@@ -11,7 +11,6 @@ import { inboxApi } from '../api';
 import { HostMark } from '../icons';
 import { linkedMachinesWith, machineOf } from '../inboxUrl';
 import { CanvasBoardPart, CanvasLayerPart, SketchButtonPart } from '../lazyParts';
-import { canvasMarkOf } from './canvasApi';
 import { useInboxTheme } from '../theme';
 import type { ThreadSlotHost } from '../thread/slotHost';
 
@@ -43,16 +42,16 @@ export function useThreadCanvas(thread: InboxThread | null, host: ThreadSlotHost
   }, [canvasFor]);
   const [canvasOpen, setCanvasOpen] = useState<string | null>(null);
   const canvasOn = !!canvasFor && canvasOpen === canvasFor;
-  /** This visit came from the reply box's + to a canvas that already held something (canvas/freshVisit.ts). */
-  const [fresh, setFresh] = useState(false);
+  /** This visit came from the reply box's +: the board opens a clear spot if what it reads holds something (canvas/freshVisit.ts). */
+  const [fromPlus, setFromPlus] = useState(false);
   const { shown: themeShown } = useInboxTheme();
   // The reply box's words go to the canvas's bar and come back: what the box held when the canvas opened (its saved
   // draft), and the bar's words as the person leaves them.
   const [canvasDraft, setCanvasDraft] = useState('');
   const canvasWords = useRef('');
-  const openCanvas = (clearSpot = false) => {
+  const openCanvas = (plus = false) => {
     if (!canvasFor) return;
-    setFresh(clearSpot);
+    setFromPlus(plus);
     setCanvasDraft('');
     canvasWords.current = '';
     setCanvasOpen(canvasFor);
@@ -101,7 +100,7 @@ export function useThreadCanvas(thread: InboxThread | null, host: ThreadSlotHost
           onClose={closeCanvas}
           outbox={host.outbox}
           machine={machine ? (host.machines.linked.find((m) => m.id === machine) ?? null) : null}
-          fresh={fresh}
+          fromPlus={fromPlus}
         />
       </Suspense>
     ) : null;
@@ -115,8 +114,8 @@ export function useThreadCanvas(thread: InboxThread | null, host: ThreadSlotHost
     openFromReply: canvasFor
       ? () => {
           void CanvasBoardPart.preload().catch(() => {});
-          // The marks say which threads' canvases hold something (an empty canvas has no mark).
-          openCanvas(!!canvasMarkOf(canvasFor));
+          // Whether the canvas holds something is the board's to say, from its own read (the marks may not be in yet).
+          openCanvas(true);
         }
       : null,
     outcome: (outcome) => {

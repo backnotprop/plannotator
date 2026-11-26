@@ -125,6 +125,7 @@ import {
   inboxChapterDiagramsOn,
   inboxDecisionModeEnvOff,
   inboxDecisionModeOn,
+  inboxCanvasOn,
   loadConfig,
   saveCookieHost,
   parseAutoUpdateEnv,
@@ -3706,7 +3707,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
   /** The canvas in every thread (inbox-canvas-switch.ts): on, with no row in Settings; only config.json `inboxCanvas: false` (or `plannotator inbox capability canvas off`) turns it off. */
   const canvasCap = canvasSwitch({
-    saved: () => loadConfig().inboxCanvas !== false,
+    saved: () => inboxCanvasOn(loadConfig()),
     fixed: options.canvas,
     save: (on) => saveConfig({ inboxCanvas: on }),
     // Every window follows, and each linked machine's stream asks again with or without its canvas frames and jobs.
@@ -8619,8 +8620,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
                 annotation_ids: body.annotation_ids as never,
                 viewing: body.viewing,
                 sent_from: sentFromOf(req, via, body),
-                // Sent from the thread's canvas: what they drew or picked, read from the stored scene (inbox-canvas.ts).
-                ...(body.sketch && canvasCap.on() ? (() => { const thread = store.message(messageId)?.thread_id; const sketch = thread ? canvas.replySketch(thread, body.sketch) : undefined; return sketch ? { sketch } : {}; })() : {}),
+                // Sent from the thread's canvas: what they drew or picked, read from the stored scene, or from the reply's
+                // own scene file when the save of it never landed (inbox-canvas.ts).
+                ...(body.sketch && canvasCap.on() ? (() => { const thread = store.message(messageId)?.thread_id; const sketch = thread ? canvas.replySketch(thread, body.sketch, attachments) : undefined; return sketch ? { sketch } : {}; })() : {}),
                 // A verdict on a review (Approve / Send feedback in the review's header): only while Code review is on.
                 ...(body.review_verdict !== undefined && body.review_verdict !== null
                   ? codeReviewOn()

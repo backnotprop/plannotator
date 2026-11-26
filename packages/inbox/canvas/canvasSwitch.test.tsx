@@ -30,6 +30,8 @@ let host: HTMLElement | null = null;
 const savedFetch = globalThis.fetch;
 /** The threads whose canvas holds something, as `GET /api/inbox/canvases` answers. */
 let withCanvas: string[] = [];
+/** `GET /api/inbox/canvases` failing (or not answered yet): no thread has a mark. */
+let marksFail = false;
 
 afterEach(() => {
   act(() => root?.unmount());
@@ -37,12 +39,16 @@ afterEach(() => {
   root = null;
   host = null;
   globalThis.fetch = savedFetch;
+  marksFail = false;
   if (hasDom) document.body.innerHTML = '';
 });
 
 function mount(node: ReactNode) {
   globalThis.fetch = (async (input: RequestInfo | URL) => {
-    if (String(input).includes('/canvases')) return Response.json({ canvases: withCanvas.map((thread_id) => ({ thread_id, rev: 2, changed: false })) });
+    if (String(input).includes('/canvases')) {
+      if (marksFail) return new Response('{}', { status: 500 });
+      return Response.json({ canvases: withCanvas.map((thread_id) => ({ thread_id, rev: 2, changed: false })) });
+    }
     return Response.json({});
   }) as typeof fetch;
   host = document.createElement('div');
@@ -72,11 +78,14 @@ async function marksNow(threads: string[]) {
 const thread = { thread_id: 'msg_A1', subject: 'Berth booking retries', messages: [] } as unknown as InboxThread;
 let canvas: ThreadCanvas | null = null;
 
-/** The layer asked for, read from what the hook hands the pane: whether it is a fresh visit. */
-function layerFresh(layer: ReactNode): boolean | null {
+/**
+ * The layer asked for, read from what the hook hands the pane: whether it was opened from the reply box's +. The board
+ * then opens a clear spot when what it reads holds something (freshVisit.ts `opensOnClearSpot`), marks or none.
+ */
+function layerFromPlus(layer: ReactNode): boolean | null {
   if (!isValidElement(layer)) return null;
-  const inner = (layer as ReactElement<{ children: ReactElement<{ fresh?: boolean }> }>).props.children;
-  return inner.props.fresh === true;
+  const inner = (layer as ReactElement<{ children: ReactElement<{ fromPlus?: boolean }> }>).props.children;
+  return inner.props.fromPlus === true;
 }
 
 function Pane({ settingsCanvas }: { settingsCanvas: { on: boolean } | undefined }) {
@@ -108,7 +117,7 @@ describe("a thread's canvas in the window", () => {
     expect(CanvasLayerPart.isLoaded()).toBe(false);
   });
 
-  test.skipIf(!hasDom)('a thread with no canvas: no header button; + → Canvas opens its canvas as it is', async () => {
+  test.skipIf(!hasDom)('a thread with no canvas: no header button; + → Canvas opens it from + (the board finds nothing to step beside)', async () => {
     withCanvas = [];
     renderPane({ on: true });
     await act(async () => {
@@ -118,10 +127,19 @@ describe("a thread's canvas in the window", () => {
     expect(headerButton()).toBeNull();
     expect(canvas!.openFromReply).not.toBeNull();
     act(() => canvas!.openFromReply!());
-    expect(layerFresh(canvas!.layer)).toBe(false);
+    expect(layerFromPlus(canvas!.layer)).toBe(true);
   });
 
-  test.skipIf(!hasDom)('a thread with a canvas: the header button shows; + → Canvas opens a clear spot (fresh), the header button the whole board', async () => {
+  test.skipIf(!hasDom)('the marks not loaded (GET /canvases failed): + → Canvas still asks the board for a clear spot, not the whole board', async () => {
+    marksFail = true;
+    withCanvas = [thread.thread_id];
+    renderPane({ on: true });
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 50)));
+    act(() => canvas!.openFromReply!());
+    expect(layerFromPlus(canvas!.layer)).toBe(true);
+  });
+
+  test.skipIf(!hasDom)('a thread with a canvas: the header button shows; + → Canvas opens from + (a clear spot), the header button the whole board', async () => {
     renderPane({ on: true });
     await act(async () => {
       await SketchButtonPart.preload();
@@ -130,12 +148,22 @@ describe("a thread's canvas in the window", () => {
     await until(() => headerButton() !== null, 'the header button');
     expect(headerButton()!.getAttribute('aria-label')).toBe('Canvas');
     act(() => canvas!.openFromReply!());
-    expect(layerFresh(canvas!.layer)).toBe(true);
+    expect(layerFromPlus(canvas!.layer)).toBe(true);
     // Closed again with the header's button (it toggles), then opened from it: the whole board.
     await act(async () => (headerButton() as HTMLButtonElement).click());
     expect(canvas!.layer).toBeNull();
     await act(async () => (headerButton() as HTMLButtonElement).click());
-    expect(layerFresh(canvas!.layer)).toBe(false);
+    expect(layerFromPlus(canvas!.layer)).toBe(false);
+  });
+
+  test.skipIf(!hasDom)('the canvas closes after + → Canvas (its menu row is gone): focus goes to the + of its own pane, not the first pane\'s', async () => {
+    const { focusBack } = await import('./CanvasParts');
+    document.body.innerHTML = ['msg_A1', 'msg_B2'].map((id) => `<section class="ib-pane" data-thread-id="${id}"><button data-reply-plus>+</button></section>`).join('');
+    const gone = document.createElement('div');
+    focusBack(gone, 'msg_B2');
+    expect(document.activeElement).toBe(document.querySelector('[data-thread-id="msg_B2"] [data-reply-plus]'));
+    focusBack(gone, 'msg_A1');
+    expect(document.activeElement).toBe(document.querySelector('[data-thread-id="msg_A1"] [data-reply-plus]'));
   });
 
   test.skipIf(!hasDom)("a linked computer's thread: + → Canvas when that computer says `canvas`, none from an older one", async () => {

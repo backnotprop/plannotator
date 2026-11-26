@@ -2191,6 +2191,9 @@ export function resolveAutoUpdate(
  * Env `0` / `false` / `off` / `disabled` turn it off and `1` / `true` / `on`
  * turn it on; an empty or unrecognized value counts as unset.
  */
+/** Whether config.json has the canvas on: on unless `inboxCanvas` is false (the Inbox and the agent's `--help` both ask this). */
+export const inboxCanvasOn = (config: { inboxCanvas?: boolean }): boolean => config.inboxCanvas !== false;
+
 export function resolveUpdateCheck(
   config: PlannotatorConfig,
   env: NodeJS.ProcessEnv = process.env,

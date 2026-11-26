@@ -108,6 +108,16 @@ const titleShown = (subject: string) => {
   return line.length > CANVAS_TITLE_MAX ? `${line.slice(0, CANVAS_TITLE_MAX - 1).join('')}…` : line.join('');
 };
 
+/**
+ * Focus as the canvas closes: back on what opened it, or, when that is gone (the + menu's row closes with its menu), on
+ * the + or the canvas button of the pane the canvas belongs to, never another pane's.
+ */
+export function focusBack(opener: Element | null, threadId: string) {
+  if (opener instanceof HTMLElement && opener.isConnected) return opener.focus({ preventScroll: true });
+  const pane = document.querySelector(`.ib-pane[data-thread-id="${CSS.escape(threadId)}"]`);
+  (pane?.querySelector<HTMLElement>('[data-reply-plus]') ?? pane?.querySelector<HTMLElement>('[data-thread-sketch]'))?.focus({ preventScroll: true });
+}
+
 /** The canvas, over the whole window. */
 export function CanvasLayer({
   threadId,
@@ -122,7 +132,7 @@ export function CanvasLayer({
   onClose,
   outbox,
   machine,
-  fresh = false,
+  fromPlus = false,
 }: {
   threadId: string;
   subject: string;
@@ -140,8 +150,8 @@ export function CanvasLayer({
   /** The window's outbox, and the linked computer the thread lives on (null for this computer's): a save held for it ends there. */
   outbox: ReadonlyMap<string, OutboxView>;
   machine: MachineView | null;
-  /** Opened from the reply box's + on a canvas that already holds something: a clear spot, and Send carries only the new drawing. */
-  fresh?: boolean;
+  /** Opened from the reply box's +: on a canvas that holds something, a clear spot whose Send carries only the new drawing. */
+  fromPlus?: boolean;
 }) {
   // A chunk that could not arrive says so in the layer; the next open asks for it again.
   const failed = useCallback(() => CanvasBoardPart.retry(), []);
@@ -156,11 +166,9 @@ export function CanvasLayer({
     if (behind && !wasInert) behind.setAttribute('inert', '');
     return () => {
       if (behind && !wasInert) behind.removeAttribute('inert');
-      // Focus goes back to the button that opened the canvas.
-      const el = opener.current;
-      if (el instanceof HTMLElement && el.isConnected) el.focus({ preventScroll: true });
-      else (document.querySelector<HTMLElement>('[data-reply-plus]') ?? document.querySelector<HTMLElement>('[data-thread-sketch]'))?.focus({ preventScroll: true });
+      focusBack(opener.current, threadId);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per layer: its thread does not change while open
   }, []);
   return createPortal(
     <dialog open role="dialog" aria-modal="true" aria-label={`Canvas of ${titleShown(subject)}`} style={WINDOW} data-canvas-layer={threadId}>
@@ -179,7 +187,7 @@ export function CanvasLayer({
         </Tip>
       </header>
       <PanePart loading={<div style={{ flex: 1 }} aria-busy="true" />} onFailed={failed}>
-        <CanvasBoard threadId={threadId} dark={dark} agent={agent} agentMark={agentMark} received={received} draft={draft} onWords={onWords} onSend={onSend} outbox={outbox} machine={machine} fresh={fresh} />
+        <CanvasBoard threadId={threadId} dark={dark} agent={agent} agentMark={agentMark} received={received} draft={draft} onWords={onWords} onSend={onSend} outbox={outbox} machine={machine} fromPlus={fromPlus} />
       </PanePart>
       </div>
     </dialog>,

@@ -417,7 +417,7 @@ export interface SettingsModel {
    * draws folded. Absent: on.
    */
   chapter_diagrams?: { on: boolean };
-  /** The canvas in every thread (config.json `inboxCanvas`, Settings → Capabilities): off unless on. Absent: an Inbox without it. */ canvas?: { on: boolean };
+  /** The canvas in every thread (config.json `inboxCanvas`; no Settings row): on unless false. Absent: an Inbox without it. */ canvas?: { on: boolean };
   /**
    * Settings → General: "Open Plannotator at plannotator.localhost" (#2184): config.json
    * `urlHost: "plannotator.localhost"`. `env` is PLANNOTATOR_URL_HOST and `url_host`

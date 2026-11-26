@@ -318,7 +318,7 @@ export interface InboxHelpOptions {
   steps?: boolean;
   /** The person turned routines on (config.json `inboxScheduledThreads`). Off (the default), the guide says nothing of them. */
   scheduled?: boolean;
-  /** The person turned the canvas on (config.json `inboxCanvas`). Off (the default), the guide says nothing of it. */
+  /** The canvas is on (config.json `inboxCanvas`, on unless false). Off, the guide says nothing of it. */
   canvas?: boolean;
   /**
    * The person turned code review on (config.json `inboxCodeReview`, read by
@@ -359,7 +359,7 @@ function toolBlock(name: InboxMcpToolName, steps = false, codeReview = false, br
 
 /** `plannotator inbox --help`'s one line for `plannotator routine`, shown with Routines on or off. */
 export const INBOX_ROUTINE_COMMAND_LINE = "  plannotator routine --help      Routines: work an agent runs on a schedule, each run reporting in the Inbox.";
-/** The canvas command's line in "Commands and flags", only while the person has the canvas on (inbox-canvas-command.ts). */
+/** The canvas command's line in "Commands and flags", only while the canvas is on, as it is by default (inbox-canvas-command.ts). */
 export const INBOX_CANVAS_COMMAND_LINE = "  plannotator inbox canvas --help  A thread's canvas, the drawing the person sketches on: read it, picture it, change it.";
 
 export function formatInboxHelp(options: InboxHelpOptions): string {
@@ -652,7 +652,7 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     INBOX_COMMAND_USAGE,
     // Thread steps from a shell, only while the person has them on.
     ...(steps ? ["", "  plannotator inbox steps [--session <id>] <thread> --json '<list>'", "                                  Your steps in a thread (see steps); '-' reads the list from stdin."] : []),
-    // A thread's canvas, only while the person has it on: its own --help is the how-to (inbox-canvas-command.ts).
+    // A thread's canvas, only while it is on (the default): its own --help is the how-to (inbox-canvas-command.ts).
     ...(canvas ? ["", INBOX_CANVAS_COMMAND_LINE] : []),
     // Routines from a shell: one line whatever the setting, so an agent asked for one finds the command (its help says
     // they must be on). Not on Windows, where there are no routines.

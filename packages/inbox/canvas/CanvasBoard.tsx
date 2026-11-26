@@ -26,7 +26,7 @@ import { heldWords, InboxHeldError, type MachineView, type OutboxView } from '..
 import { machineOf, rememberMachine } from '../inboxUrl';
 import { CANVAS_WINDOW, canvasApi, canvasLooked, subscribeCanvasFrames, type CanvasFrame, type CanvasJob, type CanvasReply } from './canvasApi';
 import { boardLine, farChanges, farParts, heldEnd, joinHeld, saveTimer, type BoardLine, type HeldSave, type SaveState } from './farSave';
-import { clearSpotView, drawnThisVisit, sketchPictures } from './freshVisit';
+import { clearSpotView, drawnThisVisit, opensOnClearSpot, sketchPictures } from './freshVisit';
 
 export interface CanvasBoardProps {
   threadId: string;
@@ -48,10 +48,11 @@ export interface CanvasBoardProps {
   /** The linked computer the thread lives on, as the window knows it now (null for this computer's thread). */
   machine?: MachineView | null;
   /**
-   * Opened from the reply box's + → Canvas on a canvas that already holds something (freshVisit.ts): the view opens
-   * on a clear spot beside the drawing, and Send with nothing selected carries only what was drawn on this visit.
+   * Opened from the reply box's + → Canvas. When the canvas the board reads holds something (freshVisit.ts
+   * `opensOnClearSpot`), the view opens on a clear spot beside the drawing and Send with nothing selected carries only
+   * what was drawn on this visit (`fresh` below).
    */
-  fresh?: boolean;
+  fromPlus?: boolean;
 }
 
 const PICTURE_AFTER_MS = 1500;
@@ -307,7 +308,7 @@ const NO_OUTBOX: ReadonlyMap<string, OutboxView> = new Map();
 type UndoAnswer = { rev?: number; scene?: CanvasScene; kept?: string[]; kept_count?: number; already?: boolean };
 const statusOf = (error: unknown) => (error as { status?: number } | null)?.status;
 
-export default function CanvasBoard({ threadId, dark, agent, agentMark, received = false, draft = '', onWords, onSend, outbox = NO_OUTBOX, machine = null, fresh = false }: CanvasBoardProps) {
+export default function CanvasBoard({ threadId, dark, agent, agentMark, received = false, draft = '', onWords, onSend, outbox = NO_OUTBOX, machine = null, fromPlus = false }: CanvasBoardProps) {
   useLayoutEffect(withStyles, []);
   useLayoutEffect(leaveOutUnshippedFaces, []);
   const api = useRef<ExcalidrawImperativeAPI | null>(null);
@@ -319,6 +320,8 @@ export default function CanvasBoard({ threadId, dark, agent, agentMark, received
   const [settled, setSettled] = useState(true);
   const [selected, setSelected] = useState(0);
   const [empty, setEmpty] = useState(true);
+  /** A fresh visit: opened from + on a canvas that held something when the board read it (set with that read). */
+  const [fresh, setFresh] = useState(false);
   /** A fresh visit (`fresh`): every element id the board held when it opened, took from the Inbox since, or sent on this visit. */
   const known = useRef(new Set<string>());
   /** Only freehand on the canvas: it is a sketch; with a box, a text or a photo it is a canvas. */
@@ -733,7 +736,9 @@ export default function CanvasBoard({ threadId, dark, agent, agentMark, received
         for (const el of read.scene.elements) known.current.add(el.id);
         for (const id of Object.keys(read.scene.files)) sentFiles.current.add(id);
         const shown = read.scene.elements.filter((e) => !e.isDeleted);
-        setEmpty(fresh || shown.length === 0);
+        const clear = opensOnClearSpot(fromPlus, read.scene.elements);
+        setFresh(clear);
+        setEmpty(clear || shown.length === 0);
         setFreehand(shown.every((e) => e.type === 'freedraw'));
         // Not measured yet: the editor's faces are listed only once it mounts, and text wrapped with a stand-in face
         // is cut off when the real one draws it (Excalidraw also remembers the stand-in's letter widths). `settleText`

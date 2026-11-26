@@ -4,7 +4,9 @@
  * stand-in store in a temp folder; no Inbox is started.
  */
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
+import { inboxBlobPath, inboxBlobsDir } from "@plannotator/shared/inbox/attachments";
 import { gzipSync } from "node:zlib";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -346,6 +348,27 @@ describe("a sketch sent from a clear spot on a canvas that already held somethin
     expect(only.reading).not.toContain("Fraud check");
     const whole = t.canvas.replySketch(THREAD, { kind: "sketch", elements: [], pictures: {} })!;
     for (const words of ["Retry twice", "Orders API", "Fraud check"]) expect(whole.reading).toContain(words);
+  });
+
+  test("its save never landed (failed, or held for a computer that is away): the reading comes from the reply's own canvas.excalidraw", async () => {
+    const t = setup();
+    await board(t, ["Orders API", "Fraud check"]);
+    // What this visit drew is not in the stored scene; the reply carries it in its scene file.
+    const drawn: CanvasElement[] = [
+      { id: "oval-new", type: "ellipse", x: 2400, y: 0, width: 240, height: 130, version: 1, versionNonce: 1 },
+      { id: "text-new", type: "text", x: 2420, y: 40, width: 120, height: 25, text: "Pending state", originalText: "Pending state", containerId: null, version: 1, versionNonce: 1 } as CanvasElement,
+    ];
+    const bytes = Buffer.from(JSON.stringify({ ...emptyScene(), elements: drawn }));
+    const sha = createHash("sha256").update(bytes).digest("hex");
+    mkdirSync(inboxBlobsDir(t.dir), { recursive: true });
+    writeFileSync(inboxBlobPath(t.dir, sha), bytes);
+    const attached = [{ name: "canvas.png", sent_sha256: "0".repeat(64), size: 10 }, { name: "canvas.excalidraw", sent_sha256: sha, size: bytes.length }];
+    const sketch = t.canvas.replySketch(THREAD, { kind: "sketch", elements: ["oval-new", "text-new"], pictures: {} }, attached)!;
+    expect(sketch).toBeDefined();
+    expect(sketch.reading).toContain("Pending state");
+    expect(sketch.reading).not.toContain("Orders API");
+    // With no scene file to fall back on, nothing is made up.
+    expect(t.canvas.replySketch(THREAD, { kind: "sketch", elements: ["oval-new"], pictures: {} }, [])).toBeUndefined();
   });
 });
 

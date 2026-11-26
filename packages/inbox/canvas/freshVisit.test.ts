@@ -10,7 +10,7 @@
 import { describe, expect, test } from 'bun:test';
 import { thingsOf } from '@plannotator/shared/inbox/canvas/reading';
 import { boxesOverlap, emptyScene, unionBox, type Box, type CanvasElement } from '@plannotator/shared/inbox/canvas/scene';
-import { clearSpotView, drawnThisVisit, sketchPictures } from './freshVisit';
+import { clearSpotView, drawnThisVisit, opensOnClearSpot, sketchPictures } from './freshVisit';
 
 describe('what Send carries on a fresh visit', () => {
   test('only what was drawn on this visit: not what the board held, an agent added, was deleted, or was sent already', () => {
@@ -23,6 +23,16 @@ describe('what Send carries on a fresh visit', () => {
     // Sent: those join what the board knows, and the next Send carries only what is drawn after.
     for (const e of drawnThisVisit(now, known)) known.add(e.id);
     expect(drawnThisVisit([...now, { id: 'stroke-4' }], known).map((e) => e.id)).toEqual(['stroke-4']);
+  });
+});
+
+describe('which visit + → Canvas opens', () => {
+  test('decided from what the board read, not from the marks: anything not deleted means a clear spot', () => {
+    expect(opensOnClearSpot(true, [{ id: 'box-orders' }])).toBe(true);
+    expect(opensOnClearSpot(true, [])).toBe(false);
+    expect(opensOnClearSpot(true, [{ id: 'gone', isDeleted: true }])).toBe(false);
+    // The header's button always opens the whole board.
+    expect(opensOnClearSpot(false, [{ id: 'box-orders' }])).toBe(false);
   });
 });
 

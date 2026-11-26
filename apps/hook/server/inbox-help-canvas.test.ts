@@ -1,5 +1,5 @@
 /**
- * `plannotator inbox --help` and `plannotator inbox call` with the canvas off (the default) and on (config.json
+ * `plannotator inbox --help` and `plannotator inbox call` with the canvas off and on (the default; config.json
  * `inboxCanvas`). The canvas is a command, `plannotator inbox canvas`, never an action of the agent tool (the owner,
  * 2026-11-24): off, an agent reads no word of it; on, one line under "Commands and flags" points at its own --help.
  * What can regress: a `canvas` action or tool section coming back, or the canvas leaking into the guide of a person
@@ -9,6 +9,7 @@ import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createAgentEnvironmentFor } from "@plannotator/server/inbox-agents";
+import { inboxCanvasOn } from "@plannotator/shared/config";
 import { INBOX_CALL_ACTIONS, INBOX_CALL_USAGE } from "./cli";
 import { parseCallCommand } from "./inbox-call-command";
 import { formatInboxHelp, INBOX_CANVAS_COMMAND_LINE } from "./inbox-help";
@@ -19,7 +20,15 @@ const guide = (canvas?: boolean) =>
 const actionsLine = (text: string) => text.split("\n").find((line) => line.startsWith("- Actions: "))!;
 
 describe("the canvas in the agent's guide", () => {
-  test("off (the default): not a word of the canvas", () => {
+  test("on by default: a config.json without inboxCanvas gives the guide its canvas line; only false takes it away", () => {
+    expect(inboxCanvasOn({})).toBe(true);
+    expect(inboxCanvasOn({ inboxCanvas: true })).toBe(true);
+    expect(inboxCanvasOn({ inboxCanvas: false })).toBe(false);
+    expect(guide(inboxCanvasOn({})).split("\n")).toContain(INBOX_CANVAS_COMMAND_LINE);
+    expect(guide(inboxCanvasOn({ inboxCanvas: false }))).not.toContain("inbox canvas");
+  });
+
+  test("off: not a word of the canvas", () => {
     for (const text of [guide(), guide(false)]) {
       expect(text).not.toContain("inbox canvas");
       expect(text.split("\n")).not.toContain("### canvas");

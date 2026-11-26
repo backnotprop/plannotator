@@ -231,8 +231,8 @@ describe("the event stream", () => {
     await until(() => windowStream.frames.filter((frame) => frame.event === "capabilities").length >= 2);
     const told = windowStream.frames.filter((frame) => frame.event === "capabilities");
     // The frame carries the window-followed capabilities (the Board's and Code review's too); Shape, off here, is held
-    // (inbox.ts heldSwitch) and left out, so a window that never drew its row does not start to. The canvas's row shows
-    // to everyone, so its switch is always there.
+    // (inbox.ts heldSwitch) and left out, so a window that never drew its row does not start to. The canvas has no row
+    // and is on unless config.json says false, so its switch is always there.
     expect(told.map((frame) => JSON.parse(frame.data))).toEqual([
       { board: { on: false }, steps: { on: true }, bro: { on: false }, code_review: { on: false }, canvas: { on: true } },
       { board: { on: false }, steps: { on: false }, bro: { on: false }, code_review: { on: false }, canvas: { on: true } },

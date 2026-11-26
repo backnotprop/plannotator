@@ -21,7 +21,9 @@
  * refused whole, with their change shown. A change to anything else lands,
  * and every answer opens with what others changed since the agent's last look.
  */
+import { readFileSync } from "node:fs";
 import { gunzipSync } from "node:zlib";
+import { inboxBlobPath } from "@plannotator/shared/inbox/attachments";
 import { inboxStoredAgentName } from "@plannotator/core/inbox-format";
 import { inboxAgentName, type InboxReplySketch } from "@plannotator/core/inbox-types";
 import { applyOps, mermaidTexts, RefError, resolveThing } from "@plannotator/shared/inbox/canvas/apply";
@@ -74,6 +76,8 @@ export type CanvasAgentAnswer = { ok: boolean; code?: string; text: string; stru
 const PICTURE_WAIT_MS = 8_000;
 const MERMAID_WAIT_MS = 12_000;
 const SCENE_MAX_BYTES = 64 * 1024 * 1024;
+/** The largest scene file a reply carries that is read for its reading when the stored scene lacks what it names. */
+const REPLY_SCENE_MAX = 16 * 1024 * 1024;
 const PICTURE_MAX_BYTES = 32 * 1024 * 1024;
 
 type Json = (data: unknown, status?: number) => Response;
@@ -102,7 +106,7 @@ export interface InboxCanvas {
   /** An agent's `plannotator inbox canvas`: a read, a picture, or a change (inbox-canvas-agent.ts is its route). */
   agent(ask: CanvasAgentAsk): Promise<CanvasAgentAnswer>;
   /** What a reply sent from the canvas carries for the agent (`body.sketch` of the reply route), checked and worded here. */
-  replySketch(threadId: string, raw: unknown): InboxReplySketch | undefined;
+  replySketch(threadId: string, raw: unknown, attached?: readonly { name: string; sent_sha256: string; size: number }[]): InboxReplySketch | undefined;
   /** For tests and the route: the command's three jobs. */
   read(threadId: string, viewer: CanvasAuthor, options?: { in?: string; after?: string; things?: string[] }): string;
   /** The reply that carried `sketch` is stored and went to `session`: what it lists is shown to that session. */
@@ -498,15 +502,30 @@ export function createInboxCanvas(options: {
     return [box.x, box.y, box.w, box.h, scale].every((v) => Number.isFinite(v)) && box.w > 0 && box.h > 0 && scale > 0 ? { box, scale } : null;
   };
 
+  /** The scene file a reply from the canvas carries (`canvas.excalidraw`, or a selection's), read from its blob. */
+  const attachedScene = (attached: readonly { name: string; sent_sha256: string; size: number }[]): CanvasScene | null => {
+    const file = attached.find((a) => (a.name === "canvas.excalidraw" || a.name === "canvas-selection.excalidraw") && a.size <= REPLY_SCENE_MAX);
+    if (!file) return null;
+    try {
+      return asScene(JSON.parse(readFileSync(inboxBlobPath(dir, file.sent_sha256), "utf8")));
+    } catch {
+      return null;
+    }
+  };
+
   /** What a reply being built lists, until the reply is stored (a reply that fails leaves an entry; a few at most are kept). */
   const replyLooks = new Map<string, [string, string][]>();
-  const replySketch: InboxCanvas["replySketch"] = (threadId, raw) => {
+  const replySketch: InboxCanvas["replySketch"] = (threadId, raw, attached = []) => {
     for (const old of [...replyLooks.keys()].slice(0, Math.max(0, replyLooks.size - 20))) replyLooks.delete(old);
     if (!raw || typeof raw !== "object") return undefined;
     const input = raw as { kind?: unknown; elements?: unknown; pictures?: unknown };
-    const scene = readCanvasScene(dir, threadId);
-    const things = thingsOf(scene);
     const ids = new Set(Array.isArray(input.elements) ? input.elements.filter((id): id is string => typeof id === "string").slice(0, 5000) : []);
+    // The elements it names are read from the stored scene; when the window's save of them never landed (it failed, or
+    // waits for a computer that is away), from the scene file the reply carries, so the reply never goes unread.
+    const stored = readCanvasScene(dir, threadId);
+    const storedIds = new Set(stored.elements.filter((e) => !e.isDeleted).map((e) => e.id));
+    const scene = [...ids].some((id) => !storedIds.has(id)) ? (attachedScene(attached) ?? stored) : stored;
+    const things = thingsOf(scene);
     const kind = input.kind === "selection" && ids.size > 0 ? "selection" : "sketch";
     // A selection: the things that hold a picked element, and what a picked frame holds. A sketch: the whole canvas, or,
     // when it names elements (what the person drew on this visit to a canvas that already held something, the reply

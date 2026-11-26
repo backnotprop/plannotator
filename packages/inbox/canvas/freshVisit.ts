@@ -18,6 +18,15 @@ export function drawnThisVisit<E extends { id: string; isDeleted?: boolean }>(el
 }
 
 /**
+ * Whether a visit opens on a clear spot: opened from the reply box's + and the canvas the board read holds something.
+ * Decided from that read, never from the marks list (which may not have loaded, or failed): a canvas taken for empty
+ * would open whole, and its Send would carry the whole board.
+ */
+export function opensOnClearSpot(fromPlus: boolean, read: readonly { id: string; isDeleted?: boolean }[]): boolean {
+  return fromPlus && read.some((e) => !e.isDeleted);
+}
+
+/**
  * The pictures a Send with nothing selected gives its freehand sketches. On the whole board each sketch gets a picture
  * of its own (cut from canvas.png) when the board holds more than that one thing, so no reader has to find it among the
  * rest. On a fresh visit canvas.png is already only the new drawing, so it is the one picture: every sketch points at it.

@@ -121,8 +121,7 @@ test.skipIf(!hasDom)('the keys are the menu\'s own: Attach a file first, ↓ mov
   await press(plus());
   await until(() => rows().length === 2, 'the menu');
   await until(() => menu()!.contains(document.activeElement), 'focus in the menu');
-  // Attach a file, the most common, is first; ↓ goes to Canvas and on round to Attach a file again.
-  if (document.activeElement?.getAttribute('data-reply-plus-item') !== 'attach') await key('ArrowDown');
+  // Attach a file, the most common, is first and has focus as the menu opens; ↓ goes to Canvas.
   expect(document.activeElement?.getAttribute('data-reply-plus-item')).toBe('attach');
   await key('ArrowDown');
   expect(document.activeElement?.getAttribute('data-reply-plus-item')).toBe('canvas');

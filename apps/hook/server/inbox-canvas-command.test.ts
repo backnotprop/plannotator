@@ -87,7 +87,7 @@ test("a change read from stdin is sent as the list; a refused one is stderr and 
 });
 
 test("off, and an Inbox from before the command, are said as such", async () => {
-  const off = inbox(() => ({ status: 409, json: { code: "canvas_off", error: "The canvas is off in this Inbox (plannotator inbox capability canvas on)." } }));
+  const off = inbox(() => ({ status: 409, json: { code: "canvas_off", error: "The canvas is off in this Inbox." } }));
   expect(await runInboxCanvasCommand(["msg_1"], off.deps)).toBe(1);
   expect(off.err.join("")).toStartWith("canvas_off: ");
   const old = inbox(() => ({ status: 404, json: { error: "Not found", code: "not_found" } }));

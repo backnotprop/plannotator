@@ -202,10 +202,16 @@ test("1. MacBook's thread in Studio's window: the pen, the board, and a box draw
   await expect.poll(async () => JSON.stringify(await read(studio, '/api/inbox/threads?machines=1')).includes(far), { timeout: 20_000 }).toBe(true);
   await expect.poll(async () => (await read<{ machines: { id: string; marks?: string[] }[] }>(studio, '/api/inbox/machines')).machines.find((m) => m.id === macbook.id)?.marks?.includes('canvas') ?? false, { timeout: 20_000 }).toBe(true);
   await page.goto(`${studio.url}#thread=${far}`);
-  await expect(page.locator('[data-thread-sketch]')).toBeVisible({ timeout: 20_000 });
+  // No canvas yet, so no header button: the reply box's + → Canvas opens it.
+  await expect(page.locator('.ib-subject').first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator('[data-thread-sketch]')).toHaveCount(0);
+  if (!(await page.getByRole('textbox', { name: /^Reply to / }).isVisible())) await page.locator('.ib-pfoot').getByRole('button', { name: 'Reply', exact: true }).click();
+  await expect(page.locator('[data-reply-plus]')).toBeVisible({ timeout: 20_000 });
+  await page.locator('[data-reply-plus]').click();
+  await expect(page.locator('[data-reply-plus-item="canvas"]')).toBeVisible({ timeout: 20_000 });
   await shot('01-far-thread-pen');
 
-  await page.locator('[data-thread-sketch]').first().click();
+  await page.locator('[data-reply-plus-item="canvas"]').click();
   layer = page.locator(`[data-canvas-layer="${far}"]`);
   await expect(layer).toBeVisible();
   await expect(layer.locator('.excalidraw-host:not([data-settling])')).toBeVisible({ timeout: 30_000 });

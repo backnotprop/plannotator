@@ -112,7 +112,7 @@ import {
   handleGoalSetupServerReady,
 } from "@plannotator/server/goal-setup";
 import { type DiffType, detectManagedVcs, prepareLocalReviewDiff, gitRuntime } from "@plannotator/server/vcs";
-import { loadConfig, saveConfig, resolveAIEnabled, resolvePlanReview, resolveSessionTailscale, sessionTailscaleOptOut, resolveDefaultDiffType, resolveDefaultDiffTypeFor, resolveSharingEnabled, resolveUpdateCheck } from "@plannotator/shared/config";
+import { inboxCanvasOn, loadConfig, saveConfig, resolveAIEnabled, resolvePlanReview, resolveSessionTailscale, sessionTailscaleOptOut, resolveDefaultDiffType, resolveDefaultDiffTypeFor, resolveSharingEnabled, resolveUpdateCheck } from "@plannotator/shared/config";
 import { formatIgnoredReviewWords, parseReviewArgs, resolveReviewTarget, withReviewDirectory, type ParsedReviewArgs } from "@plannotator/shared/review-args";
 import { resolveReviewOpenState, type ReviewOpenState } from "@plannotator/shared/review-open-state";
 import { listBranches, type AvailableBranches } from "@plannotator/shared/review-core";
@@ -934,7 +934,7 @@ const scheduledOnForHelp = () => process.platform !== "win32" && loadConfig({ qu
 /** The person turned code review on (config.json `inboxCodeReview`): only then does the guide name submit_guide's `review`. */
 const codeReviewOnForHelp = () => loadConfig().inboxCodeReview === true;
 /** The canvas is on (config.json `inboxCanvas`, on unless false): only then does the guide name `plannotator inbox canvas`. */
-const canvasOnForHelp = () => loadConfig().inboxCanvas !== false;
+const canvasOnForHelp = () => inboxCanvasOn(loadConfig());
 
 if (isTopLevelHelpInvocation(args)) {
   console.log(formatTopLevelHelp({ board: boardOnForHelp(), scheduled: scheduledOnForHelp() }));
