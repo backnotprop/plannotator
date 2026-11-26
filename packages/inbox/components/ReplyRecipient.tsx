@@ -372,6 +372,7 @@ export function ReplyRecipient({
   onOnly,
   onToggle,
   onTagAnother,
+  onRemove,
   labels = NO_LABELS,
   folderOf = NO_FOLDER,
   noun = 'reply',
@@ -388,6 +389,8 @@ export function ReplyRecipient({
   onToggle?: (row: RecipientRow) => void;
   /** The last row, "Tag another agent". Absent: no such row. */
   onTagAnother?: () => void;
+  /** Remove a row's agent from the thread (a row with `removable`). Absent: no Remove. */
+  onRemove?: (row: RecipientRow) => void;
   /** Each session's title, where it has one: the pill and the list show it over the fallback name. */
   labels?: SessionLabels;
   /** The folder a session works in, as the thread knows it. */
@@ -504,6 +507,13 @@ export function ReplyRecipient({
                 </span>
               </span>
             </button>
+            {/* Remove (approval "inbox-remove-agent-from-thread"): shown on hover and on focus, between the name and the
+                circle, which never moves; one press, no dialog. */}
+            {row.removable && onRemove && (
+              <button type="button" className="ib-rpick-rm" data-recipient-remove={row.session} aria-label={`Remove ${nameOf(row)} from this thread`} onClick={() => onRemove(row)}>
+                Remove
+              </button>
+            )}
             <button
               type="button"
               role="checkbox"

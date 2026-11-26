@@ -85,7 +85,7 @@ import { createSemDiffClient } from './semDiff/semDiffClient';
 import { loadSemDiffWorker } from './semDiff/loadSemDiffWorker';
 import { readPowerUpRejected, writePowerUpRejected, type PowerUpConfig, type PowerUpStatus } from './semDiff/powerUp';
 import { PowerUpStatusSlot } from './semDiff/PowerUpStatusSlot';
-import { POWER_UP_CHANGED_EVENT } from '@plannotator/ui/components/settings/SemanticDiffsTab';
+import { POWER_UP_CHANGED_EVENT, type PowerUpProvider } from '@plannotator/ui/components/settings/SemanticDiffsTab';
 import { computeReviewSemanticDiff, loadReviewSemanticDiff, setSemanticDiffSource, type ReadFileContents } from './semDiff/semanticDiffSource';
 import type { SemanticDiffChange, SemanticDiffResponse } from '@plannotator/shared/semantic-diff-types';
 
@@ -198,6 +198,7 @@ import { DEMO_DIFF } from './demoData';
 import { ReviewLoadError } from './components/ReviewLoadError';
 import { diffLoadFailureFromResponse, diffLoadFailureInfo, diffLoadUnreachable, type DiffLoadFailureInfo } from './utils/diffLoadFailure';
 import { exportReviewFeedback, buildProseFeedback, commitShaFromMode } from './utils/exportFeedback';
+import { newFileComment } from './utils/fileComment';
 import { parseDiffToFiles } from './utils/diffParser';
 import {
   ReviewSubmissionDialog,
@@ -561,7 +562,7 @@ const ReviewApp: React.FC = () => {
     useState<LineAnnotationComposeRequest | null>(null);
   const nextLineAnnotationComposeRequestId = useRef(0);
   const [showExportModal, setShowExportModal] = useState(false);
-  const [openSettingsMenu, setOpenSettingsMenu] = useState<boolean | 'semantic'>(false);
+  const [openSettingsMenu, setOpenSettingsMenu] = useState<boolean | 'powerUp'>(false);
   const [showNoAnnotationsDialog, setShowNoAnnotationsDialog] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   // A real session whose first /api/diff failed: the load error state, never
@@ -858,22 +859,23 @@ const ReviewApp: React.FC = () => {
   const semanticDiffUsable = semDiffClient != null;
   const diffSemanticOn = useConfigValue('diffSemantic');
   const diffPowerUpOn = useConfigValue('diffPowerUp');
-  const [powerUpConfigured, setPowerUpConfigured] = useState<{ configured: boolean; provider: 'jev' | 'clef' | null }>({ configured: false, provider: null });
+  const [powerUpConfigured, setPowerUpConfigured] = useState<{ configured: boolean; provider: PowerUpProvider | null; endpoint?: string; revision: number }>({ configured: false, provider: null, revision: 0 });
   useEffect(() => {
     if (!semDiffClient) return;
-    let cancelled = false;
+    let request = 0;
     const load = () => {
+      const id = ++request;
       fetch('/api/sem-diff/opinion/settings')
         .then((res) => (res.ok ? res.json() : null))
-        .then((data: { configured: boolean; provider: 'jev' | 'clef' | null } | null) => {
-          if (!cancelled && data) setPowerUpConfigured(data);
+        .then((data: { configured: boolean; provider: PowerUpProvider | null; endpoint?: string } | null) => {
+          if (id === request && data) setPowerUpConfigured((previous) => ({ ...data, revision: previous.revision + 1 }));
         })
         .catch(() => {});
     };
     load();
     window.addEventListener(POWER_UP_CHANGED_EVENT, load);
     return () => {
-      cancelled = true;
+      request++;
       window.removeEventListener(POWER_UP_CHANGED_EVENT, load);
     };
   }, [semDiffClient]);
@@ -886,7 +888,13 @@ const ReviewApp: React.FC = () => {
   }, []);
   const powerUpActive = semDiffClient != null && diffSemanticOn && diffPowerUpOn && powerUpConfigured.configured;
   const [powerUpRetry, setPowerUpRetry] = useState(0);
-  const powerUp = useMemo(() => ({ active: powerUpActive, rejected: powerUpRejected, provider: powerUpConfigured.provider, retry: powerUpRetry }), [powerUpActive, powerUpRejected, powerUpConfigured.provider, powerUpRetry]);
+  const powerUp = useMemo(() => ({
+    active: powerUpActive,
+    rejected: powerUpRejected,
+    provider: powerUpConfigured.provider,
+    settingsRevision: powerUpConfigured.revision,
+    retry: powerUpRetry,
+  }), [powerUpActive, powerUpRejected, powerUpConfigured, powerUpRetry]);
   const [powerUpStatus, setPowerUpStatus] = useState<PowerUpStatus | null>(null);
   useEffect(() => {
     const root = document.documentElement;
@@ -921,8 +929,8 @@ const ReviewApp: React.FC = () => {
     let cached: { key: string; promise: Promise<SemanticDiffResponse> } | null = null;
     setSemanticDiffSource(() => {
       const { files, base, snapshot, generated, powerUp: current } = semContentRef.current;
-      const opinion = current?.active ? { rejected: current.rejected } : undefined;
-      const key = `${base ?? ''}|${snapshot ?? ''}|${[...generated].join(',')}|${opinion ? `power:${opinion.rejected.join(',')}:${current?.retry ?? 0}` : 'plain'}|${files.map((file) => `${file.path}#${file.patch.length}`).join('|')}`;
+      const opinion = current?.active ? current : undefined;
+      const key = `${base ?? ''}|${snapshot ?? ''}|${[...generated].join(',')}|${opinion ? `power:${opinion.settingsRevision}:${opinion.rejected.join(',')}:${opinion.retry}` : 'plain'}|${files.map((file) => `${file.path}#${file.patch.length}`).join('|')}`;
       if (cached?.key === key) return cached.promise;
       const promise = computeReviewSemanticDiff(files, semDiffClient, read, new AbortController().signal, generated, opinion);
       cached = { key, promise };
@@ -3265,46 +3273,19 @@ const ReviewApp: React.FC = () => {
     handleAddAnnotationForFile(files[activeFileIndex].path, type, text, suggestedCode, originalCode, conventionalLabel, decorations, tokenMeta);
   }, [files, activeFileIndex, handleAddAnnotationForFile]);
 
-  const handleAddFileComment = useCallback((text: string) => {
-    const activeFile = files[activeFileIndex];
-    const trimmed = text.trim();
-    if (!activeFile || !trimmed) return;
-
-    const newAnnotation: CodeAnnotation = {
-      id: generateId(),
-      type: 'comment',
-      scope: 'file',
-      filePath: activeFile.path,
-      lineStart: 1,
-      lineEnd: 1,
-      side: 'new',
-      text: trimmed,
-      createdAt: Date.now(),
-      author: identity,
-    };
-
-    addCodeAnnotationsWithHistory([withPRContext(newAnnotation)]);
-  }, [files, activeFileIndex, identity, withPRContext, addCodeAnnotationsWithHistory]);
-
-  const handleAddFileCommentForFile = useCallback((filePath: string, text: string) => {
-    const trimmed = text.trim();
-    if (!trimmed) return;
-
-    const newAnnotation: CodeAnnotation = {
-      id: generateId(),
-      type: 'comment',
-      scope: 'file',
-      filePath,
-      lineStart: 1,
-      lineEnd: 1,
-      side: 'new',
-      text: trimmed,
-      createdAt: Date.now(),
-      author: identity,
-    };
-
+  // A file's comment keeps what the box attached (pictures, files), as a
+  // whole-file line comment does: saved in the draft, shown on the card, sent.
+  const handleAddFileCommentForFile = useCallback((filePath: string, text: string, images?: ImageAttachment[]) => {
+    const newAnnotation = newFileComment({ id: generateId(), filePath, text, images, createdAt: Date.now(), author: identity });
+    if (!newAnnotation) return;
     addCodeAnnotationsWithHistory([withPRContext(newAnnotation)]);
   }, [identity, withPRContext, addCodeAnnotationsWithHistory]);
+
+  const handleAddFileComment = useCallback((text: string, images?: ImageAttachment[]) => {
+    const activeFile = files[activeFileIndex];
+    if (!activeFile) return;
+    handleAddFileCommentForFile(activeFile.path, text, images);
+  }, [files, activeFileIndex, handleAddFileCommentForFile]);
 
   // A comment made in a whole-file view (explorer, step 2): a changed file's
   // Whole file, or a file the review does not change. Inside a hunk it is an
@@ -3312,7 +3293,8 @@ const ReviewApp: React.FC = () => {
   // was written on, so the agent and a PR's review body get the code quoted.
   const handleAddWholeFileAnnotation = useCallback((input: CodeFileAnnotationInput, options: { inDiff: boolean }) => {
     const text = input.text.trim();
-    if (!text) return;
+    // Pictures alone are a comment too (the box saves them): never dropped.
+    if (!text && !input.images?.length) return;
     const base: CodeAnnotation = {
       id: generateId(),
       type: 'comment',
@@ -3321,7 +3303,7 @@ const ReviewApp: React.FC = () => {
       lineStart: input.lineStart,
       lineEnd: input.lineEnd,
       side: 'new',
-      text,
+      ...(text ? { text } : {}),
       ...(input.images?.length ? { images: input.images } : {}),
       originalCode: input.originalCode,
       createdAt: Date.now(),
@@ -6193,8 +6175,9 @@ const ReviewApp: React.FC = () => {
                   <PowerUpStatusSlot
                     status={powerUpStatus}
                     provider={powerUpConfigured.provider}
+                    endpoint={powerUpConfigured.endpoint}
                     onRetry={() => setPowerUpRetry((n) => n + 1)}
-                    onSettings={() => setOpenSettingsMenu('semantic')}
+                    onSettings={() => setOpenSettingsMenu('powerUp')}
                   />
                 )}
                 {!isCompactTouchLayout && <ReviewHeaderStatus variant="pill" {...reviewStatusProps} />}
@@ -6743,10 +6726,11 @@ const ReviewApp: React.FC = () => {
             agentToolSetting={agentTool.setting}
             onAgentToolChange={agentTool.save}
             externalOpen={openSettingsMenu !== false}
-            externalTab={openSettingsMenu === 'semantic' ? 'semantic' : undefined}
+            externalTab={openSettingsMenu === 'powerUp' ? 'reviews' : undefined}
+            externalSection={openSettingsMenu === 'powerUp' ? 'powerUp' : undefined}
             onExternalClose={() => setOpenSettingsMenu(false)}
             // Local git session where since-base isn't offered (base ref
-            // unresolvable): Settings → Review → Git notes that the Git-status preference
+            // unresolvable): Settings → Reviews › Files and defaults › Git notes that the Git-status preference
             // can't take effect in THIS repo. PR/workspace/jj sessions say
             // nothing — the preference isn't about them.
             sinceBaseUnavailable={

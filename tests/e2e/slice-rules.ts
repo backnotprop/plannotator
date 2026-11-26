@@ -68,7 +68,7 @@ export const SLICE_HELPER_FANOUT = 25;
 export const SLICE_QUARANTINE: { spec: string; issue: number; why: string }[] = [];
 
 const REVIEW_SPECS = ['review-*.spec.ts', 'ref-cards-review.spec.ts', 'packed-page-load.spec.ts'];
-const INBOX_REVIEW_SPECS = ['inbox-code-review.spec.ts', 'inbox-pull-requests.spec.ts', 'inbox-show-me.spec.ts'];
+const INBOX_REVIEW_SPECS = ['inbox-code-review.spec.ts', 'inbox-pull-requests.spec.ts'];
 
 export const SLICE_RULES: SliceRule[] = [
   // --- Code review (the code review session's rows on #3455) ---
@@ -136,6 +136,12 @@ export const SLICE_RULES: SliceRule[] = [
   { name: 'question card', paths: ['packages/ui/components/blocks/Question*', 'packages/ui/components/Question*'], specs: ['question-*.spec.ts'] },
   { name: 'chat window and Ask AI', paths: ['packages/ui/components/chat/**', 'packages/ai/**'], specs: ['chat-window.spec.ts', 'ask-ai-sanitize.spec.ts', 'annotate-ai-history.spec.ts'] },
   { name: 'Pele diagram labels', paths: ['packages/ui/utils/pele*', 'packages/ui/utils/diagram-anchor-pele.ts', 'packages/ui/utils/diagram-engine.ts', 'packages/ui/utils/diagram-render.ts'], specs: ['pele-labels.spec.ts'] },
+  {
+    // The switch decides which engine draws a fence in the built apps; these specs expect Pele where it draws and Mermaid where a fence falls back.
+    name: 'diagram engine switch',
+    paths: ['packages/ui/utils/diagram-engine.ts', 'packages/ui/utils/pele.ts'],
+    specs: ['review-diagrams.spec.ts', 'inbox-mermaid-failure-webkit.spec.ts', 'inbox-thread-diagram-comments.spec.ts', 'vscode-guides-sanitize.spec.ts'],
+  },
   { name: 'phone surface', paths: ['packages/inbox/surface/**'], specs: ['surface.spec.ts'] },
   {
     name: 'VS Code Guides webview',
@@ -226,7 +232,6 @@ export const SLICE_RULES: SliceRule[] = [
     specs: ['inbox-launch-*.spec.ts', 'inbox-remote-launch-picker.spec.ts'],
   },
   { name: 'Inbox: board', stopgap: true, paths: ['packages/inbox/board/**'], specs: ['inbox-board*.spec.ts'] },
-  { name: 'Inbox: Shape', stopgap: true, paths: ['packages/inbox/shape/**', 'packages/server/inbox-shape*'], specs: ['inbox-shape*.spec.ts'] },
   {
     name: 'Inbox: machines, phones and accounts',
     stopgap: true,
@@ -244,8 +249,11 @@ export const SLICE_RULES: SliceRule[] = [
       'packages/shared/inbox/saved-file*',
       'packages/inbox/data/machineViews*',
       'packages/inbox/cloud/**',
+      'packages/server/inbox-scheduled-machines*',
+      'packages/server/inbox-capability-set*',
+      'packages/server/inbox-artifacts-merged*',
     ],
-    specs: ['inbox-machines.spec.ts', 'inbox-machine-update.spec.ts', 'inbox-phones.spec.ts', 'inbox-accounts*.spec.ts', 'inbox-snooze-machines.spec.ts', 'inbox-machines-agent-read.spec.ts', 'inbox-cloud-*.spec.ts'],
+    specs: ['inbox-machines.spec.ts', 'inbox-machine-update.spec.ts', 'inbox-phones.spec.ts', 'inbox-accounts*.spec.ts', 'inbox-snooze-machines.spec.ts', 'inbox-machines-agent-read.spec.ts', 'inbox-cloud-*.spec.ts', 'inbox-routines-machines.spec.ts', 'inbox-artifact-pins-machines.spec.ts'],
   },
   { name: 'Inbox: guided reviews', stopgap: true, paths: ['packages/inbox/guide/**', 'packages/server/inbox-guides*'], specs: ['inbox-guides.spec.ts', 'inbox-request-guide.spec.ts'] },
   { name: 'Inbox: Ask window', stopgap: true, paths: ['packages/inbox/ask/**', 'packages/server/inbox-ask*'], specs: ['inbox-ask-window.spec.ts', 'inbox-reask.spec.ts'] },

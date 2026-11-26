@@ -347,10 +347,16 @@ describe('Routine picks (Routine threads, Other threads)', () => {
     ]);
   });
 
-  test('only this computer\'s routines: a linked machine\'s row with the same thread id is an ordinary thread', () => {
+  test('a linked computer\'s routine thread is a routine thread too (the merged read lists its routines)', () => {
     expect(isRoutine(ROWS.billingToday)).toBe(true);
-    expect(isRoutine({ ...ROWS.billingToday, machine: OTHER } as InboxListRow)).toBe(false);
+    expect(isRoutine({ ...ROWS.billingToday, machine: OTHER } as InboxListRow)).toBe(true);
+    expect(isRoutine({ ...ROWS.webLateYesterday, machine: OTHER } as InboxListRow)).toBe(false);
     expect(routineThreadTest(null)).toBeNull();
+  });
+
+  test('Routines off here and on a linked computer: the group still applies; off everywhere: it steps aside', () => {
+    expect(routineThreadsState({ on: false, rows: [routine('mixed')], error: null, computers: [{ id: OTHER, on: true, launch_on: true, away: false }] })).toBe('ready');
+    expect(routineThreadsState({ on: false, rows: null, error: null, computers: [{ id: OTHER, on: false, launch_on: true, away: false }] })).toBe('off');
   });
 
   test('a deleted routine leaves the routines list: its thread stays and counts as Other', () => {

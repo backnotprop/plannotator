@@ -98,18 +98,22 @@ const fetches = (routes: Record<string, unknown>) => {
   return seen;
 };
 const REVIEWS: InboxReviewsAnswer = { fetched_at: null, hosts: [], rows: [], projects: {} };
-const page = (options: { project?: string | null; local?: LocalOpen | null; reviews?: InboxReviewsAnswer; onReviewLocal?: (review: ReviewBoxRequest) => void } = {}) => (
+const page = (options: { project?: string | null; local?: LocalOpen | null; reviews?: InboxReviewsAnswer; onReviewLocal?: (review: ReviewBoxRequest) => void; noProjects?: boolean } = {}) => (
   <SidebarProvider>
     <PullsPage
       state={{ model: LIST, reviews: options.reviews ?? REVIEWS, error: null, loading: false, refresh: () => {}, reload: () => {}, reloadRows: () => {} }}
       stackId={null}
       local={options.local ?? null}
       project={options.project ?? null}
-      projects={[{ id: 'prj_plannotator', name: 'plannotator', root: '/tmp/plannotator' } as never, { id: 'prj_spaces', name: 'spaces-site', root: '/tmp/spaces-site' } as never]}
-      projectNames={new Map([
-        ['prj_plannotator', 'plannotator'],
-        ['prj_spaces', 'spaces-site'],
-      ])}
+      projects={options.noProjects ? [] : [{ id: 'prj_plannotator', name: 'plannotator', root: '/tmp/plannotator' } as never, { id: 'prj_spaces', name: 'spaces-site', root: '/tmp/spaces-site' } as never]}
+      projectNames={
+        options.noProjects
+          ? new Map()
+          : new Map([
+              ['prj_plannotator', 'plannotator'],
+              ['prj_spaces', 'spaces-site'],
+            ])
+      }
       phone={false}
       onOpenStack={() => {}}
       filter="all"
@@ -271,7 +275,7 @@ test.skipIf(!hasDom)('past five rows, the Agents view\'s "N more" shows the rest
   expect(more()?.textContent).toBe('2 more');
 });
 
-test.skipIf(!hasDom)("one project with nothing here says so in the old list's words; the whole list, or a project not read, draws no group", async () => {
+test.skipIf(!hasDom)("one project with nothing here says so in the old list's words; the whole list, or a project not read, draws the heading and its + alone", async () => {
   const answer: InboxLocalWorkAnswer = { unread: 0, items: [], quiet: ['prj_spaces'], not_git: ['prj_plannotator'] };
   fetches({ '/reviews/local': answer });
   const reviews = { ...REVIEWS, projects: { 'github.com/charlie-dunn/spaces-site': ['prj_spaces'], 'github.com/charlie-dunn/plannotator': ['prj_plannotator'] } };
@@ -281,11 +285,35 @@ test.skipIf(!hasDom)("one project with nothing here says so in the old list's wo
   expect(document.querySelector('[data-local-none]')?.textContent).toBe('No other branch had a commit in the last 14 days.');
   await render(page({ project: 'prj_plannotator', reviews }));
   expect(document.querySelector('[data-local-none]')?.textContent).toBe("This project's folder isn't a git repository on this computer.");
-  // No filter: nothing to say for every project at once, no group.
+  // No filter: nothing to say for every project at once, so the heading and its + alone; nothing under it, open or not.
+  const bare = () => {
+    expect(group()).not.toBeNull();
+    expect(toggle().textContent?.trim()).toBe('On this computer');
+    expect(group()!.querySelector('[data-local-open]')).not.toBeNull();
+    expect(rows()).toHaveLength(0);
+    expect(document.querySelector('[data-local-none], [data-local-unread]')).toBeNull();
+    expect([...group()!.children].map((el) => el.className)).toEqual(['ib-pr-foldhead']);
+  };
   await render(page({ reviews }));
-  expect(group()).toBeNull();
-  // A project the answer did not read (past the cap, or its git unread): not "nothing".
+  bare();
+  // A project the answer did not read (past the cap, or its git unread): not "nothing", the + still there.
   await render(page({ project: 'prj_other', reviews }));
+  bare();
+});
+
+test.skipIf(!hasDom)('with no row, the + still opens the picker (a clean checkout can open a branch); with no project known, no group', async () => {
+  const projects = { projects: [{ project_id: 'prj_plannotator', folders: 0, branches: 4 }] };
+  fetches({ '/reviews/local/refs': projects, '/reviews/local': { unread: 0, items: [] } satisfies InboxLocalWorkAnswer });
+  await mount(page());
+  const plus = group()!.querySelector<HTMLButtonElement>('[data-local-open]')!;
+  expect(plus.getAttribute('aria-label')).toBe('Open branch or folder');
+  await act(async () => plus.click());
+  await settle();
+  expect(document.querySelector('[data-local-picker]')).not.toBeNull();
+  await act(async () => root!.unmount());
+  root = null;
+  document.body.innerHTML = '';
+  await mount(page({ noProjects: true }));
   expect(group()).toBeNull();
 });
 
@@ -316,4 +344,56 @@ test.skipIf(!hasDom)('git that could not be read says "The branches could not be
   await mount(page());
   expect(group()).not.toBeNull();
   expect(unread()).toBe('The branches could not be read.');
+});
+
+test.skipIf(!hasDom)("one row for one piece of work: a kept worktree folder and its branch's row, or a folder kept through Another folder… of a known project, show once", async () => {
+  const BRANCH = 'fix/guide-global-comment-keep-words';
+  const folder = '/tmp/trees/wt-keep';
+  const keptFolder = { project_id: 'prj_plannotator', kind: 'folder' as const, branch: BRANCH, base: 'main', at: ago(60_000), ahead: 3, folder, head: null, uncommitted: true };
+  // The same folder kept again through Another folder… (no project): the server names the project it belongs to.
+  const pickedAgain = { project_id: '', kind: 'folder' as const, branch: BRANCH, base: 'main', at: ago(60_000), ahead: 3, folder: '~/trees/wt-keep', head: null, uncommitted: true, in_project: 'prj_plannotator' };
+  // A project's own folder picked through Another folder… on a branch the list has: one row.
+  const spacesPicked = { project_id: '', kind: 'folder' as const, branch: 'feat/spaces-share-link', base: 'main', at: ago(30_000), ahead: 1, folder: '~/code/spaces-site', head: null, uncommitted: false, in_project: 'prj_spaces' };
+  window.localStorage.setItem(
+    'plannotator-inbox-reviews-opened',
+    JSON.stringify([
+      { key: `prj_plannotator::${folder}`, at: NOW - 60_000 },
+      { key: '::~/trees/wt-keep', at: NOW - 50_000 },
+      { key: '::~/code/spaces-site', at: NOW - 40_000 },
+    ]),
+  );
+  fetches({ '/reviews/local': { ...LOCAL, kept: [keptFolder, pickedAgain, spacesPicked] } satisfies InboxLocalWorkAnswer });
+  await mount(page());
+  await act(async () => toggle().click());
+  const keys = rows().map((row) => row.getAttribute('data-local-row'));
+  // Newest first: Another folder…'s pick for spaces-site's branch, the folder (its project's) for the branch it holds.
+  expect(keys).toEqual(['::~/code/spaces-site', `prj_plannotator::${folder}`, 'prj_plannotator:']);
+  expect(keys.filter((key) => key?.endsWith(BRANCH))).toEqual([]);
+  // Opened, the row it opened is the one shown.
+  await act(async () => root!.unmount());
+  root = null;
+  await mount(page({ local: { project: 'prj_plannotator', branch: BRANCH } }));
+  expect(rows().map((row) => row.getAttribute('data-local-row'))).toContain(`prj_plannotator:${BRANCH}`);
+  expect(rows().map((row) => row.getAttribute('data-local-row'))).not.toContain(`prj_plannotator::${folder}`);
+});
+
+test.skipIf(!hasDom)('two worktrees on no branch at one commit stay two rows; one such folder kept as a full path and as ~/… is one', async () => {
+  const detached = (folder: string, real: string, project: string, extra: Record<string, unknown> = {}) => ({ project_id: project, kind: 'folder' as const, branch: null, base: 'main', at: ago(120_000), ahead: 0, folder, head: '4e1c9a2', uncommitted: true, folder_real: real, ...extra });
+  // Two agents' worktrees, both started detached at main's tip, each with its own changes.
+  const one = detached('/tmp/agents/wt-one', '/private/tmp/agents/wt-one', 'prj_plannotator');
+  const two = detached('/tmp/agents/wt-two', '/private/tmp/agents/wt-two', 'prj_plannotator');
+  // wt-one again, through Another folder… by its ~/ spelling.
+  const oneAgain = detached('~/agents/wt-one', '/private/tmp/agents/wt-one', '', { in_project: 'prj_plannotator' });
+  window.localStorage.setItem(
+    'plannotator-inbox-reviews-opened',
+    JSON.stringify([
+      { key: 'prj_plannotator::/tmp/agents/wt-one', at: NOW - 60_000 },
+      { key: 'prj_plannotator::/tmp/agents/wt-two', at: NOW - 50_000 },
+      { key: '::~/agents/wt-one', at: NOW - 40_000 },
+    ]),
+  );
+  fetches({ '/reviews/local': { unread: 0, items: [], kept: [one, two, oneAgain] } satisfies InboxLocalWorkAnswer });
+  await mount(page());
+  await act(async () => toggle().click());
+  expect(rows().map((row) => row.getAttribute('data-local-row'))).toEqual(['prj_plannotator::/tmp/agents/wt-one', 'prj_plannotator::/tmp/agents/wt-two']);
 });

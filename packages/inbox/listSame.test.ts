@@ -68,3 +68,9 @@ test('keepSame keeps the value held when the read brought the same, else takes t
   const next = [{ id: 'd1', body: 'hi there' }];
   expect(keepSame(held, next)).toBe(next);
 });
+
+test("the server's clock as it answered (`now`) is new on every read: alone it is nothing new", () => {
+  const held = model([row('a')], { now: '2026-11-24T10:00:00.000Z' });
+  expect(sameListModel(held, model([row('a')], { now: '2026-11-24T10:00:05.000Z' }), { cursor: false })).toBe(true);
+  expect(sameListModel(held, model([row('a', { grid_seen: { through: 1, at: 2 } })], { now: '2026-11-24T10:00:05.000Z' }), { cursor: false })).toBe(false);
+});

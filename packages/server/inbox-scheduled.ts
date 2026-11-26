@@ -258,7 +258,8 @@ export function createInboxScheduled(deps: {
   /**
    * Every change an agent makes says so, as that agent: in the thread it named, else in the routine's own thread (made
    * for the line when the routine has none yet, where its first run would go). The line is no one's words: it takes
-   * no reply and wakes no run (the store's `threadOwner`, the window's `wordsMessage`).
+   * no reply and wakes no run (the store's `threadOwner`, the window's `wordsMessage`). With no thread and no project
+   * to make one in (a scratch routine while New message is off), nothing is posted: null, and the result says so.
    */
   const tell = async (by: InboxScheduledBy, record: InboxScheduledThread, body: string, change: Omit<InboxScheduledChange, "scheduled_id" | "name">): Promise<string | null> => {
     if (by.kind !== "agent") return null;
@@ -534,7 +535,7 @@ export function createInboxScheduled(deps: {
       return { record: found(record.id), told };
     },
 
-    async update(id: string, input: InboxScheduledInput, by: InboxScheduledBy): Promise<{ record: InboxScheduledThread; told: string | null }> {
+    async update(id: string, input: InboxScheduledInput, by: InboxScheduledBy): Promise<{ record: InboxScheduledThread; changed: boolean; told: string | null }> {
       found(id);
       const fields = await fieldsOf(input, false);
       // Folder validation can yield to a concurrent edit or delete. Apply only the fields
@@ -542,7 +543,7 @@ export function createInboxScheduled(deps: {
       const before = found(id);
       if (input.schedule !== undefined) fields.schedule = scheduleOf(input.schedule, before.schedule);
       const changed = (Object.keys(fields) as (keyof InboxScheduledThread)[]).filter((key) => JSON.stringify(fields[key] ?? null) !== JSON.stringify(before[key] ?? null));
-      if (changed.length === 0) return { record: before, told: null };
+      if (changed.length === 0) return { record: before, changed: false, told: null };
       // An agent that changes where it works or which agent runs it hands the switch back to the person.
       const moved = by.kind === "agent" && (changed.includes("folder") || changed.includes("agent"));
       const patch: Partial<InboxScheduledThread> = { ...fields, ...(moved ? { enabled: false, approved_at: null } : {}) };
@@ -556,19 +557,19 @@ export function createInboxScheduled(deps: {
         fields: changed as InboxScheduledChange["fields"],
         ...(turnedOff ? { turned_off: true as const } : {}),
       });
-      return { record, told };
+      return { record, changed: true, told };
     },
 
-    async setOn(id: string, on: boolean, by: InboxScheduledBy): Promise<{ record: InboxScheduledThread; told: string | null }> {
+    async setOn(id: string, on: boolean, by: InboxScheduledBy): Promise<{ record: InboxScheduledThread; changed: boolean; told: string | null }> {
       const before = found(id);
       if (on && by.kind === "agent" && !before.approved_at) {
         throw new InboxError("routine_not_approved", `The person turns ${before.name} on the first time, in the Inbox. Nothing was changed.`);
       }
-      if (before.enabled === on) return { record: before, told: null };
+      if (before.enabled === on) return { record: before, changed: false, told: null };
       const at = iso();
       const record = save(before, on ? { enabled: true, handled_through: at, ...(by.kind === "person" ? { approved_at: at } : {}) } : { enabled: false });
       const told = await tell(by, record, `Turned the routine ${linkOf(record)} ${on ? "on" : "off"}.`, { op: on ? "on" : "off" });
-      return { record, told };
+      return { record, changed: true, told };
     },
 
     /** Run now: the run's divider (its `scheduled_run.failed` says why when it didn't start). */
@@ -586,10 +587,14 @@ export function createInboxScheduled(deps: {
       return { message, told };
     },
 
-    async stopRun(id: string): Promise<InboxScheduledThread> {
+    /**
+     * Stop. `run`: the run it was pressed for (its divider's id), so a Stop that waited for this computer (asleep at
+     * 8:55) never ends a later run (9:00's); that run already over, it does nothing. Without it: the run going now.
+     */
+    async stopRun(id: string, run?: string): Promise<InboxScheduledThread> {
       const record = found(id);
       const running = runningOf(record);
-      if (running) await stopRunning(running.message_id);
+      if (running && (run === undefined || running.message_id === run)) await stopRunning(running.message_id);
       return record;
     },
 

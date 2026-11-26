@@ -179,8 +179,8 @@ export const SMOKE_ROOTS = [
   'apps/hook/server/index.ts',
   'apps/hook/index.tsx', 'apps/hook/vite.config.ts',
   'apps/review/index.tsx', 'apps/review/vite.config.ts', 'apps/review/diagram-engine/build.ts',
-  'apps/inbox/index.tsx', 'apps/inbox/shape.tsx', 'apps/inbox/surface.tsx',
-  'apps/inbox/vite.config.ts', 'apps/inbox/vite.shape.config.ts', 'apps/inbox/vite.surface.config.ts',
+  'apps/inbox/index.tsx', 'apps/inbox/surface.tsx',
+  'apps/inbox/vite.config.ts', 'apps/inbox/vite.surface.config.ts',
 ];
 
 const closures = new WeakMap<Graph, Map<string, Set<string>>>();

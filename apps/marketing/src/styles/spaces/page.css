@@ -104,23 +104,28 @@ mark.g{--mk:var(--green)}
 .dw .hit.a{fill:var(--amber)}
 .dw .hit.g{fill:var(--green)}
 .hand{font-family:"Hand2",cursive;font-size:21px;line-height:26px;color:var(--pen2);-webkit-text-stroke:.5px currentColor;margin:10px 0 0 2px!important;transform:rotate(-2.5deg);transform-origin:0 100%;white-space:nowrap}
-.res a{flex:none;margin-left:auto;height:24px;padding:0 10px;border-radius:12px;background:rgba(20,22,43,.9);color:#fff;font-size:12.5px;line-height:24px;font-weight:600}
-.app{display:flex;align-items:center;gap:8px;height:50px;padding:0 22px;border-bottom:1px solid var(--p-line);font-weight:650}
-.app svg{flex:none}
-.field{flex:1;display:flex;align-items:center;gap:7px;height:30px;margin:0 0 0 4px;padding:0 9px;border-radius:6px;background:var(--p-well);font-weight:400;color:var(--p-soft);white-space:nowrap}
-.field svg{flex:none;color:var(--p-soft)}
-.res>div{display:flex;align-items:center;gap:12px;padding:8px 22px}
-.res svg{flex:none;color:var(--p-soft)}
-.res svg>rect{fill:var(--thumb);stroke:var(--p-edge)}
+/* The third card, "Built as planned": the plan's three steps, each done, then the green band the beam ends on. */
+.sheet.mock h2{margin-bottom:10px}
+.sheet.mock .fig{margin-top:0;padding:4px 0}
+.dw .done{fill:var(--green);stroke:none}
+.dw .tick{fill:none;stroke:var(--mk-ink);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.res>div{display:flex;align-items:center;gap:12px;padding:10px 22px}
 .res span{display:block;min-width:0}
 .res b{display:block;font-weight:550;line-height:19px;white-space:nowrap}
-.res em{display:block;font-style:normal;font-size:12.5px;line-height:17px;color:var(--p-soft);white-space:nowrap}
 .res .top1{background:var(--green);color:var(--mk-ink)}
 .res .top1 b{font-weight:650}
-.res .top1 em{color:rgba(20,22,43,.7)}
-.res .top1 svg{color:var(--mk-ink)}
-.res .top1 svg>rect{fill:rgba(255,255,255,.72);stroke:none}
-.sheet.mock .q{margin:10px 22px 0}
+.sheet.mock .q{margin:10px 22px 0;white-space:nowrap}
+/* The agent's name (scripts/spaces/hero-name.js): its box eases to the next name's width while the old one fades,
+   so the rest of the line moves with it instead of jumping. clip-path, not overflow, keeps the text's baseline. */
+.hn{display:inline-block;white-space:nowrap;clip-path:inset(-6px -1px -6px -2px);transition:width .3s ease}
+.hn>span{transition:opacity .3s ease}
+.hn.out>span{opacity:0}
+@media (prefers-reduced-motion:reduce){.hn,.hn>span{transition:none}}
+/* The card's last line stays on one line (a wrap makes the card taller and pulls the beam off the band), except
+   on phones too narrow for "Claude Code built it. No surprises in review." inside the card's padding (below 359px).
+   There it always holds two lines (2 x the card's 20px line-height), so the card keeps one height while the name
+   cycles, short names included. */
+@media (max-width:358px){.sheet.mock .q{white-space:normal;min-height:40px}}
 
 @media (max-width:1180px){
   .frame{height:auto;max-height:none;min-height:0;padding:96px 24px 48px}

@@ -26,6 +26,7 @@ import type { InboxListSection, InboxMessageWire } from '@plannotator/core/inbox
 
 const hasDom = typeof document !== 'undefined';
 const { InboxApp } = (hasDom ? await import('./App') : {}) as typeof import('./App');
+const { replyDraftUnsaved } = (hasDom ? await import('./replyDraft') : {}) as typeof import('./replyDraft');
 
 const SERVER_SCRIPT = resolve(import.meta.dir, '../../tests/helpers/inbox-dom-server.ts');
 
@@ -115,12 +116,15 @@ beforeEach(() => {
   window.location.hash = '';
 });
 
-afterEach(() => {
+afterEach(async () => {
   if (!hasDom) return;
   act(() => root?.unmount());
   host?.remove();
   root = null;
   host = null;
+  // The box's last save (sent as it unmounts) is answered by this test's fetch: one failing on the real fetch would
+  // be kept for the thread and show in the next test's box.
+  for (let i = 0; i < 100 && replyDraftUnsaved(); i += 1) await new Promise((resolve) => setTimeout(resolve, 10));
   globalThis.fetch = savedFetch;
   (globalThis as Record<string, unknown>).EventSource = savedEventSource;
 });
@@ -252,6 +256,8 @@ test.skipIf(!hasDom)('@ opens the agents grouped by agent, the owner first and t
   await press(box, 'Escape');
   expect(picker()).toBeNull();
   expect(replyBox(el)).not.toBeNull();
+  // Typed words are the thread's draft: emptied, so the next test opens the thread with none.
+  await type(box, '');
 }, 30_000);
 
 test.skipIf(!hasDom)('an MCP agent gets the other heads-up; Send carries the tags; the sent reply shows one line per agent, each with its own Send now', async () => {

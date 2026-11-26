@@ -14,7 +14,6 @@ import {
   PRICING_TITLE,
   QUESTIONS,
   QUESTIONS_HEADING,
-  SAVING_LINE,
   UNLIMITED_FACTS,
 } from '../../lib/spaces-pricing';
 import '../../styles/spaces/page.css';
@@ -47,7 +46,7 @@ const said = (amount: string, per: string | null) => (per === null ? amount : `$
     <link rel="preload" href="/fonts/spaces-hand/SpacesHandOne.woff2" as="font" type="font/woff2" crossorigin />
     <!-- With scripts off the Monthly/Yearly switch could not switch, so it is not shown: the cards
          show the monthly prices and the first answer names both. -->
-    <noscript><style is:inline>.spp .pp-pick .pp-sw{display:none}.spp .pp-pick .pp-saving{margin-top:0}</style></noscript>
+    <noscript><style is:inline>.spp .pp-pick{display:none}</style></noscript>
   </Fragment>
 
 <div class="spp">
@@ -72,10 +71,10 @@ const said = (amount: string, per: string | null) => (per === null ? amount : `$
               aria-checked={index === 0 ? 'true' : 'false'}
               tabindex={index === 0 ? '0' : '-1'}
               data-interval={choice.interval}
-            >{choice.label}</button>
+              aria-label={choice.off === undefined ? undefined : `${choice.label}, ${choice.off}`}
+            >{choice.label}{choice.off !== undefined && ' '}{choice.off !== undefined && <span class="pp-off">{choice.off}</span>}</button>
           ))}
         </div>
-        <p class="pp-saving">{SAVING_LINE}</p>
       </div>
       {PLAN_CARDS.map((plan) => {
         const month = plan.price('month');
