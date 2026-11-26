@@ -397,12 +397,14 @@ export interface ThreadPullReview {
  * link still goes to the forge; this one stays in the Inbox.
  */
 function ReviewLine({ link, onOpen, of }: { link: PullReviewLink; onOpen: (link: PullReviewLink) => void; of?: string }) {
+  // The icon of a review card's "In Reviews" link: this line goes to Reviews, not to a thread.
+  const inReviews = link.kind === 'launchpad' && link.here === true;
   return (
     <button type="button" className="ib-prpop-rv" onClick={() => onOpen(link)} aria-describedby={of} data-pr-review={link.kind}>
       <span className="ib-prpop-rv-ic" aria-hidden="true">
-        <Icon name="questionBubble" size={14} />
+        <Icon name={inReviews ? 'reviews' : 'questionBubble'} size={14} />
       </span>
-      <span className="ib-prpop-rv-w">{link.kind === 'launchpad' && link.here ? OPEN_IN_REVIEWS : 'Open review thread'}</span>
+      <span className="ib-prpop-rv-w">{inReviews ? OPEN_IN_REVIEWS : 'Open review thread'}</span>
       {link.kind === 'thread' && link.agent && (
         <span className="ib-prpop-rv-with">
           {' · with'}
