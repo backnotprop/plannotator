@@ -31,6 +31,7 @@ import { SkillFilePane } from './SkillFilePane';
 import { VideoAttachmentView } from './VideoAttachmentView';
 import { Tip } from './Tip';
 import type { FileRef } from '../fileRefs';
+import { fileNotFoundWords } from '../fileMissingWords';
 
 const noop = () => {};
 const NO_ANNOTATIONS: [] = [];
@@ -202,6 +203,7 @@ function ReferencedFile({
 
   const missing = failed || (view !== null && !view.found);
   const reason = view && !view.found ? view.reason : 'missing';
+  const lookedIn = view && !view.found ? view.looked_in : undefined;
 
   return (
     <section
@@ -259,8 +261,8 @@ function ReferencedFile({
               <span className="ib-refmissing-ic">
                 <Icon name="doc" size={22} />
               </span>
-              <span className="ib-refmissing-name">{fileRef.path}</span>
-              <span className="ib-refmissing-t">{reason === 'refused' ? 'does not show here.' : 'is not on this computer.'}</span>
+              <span className="ib-refmissing-name">{reason === 'refused' ? fileRef.path : name}</span>
+              <span className="ib-refmissing-t">{reason === 'refused' ? 'does not show here.' : fileNotFoundWords(lookedIn ?? fileRef.path)}</span>
             </div>
           )}
           {found && found.contents !== undefined && (kind === 'markdown' || kind === 'text') && (

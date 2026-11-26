@@ -28,7 +28,7 @@ import { annotationOwnsHighlight } from '@plannotator/ui/utils/annotationOwnsHig
 import { groupAnnotationsByDocument, type AnnotationScope } from '@plannotator/ui/utils/annotationScope';
 import { InboxApiError, type AttachmentView } from '../api';
 import { attachmentDrawReady } from '../threadDrawReady';
-import { selectionOnPhrase, useInboxFileSource } from '../fileSource';
+import { pageFrameTooLarge, selectionOnPhrase, useInboxFileSource } from '../fileSource';
 import { folderOf, resolveInboxHtmlLink } from '../htmlLinks';
 import { htmlAssetRouteFromDocument } from '@plannotator/ui/utils/htmlLinkNavigation';
 import { ImageLightbox } from '@plannotator/ui/components/ImageLightbox';
@@ -2517,7 +2517,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               {error}
             </div>
           )}
-          {view && isHtml && view.html !== null && (
+          {view && isHtml && view.html !== null && !tooLarge && (
             // Kept mounted under a linked page (inert, hidden), so Back finds it as it was left.
             <div
               ref={setFitBox}
@@ -2540,7 +2540,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               onPageTap={phoneHtml ? onPageTap : undefined}
               rawHtml={view.html}
               // Its own document, served under its own policy: web pictures load in the page, never in the window.
-              frameUrl={source.pageFrameUrl}
+              frameUrl={pageFrameTooLarge(source.pageFrameUrl, () => setTooLarge(true))}
               title={attachment.name}
               annotations={annotations}
               onAddAnnotation={(annotation) => void save(annotation)}

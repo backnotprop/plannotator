@@ -14,7 +14,8 @@ export type OpenInFileCode = { found: false } | { found: true; contents: string;
  * (the pane opens that attachment instead). `reason`: not on this computer, or a file the Inbox never shows (a secret).
  */
 export type ReferencedFileView =
-  | { found: false; name: string; path: string; reason: 'missing' | 'refused' }
+  /** `looked_in` (a missing file): where it was looked for first, from the project folder when it lies there. */
+  | { found: false; name: string; path: string; reason: 'missing' | 'refused'; looked_in?: string }
   | {
       found: true;
       name: string;

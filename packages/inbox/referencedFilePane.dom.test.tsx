@@ -22,7 +22,7 @@ afterEach(() => {
   globalThis.fetch = realFetch;
 });
 
-async function open(path: string, answer: Record<string, unknown>) {
+async function open(path: string, answer: Record<string, unknown>, onAttached: (id: string) => void = () => {}) {
   const asked: string[] = [];
   globalThis.fetch = ((input: RequestInfo | URL) => {
     asked.push(String(input));
@@ -32,7 +32,7 @@ async function open(path: string, answer: Record<string, unknown>) {
   document.body.appendChild(host);
   await act(async () => {
     root = createRoot(host!);
-    root.render(<ReferencedFilePane threadId="msg_01K7ZZZZZZZZZZZZZZZZZZZZZZ" fileRef={{ path, messageId: 'msg_01K7ZZZZZZZZZZZZZZZZZZZZZZ' }} phone={false} full={false} onOpen={() => {}} onClose={() => {}} onAttached={() => {}} />);
+    root.render(<ReferencedFilePane threadId="msg_01K7ZZZZZZZZZZZZZZZZZZZZZZ" fileRef={{ path, messageId: 'msg_01K7ZZZZZZZZZZZZZZZZZZZZZZ' }} phone={false} full={false} onOpen={() => {}} onClose={() => {}} onAttached={(id) => onAttached(id)} />);
   });
   for (let i = 0; i < 50 && !host.querySelector('[data-code-view], .ib-docscroll, [data-ref-missing]'); i++) await act(async () => new Promise((r) => setTimeout(r, 10)));
   return asked;
@@ -73,4 +73,25 @@ test.skipIf(!hasDom)("a pull request's version takes comments only where the fil
   root = null;
   await open('src/a.ts', { found: true, name: 'a.ts', path: 'src/a.ts', kind: 'code', contents: 'const a = 1;\n', pull, local_matches: true });
   expect(host!.textContent).toContain('to comment');
+});
+
+test.skipIf(!hasDom)('a file found nowhere names where it was looked for, never "not on this computer"; a refused one still does not show', async () => {
+  await open('decisions.html', { found: false, name: 'decisions.html', path: 'decisions.html', reason: 'missing', looked_in: 'review/build/decisions.html' });
+  const note = host!.querySelector('[data-ref-missing="missing"]')!;
+  expect(note.textContent).toContain('review/build/decisions.html');
+  expect(note.textContent).not.toContain('not on this computer');
+  act(() => root?.unmount());
+  host?.remove();
+  root = null;
+  await open('.env', { found: false, name: '.env', path: '.env', reason: 'refused' });
+  expect(host!.querySelector('[data-ref-missing="refused"]')).not.toBeNull();
+  expect(host!.textContent).not.toContain("isn't at");
+});
+
+test.skipIf(!hasDom)('a link the thread holds as an attachment (the view answers its id) opens that attachment', async () => {
+  const opened: string[] = [];
+  await open('decisions.html', { found: true, name: 'decisions.html', path: 'decisions.html', kind: 'file', attachment_id: 'att_01K7AAAAAAAAAAAAAAAAAAAAAA' }, (id) => opened.push(id));
+  for (let i = 0; i < 20 && opened.length === 0; i++) await act(async () => new Promise((r) => setTimeout(r, 10)));
+  expect(opened).toEqual(['att_01K7AAAAAAAAAAAAAAAAAAAAAA']);
+  expect(host!.querySelector('[data-ref-missing]')).toBeNull();
 });

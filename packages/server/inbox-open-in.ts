@@ -69,6 +69,7 @@ import { isShapeProjectPath } from "@plannotator/core/shape";
 import { crossOriginRefusalBody, isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { isLinkedWorktree } from "@plannotator/shared/linked-worktree";
+import { earlierSenderPlaces, sameNamedAttachment } from "./inbox-link-fallback";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import {
   currentPlatform,
@@ -168,7 +169,7 @@ function realpathOrNull(path: string): string | null {
   }
 }
 
-interface FileScope {
+export interface FileScope {
   thread?: unknown;
   message?: unknown;
   repo?: unknown;
@@ -262,6 +263,56 @@ function kindOfName(name: string): string {
   return "code";
 }
 
+/**
+ * Where a scope's path may be, in the order to try. A diff's path starts at the repository's root
+ * (`from: "root"`). A message's link is as the agent wrote it, so it starts in the checkout the agent wrote
+ * from: at its folder (`base_path`), then at that checkout's top. Other projects come after, except that an agent in a
+ * linked worktree never falls back to the main checkout: that copy is not the agent's file. An absolute path says
+ * which of these it means. (A repository's scope, a PR page's, is the route's own.)
+ */
+export function inboxMessagePlaces(store: InboxStore, home: string, scope: FileScope, named: string): InboxProjectFilePlace[] {
+  if (typeof scope.thread !== "string") return [];
+  const first = store.message(scope.thread);
+  if (!first || first.thread_id !== scope.thread) return [];
+  const message = typeof scope.message === "string" ? store.message(scope.message) : null;
+  const sender = message?.thread_id === scope.thread ? message : first;
+  const base = sender.base_path ?? null;
+  const checkout = base ? checkoutOf(base, home) : null;
+  const own = sender.from_project?.root ?? store.project(sender.project_id)?.root ?? null;
+  const shown = [store.project(first.project_id)?.root, store.thread(scope.thread)?.project.root];
+  const known = (roots: unknown[]) => [...new Set(roots.filter((root): root is string => typeof root === "string"))];
+  if (isAbsolute(named)) {
+    const roots = known([checkout, own, ...shown]);
+    const real = realpathOrNull(named);
+    const places = roots.flatMap((root) => {
+      const inside = pathInside(root, named) ?? (real ? pathInside(root, real) : null);
+      return inside ? [{ root, relative: inside }] : [];
+    });
+    // Outside all of them: refused by the path rule, as any other path outside the project.
+    return places.length || !roots.length ? places : [{ root: roots[0]!, relative: named }];
+  }
+  const roots = known(checkout && isLinkedWorktree(checkout) ? [checkout, ...shown.filter((root) => root !== own)] : [checkout, own, ...shown]);
+  const clean = posix.normalize(named.replace(/\\/g, "/"));
+  return roots.flatMap((root) => {
+    const from = base && scope.from !== "root" ? (base === root ? "" : pathInside(root, base)) : null;
+    const places = from ? [{ root, relative: posix.join(from, clean) }] : [];
+    return [...places, { root, relative: clean }];
+  });
+}
+
+/**
+ * Where a path a message names may be, as absolute paths to try in order (approval "inbox-file-refs-open-viewer": no
+ * project boundary). `~/…` is in the home folder; an absolute path is itself; a relative one starts where the hover's
+ * starts (the agent's folder, its checkout, the thread's projects: `inboxMessagePlaces`), and may lead anywhere from
+ * there. A message of another thread brings no folder. `givenHome` is the home folder as given, `home` its realpath.
+ */
+export function inboxMessageCandidates(store: InboxStore, givenHome: string, home: string, scope: FileScope, named: string): string[] {
+  if (typeof named !== "string" || named === "" || named.length > 4096) return [];
+  if (/^~(?:[\\/]|$)/.test(named)) return [join(givenHome, named.slice(2))];
+  if (isAbsolute(named)) return [named];
+  return [...new Set(inboxMessagePlaces(store, home, scope, named).map((place) => join(place.root, place.relative)))];
+}
+
 export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
   const { store, serverSession, readBody, json, localOnly, launcher, codeReviewOn, repoRoots, threadPulls, pullFile } = context;
   const givenHome = context.home ?? homedir();
@@ -275,43 +326,8 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
   /** What a referenced file's view, raw read and attach refuse: a secret, a live system file, Plannotator's own state. */
   const refusedHere = (path: string): boolean => secretOrSystem(path) || isPlannotatorState(path, dataDirs);
 
-  /**
-   * Where a scope's path may be, in the order to try. A repository's path starts at its root, and so does
-   * a diff's (`from: "root"`). A message's link is as the agent wrote it, so it starts in the checkout the agent wrote
-   * from: at its folder (`base_path`), then at that checkout's top. Other projects come after, except that an agent in a
-   * linked worktree never falls back to the main checkout: that copy is not the agent's file. An absolute path says
-   * which of these it means.
-   */
-  const placesOf = (scope: FileScope, named: string): InboxProjectFilePlace[] => {
-    if (typeof scope.repo === "string") return repoRoots(scope.repo.toLowerCase()).map((root) => ({ root, relative: named }));
-    if (typeof scope.thread !== "string") return [];
-    const first = store.message(scope.thread);
-    if (!first || first.thread_id !== scope.thread) return [];
-    const message = typeof scope.message === "string" ? store.message(scope.message) : null;
-    const sender = message?.thread_id === scope.thread ? message : first;
-    const base = sender.base_path ?? null;
-    const checkout = base ? checkoutOf(base, home) : null;
-    const own = sender.from_project?.root ?? store.project(sender.project_id)?.root ?? null;
-    const shown = [store.project(first.project_id)?.root, store.thread(scope.thread)?.project.root];
-    const known = (roots: unknown[]) => [...new Set(roots.filter((root): root is string => typeof root === "string"))];
-    if (isAbsolute(named)) {
-      const roots = known([checkout, own, ...shown]);
-      const real = realpathOrNull(named);
-      const places = roots.flatMap((root) => {
-        const inside = pathInside(root, named) ?? (real ? pathInside(root, real) : null);
-        return inside ? [{ root, relative: inside }] : [];
-      });
-      // Outside all of them: refused by the path rule, as any other path outside the project.
-      return places.length || !roots.length ? places : [{ root: roots[0]!, relative: named }];
-    }
-    const roots = known(checkout && isLinkedWorktree(checkout) ? [checkout, ...shown.filter((root) => root !== own)] : [checkout, own, ...shown]);
-    const clean = posix.normalize(named.replace(/\\/g, "/"));
-    return roots.flatMap((root) => {
-      const from = base && scope.from !== "root" ? (base === root ? "" : pathInside(root, base)) : null;
-      const places = from ? [{ root, relative: posix.join(from, clean) }] : [];
-      return [...places, { root, relative: clean }];
-    });
-  };
+  const placesOf = (scope: FileScope, named: string): InboxProjectFilePlace[] =>
+    typeof scope.repo === "string" ? repoRoots(scope.repo.toLowerCase()).map((root) => ({ root, relative: named })) : inboxMessagePlaces(store, home, scope, named);
 
   /**
    * A read's scope from its query. A linked machine's window (through the door) asks about its thread only: that
@@ -385,18 +401,7 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
   const scopeOf = (params: URLSearchParams | Record<string, unknown>): FileScope =>
     params instanceof URLSearchParams ? { thread: params.get("thread"), message: params.get("message") } : { thread: params.thread, message: params.message };
 
-  /**
-   * Where a path a message names may be, as absolute paths to try in order (approval "inbox-file-refs-open-viewer": no
-   * project boundary). `~/…` is in the home folder; an absolute path is itself; a relative one starts where the hover's
-   * starts (the agent's folder, its checkout, the thread's projects: `placesOf`), and may lead anywhere from there. A
-   * message of another thread brings no folder.
-   */
-  const candidatesOf = (scope: FileScope, named: string): string[] => {
-    if (typeof named !== "string" || named === "" || named.length > 4096) return [];
-    if (/^~(?:[\\/]|$)/.test(named)) return [join(givenHome, named.slice(2))];
-    if (isAbsolute(named)) return [named];
-    return [...new Set(placesOf(scope, named).map((place) => join(place.root, place.relative)))];
-  };
+  const candidatesOf = (scope: FileScope, named: string): string[] => inboxMessageCandidates(store, givenHome, home, scope, named);
 
   /**
    * Whether the message names this path as the window sends it (as written; a link's own spelling, encoded or with
@@ -424,17 +429,32 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
    */
   const reachOf = (req: Request, scope: FileScope, named: string): string[] | null => {
     if (!context.doorOf?.(req) || namedBy(scope, named)) return null;
+    return threadFolders(scope);
+  };
+  /** The thread's folders, as given and at their realpaths: a linked machine's reach for a path its message does not name. */
+  const threadFolders = (scope: FileScope): string[] => {
     const roots = placesOf({ thread: scope.thread, message: scope.message }, "x").map((place) => place.root);
     return [...new Set(roots.flatMap((root) => [root, realpathOrNull(root) ?? root]))];
   };
   const within = (roots: string[] | null, path: string): boolean => roots === null || roots.some((root) => pathInside(root, path) !== null);
 
   /** `checkInboxReadableFile` held to a reach: a candidate outside it, or one whose realpath leads out, is not here. */
-  const readableWithin = async (roots: string[] | null, scope: FileScope, named: string, keep: boolean): Promise<InboxReadableFile> => {
-    const file = await checkInboxReadableFile(candidatesOf(scope, named).filter((path) => within(roots, path)), refusedHere, { keep });
+  const readableWithin = async (roots: string[] | null, scope: FileScope, named: string, keep: boolean, candidates = candidatesOf(scope, named)): Promise<InboxReadableFile> => {
+    const file = await checkInboxReadableFile(candidates.filter((path) => within(roots, path)), refusedHere, { keep });
     if (!file.ok || within(roots, file.path)) return file;
     await file.handle?.close().catch(() => {});
     return { ok: false, code: "missing" };
+  };
+
+  /**
+   * Where a missing file was looked for first (the message's own folder), as the window names a file of the thread:
+   * from the thread's project folder when it lies there, else as it is.
+   */
+  const lookedIn = (scope: FileScope, named: string): string => {
+    const first = candidatesOf(scope, named)[0];
+    if (!first) return named;
+    const project = typeof scope.thread === "string" ? store.thread(scope.thread)?.project.root : null;
+    return (project ? pathInside(project, first) : null) ?? first;
   };
 
   /** A linked machine's request that is not a press in a window there: refused, as its own Inbox refuses it. */
@@ -466,9 +486,28 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
     return null;
   };
 
+  /**
+   * A relative link not at the message's own places, from the folders the same sender's earlier messages in the thread
+   * were sent from (inbox-link-fallback.ts: its shell may have moved between them). A linked machine's request holds
+   * them to the thread's folders even for a path its message names: they are not what the message names.
+   */
+  const fromEarlierFolders = async (req: Request, roots: string[] | null, scope: FileScope, named: string, keep: boolean): Promise<InboxReadableFile | null> => {
+    const earlier = earlierSenderPlaces(store, scope, named);
+    if (earlier.length === 0) return null;
+    const there = await readableWithin(roots ?? (context.doorOf?.(req) ? threadFolders(scope) : null), scope, named, keep, earlier);
+    return there.ok ? there : null;
+  };
+
+  /** The file a message names: at its own places, else (only when nothing is there) from the sender's earlier folders. */
+  const locate = async (req: Request, roots: string[] | null, scope: FileScope, named: string, keep: boolean): Promise<InboxReadableFile> => {
+    const file = await readableWithin(roots, scope, named, keep);
+    if (file.ok || file.code !== "missing") return file;
+    return (await fromEarlierFolders(req, roots, scope, named, keep)) ?? file;
+  };
+
   /** The text of the file on this computer a message names, under the view's refusals and cap; null when there is none. */
-  const localText = async (roots: string[] | null, scope: FileScope, named: string): Promise<string | null> => {
-    const file = await readableWithin(roots, scope, named, true);
+  const localText = async (req: Request, roots: string[] | null, scope: FileScope, named: string): Promise<string | null> => {
+    const file = await locate(req, roots, scope, named, true);
     if (!file.ok) return null;
     try {
       if (!isInboxTextKind(file.kind)) return null;
@@ -499,12 +538,19 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
     const pulled = await pullVersion(scope, named);
     if (pulled) {
       // A comment attaches the file on this computer, so it is taken only where that file is the version shown.
-      const here = await localText(roots, scope, named);
+      const here = await localText(req, roots, scope, named);
       const local_matches = here !== null && here === pulled.contents;
       return json({ found: true, name, path: clean, kind: kindOfName(name), contents: pulled.contents, local_matches, pull: { label: pulled.label, platform: pulled.platform, url: pulled.url } });
     }
-    const file = await readableWithin(roots, scope, named, true);
-    if (!file.ok) return json({ found: false, name, path: clean, reason: file.code });
+    let file = await readableWithin(roots, scope, named, true);
+    if (!file.ok && file.code === "missing") {
+      // Not where this message's folder says: the file of that name the thread was handed opens as that attachment,
+      // else the link from the folders the same sender wrote from before (inbox-link-fallback.ts).
+      const held = sameNamedAttachment(store, scope, named);
+      if (held) return json({ found: true, name, path: clean, kind: "file", attachment_id: held });
+      file = (await fromEarlierFolders(req, roots, scope, named, true)) ?? file;
+    }
+    if (!file.ok) return json({ found: false, name, path: clean, reason: file.code, ...(file.code === "missing" ? { looked_in: lookedIn(scope, named) } : {}) });
     const handle = file.handle!;
     try {
       const attached = attachedTo(scope, file.path);
@@ -537,7 +583,7 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
     const params = url.searchParams;
     const scope = scopeOf(params);
     const named = params.get("path") ?? "";
-    const file = await readableWithin(reachOf(req, scope, named), scope, named, true);
+    const file = await locate(req, reachOf(req, scope, named), scope, named, true);
     if (!file.ok) return json({ found: false }, 404);
     // The handle that was checked serves the bytes: never the path again.
     const handle = file.handle!;
@@ -588,11 +634,11 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
     if (message.author.kind !== "agent") throw new InboxError("validation_error", "message_id: only an agent's message takes a file it names.", { field: "message_id" });
     if (!store.messageAnswerable(message.id)) throw new InboxError("thread_resolved", "This thread is resolved; reopen it to annotate.");
     const roots = reachOf(req, scope, body.path);
-    const file = await readableWithin(roots, scope, body.path, false);
+    const file = await locate(req, roots, scope, body.path, false);
     if (!file.ok) throw new InboxError("attachment_missing", `${body.path} is not on this computer.`);
     // The pane showed the PR's version: a comment on it attaches this computer's file only when that is the same text.
     const pulled = await pullVersion(scope, body.path);
-    if (pulled && (await localText(roots, scope, body.path)) !== pulled.contents) {
+    if (pulled && (await localText(req, roots, scope, body.path)) !== pulled.contents) {
       throw new InboxError("annotation_not_allowed", `${body.path} on this computer is not the pull request's version.`, { field: "path" });
     }
     const held = attachedTo(scope, file.path);
