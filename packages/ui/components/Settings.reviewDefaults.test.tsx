@@ -1,6 +1,6 @@
 /**
- * Settings → Review: the old Git tab, now holding a Git section and a
- * Jujutsu section, each with its own saved default diff. Picking one must
+ * Settings → Reviews › Files and defaults (the old Review tab, before that
+ * Git): a Git and a Jujutsu default diff, each with its own saved value. Picking one must
  * never change the other (a jj user's choice would otherwise reopen their
  * Git reviews on a jj mode, or the reverse).
  *
@@ -38,16 +38,23 @@ async function openTab(label: string) {
 }
 
 const section = (id: 'git' | 'jj') => document.querySelector<HTMLElement>(`section[aria-labelledby="settings-review-${id}"]`);
-const radios = (id: 'git' | 'jj') => Array.from(section(id)?.querySelectorAll<HTMLButtonElement>('button[role="radio"]') ?? []);
-const checkedLabel = (id: 'git' | 'jj') =>
-  radios(id).find((r) => r.getAttribute('aria-checked') === 'true')?.querySelector('.text-sm')?.textContent;
+const diffSelect = (id: 'git' | 'jj') => section(id)?.querySelector<HTMLSelectElement>('select') ?? null;
+const checkedLabel = (id: 'git' | 'jj') => {
+  const select = diffSelect(id);
+  return select ? Array.from(select.options).find((o) => o.value === select.value)?.textContent : undefined;
+};
 async function pick(id: 'git' | 'jj', label: string) {
-  const radio = radios(id).find((r) => r.querySelector('.text-sm')?.textContent === label);
-  if (!radio) throw new Error(`No "${label}" choice in ${id}`);
-  await act(async () => radio.click());
+  const select = diffSelect(id);
+  const option = select && Array.from(select.options).find((o) => o.textContent === label);
+  if (!select || !option) throw new Error(`No "${label}" choice in ${id}`);
+  await act(async () => {
+    select.value = option.value;
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
 }
 
-describe.if(hasDom)('Settings → Review', () => {
+// The Review tab's defaults now sit in Settings → Reviews › Files and defaults.
+describe.if(hasDom)('Settings → Reviews: default diff per VCS', () => {
   beforeEach(() => {
     saved.clear();
     setStorageBackend({ getItem: (k) => saved.get(k) ?? null, setItem: (k, v) => void saved.set(k, v), removeItem: (k) => void saved.delete(k) });
@@ -68,11 +75,11 @@ describe.if(hasDom)('Settings → Review', () => {
     resetStorageBackend();
   });
 
-  test('the Git tab is now Review, with a Git and a Jujutsu section', async () => {
+  test('Reviews holds a Git and a Jujutsu default, each with its own saved value', async () => {
     await mountReviewSettings();
-    expect(sidebarTabs()).toContain('Review');
+    expect(sidebarTabs()).toContain('Reviews');
     expect(sidebarTabs()).not.toContain('Git');
-    await openTab('Review');
+    await openTab('Reviews');
     expect(section('git')).not.toBeNull();
     expect(section('jj')).not.toBeNull();
     // A jj user who never chose opens on Current change.
@@ -82,7 +89,7 @@ describe.if(hasDom)('Settings → Review', () => {
 
   test('picking a Jujutsu default saves it apart from the Git default, and the reverse', async () => {
     await mountReviewSettings();
-    await openTab('Review');
+    await openTab('Reviews');
 
     await pick('jj', 'Line of work');
     expect(configStore.get('reviewDefaults').jj?.defaultDiffType).toBe('jj-line');
