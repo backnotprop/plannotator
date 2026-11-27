@@ -15,6 +15,9 @@
 # push to an FCM token answers `{ sent: false, reason: "no_fcm_key" }`.
 # APNS_ORIGIN, FCM_ORIGIN and FCM_OAUTH_ORIGIN exist only for the proof under
 # `wrangler dev` (local stand-ins for Apple and Google); never set them here.
+# APNS_TOPICS (relay 1.1, [vars] below): the bundle ids a phone may name as its
+# push topic, comma-separated. Keep ai.plannotator.app on it while any app that
+# names no topic is in use. Not a secret.
 name = "plannotator-relay"
 main = "src/index.ts"
 compatibility_date = "2026-09-01"
@@ -60,3 +63,7 @@ namespace_id = "1002"
   limit = 20
   period = 60
 
+# Relay 1.1: the bundle ids a phone may register its APNs token under (src/topics.ts).
+# Add a TestFlight or development build's id here, comma-separated, and deploy.
+[vars]
+APNS_TOPICS = "ai.plannotator.app"

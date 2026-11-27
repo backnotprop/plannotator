@@ -312,13 +312,30 @@ test.skipIf(!hasDom)('one row on a phone too: the letter, the name, no arrows, n
 test.skipIf(!hasDom)('a neighbour is drawn at the Fit its image will have, between the rows the image keeps clear', () => {
   const stage = { left: 0, top: 0, width: 400, height: 660, pad: 12 };
   // No rows: as the stage fits it. Rows: the same width, moved below the top row.
-  expect(peekFit({ width: 1600, height: 1000 }, stage)).toEqual({ left: 12, top: 212.5, width: 376, height: 235 });
-  expect(peekFit({ width: 1600, height: 1000 }, stage, { top: 62, bottom: 248 })).toEqual({ left: 12, top: 62 + 57.5, width: 376, height: 235 });
+  expect(peekFit({ width: 1600, height: 1000 }, stage, undefined, true)).toEqual({ left: 12, top: 212.5, width: 376, height: 235 });
+  expect(peekFit({ width: 1600, height: 1000 }, stage, { top: 62, bottom: 248 }, true)).toEqual({ left: 12, top: 62 + 57.5, width: 376, height: 235 });
   // A picture that has to shrink to fit between them.
-  const portrait = peekFit({ width: 1000, height: 1600 }, stage, { top: 62, bottom: 248 });
+  const portrait = peekFit({ width: 1000, height: 1600 }, stage, { top: 62, bottom: 248 }, true);
   expect(portrait.height).toBe(350 - 24);
   expect(portrait.top).toBe(62 + 12);
   expect(portrait.top + portrait.height).toBe(660 - 248 - 12);
+});
+
+test.skipIf(!hasDom)('a panorama neighbour slides in at the Fit its image opens at: whole on a phone, its height from the left off one', () => {
+  const stage = { left: 0, top: 0, width: 400, height: 660, pad: 12 };
+  const panorama = { width: 8000, height: 1000 };
+  // A phone: the whole width inside the padding, centred down the stage, as ImageAttachmentView fits it there.
+  const phone = peekFit(panorama, stage, undefined, true);
+  expect(phone.left).toBeCloseTo(12, 5);
+  expect(phone.width).toBeCloseTo(376, 5);
+  expect(phone.height).toBeCloseTo(47, 5);
+  expect(phone.top).toBeCloseTo((660 - 47) / 2, 5);
+  // Not a phone (a touch tablet): its height inside the padding, read from the left, wider than the stage.
+  const tablet = peekFit(panorama, stage, undefined, false);
+  expect(tablet.height).toBeCloseTo(636, 5);
+  expect(tablet.top).toBeCloseTo(12, 5);
+  expect(tablet.left).toBeCloseTo(0, 5);
+  expect(tablet.width).toBeCloseTo(8000 * (636 / 1000), 5);
 });
 
 test.skipIf(!hasDom)('choices labeled with their own letters out of order (C, A, B) are captioned by that letter, with no chip of a position letter', async () => {

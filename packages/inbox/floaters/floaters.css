@@ -1,6 +1,9 @@
 /* Floating reply drafts and Ask AI in the corner (approval "inbox-reply-floaters"; floaters/useReplyFloaters.tsx). */
 .ib-rf-layer { position: fixed; top: 0; left: 0; right: 0; height: var(--ib-vvh, 100dvh); z-index: 40; pointer-events: none; isolation: isolate; }
 .ib-rf-layer.ib-rf-over { z-index: 85; }
+/* A draft's window above the minimized chat's circle (Ask's layer, z 41) if it is dragged onto it: the circle never
+   draws over it or takes its clicks. Ask's window is minimized whenever the circle shows. */
+.ib-rf-layer[data-rf-over-circle] { z-index: 42; }
 .ib-rf-layer button { font: inherit; color: inherit; }
 .ib-rf-stack, .ib-rf-layer > .ib-rf-round { position: absolute; pointer-events: auto; transition: right 180ms cubic-bezier(0.23, 1, 0.32, 1), bottom 180ms cubic-bezier(0.23, 1, 0.32, 1); }
 

@@ -69,7 +69,7 @@ async function open(row: InboxScheduledRow, known: InboxScheduledRow | null = ro
   const noop = () => {};
   act(() =>
     root!.render(
-      <ScheduledEditor id={row.id} row={known} version={0} block={null} defaults={{ agent: null, projectId: null }} phone={false} narrow={false} onClose={noop} onCreated={noop} onDelete={async () => {}} onOpenThread={noop} />,
+      <ScheduledEditor id={row.id} row={known} version={0} home={{ id: null, name: 'this computer' }} homes={[]} defaultsFor={() => ({ agent: null, projectId: null })} phone={false} narrow={false} onClose={noop} onCreated={noop} onDelete={async () => {}} onOpenThread={noop} />,
     ),
   );
   await settle();

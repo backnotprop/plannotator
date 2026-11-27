@@ -34,7 +34,8 @@ import { SidebarTrigger } from '../shell/sidebar';
 import { Icon } from '../icons';
 import { hashOf, writeRoute } from '../app/writeRoute';
 import type { PlanRead } from './client';
-import { recordPlanLook, useDocVersions, usePlan } from './store';
+import { recordPlanLook, useDocVersions, usePlan, usePlanShareOn } from './store';
+import { PlanShare } from './PlanShare';
 import { approvalTone, approvalWords, PLAN_FILES_WORDS } from './words';
 import { usePlanEditing } from './PlanEditing';
 import { flushQueuedPlanSent, planAgentOf } from './deliver';
@@ -198,9 +199,14 @@ function PlanLoaded({ id, version, diff, phone, doc, file, read, versions, fresh
   const planApproval = planApprovalState(read.events, primary, mainHead, { cleared: read.plan.last_approval_cleared, moved: read.plan.last_approval_moved });
   const railDecision: PlanRailDecision | null = planApproval.kind === 'none' ? null : { words: approvalWords(planApproval), tone: approvalTone(planApproval) };
   const head = <PlanRailHead name={read.plan.name} project={project} decision={railDecision} />;
+  // Share this space (approval "share-this-space"): at the right end of the top bar, only while its switch is on. On a
+  // phone it sits in the bar's own end slot, so it stays on the first row.
+  const shareOn = usePlanShareOn();
+  const share = shareOn ? <PlanShare id={id} phone={phone} fresh={fresh} /> : null;
   const band = (
     <AppRail
       variant="dense"
+      account={phone ? share : null}
       leading={
         <>
           <SidebarTrigger />
@@ -220,7 +226,7 @@ function PlanLoaded({ id, version, diff, phone, doc, file, read, versions, fresh
             <Breadcrumbs root={{ label: 'Spaces', link: spacesLink(id) }} collectionName={read.plan.name} collectionLink={routeLink(planFileRoute(id, primary, { kind: 'doc', id: primary }))} path={fileName} />
           )
         }
-        actions={null}
+        actions={phone ? null : share}
       />
     </AppRail>
   );

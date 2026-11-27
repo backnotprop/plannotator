@@ -41,7 +41,7 @@ export interface PlannotatorToolInput {
 export const PLANNOTATOR_TOOL_DESCRIPTION = [
   'Open Plannotator, the browser review UI, for the user, and return at once. Also lists and closes the reviews opened in this conversation (by this tool or the user\'s /plannotator-* commands).',
   '- action "annotate": annotate a file (markdown, text, config, HTML), a folder, or a URL; `target` is required. Pass a list as `target` to review several files together, in the order you want them read. `gate: true` adds an Approve button for an explicit sign-off. `options.markdown: true` converts HTML or a URL to markdown first.',
-  '- action "review": review code changes; `target` is an optional repository directory or a GitHub/GitLab/Bitbucket pull request URL (default: the current repository). `options.base` sets the compare branch or ref (git only). `gate: true` when you wait for the sign-off: a bare Approve reaches you too.',
+  '- action "review": review code changes; `target` is an optional repository directory or a GitHub/GitLab/Bitbucket/Forgejo pull request URL (default: the current repository). `options.base` sets the compare branch or ref (git only). `gate: true` when you wait for the sign-off: a bare Approve reaches you too.',
   '- action "last": annotate your own last assistant message; no target.',
   '- action "list": the reviews opened in this conversation that are still open, one line each: session id, what it shows, url, age, state, and how many comments the reviewer has not sent yet.',
   '- action "close": close a review opened in this conversation that is no longer needed; `session` is its id (pn-...) or "all". Nothing is sent to you, and the reviewer\'s unsent comments stay saved as a draft. Plan reviews are not closed this way: they end with the reviewer\'s decision.',
@@ -441,7 +441,7 @@ export function plannotatorToolOpenedText(
 
 /**
  * The outcome a decision heading names for a code review the reviewer posted
- * straight to the PR platform (GitHub, GitLab, Bitbucket): the same words on
+ * straight to the PR platform (GitHub, GitLab, Bitbucket, Forgejo): the same words on
  * every host that delivers it as a message.
  */
 export const PLANNOTATOR_OUTCOME_REVIEW_POSTED = 'Review posted'

@@ -4,6 +4,7 @@ import { getMRLabel, getMRNumberLabel, getDisplayRepo } from '@plannotator/share
 import { exportAnnotations, parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
 import { artifactAnchorLabel } from './artifactAnnotations';
 import { codeFenceFor } from '@plannotator/core/markdown-structure';
+import { attachedLines } from '@plannotator/ui/utils/attachedLines';
 
 /**
  * Quoted code in a fence longer than any backtick run in it (CommonMark), so
@@ -240,6 +241,7 @@ function formatFileAnnotations(fileAnnotations: CodeAnnotation[], headingLevel =
       output += `${markdownPreviewQuote(ann.markdownPreview)}\n`;
       if (ann.text) output += `${prefix}${ann.text}\n`;
       else if (prefix) output += `${prefix.trimEnd()}\n`;
+      output += attachedLines(ann.images);
       output += '\n';
       continue;
     }
@@ -255,6 +257,7 @@ function formatFileAnnotations(fileAnnotations: CodeAnnotation[], headingLevel =
       }
       output += formatCallFlowAnnotationTargets(ann);
       output += formatSuggestionBlocks(ann);
+      output += attachedLines(ann.images);
       output += '\n';
       continue;
     }
@@ -283,6 +286,7 @@ function formatFileAnnotations(fileAnnotations: CodeAnnotation[], headingLevel =
     output += outsideDiffCodeBlock(ann);
     // The code block already quotes the lines; a suggestion still shows what it replaces.
     output += ann.outsideDiff && !ann.suggestedCode ? '' : formatSuggestionBlocks(ann);
+    output += attachedLines(ann.images);
     output += '\n';
   }
 

@@ -37,16 +37,22 @@ describe('Inbox window e2e shards', () => {
     expect(split.flat().filter((f) => f === 'tests/e2e/brand-new.spec.ts')).toHaveLength(1);
   });
 
-  test('no shard runs far past an even split of the measured time', () => {
-    // Times for 165 of 210 specs left the shards at 5.8 to 17.5 min (run 42217775919): refresh
-    // tests/e2e/shard-times.json when this fails. A spec with no time yet counts as the median.
+  test('every spec has a measured time, and every time is a spec', () => {
+    // 19 specs with no time, each counted as the median, left one shard at 18 min of tests
+    // while others ran 12. A new spec records its seconds in tests/e2e/shard-times.json: the
+    // sum of its test durations in the list reporter's log of a CI run (a guess is fine to start).
     const times = specTimes();
-    const known = Object.values(times).sort((a, b) => a - b);
-    const median = known[Math.floor(known.length / 2)];
-    const weight = (file: string) => times[file.split('/').pop()!] ?? median;
+    const names = specFiles().map((f) => f.split('/').pop()!);
+    expect(names.filter((name) => times[name] === undefined), 'specs with no entry in tests/e2e/shard-times.json').toEqual([]);
+    expect(Object.keys(times).filter((name) => !names.includes(name)), 'entries in tests/e2e/shard-times.json for no spec').toEqual([]);
+  });
+
+  test('no shard runs far past an even split of the measured time', () => {
+    // Stale times left the shards at 6.9 to 17.4 min of tests (runs 45032323106, 45030988315,
+    // 45028863712): refresh tests/e2e/shard-times.json when this fails.
+    const times = specTimes();
+    const weight = (file: string) => times[file.split('/').pop()!] ?? 0;
     const all = specFiles();
-    const untimed = all.filter((f) => times[f.split('/').pop()!] === undefined);
-    expect(untimed.length, `specs with no measured time: ${untimed.join(', ')}`).toBeLessThanOrEqual(all.length / 10);
     const even = (all.reduce((sum, f) => sum + weight(f), 0) + SHARD_1_EXTRA_S) / E2E_SHARDS;
     const longest = Math.max(...all.map(weight));
     const walls = shards().map((list, i) => list.reduce((sum, f) => sum + weight(f), 0) + (i === 0 ? SHARD_1_EXTRA_S : 0));

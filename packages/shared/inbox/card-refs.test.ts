@@ -186,6 +186,14 @@ describe("parseInboxCardRef: any other web link (user feedback #10)", () => {
     expect(parseInboxCardRef("https://www.notion.so/acme/Roadmap", "pr")).toBeNull();
   });
 
+  test("a Forgejo / Gitea PR link stays a plain link to its own address (the Board has no Forgejo source)", () => {
+    // Never a GitHub-sourced PR, and never the GitHub-shaped `/pull/N` link.
+    for (const url of ["https://codeberg.org/acme/widgets/pulls/7", "https://git.acme.corp/acme/widgets/pulls/7", "http://forgejo.lan:3000/acme/widgets/pulls/7"]) {
+      expect(parseInboxCardRef(url)).toMatchObject({ kind: "link", source: "web", url });
+      expect(parseInboxCardRef(url, "pr")).toBeNull();
+    }
+  });
+
   test("other schemes, credentials, whitespace and no scheme are refused", () => {
     for (const refused of [
       "javascript:alert(1)",

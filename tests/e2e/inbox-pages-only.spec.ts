@@ -169,7 +169,7 @@ test('an attached page shows its web pictures; the window asks the web for none,
       const window = await context.request.get(url);
       // One web folder is allowed, and only that: the site's own hand-uploaded pictures, for the personal agents
       // dialog's banner (owner, 2026-11-13). Every other web picture stays blocked, as the requests below prove.
-      expect(window.headers()['content-security-policy']).toContain("img-src 'self' data: blob: https://plannotator.ai/assets/hosted/;");
+      expect(window.headers()['content-security-policy']).toContain("img-src 'self' data: blob: https://plannotator.ai/assets/hosted/ https://plannotator.ai/launch/;");
 
       // Only the window may keep a page: the listener's cross-origin guard runs before the route.
       // Another site (or an opaque-origin page, `Origin: null`) cannot get HTML served from the Inbox.

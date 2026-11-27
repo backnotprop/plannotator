@@ -8,8 +8,9 @@
  *  - every live session;
  *  - every session that owns a thread waiting on the person (Stopped on you, Holding up work, Waiting on you), ended
  *    or not: the thread's owner as a plain reply would reach it (`store.threadOwner`);
- *  - every session that ended today (it was heard from since this machine's midnight; kept in memory, so an Inbox
- *    restart forgets those);
+ *  - every session that ended in the last `INBOX_AGENTS_ENDED_DAYS` days (it was heard from since that day's midnight on
+ *    this machine's clock; kept in memory, so an Inbox restart forgets those): the window's sidebar leaves them out,
+ *    and the list's Agents view names their threads' agent with them;
  *  - every session the Inbox launched whose launch is not deleted and whose thread is not archived (of a scheduled
  *    thread, only its newest run's: an earlier run's session is listed only while live). One that is
  *    stopped is idle (a reply starts it again); one whose start failed or whose CLI is gone has ended.
@@ -30,7 +31,8 @@
  * got, and what was kept on disk (inbox-first-seen.ts, so an Inbox restart moves nothing). Each machine orders its own
  * agents, so every window, linked machine and phone shows a machine's group in the same order.
  *
- * The cap: at most `INBOX_AGENTS_LISTED_MAX` per machine, `total` and `ended_today` counting them all. Past it the
+ * The cap: at most `INBOX_AGENTS_LISTED_MAX` per machine, `total` counting them all and `ended_today` those of them
+ * that ended today (`InboxAgentsEvidence.today`). Past it the
  * agents waiting on the person stay, then the newest live ones, then the newest ended; the kept ones keep their
  * order. Another machine's group comes from its own list (the door's `threads`, read by its PeerLink), capped again
  * here, so a merged list is never longer than the cap per machine.
@@ -43,7 +45,8 @@
 import { basename } from "node:path";
 import type { InboxFirstSeen } from "./inbox-first-seen";
 import { INBOX_AGENT_FACES_KEPT, INBOX_AGENTS_LISTED_MAX, inboxAgentNamesChecked, readInboxAgentFaces, type InboxAgent, type InboxAgentsGroup, type InboxRunState } from "@plannotator/core/inbox-types";
-import type { InboxAgentSession } from "./inbox-sessions";
+import { contextPercentOf, effortLevelOf, modelIdOf, type InboxAgentSession } from "./inbox-sessions";
+import { withAgentStatusMark } from "./inbox-agent-mark";
 
 /** A launched session (inbox-launch.ts `agents`). */
 export interface InboxAgentLaunch {
@@ -60,6 +63,8 @@ export interface InboxAgentLaunch {
   scratch: string | null;
   /** A routine's run (its root is a run divider). */
   scheduled?: boolean;
+  /** It runs in a Rex tab whose pane the Inbox never learned, so it offers no Stop. */
+  rex?: boolean;
 }
 
 /** One thread waiting on the person, by the session that owns it. */
@@ -73,8 +78,10 @@ export interface InboxAgentWait {
 }
 
 export interface InboxAgentsEvidence {
-  /** The live sessions, and the ended ones heard from today (`live.agentSessions`). */
+  /** The live sessions, and the ended ones heard from in the last `INBOX_AGENTS_ENDED_DAYS` days (`live.agentSessions`). */
   sessions: InboxAgentSession[];
+  /** The start of today (ms): an ended session last heard before it ended on an earlier day (`ended_today`). Absent: today's only were given. */
+  today?: number;
   launches: InboxAgentLaunch[];
   /** The threads in Stopped on you, Holding up work or Waiting on you, with their owner. */
   waits: InboxAgentWait[];
@@ -114,6 +121,16 @@ export function inboxStartOfDay(now: number): number {
   return day.getTime();
 }
 
+/** How many days of ended sessions the agents list keeps, today included (the list's Agents view names them). */
+export const INBOX_AGENTS_ENDED_DAYS = 7;
+
+/** The start of the first day the agents list keeps ended sessions from: `INBOX_AGENTS_ENDED_DAYS - 1` days before today's. */
+export function inboxAgentsEndedSince(now: number): number {
+  const day = new Date(inboxStartOfDay(now));
+  day.setDate(day.getDate() - (INBOX_AGENTS_ENDED_DAYS - 1));
+  return day.getTime();
+}
+
 /** A folder's project as the person reads it: `id` null and the folder's name when the Inbox has none. */
 export function inboxFolderProject(root: string): { id: null; name: string } {
   return { id: null, name: basename(root) || root };
@@ -145,6 +162,7 @@ export function inboxAgentsGroup(evidence: InboxAgentsEvidence, cap = INBOX_AGEN
       session: entry.session,
       ...(continues.length > 0 ? { continues } : {}),
       host: entry.host,
+      ...(entry.runtime ? { runtime: entry.runtime } : {}),
       ...(evidence.labels && entry.label ? { label: entry.label } : {}),
       ...(evidence.labels && entry.title ? { title: entry.title } : {}),
       project: evidence.projectOf(entry.root, entry.session),
@@ -153,6 +171,9 @@ export function inboxAgentsGroup(evidence: InboxAgentsEvidence, cap = INBOX_AGEN
       live: entry.live,
       started_at: iso(entry.startedAt),
       last_seen_at: iso(entry.lastSeen),
+      ...(entry.live && entry.model !== null ? { model: entry.model } : {}),
+      ...(entry.live && entry.effort !== null ? { effort: entry.effort } : {}),
+      ...(entry.live && entry.context !== null ? { context: entry.context } : {}),
     });
     seen.set(entry.session, entry.firstSeen ?? entry.startedAt);
   }
@@ -186,13 +207,14 @@ export function inboxAgentsGroup(evidence: InboxAgentsEvidence, cap = INBOX_AGEN
       continue;
     }
     const run = launch.run;
-    const working = run === "starting" || run === "working" || run === "cloning" || known?.state === "working";
+    // Stopped by the person: its last polls may still say working for a while, which it no longer is.
+    const working = run === "starting" || run === "working" || run === "cloning" || (run !== "stopped" && known?.state === "working");
     const ended = !known?.live && (run === "failed" || run === "missing" || run === "clone_failed" || run === "clone_cancelled");
     bySession.set(session, {
       ...(known ?? { host: launch.host, project: evidence.projectById(launch.project_id), started_at: launch.started_at, last_seen_at: null }),
       id: launch.launch_id,
       session,
-      launch: { id: launch.launch_id, thread_id: launch.thread_id, started: launch.started, run, scratch: launch.scratch },
+      launch: { id: launch.launch_id, thread_id: launch.thread_id, started: launch.started, run, scratch: launch.scratch, ...(launch.rex ? { rex: true as const } : {}) },
       host: known?.host ?? launch.host,
       state: working ? "working" : ended ? "ended" : "idle",
       waiting: 0,
@@ -249,12 +271,28 @@ export function inboxAgentsGroup(evidence: InboxAgentsEvidence, cap = INBOX_AGEN
     const stay = new Set([...all].sort((a, b) => keepRank(a) - keepRank(b) || order(a, b)).slice(0, cap));
     return all.filter((agent) => stay.has(agent));
   })();
-  return { agents: kept, total: all.length, ended_today: all.filter((agent) => agent.state === "ended").length };
+  // Each agent's status mark (inbox-agent-mark.ts), from what its session's connection says now.
+  const facts = new Map(evidence.sessions.map((entry) => [entry.session, { busy: entry.busy, blocked: entry.blocked ?? null }] as const));
+  const marked = kept.map((agent) => withAgentStatusMark(agent, facts.get(agent.session) ?? null));
+  // Ended on an earlier day: heard from last before today (only an ended session the evidence gave is dated).
+  const earlier = new Set(evidence.today === undefined ? [] : evidence.sessions.filter((entry) => !entry.live && entry.lastSeen < evidence.today!).map((entry) => entry.session));
+  return { agents: marked, total: all.length, ended_today: all.filter((agent) => agent.state === "ended" && !earlier.has(agent.session)).length };
 }
 
 /** The merged view's agents: this Inbox's group first, named by its id, then each linked machine's (`machines.agents`). */
 export function inboxMergedAgents(self: string, own: InboxAgentsGroup, machines: readonly InboxAgentsGroup[]): InboxAgentsGroup[] {
   return [{ machine: self, ...own }, ...machines.filter((group) => group.machine !== self)];
+}
+
+function sessionFactsChecked(agent: InboxAgent): InboxAgent {
+  const { model, effort, context, ...rest } = agent;
+  const checked = { model: modelIdOf(model), effort: effortLevelOf(effort), context: contextPercentOf(context) };
+  return {
+    ...rest,
+    ...(checked.model === null ? {} : { model: checked.model }),
+    ...(checked.effort === null ? {} : { effort: checked.effort }),
+    ...(checked.context === null ? {} : { context: checked.context }),
+  };
 }
 
 /**
@@ -265,7 +303,10 @@ export function inboxPeerAgentsGroup(value: unknown, machine: string, cap = INBO
   const group = Array.isArray(value) ? value[0] : null;
   if (!group || typeof group !== "object" || !Array.isArray((group as InboxAgentsGroup).agents)) return null;
   const raw = group as Partial<InboxAgentsGroup>;
-  const agents = raw.agents!.filter((agent): agent is InboxAgent => !!agent && typeof agent === "object" && typeof agent.id === "string" && typeof agent.session === "string" && STATES.has(agent.state)).slice(0, cap).map(inboxAgentNamesChecked);
+  // Where it lives in that machine's Rex, its pane's status and mark, as that machine's Inbox read them (checked as
+  // sent). Show in Rex as that machine offers it to a linked machine's reader: only while a Rex app is attached to its
+  // Rex from another computer, never for its own screen's app (an older Inbox there offers none).
+  const agents = raw.agents!.filter((agent): agent is InboxAgent => !!agent && typeof agent === "object" && typeof agent.id === "string" && typeof agent.session === "string" && STATES.has(agent.state)).slice(0, cap).map((agent) => sessionFactsChecked(inboxAgentNamesChecked(agent, { show: true })));
   const count = (n: unknown, floor: number) => (typeof n === "number" && Number.isSafeInteger(n) && n >= floor ? n : floor);
   // Its agents' faces and given names live there (inbox-linked-marks): passed through as that machine sent them.
   const faces = raw.faces !== undefined ? { faces: Object.fromEntries(Object.entries(readInboxAgentFaces(raw.faces)).slice(-INBOX_AGENT_FACES_KEPT)), faces_rev: count(raw.faces_rev, 0) } : {};

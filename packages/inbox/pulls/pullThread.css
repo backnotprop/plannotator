@@ -1,0 +1,32 @@
+/* A PR's thread (mock "V1, slim line"): the PR's line over the messages (PullContextLine.tsx), the empty thread before
+   its first message (PullThreadStart.tsx), and "Sent with: this PR's details" under that message (PullDetailsLine.tsx).
+   Theme tokens only; the reply box, the bar and the list are the product's own. */
+
+/* The PR's line: the review thread's own .ib-rvctx, on one line that wraps; the links keep its end. */
+.ib-rvctx.ib-pctx { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 6px; margin-bottom: 14px; }
+.ib-pctx svg { margin-right: 0; flex: none; }
+.ib-pctx-t { color: var(--foreground); font-weight: 500; min-width: 0; overflow-wrap: anywhere; }
+.ib-pctx-dot { opacity: 0.6; }
+.ib-pctx-head { font-size: var(--ib-fs-12, 12px); overflow-wrap: anywhere; }
+.ib-pctx-size { white-space: nowrap; }
+.ib-pctx-go { margin-left: auto; display: inline-flex; gap: 14px; }
+.ib-rvctx.ib-pctx .ib-pctx-go .ib-rvctx-link { margin-left: 0; padding: 0; border: 0; background: none; font: inherit; cursor: pointer; white-space: nowrap; }
+.ib-pctx-asked { white-space: nowrap; }
+.ib-pctx-err { flex-basis: 100%; color: var(--destructive); }
+
+/* The empty thread: its messages' column, with one calm line in the middle of what is left. */
+.ib-pth-body { display: flex; flex-direction: column; }
+.ib-pth-empty { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 120px; }
+.ib-pth-empty p { margin: 0; max-width: 64ch; color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); text-align: center; text-wrap: balance; }
+/* A thread that started but isn't tied yet: the words it went with, sent, so fixed (not in the box), read as a sent
+   message reads in a thread: plain text under its label, no box. */
+.ib-pth-sent { margin: 20px 0 0; max-width: 72ch; }
+.ib-pth-sent-h { display: block; margin-bottom: 4px; color: var(--muted-foreground); font-size: var(--ib-fs-12, 12px); }
+.ib-pth-sent p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ib-pth-err { color: var(--destructive); }
+
+/* "Sent with: this PR's details": one quiet line; open, the exact text the agent got, as plain text. */
+.ib-pdet { margin: 6px 0 0; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-pdet-b { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
+.ib-pdet-b:hover { color: var(--foreground); }
+.ib-pdet-t { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; color: var(--muted-foreground); }

@@ -287,14 +287,14 @@ export function ToPicker({
             <div
               key={item.key}
               {...(asleep ? { role: 'option' as const, 'aria-selected': false, 'aria-disabled': 'true' as const } : props)}
-              aria-label={`${hostLabel(target.host)}${target.label ? `, ${target.label},` : ''} in ${target.project.name}, ${folder}${started ? `, started ${started}` : ''}`}
+              aria-label={`${hostLabel(target.host, target.runtime)}${target.label ? `, ${target.label},` : ''} in ${target.project.name}, ${folder}${target.place ? `, ${target.place.line}` : started ? `, started ${started}` : ''}`}
               className={`ib-cp-opt${on ? ' ib-hl' : ''}`}
               data-compose-session={target.session}
               data-compose-project={target.project.name}
               data-compose-session-machine={item.machine.key}
             >
               <HostMark host={target.host} agent={target.session} />
-              <b className="ib-cp-oa">{hostLabel(target.host)}</b>
+              <b className="ib-cp-oa">{hostLabel(target.host, target.runtime)}</b>
               {target.label ? (
                 <Tip content={target.label} cut>
                   <span className="ib-cp-op" dir="auto" data-session-label="">
@@ -308,9 +308,10 @@ export function ToPicker({
                 </span>
               )}
               <FolderPath path={folder} names={twins.has(lastFolderName(target.project.root)) ? 2 : 1} />
-              <Tip content={started ? `Started ${started}` : null}>
-                <span className="ib-cp-os" data-compose-started={started ?? undefined}>
-                  {started ? `· ${started}` : null}
+              {/* Where it lives (a Rex pane, as Rex names it now) tells two sessions of a project apart better than a time. */}
+              <Tip content={target.place ? (started ? `${target.place.line} · started ${started}` : target.place.line) : started ? `Started ${started}` : null}>
+                <span className="ib-cp-os" data-compose-started={target.place ? undefined : (started ?? undefined)} data-compose-place={target.place ? '' : undefined}>
+                  {target.place ? <bdi>{`· ${target.place.line}`}</bdi> : started ? `· ${started}` : null}
                 </span>
               </Tip>
               <span className="ib-cp-check" aria-hidden="true" data-compose-state={parts && !chosenRow ? '' : undefined}>

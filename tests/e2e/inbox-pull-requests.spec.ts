@@ -21,12 +21,12 @@
  *     the agent's own message) and Open review thread, no Board UI, no merge
  *     button.
  *  4. A PR with no review thread, one PR on its own: its launchpad (approval
- *     "pr-launchpad"). Start a guided review in the Guided review card opens
- *     the New review box filled in (approval "pr-page-review-with-agent");
- *     Start review sends the first message to the agent in To, and the PR is
- *     that thread's from then on (the guided review on its way, Open review
- *     thread; once it arrives, Open the guided review). The diff card's Open
- *     the diff is there in every state.
+ *     "pr-launchpad"). Guided review in its row of buttons opens the New
+ *     review box filled in (approval "pr-page-review-with-agent"); Start
+ *     review sends the first message to the agent in To, and the PR is that
+ *     thread's from then on (the guided review on its way, the thread's line;
+ *     once it arrives, the guide's line). Open the diff is the row's primary
+ *     in every state.
  *     (Start a new agent shows only while the Inbox can launch; the shots add
  *     compose's launch block to the sessions answer, since launching is not
  *     on main yet.)
@@ -256,6 +256,8 @@ function writeForge(dir: string) {
     'if [ "$1" = api ] && [ "$4" = graphql ]; then',
     '  case "$*" in *"query InboxPullsOthers"*) echo "glab others" >> "$calls"; echo \'{"data":{"currentUser":{"username":"dana"}}}\'; exit 0;; esac',
     '  case "$*" in *reviewRequestedMergeRequests*) echo "glab pulls" >> "$calls"; cat "$dir/glab-pulls.json"; exit 0;; esac',
+    // The read's other lists, a query each: one "glab pulls" line a read.
+    '  case "$*" in *"query InboxPulls "*) cat "$dir/glab-pulls.json"; exit 0;; esac',
     '  echo "glab graphql-other" >> "$calls"; echo \'{"data":null}\'; exit 1',
     'fi',
     'if [ "$1" = api ] && [ "$2" = --hostname ]; then',
@@ -378,6 +380,18 @@ async function shot(page: Page, name: string, schemes: readonly ('light' | 'dark
     await page.waitForTimeout(400);
     await page.screenshot({ path: join(proofDir, `${name}-${scheme}.png`) });
   }
+  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
+}
+
+async function widthShots(page: Page, name: string, widths: readonly number[] = [1280, 768, 390]): Promise<void> {
+  await noAgentsDialog(page);
+  await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
+  for (const width of widths) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.waitForTimeout(400);
+    await page.screenshot({ path: join(proofDir, `${name}-${width}-dark.png`) });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
 }
 
@@ -801,11 +815,15 @@ test('on, with the Board off: the row, and the list by whose move it is, the sta
   const onYou = list.locator('[data-pulls-group="on_you"] [data-pulls-row]');
   await expect(onYou).toHaveCount(2);
   await expect(list.locator('[data-pulls-group="on_you"] [data-pulls-row="github.com/northwind/web-app#880"]')).toContainText("Review requested · tomas's PR");
-  // A face by every name, but not twice in a row: tomas is pictured at the row's left, so his name in the words has none.
+  // Closed, a row is one line: the words are on the open row's second line.
   const asked = list.locator('[data-pulls-row="github.com/northwind/web-app#880"] [data-reviews-status]');
+  await expect(asked).toHaveCount(0);
+  // A face by every name, but not twice in a row: tomas is pictured at the second line's start, so his name in the words has none.
+  await list.locator('[data-pulls-row="github.com/northwind/web-app#880"]').click();
   await expect(asked).toHaveText("Review requested · tomas's PR");
   await expect(asked.locator('[data-person="tomas"]')).toHaveCount(1);
   await expect(asked.locator('[data-face]')).toHaveCount(0);
+  await page.locator('[data-launchpad] .ib-pr-bar [aria-label="Close"]').click();
   // The board's popover: who it waits on, with their picture, read through the Inbox's own route like the authors'.
   await page.locator('[data-prs-page] [data-pr-tile="github.com/northwind/web-app#869"]').hover();
   const waits = page.locator('[data-pr-pop="github.com/northwind/web-app#869"] .ib-prpop-status');
@@ -826,10 +844,19 @@ test('on, with the Board off: the row, and the list by whose move it is, the sta
   await fold.click();
   const stackRow = list.locator(`[data-pulls-group="not_reviewed"] [data-pulls-row="${STACK_ID}"]`);
   await expect(stackRow).toHaveAttribute('data-pulls-layers', '4');
-  await expect(stackRow.locator('[data-pulls-chain] .ib-bc-mark')).toHaveCount(4);
+  // One row for the stack: its count unfolds its four layers under it, and folds them again.
+  const unfold = list.locator(`[data-reviews-stack-toggle="${STACK_ID}"]`);
+  await expect(unfold).toHaveText('4');
+  await unfold.click();
+  await expect(list.locator(`[data-reviews-stack="${STACK_ID}"] [data-reviews-layer]`)).toHaveCount(4);
+  await unfold.click();
+  await expect(list.locator(`[data-reviews-stack="${STACK_ID}"] [data-reviews-layer]`)).toHaveCount(0);
   await expect(stackRow).toContainText('3 open, 1 merged');
   await expect(stackRow.locator('.ib-lead .ib-atiles')).toHaveCount(0);
+  // The author's picture leads the open row's second line.
   for (const [row, login] of [[STACK_ID, 'dana'], ['github.com/northwind/web-app#880', 'tomas'], ['gitlab.com/northwind/ledger#58:pull', 'priya']] as const) {
+    await list.locator(`[data-pulls-row="${row}"]`).click();
+    if (row === STACK_ID) await expect(list.locator(`[data-pulls-row="${row}"] [data-pulls-chain] .ib-bc-mark`)).toHaveCount(4);
     const av = list.locator(`[data-pulls-row="${row}"] .ib-lead [data-pulls-author="${login}"]`);
     await expect(av).toHaveAttribute('data-pulls-avatar', 'shown');
     // Round, as in the details.
@@ -850,6 +877,297 @@ test('on, with the Board off: the row, and the list by whose move it is, the sta
   // Remembered: a new read of the page finds it as the person left it (open for the rest of this spec).
   await page.reload();
   await expect(list.locator('[data-reviews-fold="not_reviewed"]')).toHaveAttribute('aria-expanded', 'true');
+});
+
+test("compact rows (approval inbox-reviews-compact-list): one 30px line each, the open row's second line, a stack unfolded, a phone", async () => {
+  const { page } = world;
+  const list = page.locator('[data-pulls-list]');
+  const asks = list.locator('[data-pulls-row="github.com/northwind/web-app#880"]');
+  await asks.click();
+  await expect(asks.locator('[data-reviews-line2]')).toBeVisible();
+  await page.mouse.move(0, 0);
+  // Measured: a closed row is one 30px line, the open one grows its second line; no title wraps.
+  const rows = await list.locator('[data-reviews-row]').evaluateAll((els) =>
+    els.map((el) => ({ open: el.getAttribute('aria-current') === 'true', height: el.getBoundingClientRect().height, title: el.querySelector('.ib-rvr-t')!.getBoundingClientRect().height })),
+  );
+  for (const row of rows) {
+    if (row.open) expect(row.height).toBeGreaterThan(44);
+    else expect(Math.round(row.height)).toBe(30);
+    expect(row.title).toBeLessThanOrEqual(20);
+  }
+  const open = rows.find((row) => row.open)!;
+  console.log(`compact rows: closed ${rows.find((row) => !row.open)!.height}px, open ${open.height}px, ${Math.floor(800 / 30)} closed rows per 800px`);
+  // No focus ring in a picture: a ring left by the keyboard steps reads like a highlight, which selection never is.
+  const proof = async (name: string) => {
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await page.screenshot({ path: join(proofDir, name) });
+  };
+  /** How far each layer's tree line starts below the middle of the line above it (4px between closed rows). */
+  const treeReach = () =>
+    list.locator(`[data-reviews-stack="${STACK_ID}"]`).evaluate((block) => {
+      const rows = [block.querySelector('[data-reviews-row]')!, ...block.querySelectorAll('[data-reviews-layer]')];
+      return rows.slice(1).map((row, i) => {
+        const above = rows[i]!.querySelector('.ib-rvr-l1')!.getBoundingClientRect();
+        return Math.round(row.querySelector('[data-reviews-tree]')!.getBoundingClientRect().top - (above.top + above.height / 2));
+      });
+    });
+  await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
+  await page.waitForTimeout(400);
+  await proof('compact-01-selected-dark.png');
+  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
+  await page.waitForTimeout(400);
+  await proof('compact-02-selected-light.png');
+  await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
+  const unfold = list.locator(`[data-reviews-stack-toggle="${STACK_ID}"]`);
+  const stackRow = list.locator(`[data-reviews-row][data-pulls-row="${STACK_ID}"]`);
+  // The count's hit area: the row's full 30px and a little to each side, though it draws 22px tall.
+  const hit = await unfold.evaluate((button) => {
+    const box = button.getBoundingClientRect();
+    const at = (x: number, y: number) => document.elementFromPoint(x, y)?.closest('[data-reviews-stack-toggle]') === button;
+    const cx = box.left + box.width / 2;
+    const cy = box.top + box.height / 2;
+    return { drawn: box.height, top: at(cx, cy - 12), bottom: at(cx, cy + 11.5), left: at(box.left - 2, cy), right: at(box.right + 2, cy) };
+  });
+  expect(hit).toEqual({ drawn: 22, top: true, bottom: true, left: true, right: true });
+  // The keyboard: the stack's row, its count, then its layers once unfolded.
+  await stackRow.focus();
+  await page.keyboard.press('Tab');
+  await expect(unfold).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(list.locator(`[data-reviews-stack="${STACK_ID}"] [data-reviews-layer]`)).toHaveCount(4);
+  await page.keyboard.press('Tab');
+  await expect(list.locator('[data-reviews-layer="github.com/northwind/billing-svc#411"]')).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(list.locator(`[data-reviews-layer="${LAYER_412}"]`)).toBeFocused();
+  // The keyboard's ring is there while it is the keyboard's (inside the row, on its fill).
+  expect(await list.locator(`[data-reviews-layer="${LAYER_412}"]`).evaluate((el) => el.matches(':focus-visible') && getComputedStyle(el, '::before').boxShadow.includes('inset'))).toBe(true);
+  // Closed rows: each layer's line reaches the mark above it, and the layers sit right under the stack's row.
+  expect(await treeReach()).toEqual([4, 4, 4, 4]);
+  expect(await list.locator(`[data-reviews-stack="${STACK_ID}"]`).evaluate((block) => Math.round(block.querySelector('[data-reviews-layer]')!.getBoundingClientRect().top - block.querySelector('[data-reviews-row]')!.getBoundingClientRect().bottom))).toBe(0);
+  await page.mouse.move(0, 0);
+  await page.waitForTimeout(400);
+  await proof('compact-03-stack-unfolded-dark.png');
+  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
+  // A layer's row opens that layer's diff; back from it, that layer's row is the open one, its stack's page beside.
+  await list.locator(`[data-reviews-layer="${LAYER_413}"]`).click();
+  const review = page.locator('[data-pull-review]');
+  await expect(review).toBeVisible();
+  await expect.poll(() => page.evaluate(() => decodeURIComponent(location.hash))).toContain(`layer=${LAYER_413}`);
+  await review.getByRole('button', { name: 'Reviews' }).first().click();
+  const layerRow = list.locator(`[data-reviews-layer="${LAYER_413}"]`);
+  await expect(layerRow).toHaveAttribute('aria-current', 'true');
+  await expect(layerRow.locator('[data-reviews-line2]')).toContainText('#413');
+  await expect(stackRow).not.toHaveAttribute('aria-current', 'true');
+  // The open layer has its second line: the line of the layer above it still reaches its mark.
+  expect(await treeReach()).toEqual([4, 4, 4, 4]);
+  // Then a layer opened from the stack's own page (Open the diff: the lowest open one, #412), and back: that layer's
+  // row, not the one opened from the list before.
+  await page.locator(`[data-pulls-stack="${STACK_ID}"]`).getByRole('button', { name: 'Open the diff', exact: true }).click();
+  await expect(review).toHaveAttribute('data-pull-review', LAYER_412);
+  await review.getByRole('button', { name: 'Reviews' }).first().click();
+  await expect(list.locator(`[data-reviews-layer="${LAYER_412}"]`)).toHaveAttribute('aria-current', 'true');
+  await expect(layerRow).not.toHaveAttribute('aria-current', 'true');
+  expect(await treeReach()).toEqual([4, 4, 4, 4]);
+  // The stack's own row open and unfolded: its first layer's line reaches its mark, past its second line.
+  await stackRow.click();
+  await expect(stackRow).toHaveAttribute('aria-current', 'true');
+  if ((await unfold.getAttribute('aria-expanded')) !== 'true') await unfold.click();
+  expect(await treeReach()).toEqual([4, 4, 4, 4]);
+  await expect(page.locator(`[data-pulls-stack="${STACK_ID}"]`)).toBeVisible();
+  // A phone: the list alone, every row two lines, about 56px: the title, then the status words, Medium or Low, the
+  // repository and number on one line cut with "…"; an unfolded stack's tree lines on their own rows.
+  await page.goto(`${world.url}#reviews`);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(list.locator('[data-reviews-row]').first()).toBeVisible();
+  if ((await unfold.getAttribute('aria-expanded')) !== 'true') await unfold.click();
+  const phoneRows = await list.locator('[data-reviews-row], [data-reviews-layer]').evaluateAll((els) =>
+    els.map((el) => {
+      const second = el.querySelector<HTMLElement>('[data-reviews-line2-phone] .ib-pv');
+      return { layer: el.hasAttribute('data-reviews-layer'), height: Math.round(el.getBoundingClientRect().height), second: second ? Math.round(second.getBoundingClientRect().height) : null, inRow: second ? second.getBoundingClientRect().right <= el.getBoundingClientRect().right : null };
+    }),
+  );
+  expect(phoneRows.length).toBeGreaterThan(6);
+  for (const row of phoneRows) {
+    // A stack's layers a little tighter, still over a finger's 44px.
+    expect(row.height).toBeGreaterThanOrEqual(row.layer ? 48 : 54);
+    expect(row.height).toBeLessThanOrEqual(row.layer ? 51 : 58);
+    expect(row.second).not.toBeNull();
+    expect(row.second!).toBeLessThanOrEqual(20);
+    expect(row.inRow).toBe(true);
+  }
+  // The teammate's PR: its status words in their colour, then the repository and number.
+  await expect(list.locator('[data-reviews-row][data-pulls-row="github.com/northwind/web-app#880"] [data-reviews-line2-phone]')).toContainText('web-app #880');
+  await expect(list.locator('[data-reviews-line2]')).toHaveCount(0);
+  await expect(list.locator(`[data-reviews-stack="${STACK_ID}"] [data-reviews-layer]`)).toHaveCount(4);
+  const trees = await list.locator(`[data-reviews-stack="${STACK_ID}"] [data-reviews-layer]`).evaluateAll((els) =>
+    els.map((el) => {
+      const row = el.getBoundingClientRect();
+      const tree = el.querySelector('[data-reviews-tree]')!.getBoundingClientRect();
+      const line = el.querySelector('.ib-rvr-l1')!.getBoundingClientRect();
+      return { inside: tree.left >= row.left && tree.right <= row.left + 48 && tree.bottom > row.top && tree.bottom <= row.bottom, elbow: Math.abs(tree.bottom - (line.top + line.height / 2)) <= 1 };
+    }),
+  );
+  expect(trees).toEqual(trees.map(() => ({ inside: true, elbow: true })));
+  // The unfolded stack is one block: no divider inside it, one after its last layer, no gap between its rows, and one
+  // tree line from the stack's mark down (each piece runs on from the one above it).
+  const block = await list.locator(`[data-reviews-stack="${STACK_ID}"]`).evaluate((stack) => {
+    const rows = [stack.querySelector('[data-reviews-row]')!, ...stack.querySelectorAll('[data-reviews-layer]')];
+    const trees = rows.slice(1).map((row) => row.querySelector('[data-reviews-tree]')!.getBoundingClientRect());
+    const mark = rows[0]!.querySelector('.ib-rvr-mark')!.getBoundingClientRect();
+    return {
+      dividers: rows.map((row) => getComputedStyle(row).borderBottomWidth),
+      gaps: rows.slice(1).map((row, i) => Math.round(row.getBoundingClientRect().top - rows[i]!.getBoundingClientRect().bottom)),
+      fromMark: trees[0]!.top >= mark.top && trees[0]!.top <= mark.bottom,
+      runsOn: trees.slice(1).every((tree, i) => tree.top <= trees[i]!.bottom - 4),
+    };
+  });
+  expect(block).toEqual({ dividers: ['0px', '0px', '0px', '0px', '1px'], gaps: [0, 0, 0, 0], fromMark: true, runsOn: true });
+  await page.mouse.move(0, 0);
+  await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
+  await page.waitForTimeout(400);
+  await proof('compact-07-phone-stack-block-dark.png');
+  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
+  await page.waitForTimeout(400);
+  await proof('compact-07-phone-stack-block-light.png');
+  // A phone's group labels stay at the top while their rows scroll under them, on the list's own ground.
+  await page.setViewportSize({ width: 390, height: 420 });
+  const body = list.locator('.ib-lbody');
+  const fold = list.locator('[data-reviews-fold="not_reviewed"]');
+  await fold.evaluate((el) => {
+    const scroller = el.closest('.ib-lbody')!;
+    scroller.scrollTop += el.getBoundingClientRect().top - scroller.getBoundingClientRect().top + 60;
+  });
+  await page.waitForTimeout(100);
+  const stuck = await fold.evaluate((el) => {
+    const scroller = el.closest('.ib-lbody')!;
+    const ground = getComputedStyle(el.closest('.pn-inbox')!).backgroundColor;
+    return { gap: Math.round(el.getBoundingClientRect().top - scroller.getBoundingClientRect().top), scrolled: scroller.scrollTop > 0, background: getComputedStyle(el).backgroundColor === ground };
+  });
+  expect(stuck).toEqual({ gap: 0, scrolled: true, background: true });
+  // Shift+Tab onto a row partly under the stuck label scrolls it out from under it.
+  await body.evaluate((scroller) => {
+    const label = scroller.querySelector('[data-reviews-fold="not_reviewed"]')!.getBoundingClientRect();
+    const items = [...scroller.querySelectorAll<HTMLElement>('[data-pulls-group="not_reviewed"] [data-reviews-item]')];
+    items.find((el) => el.getBoundingClientRect().top >= label.bottom + 40)!.focus({ preventScroll: true });
+  });
+  await page.keyboard.press('Shift+Tab');
+  await page.keyboard.press('Shift+Tab');
+  const clear = await body.evaluate((scroller) => {
+    const label = scroller.querySelector('[data-reviews-fold="not_reviewed"]')!.getBoundingClientRect();
+    const focused = document.activeElement!;
+    return { inList: scroller.contains(focused) && focused !== scroller.querySelector('[data-reviews-fold="not_reviewed"]'), below: focused.getBoundingClientRect().top >= label.bottom - 1 };
+  });
+  expect(clear).toEqual({ inList: true, below: true });
+  await body.evaluate((el) => (el.scrollTop = 0));
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
+  if ((await unfold.getAttribute('aria-expanded')) === 'true') await unfold.click();
+});
+
+test("compact rows on a phone: a layer opened from the list, its Back is the browser's Back to the list, that layer still shown", async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, colorScheme: 'light' });
+  const page = await context.newPage();
+  try {
+    // The Inbox first, then Reviews as a screen of its own: a Back past Reviews has somewhere to land.
+    await page.goto(world.url);
+    await page.evaluate(() => (location.hash = '#reviews'));
+    const list = page.locator('[data-pulls-list]');
+    await expect(list.locator('[data-reviews-row]').first()).toBeVisible();
+    await openNotReviewed(page);
+    const unfold = list.locator(`[data-reviews-stack-toggle="${STACK_ID}"]`);
+    if ((await unfold.getAttribute('aria-expanded')) !== 'true') await unfold.click();
+    const before = await page.evaluate(() => history.length);
+    await list.locator(`[data-reviews-layer="${LAYER_413}"]`).click();
+    const review = page.locator('[data-pull-review]');
+    await expect(review).toHaveAttribute('data-pull-review', LAYER_413);
+    // The window's Back: the list again, as the swipe back would go, and no entry added.
+    await review.getByRole('button', { name: 'Reviews' }).first().click();
+    await expect(list.locator(`[data-reviews-layer="${LAYER_413}"]`)).toBeVisible();
+    await expect(page.locator('[data-pulls-stack]')).toHaveCount(0);
+    await expect.poll(() => page.evaluate(() => decodeURIComponent(location.hash))).not.toContain('stack=');
+    expect(await page.evaluate(() => history.length)).toBe(before + 1);
+    // The list as it was: that layer's stack unfolded, the layer its open row.
+    await expect(unfold).toHaveAttribute('aria-expanded', 'true');
+    await expect(list.locator(`[data-reviews-layer="${LAYER_413}"]`)).toHaveAttribute('aria-current', 'true');
+    // A second Back leaves Reviews: never the stack's page.
+    await page.goBack();
+    await expect.poll(() => page.evaluate(() => location.hash)).not.toContain('reviews');
+    await expect(page.locator('[data-pulls-stack]')).toHaveCount(0);
+  } finally {
+    await context.close();
+  }
+});
+
+test('compact rows: one row with every mark at once in the narrowest list, and a title tooltip only while the title is cut', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'dark', reducedMotion: 'reduce' });
+  const page = await context.newPage();
+  const DAY = 86_400_000;
+  const long = 'Retry the charge: fix/billing-retry-jitter-on-charge-timeouts-and-dunning';
+  const keys = Array.from({ length: 120 }, (_, i) => `github.com/northwind/billing-svc#${9000 + i}`);
+  try {
+    // One more row, made from the stack's own: High, failing checks, the agent, 120 layers, 11 months old.
+    await page.route((url) => url.pathname === '/api/inbox/reviews', async (route) => {
+      const response = await route.fetch();
+      const body = (await response.json()) as { rows: Record<string, unknown>[] };
+      const like = body.rows.find((row) => (row.stacks as { id: string }[])[0]?.id === STACK_ID) as { stacks: { layers: Record<string, unknown>[] }[] } | undefined;
+      if (!like) return route.fulfill({ response, json: body });
+      const base = like.stacks[0]!.layers[0]!;
+      const old = new Date(Date.now() - 350 * DAY).toISOString();
+      const layers = Array.from({ length: 120 }, (_, i) => ({
+        ...base,
+        key: keys[i],
+        number: 9000 + i,
+        url: `https://github.com/northwind/billing-svc/pull/${9000 + i}`,
+        title: long,
+        state: 'open',
+        base: i === 0 ? 'main' : `every/${8999 + i}`,
+        head: `every/${9000 + i}`,
+        checks: i === 7 ? 'failure' : 'success',
+        updated_at: old,
+        merged_at: null,
+      }));
+      const stack = { ...like.stacks[0], id: keys[keys.length - 1], layers, parents: {}, base: 'main', open_base: 'main' };
+      const review = { thread_id: 'thr_every_mark', project_id: null, subject: null, first_review_id: 'msg_every', latest_review_id: 'msg_every', round: 1, title: long, files: 1, additions: 1, deletions: 1, agent: { host: 'claude-code', session: null, name: 'Claude Code' }, source: null, verdict: null, answered: null, reviewed_at: old, updated_at: old };
+      body.rows.unshift({ id: 'thr_every_mark', reviewed: true, move: 'on_you', reason: 'review_ready', thread_id: 'thr_every_mark', review, stacks: [stack], pull_keys: keys, link: null, pull_reason: null, landed: [], updated_at: old });
+      await route.fulfill({ response, json: body });
+    });
+    await page.route((url) => url.pathname === '/api/inbox/pulls/risk', async (route) => {
+      if (route.request().method() !== 'GET') return route.continue();
+      const response = await route.fetch();
+      const body = (await response.json()) as { judgments?: Record<string, unknown> };
+      await route.fulfill({ response, json: { ...body, judgments: { ...body.judgments, [keys[3]!]: { head: 'h', base: 'main', rules: 'r', level: 'high', why: 'It changes how charges retry.' } } } });
+    });
+    await page.goto(`${world.url}#reviews`);
+    const row = page.locator('[data-reviews-row="thr_every_mark"]');
+    await expect(row).toBeVisible();
+    const line = row.locator('.ib-rvr-l1');
+    await expect(line.locator('[data-pull-risk="high"]')).toBeVisible();
+    await expect(line.locator('[data-reviews-checks="failure"]')).toBeVisible();
+    await expect(line.locator('[data-reviews-agent="claude-code"]')).toBeVisible();
+    await expect(line.locator('.ib-rvr-age [aria-hidden]')).toHaveText('11mo');
+    await expect(page.locator('[data-reviews-stack-toggle="thr_every_mark"]')).toHaveText('120');
+    // The narrowest list (380px): still one 30px line, every mark inside the row, the title cut with "…" only.
+    const fit = await row.evaluate((el) => {
+      const box = el.getBoundingClientRect();
+      const marks = [...el.querySelectorAll('.ib-rvr-end > *')].map((m) => m.getBoundingClientRect()).filter((r) => r.width > 1);
+      return { column: Math.round(el.closest('.ib-listcol')!.getBoundingClientRect().width), height: Math.round(box.height), inside: marks.every((r) => r.left >= box.left && r.right <= box.right) };
+    });
+    expect(fit).toEqual({ column: 380, height: 30, inside: true });
+    await page.mouse.move(0, 0);
+    await page.waitForTimeout(400);
+    await page.screenshot({ path: join(proofDir, 'compact-06-every-mark-dark.png') });
+    // The tooltip: the full title only while the line cuts it, on the title, never on the row's button (a screen
+    // reader would say the title again after the row's name).
+    await row.hover();
+    await expect(row.locator('.ib-rvr-t')).toHaveAttribute('title', long);
+    await expect(row).not.toHaveAttribute('title', /./);
+    const short = page.locator('[data-reviews-row][data-pulls-row="github.com/northwind/web-app#880"]');
+    await short.hover();
+    await expect(short.locator('.ib-rvr-t')).not.toHaveAttribute('title', /./);
+    await expect(short).not.toHaveAttribute('title', /./);
+  } finally {
+    await context.close();
+  }
 });
 
 test('the stack view with the Board off: layers from main up, Lands next, its review thread, no Board UI, no merge button', async () => {
@@ -920,6 +1238,7 @@ async function phoneShot(browser: Browser, row: string, name: string, schemes: r
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, colorScheme: 'light', deviceScaleFactor: 2 });
   const page = await context.newPage();
   try {
+    if (process.env.PLANNOTATOR_E2E_POOR_LINK) await (await context.newCDPSession(page)).send('Network.emulateNetworkConditions', { offline: false, latency: 300, downloadThroughput: 125_000, uploadThroughput: 125_000 });
     await offerLaunch(page);
     await page.goto(`${world.url}#reviews&stack=${encodeURIComponent(row)}`);
     await expect(page.locator('[data-pulls-stack]')).toBeVisible();
@@ -929,9 +1248,21 @@ async function phoneShot(browser: Browser, row: string, name: string, schemes: r
     }
     // Nothing scrolls sideways, and each control is a full touch target.
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
-    for (const box of await page.locator(PHONE_TARGETS).evaluateAll(touchTargets)) {
-      expect(box.right).toBeLessThanOrEqual(390);
-      expect(box.height).toBeGreaterThanOrEqual(44);
+    let measured = '';
+    await expect
+      .poll(
+        async () => {
+          const now = JSON.stringify(await page.locator(PHONE_TARGETS).evaluateAll(touchTargets));
+          const same = now === measured && now !== '[]';
+          measured = now;
+          return same;
+        },
+        { timeout: 15_000, intervals: [150, 250, 500] },
+      )
+      .toBe(true);
+    for (const box of JSON.parse(measured) as ReturnType<typeof touchTargets>) {
+      expect(box.right, box.what).toBeLessThanOrEqual(390);
+      expect(box.height, box.what).toBeGreaterThanOrEqual(44);
     }
     await expect(page.locator('[data-pulls-stack] [data-pulls-open-diff]')).toBeVisible();
     await shot(page, name, schemes);
@@ -940,20 +1271,23 @@ async function phoneShot(browser: Browser, row: string, name: string, schemes: r
   }
 }
 
-/** The stack view's and the launchpad's controls a phone must make full touch targets: the one button, Open the diff, the launchpad's card buttons, and in New review the choices and Start. */
-const PHONE_TARGETS = '[data-pulls-primary], [data-pulls-open-diff], [data-launch-go], .ib-cp-choice input, [data-compose-send]';
+/** The stack view's and the launchpad's controls a phone must make full touch targets: the one button, Open the diff, the launchpad's row of buttons and its lines, and in New review the choices and Start. */
+const PHONE_TARGETS = '[data-pulls-primary], [data-pulls-open-diff], [data-launch-go], [data-launch-line], .ib-cp-choice input, [data-compose-send]';
 
 /**
  * Each target's right edge and its height to the touch: its own box, or its `::after` hit area where that is taller
  * (New review's Start on a phone is 36 px to the eye and 44 px or more to the touch).
  */
 const touchTargets = (els: Element[]) =>
-  els.map((el) => {
-    const box = el.getBoundingClientRect();
-    return { right: box.right, height: Math.max(box.height, parseFloat(getComputedStyle(el, '::after').height) || 0) };
-  });
+  els
+    .filter((el) => el.checkVisibility())
+    .map((el) => {
+      const box = el.getBoundingClientRect();
+      const what = `${el.outerHTML.slice(0, 160)} in ${el.parentElement?.className ?? ''}`;
+      return { what, right: box.right, height: Math.max(box.height, parseFloat(getComputedStyle(el, '::after').height) || 0) };
+    });
 
-test('one PR with no review thread, on its launchpad: Start a guided review, the New review box, "on its way", the guided review arriving, Open review thread, and Open the diff in each', async ({ browser }) => {
+test('one PR with no review thread, on its launchpad: Guided review, the New review box, "on its way", the guided review arriving, the thread line, and Open the diff in each', async ({ browser }) => {
   const { page } = world;
   await offerLaunch(page);
   await page.goto(`${world.url}#pulls`);
@@ -962,16 +1296,18 @@ test('one PR with no review thread, on its launchpad: Start a guided review, the
   await list.locator(`[data-pulls-row="${LOCALE}"]`).click();
   const pane = page.locator('[data-pulls-stack]');
   await expect(pane).toHaveAttribute('data-launchpad', '');
-  // The Guided review card leads, its Start the primary; the diff card's Open the diff is there in every state; no thread, no Reply.
-  const primary = pane.locator('[data-launch-door="guide"] [data-launch-go="start"]');
-  await expect(primary).toHaveText('Start a guided review');
-  await expect(primary).toHaveClass(/ib-pri/);
-  await expect(pane.locator('[data-launch-door="diff"] [data-pulls-open-diff]')).toHaveText('Open the diff');
-  await expect(pane.locator('[data-launch-door="thread"]')).toContainText('None yet');
+  // One row: Open the diff the primary, Guided review beside it; no lines, no thread, no Reply.
+  const primary = pane.locator('[data-launch-row] [data-launch-go="guide"]');
+  await expect(primary).toHaveText('Guided review');
+  await expect(pane.locator('[data-launch-row] [data-pulls-open-diff]')).toHaveText('Open the diff');
+  await expect(pane.locator('[data-launch-row] [data-pulls-open-diff]')).toHaveClass(/ib-pri/);
+  await expect(pane.locator('[data-launch-line]')).toHaveCount(0);
   await expect(pane.locator('[data-pulls-thread]')).toHaveCount(0);
   await expect(pane.locator('[data-pulls-reply]')).toHaveCount(0);
   await expect(pane).not.toContainText(/\bhand/i);
   await shot(page, '4-no-thread');
+  await widthShots(page, 'launchpad-a-no-thread');
+  await phoneShot(browser, LOCALE, 'phone-launchpad-a-no-thread', ['dark']);
   await primary.click();
   // The New review box, filled in: this PR, an agent of its project in To, nothing asked of the person but Start.
   const box = page.locator('[data-review-box]');
@@ -1006,47 +1342,55 @@ test('one PR with no review thread, on its launchpad: Start a guided review, the
   expect(words).toContain('\n- Link: https://github.com/northwind/web-app/pull/869\n');
   expect(words).toContain('\n1. Send me a guided review of its diff against main, using /review-curate (its instructions are at the end of this message).\n');
   expect(words).toContain('BEGIN SKILL INSTRUCTIONS: review-curate');
-  // Kept: a fresh read still ties it to that thread, and says what was asked; the wide card opens the thread (no second Start).
+  // Kept: a fresh read still ties it to that thread, and says what was asked; the thread's line opens it (no second start).
   await page.goto(`${world.url}#reviews&stack=${encodeURIComponent(LOCALE)}`);
   await page.reload();
   await expect(page.locator('[data-pulls-stack] [data-pulls-thread]')).toHaveAttribute('data-pulls-thread', threadId);
-  await expect(page.locator(`[data-pulls-row="${LOCALE}"]`)).toContainText('#869 · Curating…');
-  await expect(page.locator('[data-launch-door="guide"]')).toContainText('is on its way from Claude Code');
-  await expect(page.locator('[data-pulls-stack] [data-pulls-primary]')).toHaveText('Open review thread');
-  await expect(page.locator('[data-pulls-stack] [data-launch-go="start"]')).toHaveCount(0);
+  await expect(page.locator(`[data-pulls-row="${LOCALE}"] .ib-pr-l3`)).toContainText(/^#869 · web-app · .*Curating…$/);
+  await expect(page.locator('[data-launch-line="guide"]')).toContainText('Claude Code is writing it…');
+  await expect(page.locator('[data-pulls-stack] [data-launch-line="thread"]')).toBeVisible();
+  await expect(page.locator('[data-pulls-stack] [data-launch-go="guide"]')).toBeDisabled();
   await expect(page.locator('[data-pulls-stack] [data-pulls-open-diff]')).toBeVisible();
   await expect(page.locator('[data-pulls-stack]')).not.toContainText(/\bhand/i);
   await shot(page, '6-on-the-way');
   await phoneShot(browser, LOCALE, 'phone-6-on-the-way');
 
-  // The agent's guided review arrives through phase 1's path: the Guided review card opens it, the thread from its own card.
+  // The agent's guided review arrives through phase 1's path: its line opens it, the thread from its own line.
   await sendReview(world.claude, world.projects.web, String(opening.id), world.patches.locale, 'src/i18n/fallback.ts', 'Fall back to English for missing strings');
   await page.reload();
   const stackPane = page.locator('[data-pulls-stack]');
-  await expect(stackPane.locator('[data-launch-door="guide"] [data-launch-go="guide"]')).toHaveText('Open the guided review');
-  await expect(stackPane.locator('[data-launch-go="start"], [data-launch-go="guide-thread"]')).toHaveCount(0);
-  await expect(stackPane.locator('[data-launch-door="thread"] [data-launch-go="thread"]')).toHaveText('Open review thread');
+  await expect(stackPane.locator('[data-launch-line="guide"]')).toContainText('Open');
+  await expect(stackPane.locator('[data-launch-go="start-thread"]')).toHaveCount(0);
+  await expect(stackPane.locator('[data-launch-line="thread"]')).toContainText('Open');
   await shot(page, '6a-review-arrived');
   await phoneShot(browser, LOCALE, 'phone-6a-review-arrived');
+  writeFileSync(join(world.projects.web, 'picture-it-fallback.html'), '<!doctype html><html><head><meta name="plannotator-page" content="picture-it"><title>How the English fallback works</title></head><body><h1>Fallback</h1></body></html>');
+  await world.claude.send({ project_path: world.projects.web, reply_to: String(opening.id), body: 'Here is a Picture page of the fallback.', attachments: ['picture-it-fallback.html'] });
+  rmSync(join(world.projects.web, 'picture-it-fallback.html'));
+  await page.reload();
+  await expect(stackPane.locator('[data-launch-line="picture"]')).toContainText('How the English fallback works');
+  await expect(stackPane.locator('[data-launch-line="guide"]')).toContainText('Open');
+  await widthShots(page, 'launchpad-b-review-and-picture');
+  await phoneShot(browser, LOCALE, 'phone-launchpad-b-review-and-picture', ['dark']);
   // The thread is named for the PR (owner, q-49bd0699 A), as the person's own name: the Inbox list shows it.
   await page.goto(world.url);
   await expect(page.locator(`[data-row="${threadId}"]`)).toContainText('Review #869: Fall back to English for missing strings');
   await shot(page, '6t-thread-name', ['light']);
-  // Reviewed, the row still opens the PR's launchpad (the owner, 2026-11-09); its Review thread card opens the same
+  // Reviewed, the row still opens the PR's launchpad (the owner, 2026-11-09); its Thread line opens the same
   // thread, in Reviews, and the line over the thread's title leads back to the launchpad.
   await page.goto(`${world.url}#pulls`);
   await page.locator(`[data-pulls-row="${LOCALE}"]`).click();
   await expect(page.locator('[data-pulls-stack][data-launchpad]')).toHaveAttribute('data-pulls-stack', LOCALE);
-  await expect(stackPane.locator('[data-launch-go="guide"]')).toBeVisible();
-  await stackPane.locator('[data-launch-door="thread"] [data-launch-go="thread"]').click();
+  await expect(stackPane.locator('[data-launch-line="guide"]')).toBeVisible();
+  await stackPane.locator('[data-launch-line="thread"]').click();
   await expect.poll(() => page.evaluate(() => decodeURIComponent(location.hash))).toBe(`#reviews&thread=${threadId}`);
   await expect(page.locator('[data-review-context]')).toContainText('#869');
   await page.locator('[data-review-open-pull]').click();
-  await expect(stackPane.locator('[data-launch-go="guide"]')).toBeVisible();
+  await expect(stackPane.locator('[data-launch-line="guide"]')).toBeVisible();
   await stackPane.locator('[data-pulls-open-diff]').click();
   await expect(page.locator('[data-pull-review]')).toHaveAttribute('data-pull-review', LOCALE);
   await page.goto(`${world.url}#pulls&stack=${encodeURIComponent(LOCALE)}`);
-  await page.locator('[data-pulls-stack] [data-launch-go="thread"]').click();
+  await page.locator('[data-pulls-stack] [data-launch-line="thread"]').click();
   await expect.poll(() => page.evaluate(() => decodeURIComponent(location.hash))).toContain(threadId);
   await page.unroute('**/api/inbox/sessions*');
 });
@@ -1307,7 +1651,8 @@ test("the details as real gh answers them: a running check, a template for a bod
     body: template, state: 'OPEN', isDraft: false, reviewDecision: '', mergeable: '', mergeStateStatus: '', closingIssuesReferences: [], labels: [],
     comments: [
       { id: 'c1', author: { login: 'kim' }, body: 'Plain words.\n\n<!-- bot-state\n\nhidden-bot-marker -->\n\nAfter.', createdAt: '2026-11-01T09:00:00Z', url: '' },
-      { id: 'c2', author: { login: 'kim' }, body: `\`\`\`mermaid\ngraph TD\n  ${posing}\n\`\`\``, createdAt: '2026-11-01T10:00:00Z', url: '' },
+      // An icon-only label is one Pele cannot draw, so Mermaid draws this fence, the posing label's markup and all.
+      { id: 'c2', author: { login: 'kim' }, body: `\`\`\`mermaid\ngraph TD\n  P["fa:fa-user"] --> ${posing}\n\`\`\``, createdAt: '2026-11-01T10:00:00Z', url: '' },
     ],
     reviews: [],
     statusCheckRollup: [
@@ -1329,15 +1674,16 @@ test("the details as real gh answers them: a running check, a template for a bod
     await expect(panel).not.toContainText('your-change-here');
     await expect(panel).not.toContainText('hidden-bot-marker');
 
-    // What a diagram in a comment draws can copy the marks of the window's overlays. It draws late, above the note
-    // below, so it is waited for first; Escape still closes the panel.
-    await expect(panel.locator('.pn-visible-viewport-overlay [data-pn-image-annotator-stage]').first()).toBeAttached({ timeout: 15_000 });
+    // What Mermaid draws for a diagram in a comment can copy the marks of the window's overlays. It draws late, above
+    // the note below, so it is waited for first; Escape still closes the panel.
+    const stage = panel.locator('[data-diagram-svg] > svg:not(.pele) .pn-visible-viewport-overlay [data-pn-image-annotator-stage]');
+    await expect(stage.first()).toBeAttached({ timeout: 15_000 });
 
     await expect(panel.locator('[data-pull-details-threads-missing]')).toBeVisible();
     write(`ctxg-${number}.json`, { data: { repository: { pullRequest: { comments: { nodes: [] }, reviews: { nodes: [] }, reviewThreads: { nodes: [] } } } } });
     await panel.locator('[data-pull-details-threads-missing] button').click();
     await expect(panel.locator('[data-pull-details-threads-missing]')).toHaveCount(0);
-    await expect(panel.locator('.pn-visible-viewport-overlay [data-pn-image-annotator-stage]').first()).toBeAttached();
+    await expect(stage.first()).toBeAttached();
     await page.mouse.move(700, 5);
     await page.keyboard.press('Escape');
     await expect(panel).toBeHidden();
@@ -1786,16 +2132,25 @@ test("a description's web links never replace the window, however they are spell
   }
 });
 
-test("a description's markup can't pose as the window's own overlays, even through a diagram's label: Escape still closes the details", async ({ browser }) => {
+test("a description's markup can't pose as the window's own overlays, even through a diagram label Mermaid draws: Escape still closes the details", async ({ browser }) => {
   const label = `A["<div class='pn-visible-viewport-overlay'><div data-pn-image-annotator-stage='1'>x</div></div>"]`;
-  for (const description of ['<div data-pn-annotation-toolbar-row>x</div>', '<div data-quick-label-picker>x</div>', `\`\`\`mermaid\ngraph TD\n  ${label}\n\`\`\``]) {
+  const stage = '.pn-visible-viewport-overlay [data-pn-image-annotator-stage]';
+  const cases = [
+    { description: '<div data-pn-annotation-toolbar-row>x</div>', posing: '[data-pn-annotation-toolbar-row]' },
+    { description: '<div data-quick-label-picker>x</div>', posing: '[data-quick-label-picker]' },
+    // An icon-only label is one Pele cannot draw, so Mermaid draws this fence, the posing label's markup and all.
+    { description: `\`\`\`mermaid\ngraph TD\n  P["fa:fa-user"] --> ${label}\n\`\`\``, posing: `[data-diagram-svg] > svg:not(.pele) ${stage}` },
+    // Pele draws this one and keeps no markup from a label: the drawing is there, the posing markup is not.
+    { description: `\`\`\`mermaid\ngraph TD\n  ${label}\n\`\`\``, posing: '[data-diagram-svg] > svg.pele', absent: stage },
+  ];
+  for (const { description, posing, absent } of cases) {
     const { context, page } = await stubbedReview(browser, 1440, COLLIDING_PATHS_DIFF, { description });
     try {
       const review = page.locator('[data-pull-review]');
       await openDetails(review);
       const section = page.locator('[data-pull-review] [data-pull-description]');
-      const posing = section.locator('[data-pn-annotation-toolbar-row], [data-quick-label-picker], .pn-visible-viewport-overlay [data-pn-image-annotator-stage]');
-      await expect(posing.first()).toBeAttached({ timeout: 15_000 });
+      await expect(section.locator(posing).first()).toBeAttached({ timeout: 15_000 });
+      if (absent) await expect(section.locator(absent)).toHaveCount(0);
       await page.keyboard.press('Escape');
       await expect(review.locator('[data-pull-details]')).toHaveCount(0);
     } finally {
@@ -2593,12 +2948,12 @@ test('a phone at 390 px: the list, a stack, a layer review; and off, no row', as
     const review = page.locator('[data-pull-review]');
     await expect(review.locator('[data-guide-file-shell="src/charges/schedule.ts"]')).toBeVisible({ timeout: 30_000 });
     await shot(page, 'phone-3-layer-review');
-    // A teammate's PR with no review thread, on its launchpad: Start a guided review, the box as a sheet, every choice a touch target.
+    // A teammate's PR with no review thread, on its launchpad: Guided review, the box as a sheet, every choice a touch target.
     await offerLaunch(page);
     await page.goto(`${world.url}#pulls`);
     await page.locator('[data-pulls-row="github.com/northwind/web-app#880"]').click();
     await shot(page, 'phone-4-no-thread');
-    await page.locator('[data-pulls-stack] [data-pulls-primary]').click();
+    await page.locator('[data-pulls-stack] [data-launch-go="guide"]').click();
     const box = page.locator('[data-review-box]');
     await expect(box.locator('[data-review-pick]')).toContainText('RTL layout');
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
@@ -2812,6 +3167,57 @@ test('a PR of 21 small files on a tall window: every file on screen draws, all t
   }
 });
 
+/** Review parity's shots (code review in the Inbox brought up to the code review app). */
+const parityDir = join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo, '.local/proof')), 'review-parity');
+
+test("Whole file chosen in code review draws whole files on the PR page too; the bar's Diff display gear turns it off, back to hunks with expand arrows, and code review's cookie and config.json say so", async () => {
+  const { page, context } = world;
+  mkdirSync(parityDir, { recursive: true });
+  // Code review's Whole file, as code review leaves it: its cookie, which every port on this host shares.
+  await context.addCookies([{ name: 'plannotator-diff-expand-unchanged', value: 'true', url: world.url }]);
+  await page.goto(`${world.url}#pulls&stack=${encodeURIComponent(TEAMMATE)}&layer=${encodeURIComponent(TEAMMATE)}&scope=layer`);
+  await page.reload();
+  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
+  try {
+    const review = page.locator('[data-pull-review]');
+    const shell = review.locator(`[data-guide-file-shell="${TOKENS_PATH}"]`);
+    // Whole: line 20, in no hunk, is drawn with nothing opened, and no expand arrow is left.
+    await expect(shell.locator('[data-column-number="20"]').first()).toBeVisible({ timeout: 30_000 });
+    await expect(shell.locator('[data-expand-button]').filter({ visible: true })).toHaveCount(0);
+    const gear = review.locator('.ib-vhead [data-diff-controls] [data-diff-display-options]');
+    await expect(gear).toBeVisible();
+    await gear.click();
+    const popup = page.locator('[data-diff-display-popup]');
+    const whole = popup.getByRole('switch', { name: 'Whole file' });
+    await expect(whole).toHaveAttribute('aria-checked', 'true');
+    // Hide whitespace needs the local repository: not offered here.
+    await expect(popup.getByRole('switch', { name: 'Hide whitespace' })).toHaveCount(0);
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: join(parityDir, 'b0-01-whole-file-light.png') });
+    await whole.click();
+    await expect(whole).toHaveAttribute('aria-checked', 'false');
+    // Hunks with their context, and the expand arrows to open more, as code review draws by default.
+    await expect(shell.locator('[data-expand-button]').filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+    await expect(shell.locator('[data-column-number="20"]')).toHaveCount(0);
+    await gear.click();
+    await expect(popup).toHaveCount(0);
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: join(parityDir, 'b0-02-diffs-light.png') });
+    // Kept where code review reads it: its cookie at once, config.json a moment later.
+    expect((await context.cookies(world.url)).find((cookie) => cookie.name === 'plannotator-diff-expand-unchanged')?.value).toBe('false');
+    await expect
+      .poll(() => (JSON.parse(readFileSync(join(world.dataDir, 'config.json'), 'utf8')) as { diffOptions?: { expandUnchanged?: unknown } }).diffOptions?.expandUnchanged)
+      .toBe(false);
+    // A reload opens on hunks: nothing turns Whole file back on.
+    await page.reload();
+    await expect(shell.locator('[data-expand-button]').filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+    await expect(shell.locator('[data-column-number="20"]')).toHaveCount(0);
+  } finally {
+    await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
+  }
+  expect(world.errors).toEqual([]);
+});
+
 test('the expand arrows on the PR page: read from the forge, opening a gap grows the box; a comment on an opened line posts in the main comment', async () => {
   const { page } = world;
   // A page with no diff holds no workers.
@@ -2983,14 +3389,14 @@ test('the walkthrough video (20 s or less): Start a guided review starts a revie
   const pause = (ms: number) => page.waitForTimeout(ms);
   try {
     await page.goto(`${world.url}#pulls`);
-    // A teammate's PR with no review thread, on its launchpad: Start a guided review, and Open the diff in its own card.
+    // A teammate's PR with no review thread, on its launchpad: Guided review, and Open the diff beside it.
     await page.locator('[data-pulls-row="github.com/northwind/web-app#880"]').click();
     const pane = page.locator('[data-pulls-stack][data-launchpad]');
-    await expect(pane.locator('[data-pulls-primary="review"]')).toBeVisible();
+    await expect(pane.locator('[data-launch-go="guide"]')).toBeVisible();
     await pause(2200);
-    await pane.locator('[data-launch-door="diff"] [data-pulls-open-diff]').hover();
+    await pane.locator('[data-launch-row] [data-pulls-open-diff]').hover();
     await pause(1300);
-    await pane.locator('[data-pulls-primary]').click();
+    await pane.locator('[data-launch-go="guide"]').click();
     await pause(900);
     const box = page.locator('[data-review-box]');
     await box.locator('[data-compose-to]').click();
@@ -3003,7 +3409,7 @@ test('the walkthrough video (20 s or less): Start a guided review starts a revie
     const opening = await world.claude.nextReply(threadId);
     await sendReview(world.claude, world.projects.web, String(opening.id), world.patches.rtl, 'src/settings/Layout.tsx', 'RTL layout for the settings pages');
     await page.reload();
-    await expect(page.locator('[data-pulls-stack] [data-launch-go="guide"]')).toBeVisible();
+    await expect(page.locator('[data-pulls-stack] [data-launch-line="guide"]')).toBeVisible();
     await pause(2500);
     // Open the diff: straight into the review mode, no stop on the way.
     await page.locator('[data-pulls-stack] [data-pulls-open-diff]').click();
@@ -4081,25 +4487,30 @@ test('Reviews: what waits on the person is never hidden, every row shows what it
   await expect(page.getByText('Before one.')).toHaveCount(0);
   await page.unroute('**/api/inbox/reviews*');
 
-  // The row goes while the person is in the thread (archived from another window): the link to what was left out went
-  // with it, so the thread shows whole, and stays whole if the row comes back.
+  // The row goes while the person is in the thread (archived from another window): what is open stays open, so the
+  // thread keeps its look, its fold and its context line (app/reviewView.ts), and still when the row comes back.
   const archive = (threadId: string, resolved: boolean) => page.request.post(`${world.url}api/inbox/messages/${threadId}/resolve`, { data: { resolved } });
   await fresh(long.thread_id);
   await expect(page.getByText('Before one.')).toHaveCount(0);
+  const without = page.waitForResponse(async (r) => new URL(r.url()).pathname === '/api/inbox/reviews' && !(await r.text()).includes(long.thread_id), { timeout: 15_000 });
   await archive(long.thread_id, true);
-  await expect(page.getByText('Before one.')).toBeVisible({ timeout: 15_000 });
+  await without;
+  await page.waitForTimeout(800);
+  await expect(page.locator('[data-review-context]')).toBeVisible();
+  await expect(page.getByText('Before one.')).toHaveCount(0);
   await archive(long.thread_id, false);
   await expect(page.locator('[data-review-context]')).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByText('Before one.')).toBeVisible();
+  await expect(page.getByText('Before one.')).toHaveCount(0);
 
-  // A thread handed a PR and archived before its review: the PR's launchpad offers Start a guided review again, not "on the way".
+  // A thread handed a PR and archived before its review: the PR's launchpad offers Guided review again, not "on the way".
   const handed = await claude.send({ project_path: world.projects.web, thread: 'handed-off', subject: 'Handed', body: 'On it.' });
   expect((await page.request.post(`${world.url}api/inbox/pulls/owner`, { data: { keys: [LOCALE], thread_id: handed.thread_id, ask: 'guide' } })).status()).toBe(200);
   await archive(handed.thread_id, true);
   await page.goto(`${world.url}#reviews`);
   await page.reload();
   await page.locator(`[data-pulls-row="${LOCALE}"], [data-pulls-row]`).filter({ hasText: '#869' }).first().click();
-  await expect(page.locator('[data-pulls-stack] [data-pulls-primary]')).toHaveText('Start a guided review');
+  await expect(page.locator('[data-pulls-stack] [data-launch-go="guide"]')).toBeEnabled();
+  await expect(page.locator('[data-pulls-stack] [data-launch-line="guide"]')).toHaveCount(0);
 
   // Code review off: the thread's view is the off page on a fresh link, and the thread itself loses nothing.
   await setCodeReview(false);
@@ -4147,8 +4558,8 @@ test('the PR page draws moved and renamed code, says so in the file header, and 
   const moved = review.locator(`[data-guide-file-shell="${SEM_PATH}"]`);
   const plain = review.locator(`[data-guide-file-shell="${SEM_PLAIN_PATH}"]`);
   const note = moved.locator('[data-semantic-note="semantic"]');
-  await expect(note).toContainText('1 moved', { timeout: 30_000 });
-  await expect(note).toContainText('1 renamed');
+  await expect(note).toHaveAttribute('aria-label', /1 moved/, { timeout: 30_000 });
+  await expect(note).toHaveAttribute('aria-label', /1 renamed/);
   await expect(moved.locator('[data-semantic-start]').first()).toBeAttached();
   await expect(plain.locator('[data-column-number]').first()).toBeVisible();
   await expect(plain.locator('[data-semantic-note]')).toHaveCount(0);
@@ -4172,7 +4583,7 @@ test('the PR page draws moved and renamed code, says so in the file header, and 
   await expect(toggle).toHaveAttribute('aria-checked', 'true');
   await toggle.click();
   await expect(moved.locator('[data-semantic-start]')).toHaveCount(0);
-  await expect(moved.locator('[data-semantic-note="off"]')).toBeVisible();
+  await expect(moved.locator('[data-semantic-note]')).toHaveCount(0);
   await page.keyboard.press('Escape');
   await expect.poll(() => (JSON.parse(readFileSync(join(world.dataDir, 'config.json'), 'utf8')) as { diffOptions?: { semantic?: boolean } }).diffOptions?.semantic).toBe(false);
 
@@ -4184,6 +4595,6 @@ test('the PR page draws moved and renamed code, says so in the file header, and 
   await expect(toggle).toHaveAttribute('aria-checked', 'false');
   await toggle.click();
   await page.keyboard.press('Escape');
-  await expect(moved.locator('[data-semantic-note="semantic"]')).toContainText('1 moved', { timeout: 30_000 });
+  await expect(moved.locator('[data-semantic-note="semantic"]')).toHaveAttribute('aria-label', /1 moved/, { timeout: 30_000 });
   expect(world.errors).toEqual([]);
 });

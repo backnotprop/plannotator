@@ -186,7 +186,7 @@ test.skipIf(!hasDom)('a + saves an emoji with the name typed (Enter keeps it), i
   expect(savedReactions()).toEqual([{ emoji: '🚀' }]);
   const field = $('[data-name-field]') as HTMLInputElement;
   expect(field).not.toBeNull();
-  expect(field.placeholder).toBe('Name it (optional)');
+  expect(field.placeholder).toBe('Name, or / for a skill');
   await type(field, 'Ship it');
   await act(async () => {
     field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));

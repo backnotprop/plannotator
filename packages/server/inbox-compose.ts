@@ -39,7 +39,7 @@ import { basename } from "node:path";
 import { inboxHasUnsent, inboxRowArchived } from "@plannotator/shared/inbox/list";
 import { INBOX_CROSS_SITE_BODY, INBOX_MACHINE_WINDOW_ONLY_BODY, INBOX_WINDOW_ONLY_BODY, isCrossSiteRequest, isWindowRequest } from "./inbox-cross-site";
 import type { InboxReplyDraftRow } from "@plannotator/core/inbox-types";
-import type { InboxComposeProject, InboxComposeSession, InboxDraft, InboxDraftStatus, InboxLaunchFrom, InboxMessage, InboxProject } from "@plannotator/core/inbox-types";
+import type { InboxComposeProject, InboxComposeSession, InboxDraft, InboxDraftStatus, InboxLaunchFrom, InboxMessage, InboxProject, InboxSentFrom } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { deleteInboxDraft, inboxDraftUploadIds, listInboxDrafts, saveInboxDraft } from "@plannotator/shared/inbox/drafts";
 import { InboxError } from "@plannotator/shared/inbox/schema";
@@ -57,9 +57,9 @@ import {
 } from "@plannotator/shared/inbox/uploads";
 import type { InboxLaunch } from "./inbox-launch";
 import { replacesEndedAsker, takesOver, thereInThread, type createInboxLiveSessions } from "./inbox-sessions";
-
-/** How many characters of a reply draft the Drafts page shows. */
-const INBOX_REPLY_PREVIEW_MAX = 160;
+import { replyDraftPreview } from "@plannotator/core/inbox-reply-draft";
+/** The Drafts page's "Replies not sent": the most recently drafted first. */
+const newestDraftFirst = (a: InboxReplyDraftRow, b: InboxReplyDraftRow) => (b.unsent!.reply_at ?? b.last_at).localeCompare(a.unsent!.reply_at ?? a.last_at) || a.thread_id.localeCompare(b.thread_id);
 
 /** How often pending uploads are swept (each sweep drops those older than a day that no draft names). */
 export const INBOX_UPLOAD_SWEEP_MS = 60 * 60 * 1000;
@@ -97,8 +97,14 @@ export function createInboxCompose(options: {
   onReviewStart?: (threadId: string, review: unknown, where: { host: string; project_id: string; at: string }) => void;
   /** This Inbox's stable id (linked machines): the sessions answer says whose sessions they are. */
   machine?: () => string;
+  /** Uploads something else keeps for later (a Combine's files copied from a linked computer): the sweep leaves them. */
+  keepUploads?: () => Iterable<string>;
   /** A compose draft was saved, deleted or sent: every window's stream says `event: drafts`, so its Drafts count follows (#2593). */
   onDraftsChange?: () => void;
+  /** Linked machines' threads holding unsent work (mark `reply-drafts`; inbox-machine-drafts.ts), listed with this Inbox's own. */
+  farReplies?: () => Promise<InboxReplyDraftRow[]>;
+  /** Where live sessions live, as this computer's Rex last confirmed (inbox-rex.ts): one line each. Absent: none. */
+  places?: (sessions: string[]) => ReadonlyMap<string, string>;
   /** A new thread's first message was just written (not a replay), before its agent starts: inbox.ts's `/create-routine` grant. */
   onSent?: (req: Request, body: Record<string, unknown>, message: InboxMessage) => void;
 }) {
@@ -116,6 +122,20 @@ export function createInboxCompose(options: {
   };
 
   /** Every live session, grouped by project: the most recently active project first, and inside one the most recently active session first. */
+  /** The To picker's sessions with where Rex says they live (the line only: To offers no Rex action); this computer's window only. */
+  const withPlaces = (projects: InboxComposeProject[], here: boolean): InboxComposeProject[] => {
+    if (!options.places || !here) return projects;
+    const shown = options.places(projects.flatMap((group) => group.sessions.map((s) => s.session)));
+    if (shown.size === 0) return projects;
+    return projects.map((group) => ({
+      ...group,
+      sessions: group.sessions.map((s) => {
+        const place = shown.get(s.session);
+        return place ? { ...s, place: { kind: "rex" as const, line: place } } : s;
+      }),
+    }));
+  };
+
   const sessionsModel = (): InboxComposeProject[] => {
     const lastThreads = store.lastThreadsBySession();
     const groups = new Map<string, { project: InboxComposeProject["project"]; sessions: (InboxComposeSession & { activity: number })[] }>();
@@ -142,6 +162,7 @@ export function createInboxCompose(options: {
         last_thread: last ? { id: last.id, subject: last.subject, at: last.at } : null,
         ...(root !== group.project.root ? { root } : {}),
         ...(entry.label ? { label: entry.label } : {}),
+        ...(entry.runtime ? { runtime: entry.runtime } : {}),
         activity: Math.max(entry.startedAt, last ? Date.parse(last.at) : 0),
       });
     }
@@ -157,7 +178,7 @@ export function createInboxCompose(options: {
   const withStatus = (draft: InboxDraft) => ({ ...draft, status: draftStatus(draft) });
 
   /** A new thread the person writes, addressed to one live session (compose's Send). */
-  const startThread = async (body: Record<string, unknown>, from: InboxLaunchFrom | null = null, sent?: (message: InboxMessage) => void): Promise<Response> => {
+  const startThread = async (body: Record<string, unknown>, from: InboxLaunchFrom | null = null, sent?: (message: InboxMessage) => void, sentFrom: InboxSentFrom | null = null): Promise<Response> => {
     const key = typeof body.idempotency_key === "string" ? body.idempotency_key.trim() : "";
     if (!key) throw new InboxError("validation_error", "idempotency_key: required on a Send.", { field: "idempotency_key" });
     // A replayed Send answers the thread it wrote, whatever the session's state now.
@@ -231,6 +252,7 @@ export function createInboxCompose(options: {
         // Settings -> Rows' ask box: the agent also receives how to change the rows (INBOX_ROWS_ASK_BLOCK).
         rows_ask: body.rows_ask === true,
         ...(prepared ? { launch: prepared.launch } : {}),
+        sent_from: sentFrom,
       });
     } catch (error) {
       removeInboxAttachmentFiles(store.dir, attachments);
@@ -309,8 +331,9 @@ export function createInboxCompose(options: {
    * `owner`: this computer's window or the owner's own login over the tailnet, or a linked machine (the owner's other
    * computer); never a phone through the device door. `door`: a linked machine asked through the device door (remote launch): it
    * starts an agent only for a press in a window there (`window`), and the launch records which machine (`from`).
+   * `sentFrom`: where the person wrote it, as the server told it from the request (inbox-sent-from.ts).
    */
-  const route = async (req: Request, url: URL, owner: boolean = false, door: InboxComposeDoor | null = null): Promise<Response | null> => {
+  const route = async (req: Request, url: URL, owner: boolean = false, door: InboxComposeDoor | null = null, here: boolean = false, sentFrom: (body: Record<string, unknown>) => InboxSentFrom | null = () => null): Promise<Response | null> => {
     const path = url.pathname;
     if (path === "/api/inbox/sessions") {
       if (req.method !== "GET") return json({ error: "Use GET." }, 405);
@@ -319,7 +342,7 @@ export function createInboxCompose(options: {
         serverSession,
         ...(options.machine ? { machine: options.machine() } : {}),
         home: homedir(),
-        projects: sessionsModel(),
+        projects: withPlaces(sessionsModel(), here),
         ...(session ? { session: { session, live: live.askerLive(session) } } : {}),
         // Launch (only while `inboxLaunch.enabled`, on unless false; read live): the agents To offers to start and the folder menu's projects.
         ...(options.launch ? { launch: await options.launch.composeBlock(owner && !isCrossSiteRequest(req) ? { pick: trustPick(url) } : null) } : {}),
@@ -330,7 +353,7 @@ export function createInboxCompose(options: {
       const body = await options.readBody(req);
       // Another machine starts an agent here only for what the person pressed in a window there: never an agent's call.
       if (door?.machine && !door.window && body.to && typeof body.to === "object" && "launch" in body.to) return json(INBOX_MACHINE_WINDOW_ONLY_BODY, 403);
-      return staleTab(body) ?? trustRefused(req, body, owner, door) ?? (await startThread(body, door?.machine ? door.from : null, (message) => options.onSent?.(req, body, message)));
+      return staleTab(body) ?? trustRefused(req, body, owner, door) ?? (await startThread(body, door?.machine ? door.from : null, (message) => options.onSent?.(req, body, message), sentFrom(body)));
     }
     const toMatch = /^\/api\/inbox\/messages\/([A-Za-z0-9_]+)\/to$/.exec(path);
     if (toMatch) {
@@ -342,7 +365,10 @@ export function createInboxCompose(options: {
       if (req.method !== "GET") return json({ error: "Use GET." }, 405);
       // `replies` (additive, approval "inbox-reply-drafts"): every open thread holding unsent work
       // (reply words, picks, comments), for the Drafts page's "Replies not sent" and the sidebar's count.
-      return json({ serverSession, drafts: listInboxDrafts(store.dir).map(withStatus), replies: replyDraftRows() });
+      // A linked machine's threads too (its rows say `machine`), newest draft first across both.
+      const far = (await options.farReplies?.().catch(() => [])) ?? [];
+      const replies = far.length === 0 ? replyDraftRows() : [...replyDraftRows(), ...far].sort(newestDraftFirst);
+      return json({ serverSession, drafts: listInboxDrafts(store.dir).map(withStatus), replies });
     }
     const draftMatch = /^\/api\/inbox\/drafts\/([A-Za-z0-9_]+)(\/delete)?$/.exec(path);
     if (draftMatch) {
@@ -405,14 +431,9 @@ export function createInboxCompose(options: {
     store
       .unsentRows()
       .filter((row) => inboxHasUnsent(row.unsent) && !inboxRowArchived(row))
-      .map((row) => {
-        const draft = store.replyDraft(row.thread_id);
-        // A draft holding only files reads as its first: a long paste's first words, another file's name.
-        const first = draft?.files?.[0];
-        const words = (draft?.body.trim() || first?.pasted?.preview || first?.name || "").replace(/\s+/g, " ").trim();
-        return { ...row, reply_preview: words ? words.slice(0, INBOX_REPLY_PREVIEW_MAX) : null };
-      })
-      .sort((a, b) => (b.unsent!.reply_at ?? b.last_at).localeCompare(a.unsent!.reply_at ?? a.last_at) || a.thread_id.localeCompare(b.thread_id));
+      // A draft holding only files reads as its first: a long paste's first words, another file's name.
+      .map((row) => ({ ...row, reply_preview: replyDraftPreview(store.replyDraft(row.thread_id)) }))
+      .sort(newestDraftFirst);
 
   /** Forget uploads older than a day that no draft names, and the blobs only they held. */
   const sweep = () => {
@@ -421,6 +442,7 @@ export function createInboxCompose(options: {
       // A reply draft's files (long pastes too) are kept as a compose draft's files are, at any age.
       for (const id of store.replyDraftUploadIds()) keep.add(id);
       for (const id of store.commentPictureUploadIds()) keep.add(id);
+      for (const id of options.keepUploads?.() ?? []) keep.add(id);
       for (const id of inboxCommentDraftUploadIds(store.dir, (threadId: string) => store.thread(threadId) !== null)) keep.add(id);
       sweepInboxUploads(store.dir, { keep, usedBlobs: store.usedBlobs(), now: now().getTime() });
     } catch {

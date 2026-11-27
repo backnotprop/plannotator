@@ -1,19 +1,9 @@
 /** The list's tags and their colours on the wire (inbox-tag-colours.ts), and the colour writes. */
-import type { InboxInitiative, InboxTagColours, InboxTagLook } from '@plannotator/core/inbox-types';
+import type { InboxTagColours, InboxTagLook } from '@plannotator/core/inbox-types';
 import { post } from '../../api';
 import { inboxUrl } from '../../inboxUrl';
 
-/** The list model's tags (ListModel extends this). */
-export interface ListTagsFields {
-  /**
-   * The live tags, oldest first (approval "inbox-thread-tags"): the sidebar's Tags and the Add tag list; each row's
-   * `tags` names them. Absent from an older Inbox: the window then draws no Tags section and offers no Add tag.
-   * Merged: one per name across the linked machines that take tags, `machines` its id on each (InboxMachineTag).
-   */
-  tags?: (InboxInitiative & { machines?: Record<string, string>; look?: InboxTagLook })[];
-  /** "Show tag colors" and the person's own colours. Absent from an Inbox before tag colours. */
-  tag_colours?: InboxTagColours;
-}
+export type { ListTagsFields } from '@plannotator/core/inbox-wire-models';
 
 export const tagColoursApi = {
   /**

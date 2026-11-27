@@ -22,7 +22,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, symlinkSy
 import { createServer, request, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
+import { E2E_GROUP_TIP_SEEN, inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
 
 const repo = resolve(__dirname, '../..');
@@ -106,7 +106,7 @@ test.beforeAll(async () => {
   // Bun counts as the binary the install script manages, so About and the dialog offer Update now.
   const bun = realpathSync(process.env.BUN_BINARY ?? execSync('command -v bun').toString().trim());
   symlinkSync(bun, join(home, '.local', 'bin', 'plannotator'));
-  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ inboxTailscale: true, inboxThemeChooser: { notNeededAt: '2026-10-01T10:00:00.000Z' } }));
+  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ inboxTailscale: true, inboxThemeChooser: { notNeededAt: '2026-10-01T10:00:00.000Z' }, inboxReveals: { ...E2E_GROUP_TIP_SEEN } }));
   writeFileSync(join(dataDir, 'update-state.json'), JSON.stringify({ latestRelease: { tag: NEXT, fetchedAt: Date.now(), publishedAt: '2026-10-09T15:00:00Z' } }));
   mkdirSync(join(dataDir, 'update-notes'));
   writeFileSync(join(dataDir, 'update-notes', `${NEXT}.json`), JSON.stringify({ version: NEXT, notes: 'A patch release for the Inbox.\n\n### Update notices\n\nOne click.', highlights: [] }));

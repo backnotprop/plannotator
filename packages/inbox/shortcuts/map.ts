@@ -4,6 +4,7 @@
  * words come from the registry; this says only where they go.
  */
 import type { ShortcutScopeDefinition } from '@plannotator/ui/shortcuts';
+import type { OpenReviewKeys } from './review';
 import { inboxAppShortcuts, inboxArtifactsShortcuts, inboxBoardShortcuts, inboxFileViewerShortcuts, inboxListShortcuts, inboxListPickShortcuts, inboxPrBoardShortcuts, inboxSearchShortcuts, inboxThreadShortcuts, inboxTileShortcuts } from './index';
 
 export type Ref = { scope: ShortcutScopeDefinition<any>; action: string; only?: number };
@@ -20,6 +21,8 @@ export interface MapRow {
 export interface MapGroup {
   title: string;
   rows: MapRow[];
+  /** The open review's keys (withReviewKeys): drawn as they are, never left out for being the review's. */
+  review?: true;
 }
 
 const app = (action: string): Ref => ({ scope: inboxAppShortcuts, action });
@@ -104,5 +107,15 @@ export const present = (ref: Ref) => ref.scope.shortcuts[ref.action] !== undefin
 /** The map's rows as they are drawn now: a row whose actions are all absent (an extra that is off) is left out. */
 export function mapColumns(columns: MapGroup[][] = MAP_COLUMNS): MapGroup[][] {
   return columns.map((groups) => groups.map((group) => ({ ...group, rows: group.rows.filter((row) => row.keys.some(present)) })).filter((group) => group.rows.length > 0));
+}
+
+/**
+ * With a review on screen (shortcuts/review.ts): its keys first, under the code review app's name and in its words,
+ * and the Inbox's rows lose the keys the review takes (a row left with none is dropped by the map).
+ */
+export function withReviewKeys(columns: MapGroup[][], review: OpenReviewKeys | null): { columns: MapGroup[][]; hidden: ReadonlySet<string> } {
+  if (!review) return { columns, hidden: new Set() };
+  const group: MapGroup = { title: review.title, review: true, rows: review.rows.map((keys) => ({ keys: [...keys] })) };
+  return { columns: columns.map((groups, i) => (i === 0 ? [group, ...groups] : groups)), hidden: review.claimed };
 }
 

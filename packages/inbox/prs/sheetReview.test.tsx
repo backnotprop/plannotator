@@ -182,7 +182,9 @@ async function start(keys: string[], words: string) {
   click($('[data-pr-select="select"]')!);
   for (const k of keys) click(tile(k)!);
   const button = $('[data-pr-review]')!;
-  expect(button.textContent).toBe(words);
+  // The full words, and its title for when a narrow bar says "Review".
+  expect(button.querySelector('.ib-prs-long')!.textContent).toBe(words);
+  expect(button.title).toBe(words);
   click(button);
   await settle();
 }
@@ -240,7 +242,7 @@ test('a PR with a review thread is linked to it, never given a second; one start
   expect(opened).toEqual(['msg_codex']);
 
   // #7 again before the list brings its link: its thread is the one just started.
-  click($('[data-pr-clear]')!);
+  click($('[data-pr-select="done"]')!);
   sent = [];
   await start([key(7)], 'Start review thread');
   expect(messages()).toEqual([]);

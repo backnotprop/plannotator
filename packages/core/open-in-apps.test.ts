@@ -85,7 +85,7 @@ describe("openInMacArgv", () => {
         "42",
         file,
       ]);
-      // No line: the plain `open -a`, as every other app.
+      // No line: these IDEs use the plain `open -a`.
       expect(openInMacArgv(app, app.mac!.appName, file)).toEqual(["-a", app.mac!.appName, file]);
     }
   });
@@ -99,6 +99,16 @@ describe("openInMacArgv", () => {
       "--line",
       "7",
       file,
+    ]);
+  });
+
+  test("Android Studio opens a file through its own launcher even without a selected line", () => {
+    const app = getOpenInApp("android-studio")!;
+    expect(openInMacArgv(app, app.mac!.appName, file)).toEqual([
+      "-na", "Android Studio", "--args", "--line", "1", file,
+    ]);
+    expect(openInMacArgv(app, app.mac!.appName, file, 42)).toEqual([
+      "-na", "Android Studio", "--args", "--line", "42", file,
     ]);
   });
 

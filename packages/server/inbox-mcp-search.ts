@@ -16,6 +16,8 @@ import { INBOX_SEARCH_FIRST_RULE } from "@plannotator/shared/inbox/connection";
 import { clip, shortTime } from "./inbox-mcp-read";
 import { guarded, okComplete, PROJECT_PATH_DESCRIPTION } from "./inbox-mcp-result";
 import type { InboxMcpContext } from "./inbox-mcp";
+import { farSearchFor } from "./inbox-mcp-far-find";
+import type { InboxProject } from "@plannotator/core/inbox-types";
 
 /** Results the search answers by default. */
 export const INBOX_AGENT_SEARCH_LIMIT = 10;
@@ -37,6 +39,8 @@ export interface InboxAgentSearchRow {
   /** The match is in this question (its prompt, choices or answer). */
   question?: string;
   project?: string;
+  /** The linked computer the message is on (absent: this one). */
+  machine?: { id: string; name: string };
 }
 
 export function rowOf(row: InboxSearchMessageRow, withProject: boolean): InboxAgentSearchRow {
@@ -53,7 +57,9 @@ export function rowOf(row: InboxSearchMessageRow, withProject: boolean): InboxAg
 }
 
 export function searchRowText(row: InboxAgentSearchRow): string {
-  const parts = [`- ${row.message_id} in thread ${row.thread_id} (${JSON.stringify(clip(row.subject, 80))})`, row.author, shortTime(row.at)];
+  const parts = [`- ${row.message_id} in thread ${row.thread_id} (${JSON.stringify(clip(row.subject, 80))})`];
+  if (row.machine) parts.push(`on ${row.machine.name}`);
+  parts.push(row.author, shortTime(row.at));
   if (row.project) parts.push(`project ${row.project}`);
   if (row.question) parts.push(`question ${row.question}`);
   parts.push(JSON.stringify(row.snippet));
@@ -83,41 +89,59 @@ export function registerInboxSearchTool(server: McpServer, context: InboxMcpCont
         const q = input.query.trim().slice(0, INBOX_SEARCH_QUERY_MAX);
         if (inboxSearchTerms(q).length === 0) throw new InboxError("validation_error", "query: words to search for (letters or digits).");
         let projectIds: string[] | null = null;
+        let found: { projects: InboxProject[]; unresolved: boolean } | null = null;
         let scope = "every project";
         let note = "";
         if (!input.all_projects) {
           if (!input.project_path) throw new InboxError("validation_error", "project_path: required unless all_projects (the connection fills it).");
           // Looked up, never made: a search writes nothing, and a folder the Inbox has never seen has no messages.
-          const found = context.findProjects ? await context.findProjects(input.project_path) : { projects: [], unresolved: false };
+          found = context.findProjects ? await context.findProjects(input.project_path) : { projects: [], unresolved: false };
           // One search per group: a search of one folder of a combined project covers them all.
           projectIds = [...new Set(found.projects.map((project) => context.store.canonicalProjectId(project.id)))];
           scope = found.projects[0]?.name ?? input.project_path;
           if (found.unresolved) note = " Git did not answer in time, so the project of this folder is not known yet: nothing was searched. Try again, or pass all_projects.";
           else if (projectIds.length === 0) note = " No Inbox thread has been written from this folder's project yet; pass all_projects to search every project.";
         }
-        if (projectIds?.length === 0) {
-          return okComplete(`No message matches ${JSON.stringify(q)} in ${scope}.${note}`, { query: q, scope, total: 0, results: [], ...(note ? { note: note.trim() } : {}) });
-        }
-        if (!index.ready()) {
-          await Promise.race([index.ensureBuilt(), new Promise((resolve) => setTimeout(resolve, INBOX_AGENT_SEARCH_BUILD_WAIT_MS))]);
-          if (!index.ready()) throw new InboxError("search_indexing", "The search index is still being built; try again in a moment.");
-        }
         const limit = Math.min(input.limit ?? INBOX_AGENT_SEARCH_LIMIT, INBOX_SEARCH_LIMIT_MAX);
+        // The linked machines are asked at once, beside this search (inbox-mcp-far-find.ts); none linked: null.
+        const far = found?.unresolved
+          ? Promise.resolve(null)
+          : farSearchFor(context, { q, limit, all: input.all_projects === true, projectPath: input.project_path, projects: found?.projects ?? [] });
         let total = 0;
-        const rows: InboxSearchMessageRow[] = [];
-        // The caller's project (and the one an older Inbox kept for its worktree, threadReadScope), or every project.
-        for (const project of projectIds ?? [null]) {
-          const answer = index.search({ q, project, group: "messages", offset: 0, limit });
-          total += answer.totals?.messages ?? 0;
-          for (const row of answer.groups?.messages ?? []) if (row.type === "message") rows.push(row);
+        // This computer's rows in the order it always gave them (project by project), and each with its rank.
+        const ranked: { row: InboxAgentSearchRow; score: number }[] = [];
+        if (projectIds === null || projectIds.length > 0) {
+          if (!index.ready()) {
+            await Promise.race([index.ensureBuilt(), new Promise((resolve) => setTimeout(resolve, INBOX_AGENT_SEARCH_BUILD_WAIT_MS))]);
+            if (!index.ready()) throw new InboxError("search_indexing", "The search index is still being built; try again in a moment.");
+          }
+          // The caller's project (and the one an older Inbox kept for its worktree, threadReadScope), or every project.
+          for (const project of projectIds ?? [null]) {
+            const answer = index.search({ q, project, group: "messages", offset: 0, limit, scores: true });
+            total += answer.totals?.messages ?? 0;
+            const scores = answer.scores?.messages ?? [];
+            (answer.groups?.messages ?? []).forEach((row, i) => {
+              if (row.type === "message") ranked.push({ row: rowOf(row, projectIds === null), score: scores[i] ?? 0 });
+            });
+          }
         }
-        const results = rows.slice(0, limit).map((row) => rowOf(row, projectIds === null));
+        const away = await far;
+        if (away) total += away.total;
+        // With far rows, one order across every machine: the index's rank (match, then newest), this computer's first
+        // on a tie. Without any, this computer's rows exactly as before.
+        if (away && away.rows.length > 0) {
+          // A far row names its project whenever it is not this one's name (the same repository in another folder there).
+          for (const { score, project, ...row } of away.rows) ranked.push({ row: projectIds === null || project.toLowerCase() !== scope.toLowerCase() ? { ...row, project } : row, score });
+          ranked.sort((a, b) => b.score - a.score);
+        }
+        const results = ranked.slice(0, limit).map(({ row }) => row);
+        const lines = away?.lines.length ? `\n${away.lines.join("\n")}` : "";
         const head =
           results.length === 0
-            ? `No message matches ${JSON.stringify(q)} in ${scope}.`
+            ? `No message matches ${JSON.stringify(q)} in ${scope}.${note}`
             : `${total} message${total === 1 ? " matches" : "s match"} ${JSON.stringify(q)} in ${scope}${total > results.length ? `; the best ${results.length}` : ""}:`;
-        const text = results.length === 0 ? head : `${head}\n${results.map(searchRowText).join("\n")}\nread_thread with a thread_id and its message_id shows that message in full.`;
-        return okComplete(text, { query: q, scope, total, results });
+        const text = results.length === 0 ? `${head}${lines}` : `${head}\n${results.map(searchRowText).join("\n")}\nread_thread with a thread_id and its message_id shows that message in full.${lines}`;
+        return okComplete(text, { query: q, scope, total, results, ...(results.length === 0 && note ? { note: note.trim() } : {}), ...(away?.lines.length ? { not_searched: away.lines } : {}) });
       }),
   );
 }

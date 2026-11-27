@@ -29,6 +29,10 @@ import { MermaidBlock, __setMermaidRuntimeLoaderForTests } from './MermaidBlock'
 import { ThemeProvider, useTheme } from './ThemeProvider';
 import { __resetMermaidThemeForTests } from '../utils/mermaidTheme';
 import { resetStorageBackend, setStorageBackend } from '../utils/storage';
+import { drawMermaidFencesWithMermaid } from '../test-setup/mermaidEngine';
+
+// A stand-in Mermaid runtime draws here; Pele is DiagramBlock.engine.test.tsx's.
+drawMermaidFencesWithMermaid();
 
 const hasDom = typeof document !== 'undefined';
 

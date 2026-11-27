@@ -54,6 +54,7 @@ import { withoutInboxSkillsBlock } from "@plannotator/core/skill-reference-block
 import {
   displayInboxSubject,
   inboxAgentName,
+  inboxSectionWaitsOnPerson,
   isInboxNote,
   type InboxLine,
   type InboxListRow,
@@ -994,7 +995,7 @@ export class InboxSearchIndex {
       if (!facts) return false;
       if (query.status === "archived") return facts.archived;
       if (facts.archived || (threadId !== null && snoozed?.has(threadId))) return false;
-      if (query.status === "waiting") return facts.section === "stopped" || facts.section === "holding" || facts.section === "waiting";
+      if (query.status === "waiting") return inboxSectionWaitsOnPerson(facts.section);
       return facts.section === query.status;
     };
     const fromOk = (doc: Doc, facts: ThreadFacts | null): boolean => {
@@ -1071,6 +1072,7 @@ export class InboxSearchIndex {
     }
     const totals = {} as Record<InboxSearchGroupId, number>;
     const answer: Partial<Record<InboxSearchGroupId, InboxSearchRow[]>> = {};
+    const scores: Partial<Record<InboxSearchGroupId, number[]>> = {};
     for (const id of INBOX_SEARCH_GROUPS) {
       const list = groups[id];
       totals[id] = list.length;
@@ -1079,13 +1081,17 @@ export class InboxSearchIndex {
       const limit = Math.min(INBOX_SEARCH_LIMIT_MAX, query.limit ?? (query.group ? INBOX_SEARCH_LIMIT_MAX : terms.length === 0 ? INBOX_SEARCH_BROWSE_LIMIT : INBOX_SEARCH_CAPS[id]));
       const offset = query.group ? Math.max(0, query.offset ?? 0) : 0;
       const rows: InboxSearchRow[] = [];
-      for (const { doc } of topOf(list, offset + limit).slice(offset, offset + limit)) {
+      const ranks: number[] = [];
+      for (const { doc, score } of topOf(list, offset + limit).slice(offset, offset + limit)) {
         const row = this.row(this.docs[doc]!, terms, labels);
-        if (row) rows.push(row);
+        if (!row) continue;
+        rows.push({ ...row, score });
+        ranks.push(score);
       }
       answer[id] = rows;
+      scores[id] = ranks;
     }
-    return { ...base, took_ms: this.now() - started, totals, groups: answer, recent: null };
+    return { ...base, took_ms: this.now() - started, totals, groups: answer, recent: null, ...(query.scores ? { scores } : {}) };
   }
 
   /** The threads the person looked at last (`person_seen_seq`), newest look first. */

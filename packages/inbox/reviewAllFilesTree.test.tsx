@@ -16,8 +16,6 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { buildGuideSnapshot } from '@plannotator/core/guide-format';
 import type { InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
-import type { ShapeHost } from '@plannotator/ui/components/shape';
-import type { InboxShapes } from './shape/useInboxShapes';
 
 const hasDom = typeof document !== 'undefined';
 /** What the stubbed reader was last asked: its mode, the file to bring into view and its Viewed ticks. */
@@ -34,8 +32,6 @@ if (hasDom) {
     },
   }));
 }
-// The pane's Shape props (required since the board's Show me): no boards here.
-const NO_BOARDS: InboxShapes = { shapes: null, byThread: new Map(), changed: 0, rowShown: false, subscribe: () => () => {}, refresh: () => {} };
 const { ReviewPane } = (hasDom ? await import('./components/ReviewPane') : {}) as typeof import('./components/ReviewPane');
 
 const PROJECT: InboxProject = { id: 'prj_1', key: 'ledger-abcdef', name: 'ledger', root: '/work/ledger', created_at: '2026-10-11T10:00:00.000Z' };
@@ -88,9 +84,9 @@ beforeEach(() => {
     const path = String(input);
     if (init?.method === 'POST') {
       if (path.endsWith('/guide/viewed')) {
-        const { viewed } = JSON.parse(String(init.body)) as { viewed: string[] };
-        viewedPosts.push(viewed);
-        return Response.json({ message_id: REVIEW, viewed });
+        const { path: file, viewed } = JSON.parse(String(init.body)) as { path: string; viewed: boolean };
+        viewedPosts.push([file, String(viewed)]);
+        return Response.json({ message_id: REVIEW, viewed: viewed ? [file] : [] });
       }
       return Response.json({});
     }
@@ -128,7 +124,7 @@ async function render({ review = true }: { review?: boolean } = {}) {
     root = createRoot(host!);
     root.render(
       <div className="pn-inbox">
-        <ReviewPane thread={thread} message={message} codeReview onBack={() => {}} onClose={() => {}} onSent={() => {}} onWriteReply={() => {}} shapeHost={{} as ShapeHost} shapes={NO_BOARDS} board={null} onBoard={() => {}} />
+        <ReviewPane thread={thread} message={message} codeReview onBack={() => {}} onClose={() => {}} onSent={() => {}} onWriteReply={() => {}} />
       </div>,
     );
   });
@@ -202,7 +198,8 @@ test.skipIf(!hasDom)("a review's tree dims a file ticked Viewed on its header; a
   expect(treeFile('src/auth/guard.ts')!.dataset.itemMuted).toBeUndefined();
   await act(async () => reader.viewed!.onToggle('src/auth/guard.ts'));
   await settle();
-  expect(viewedPosts).toEqual([['src/auth/guard.ts']]);
+  // One file's change, never the whole list.
+  expect(viewedPosts).toEqual([['src/auth/guard.ts', 'true']]);
   expect(treeFile('src/auth/guard.ts')!.dataset.itemMuted).toBe('true');
   expect(treeFile('src/auth/token.ts')!.dataset.itemMuted).toBeUndefined();
   expect(tree()!.textContent).toContain('1 viewed');

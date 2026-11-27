@@ -1,0 +1,90 @@
+name: Mobile iOS
+
+# The native iPhone app (apps/mobile/), kept apart from the Inbox's CI. It
+# starts only when a file under apps/mobile/ or this file changes, on GitHub's
+# own macOS runners (never TEST_RUNNER or E2E_RUNNER), and it is never a
+# required check: red here never blocks a pull request. No other workflow
+# builds Swift, and scripts/ci-affected.ts leaves the native file kinds of
+# apps/mobile/ios and apps/mobile/android out of the Test workflow's plan
+# (nativeAppFile), so a pull request with only those runs no test lane and no
+# Checks there.
+#
+# It starts for the iOS app (apps/mobile/ios), the contract's generated Swift
+# (apps/mobile/contract/generated/swift) and this file: not for Android files
+# or the contract's JSON data, which no step here reads. The contract's check
+# and the ledger's clock have their own workflow, mobile-contract.yml, so
+# recording a ledger row never starts a macOS build.
+#
+# Concurrency is per job, so the two kinds of run never cancel each other.
+# `ios` runs in a group per branch: a new push cancels only the same pull
+# request's (or main's) older run, never another pull request's. `ios-nightly`
+# has its own group and never cancels or is cancelled, so a push during the
+# nightly cannot stop it. At most one macOS job per branch, plus the nightly
+# while it runs. A job whose `if` is false is skipped before it joins a group.
+#
+# The repository variable MOBILE_CI=nightly stops the per-push job (`ios`);
+# the nightly and manual runs (`ios-nightly`) carry on. Any other value, or
+# none, runs both.
+#
+# apps/mobile/ios/ci.sh does the work. It exits 0 while there is no Xcode
+# project to build. The nightly runs the same steps as the pull request job
+# until the app has a UI test suite.
+#
+# The runner image is pinned (macos-15), as the rest of the repository pins
+# ubuntu-24.04: Xcode and Swift do not change under the job.
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'apps/mobile/ios/**'
+      - 'apps/mobile/contract/generated/swift/**'
+      - '.github/workflows/mobile-ios.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'apps/mobile/ios/**'
+      - 'apps/mobile/contract/generated/swift/**'
+      - '.github/workflows/mobile-ios.yml'
+  schedule:
+    - cron: "41 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ios:
+    name: iOS (build and swift test)
+    if: ${{ (github.event_name == 'pull_request' || github.event_name == 'push') && vars.MOBILE_CI != 'nightly' }}
+    concurrency:
+      group: mobile-ios-${{ github.ref }}
+      cancel-in-progress: true
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build and test the app
+        run: bash apps/mobile/ios/ci.sh pr
+
+  ios-nightly:
+    name: iOS nightly (same as the PR job until a UI suite exists)
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    concurrency:
+      group: mobile-ios-nightly
+      cancel-in-progress: false
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build and test the app
+        run: bash apps/mobile/ios/ci.sh nightly
+

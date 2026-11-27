@@ -11,14 +11,15 @@
  */
 import { createContext, useContext, useLayoutEffect, useRef, useState } from 'react';
 import type { Annotation, ImageAttachment } from '@plannotator/ui/types';
+import type { InboxUpload } from '@plannotator/core/inbox-types';
 
 export type FileCommentDraft =
-  /** A comment composer of the viewer (a selection's, a pin's, code lines', a diagram part's): its anchor, its words as `text`. */
-  | { kind: 'comment'; annotation: Annotation }
+  /** A comment composer of the viewer (a selection's, a pin's, code lines', a diagram part's): its anchor, its words as `text`; a phone page's pin card, the files added to it (`late`: still uploading as it closed). */
+  | { kind: 'comment'; annotation: Annotation; files?: readonly InboxUpload[]; late?: readonly Promise<InboxUpload | null>[] }
   /** A saved comment's edit box, its words changed and not saved. */
   | { kind: 'edit'; id: string; text: string }
-  /** The file's own comment row (an image's, a film's): its words, a drawing not yet added, a film's pinned moment and frame. */
-  | { kind: 'row'; text: string; markup: ImageAttachment | null; time?: number | null; frame?: Blob | null };
+  /** The file's own comment row (an image's, a film's): its words, a drawing not yet added, a film's pinned moment and frame, the files added to it (`late`: still uploading as it closed). */
+  | { kind: 'row'; text: string; markup: ImageAttachment | null; time?: number | null; frame?: Blob | null; files?: readonly InboxUpload[]; late?: readonly Promise<InboxUpload | null>[] };
 
 const drafts = new Map<string, FileCommentDraft[]>();
 
@@ -46,11 +47,11 @@ export function keepFileDrafts(key: string, kept: readonly FileCommentDraft[]): 
 export function draftHasWords(draft: FileCommentDraft): boolean {
   switch (draft.kind) {
     case 'comment':
-      return (draft.annotation.text ?? '').trim() !== '' || (draft.annotation.images?.length ?? 0) > 0;
+      return (draft.annotation.text ?? '').trim() !== '' || (draft.annotation.images?.length ?? 0) > 0 || (draft.files?.length ?? 0) > 0 || (draft.late?.length ?? 0) > 0;
     case 'edit':
       return true;
     case 'row':
-      return draft.text.trim() !== '' || draft.markup !== null;
+      return draft.text.trim() !== '' || draft.markup !== null || (draft.files?.length ?? 0) > 0 || (draft.late?.length ?? 0) > 0;
   }
 }
 
@@ -76,6 +77,9 @@ export function anchorKeyOf(annotation: Annotation): string {
 export function clearFileDrafts(): void {
   drafts.clear();
 }
+
+/** A viewer comment's draft, as the pane puts it back. */
+export type CommentDraft = Extract<FileCommentDraft, { kind: 'comment' }>;
 
 /** A row draft, as the file's own comment row takes it. */
 export type RowDraft = Extract<FileCommentDraft, { kind: 'row' }>;

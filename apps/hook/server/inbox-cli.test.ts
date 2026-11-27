@@ -417,6 +417,18 @@ describe("plannotator inbox mcp inside an agent Ask AI started (PLANNOTATOR_ASK_
     expect(fromPerson.PLANNOTATOR_INBOX_TOOL).toBe("0");
     expect(fromPerson.PLANNOTATOR_AGENT_TOOL).toBe("1");
   });
+
+  test("an Inbox started from a Rex pane does not keep that pane: its background agents would report it as theirs", () => {
+    const pane = { REX_SESSION: "session:11111111-2222-4333-8444-555555555555", REX_BLOCK: "block:11111111-2222-4333-8444-666666666666", REX_SERVER: "/tmp/rex.sock", REX_BIN_DIR: "/Applications/Rex.app/Contents/Resources/bin", TERM_PROGRAM: "rex" };
+    const detached = detachedInboxEnv({ PATH: "/bin", ...pane }, "/data");
+    expect(Object.keys(detached).filter((name) => name.startsWith("REX_") || name === "TERM_PROGRAM")).toEqual([]);
+    expect(detached.PATH).toBe("/bin");
+    // Which Rex server is this computer's stays known, under the Inbox's own name (a socket here; never another computer's address).
+    expect(detached.PLANNOTATOR_INBOX_REX_SERVER).toBe("/tmp/rex.sock");
+    expect(detachedInboxEnv({ PATH: "/bin", REX_SERVER: "https://build.example.ts.net" }, "/data").PLANNOTATOR_INBOX_REX_SERVER).toBeUndefined();
+    // As Rex writes it in a tab on a Mac (a percent-encoded URL): kept as the path it names.
+    expect(detachedInboxEnv({ PATH: "/bin", REX_SERVER: "unix:///Users/ada/Library/Application%20Support/rex/server.sock" }, "/data").PLANNOTATOR_INBOX_REX_SERVER).toBe("/Users/ada/Library/Application Support/rex/server.sock");
+  });
 });
 
 describe("plannotator inbox mcp inside an agent session", () => {

@@ -22,9 +22,17 @@
  *    then `applied`, so the relay deletes it. Frames are handled one at a
  *    time in the order they arrive: `hello`, then the held commands;
  *  - posts one push per paired phone whose switch is on when an agent's
- *    message lands with a question or a guided review (where the window's
- *    browser notification fires for a question, packages/inbox/notify.ts),
- *    the summary encrypted under that phone's key.
+ *    message lands with a question, a guided review, a permission prompt,
+ *    a failed turn or a new thread (where the window's browser notification
+ *    fires, packages/inbox/notify.ts), the summary (push version 2,
+ *    inbox-relay-push.ts) encrypted under that phone's key; never for a
+ *    snoozed thread;
+ *  - hands a command's sealed `not_after` to the door, which refuses a first
+ *    arrival past it (`410 command_expired`, reported applied) after looking
+ *    up its key, so a "now" write held at the relay is never applied late and
+ *    one already applied replays its answer;
+ *  - reads the relay's version from `hello` (relay 1.1 says `"1.1"`; 1.0 says
+ *    none) and uses a 1.1 route (the `live` push) only on a relay that has it.
  *
  * The phone registers its own APNs token at the relay with its relay secret
  * (exchange 7.29); the Inbox never sees it.
@@ -34,25 +42,29 @@
  * stays at the URL relay.json names.
  */
 
-import { createHmac, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { decryptWithKey, deriveRelayKeys, deriveRelaySignalToken, encryptWithKey } from "@plannotator/core/crypto";
-import { displayInboxSubject, inboxAgentName } from "@plannotator/core/inbox-types";
+import type { InboxListRow } from "@plannotator/core/inbox-types";
 import { sha256Hex, type InboxDevice, type InboxDevices } from "@plannotator/shared/inbox/devices";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
 import type { InboxLine } from "@plannotator/core/inbox-types";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { createInboxAgentRelayApplied } from "./inbox-agent-relay-applied";
 import { AGENT_PLATFORM } from "./inbox-devices";
+import { INBOX_PUSH_KINDS_FOR_NEW_APPS, inboxPushCollapseId, type InboxPushKind } from "@plannotator/core/inbox-push";
+import { inboxPushSummary, sizedPushEnvelope } from "./inbox-relay-push";
+
+export { apnsBody } from "./inbox-relay-push";
 
 export const DEFAULT_RELAY_URL = "https://relay.plannotator.ai";
 export const INBOX_RELAY_FILE = "relay.json";
 
 /** How long one call to the relay may take: a pairing waits on it before answering. */
 const RELAY_REQUEST_MS = 10_000;
-/** Apple's ceiling on a push body (section 4, "Push"). */
-const APNS_BODY_LIMIT = 4096;
+/** What `hello` from a relay that names no version means: the first relay, 1.0. */
+export const RELAY_VERSION_BEFORE_HELLO = "1.0";
 /**
  * Cloudflare's WebSocket message limit (32 MiB), the platform's, not ours: a
  * result whose item frame would pass it is answered with a small 413 result
@@ -70,8 +82,9 @@ export const RELAY_BODY_LIMIT = Math.floor((WEBSOCKET_MESSAGE_LIMIT * 3) / 4);
  * 16n/9: a message image at the 10 MB cap (MAX_REVIEW_IMAGE_PREVIEW_BYTES)
  * is a frame of about 17.8 MiB, inside WEBSOCKET_MESSAGE_LIMIT.
  */
-export async function sealRelayResult(deviceId: string, id: string, status: number, contentType: string, bytes: Buffer, key: string): Promise<string> {
-  const result = { v: 1, type: "result", id, status, content_type: contentType, body_b64: bytes.toString("base64") };
+export async function sealRelayResult(deviceId: string, id: string, status: number, contentType: string, bytes: Buffer, key: string, now: number = Date.now()): Promise<string> {
+  // `now`: the computer's clock when it answered, so a phone keeps its offset from it for `not_after` (section 4).
+  const result = { v: 1, type: "result", id, status, content_type: contentType, body_b64: bytes.toString("base64"), now: new Date(now).toISOString() };
   return JSON.stringify({ type: "item", device_id: deviceId, cursor: null, ciphertext: await encryptWithKey(JSON.stringify(result), key) });
 }
 
@@ -111,19 +124,51 @@ export async function readRelayBody(answer: Response, cap: number): Promise<Buff
 const RECONNECT_FIRST_MS = 1_000;
 const RECONNECT_LAST_MS = 60_000;
 
+/**
+ * The socket's liveness check: a ping after `intervalMs`, then a look every
+ * `timeoutMs` until its pong comes back (`heartbeatLook`). A ping leaves after
+ * every byte already sent, and a result frame can be about 17.8 MiB, so a slow
+ * upload must not count as a dead socket: it would be cut off mid-frame and
+ * its command sent again. The pong is due `timeoutMs` after the frames sent
+ * before the ping could have left at `uplinkBytesPerMs` (about 256 kbit/s, a
+ * slow uplink). Bun (from 1.4) reports its send queue, which empties in steps
+ * of hundreds of KB as the kernel takes them: bytes waiting there that have
+ * not moved for as long as `queueStepBytes` takes at that rate mean the path
+ * is dead, sooner than the allowance; a queue still moving keeps the socket
+ * past it.
+ */
+const RELAY_HEARTBEAT = { intervalMs: 30_000, timeoutMs: 10_000, uplinkBytesPerMs: 32, queueStepBytes: 2 * 1024 * 1024 };
+
+export type RelayHeartbeat = typeof RELAY_HEARTBEAT;
+
+/**
+ * One look for a pong: `left` is Bun's send queue now, `queued` what it held
+ * at the last look plus what frames sent since added, `movedAt` when it last
+ * shrank (or the ping), `due` when the pong is late once the queue is empty.
+ */
+export function heartbeatLook(
+  look: { now: number; left: number; queued: number; movedAt: number; due: number },
+  heartbeat: RelayHeartbeat,
+): { drop: true } | { drop: false; ms: number; movedAt: number } {
+  const moved = look.left < look.queued;
+  const movedAt = moved ? look.now : look.movedAt;
+  if (look.left > 0) {
+    const stuckMs = Math.max(heartbeat.timeoutMs, heartbeat.queueStepBytes / heartbeat.uplinkBytesPerMs);
+    return look.now - movedAt >= stuckMs ? { drop: true } : { drop: false, ms: heartbeat.timeoutMs, movedAt };
+  }
+  // The queue is empty (or this Bun does not report it): one more look for bytes that just left it, else the allowance.
+  if (moved) return { drop: false, ms: heartbeat.timeoutMs, movedAt };
+  if (look.now >= look.due) return { drop: true };
+  return { drop: false, ms: Math.min(heartbeat.timeoutMs, look.due - look.now), movedAt };
+}
+
+type RelaySocket = WebSocket & Pick<Bun.WebSocket, "ping" | "terminate">;
+
 export interface InboxRelayFile {
   v: 1;
   url: string;
   mailbox_id: string;
   secret: string;
-}
-
-/**
- * The body the relay sends to APNs around an envelope, byte for byte as
- * apps/relay/src/apns.ts `apnsBody` writes it: the push is sized against it.
- */
-export function apnsBody(envelope: string): string {
-  return JSON.stringify({ aps: { alert: { title: "Plannotator", body: "New in your Inbox" }, "mutable-content": 1, sound: "default" }, e: envelope });
 }
 
 export function relayUrl(env: NodeJS.ProcessEnv = process.env): string {
@@ -153,42 +198,19 @@ function writeRelayFile(dataDir: string, value: InboxRelayFile): void {
   renameSync(temp, path);
 }
 
-/** The push summary a phone decrypts (section 4, "Push"). */
-interface PushPlaintext {
-  v: 1;
-  /** Pushes and down items share the device key: the reader checks the type, so a relay cannot pass one off as the other. */
-  type: "push";
-  thread_id: string;
-  message_id: string;
-  subject?: string;
-  project?: string;
-  agent?: string;
-  question?: {
-    key: string;
-    revision: number;
-    prompt: string;
-    context: string | null;
-    choices: { label: string; recommended: boolean }[];
-  } | null;
-}
-
-/** The fullest summary whose APNs body fits Apple's 4096 bytes: without the context, then without the question, then ids alone. */
-async function sizedEnvelope(summary: PushPlaintext, key: string): Promise<string> {
-  const { v, type, thread_id, message_id } = summary;
-  const tries: PushPlaintext[] = [summary];
-  if (summary.question?.context) tries.push({ ...summary, question: { ...summary.question, context: null } });
-  if (summary.question) tries.push({ ...summary, question: null });
-  tries.push({ v, type, thread_id, message_id });
-  for (const plaintext of tries) {
-    const envelope = await encryptWithKey(JSON.stringify(plaintext), key);
-    if (Buffer.byteLength(apnsBody(envelope)) <= APNS_BODY_LIMIT) return envelope;
-  }
-  return encryptWithKey(JSON.stringify({ v, type, thread_id, message_id }), key);
-}
-
 interface HelloFrame {
   type: "hello";
-  devices: { device_id: string; cursor: number; carriage: boolean; apns: boolean }[];
+  /** Relay 1.1 and later; absent from 1.0. */
+  version?: unknown;
+  /** `topic` (relay 1.1): the phone registered its app's topic through the 1.1 route. */
+  devices: { device_id: string; cursor: number; carriage: boolean; apns: boolean; topic?: boolean }[];
+}
+
+/** Relay 1.1: a phone started or stopped naming its app's topic. */
+interface TopicFrame {
+  type: "topic";
+  device_id: string;
+  topic: boolean;
 }
 
 interface CarriageFrame {
@@ -212,6 +234,19 @@ interface CommandPlaintext {
   method: string;
   path: string;
   body?: unknown;
+  /** The app's `X-Plannotator-App` words (inbox-door-version.ts); absent from an older app. */
+  app?: unknown;
+  /** An ISO time: the door refuses a first arrival past it (`410 command_expired`), never applied late. */
+  not_after?: unknown;
+}
+
+export { commandTimeRefusal, NOT_AFTER_GRACE_MS } from "./inbox-not-after";
+
+/** A Live Activity update (relay 1.1): counts only, never a name or a word. */
+export interface InboxLiveCounts {
+  working: number;
+  stopped_on_you: number;
+  ended: boolean;
 }
 
 export interface InboxAgentCommandPlaintext {
@@ -234,13 +269,19 @@ export interface InboxRelayContext {
   /** A store line as the event stream's `record` event writes it (`eventPayload` in inbox.ts). */
   payload: (line: InboxLine) => unknown;
   /** Apply a command as a device, in-process through the device door (inbox-devices.ts `asDevice`). */
-  apply: (deviceId: string, command: { method: string; path: string; body?: unknown }) => Promise<Response>;
+  apply: (deviceId: string, command: { method: string; path: string; body?: unknown; app?: unknown; not_after?: unknown }) => Promise<Response>;
   /** Where a new mailbox is made. Default: `relayUrl()`. */
   url?: string;
   /** One line per event, ids and status codes only (the Inbox's log). */
   log?: (line: string) => void;
   phones?: boolean;
   agents?: InboxRelayAgents;
+  /** Timing override for the loopback relay test. */
+  heartbeat?: Partial<typeof RELAY_HEARTBEAT>;
+  /** The list's rows as the window places them (launched sessions decorated): the push's badge and `time_sensitive`. Default: the store's rows. */
+  rows?: () => readonly InboxListRow[];
+  /** The clock `not_after` is read against (tests). */
+  now?: () => number;
 }
 
 export function createInboxRelay(context: InboxRelayContext) {
@@ -254,9 +295,19 @@ export function createInboxRelay(context: InboxRelayContext) {
   let making: Promise<InboxRelayFile | null> | null = null;
   let socket: WebSocket | null = null;
   let retry: ReturnType<typeof setTimeout> | null = null;
+  let heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
+  const heartbeat = { ...RELAY_HEARTBEAT, ...context.heartbeat };
+  /** When every frame sent on this socket could have left at the heartbeat's slowest uplink. */
+  let drainedAt = 0;
+  /** Bun's send queue at the heartbeat's last look, plus what frames sent since added to it. */
+  let queued = 0;
   let delay = RECONNECT_FIRST_MS;
   let stopped = false;
   let reachable: boolean | null = null;
+  /** The relay's version, from the last `hello`; null before the first. */
+  let relayVersion: string | null = null;
+  /** Relay 1.1: the phones whose app registered its topic (from `hello` and `topic` frames); none before the first `hello`. */
+  const topics = new Set<string>();
   let unsubscribe: (() => void) | null = null;
   /** Per phone with carriage on, on this socket: the store seq its items have reached. Cleared on each new socket. */
   const sent = new Map<string, number>();
@@ -329,8 +380,13 @@ export function createInboxRelay(context: InboxRelayContext) {
   };
 
   const onHello = async (frame: HelloFrame): Promise<void> => {
+    const version = typeof frame.version === "string" ? frame.version : RELAY_VERSION_BEFORE_HELLO;
+    if (version !== relayVersion) log(`relay version ${version}`);
+    relayVersion = version;
     log(`hello ${frame.devices.length}`);
     sent.clear();
+    topics.clear();
+    for (const entry of frame.devices) if (entry.topic === true) topics.add(entry.device_id);
     const listed = new Set<string>();
     for (const entry of frame.devices) {
       listed.add(entry.device_id);
@@ -349,11 +405,19 @@ export function createInboxRelay(context: InboxRelayContext) {
     for (const id of sent.keys()) void pump(id);
   };
 
-  const send = (frame: unknown): boolean => {
+  /** Sends one frame on the open socket, and counts its bytes toward when the heartbeat may expect a pong. */
+  const transmit = (frame: string): boolean => {
     if (!socket || socket.readyState !== WebSocket.OPEN) return false;
-    socket.send(JSON.stringify(frame));
+    const before = socket.bufferedAmount;
+    socket.send(frame);
+    // A frame sent now must not read as the queue failing to shrink.
+    queued += socket.bufferedAmount - before;
+    // Frames are JSON around base64 text, so their length is their byte count.
+    drainedAt = Math.max(drainedAt, Date.now()) + frame.length / heartbeat.uplinkBytesPerMs;
     return true;
   };
+
+  const send = (frame: unknown): boolean => transmit(JSON.stringify(frame));
 
   /**
    * One store line's item frame, sealed under the phone's key. `after` is the
@@ -404,8 +468,7 @@ export function createInboxRelay(context: InboxRelayContext) {
             const frame = await recordFrame(deviceId, line, reached, key);
             // A carriage frame moved the cursor meanwhile: start again from it.
             if (sent.get(deviceId) !== reached) continue pass;
-            if (!socket || socket.readyState !== WebSocket.OPEN) return;
-            socket.send(frame);
+            if (!transmit(frame)) return;
             reached = line.seq;
             sent.set(deviceId, reached);
           }
@@ -428,7 +491,7 @@ export function createInboxRelay(context: InboxRelayContext) {
 
   /** The result item for a command, sealed under the phone's key; past the WebSocket message limit, a 413 in its place. */
   const resultFrame = async (deviceId: string, id: string, answer: Response, key: string): Promise<string> => {
-    const seal = (status: number, contentType: string, bytes: Buffer) => sealRelayResult(deviceId, id, status, contentType, bytes, key);
+    const seal = (status: number, contentType: string, bytes: Buffer) => sealRelayResult(deviceId, id, status, contentType, bytes, key, (context.now ?? Date.now)());
     // base64 grows a body by 4/3 before the JSON and the seal: anything over
     // 3/4 of the frame limit can never fit, so it is refused without being
     // read, and a body without a length is read only up to that bound.
@@ -481,7 +544,7 @@ export function createInboxRelay(context: InboxRelayContext) {
         answer = new Response(body, { status: first.status, headers: { "Content-Type": first.headers.get("content-type") ?? "application/json; charset=utf-8" } });
       }
       const item = await resultFrame(frame.device_id, opened.id, answer, keys.key);
-      if (socket && socket.readyState === WebSocket.OPEN) socket.send(item);
+      transmit(item);
     } else {
       log(`agent command ${frame.device_id} refused`);
     }
@@ -501,11 +564,13 @@ export function createInboxRelay(context: InboxRelayContext) {
     const command = opened && opened.id === frame.id ? opened : null;
     if (opened && !command) log(`command ${frame.device_id} refused: its sealed id is not the frame's`);
     if (keys && command) {
-      const answer = await context.apply(frame.device_id, { method: command.method, path: command.path, body: command.body });
+      // Its time is checked by the door, after its key (inbox-devices.ts `claim`): a command already applied replays
+      // its answer however late it comes back (a hello re-sends one never acknowledged); a late first one is 410.
+      const answer = await context.apply(frame.device_id, { method: command.method, path: command.path, body: command.body, app: command.app, not_after: command.not_after });
       log(`command ${frame.device_id} ${command.method} ${answer.status}`);
       if (devices.get(frame.device_id)?.carriage) {
         const item = await resultFrame(frame.device_id, command.id, answer, keys.key);
-        if (socket && socket.readyState === WebSocket.OPEN) socket.send(item);
+        transmit(item);
       }
     } else {
       // Refused the same way whatever the reason: reported applied, so the relay lets it go.
@@ -515,7 +580,7 @@ export function createInboxRelay(context: InboxRelayContext) {
   };
 
   const onFrame = async (text: string): Promise<void> => {
-    let frame: HelloFrame | CarriageFrame | CommandFrame;
+    let frame: HelloFrame | CarriageFrame | CommandFrame | TopicFrame;
     try {
       frame = JSON.parse(text);
     } catch {
@@ -536,31 +601,37 @@ export function createInboxRelay(context: InboxRelayContext) {
       }
     } else if (frame?.type === "command" && typeof frame.device_id === "string" && typeof frame.id === "string" && typeof frame.ciphertext === "string") {
       await onCommand(frame);
+    } else if (frame?.type === "topic" && typeof frame.device_id === "string" && typeof frame.topic === "boolean") {
+      if (frame.topic) topics.add(frame.device_id);
+      else topics.delete(frame.device_id);
+      log(`topic ${frame.device_id} ${frame.topic ? "on" : "off"}`);
     }
   };
 
-  /** The one socket, open while the mailbox has a paired phone; it reconnects when it drops. */
+  const clearHeartbeat = () => {
+    if (heartbeatTimer) clearTimeout(heartbeatTimer);
+    heartbeatTimer = null;
+  };
+
+  /** The one socket, open while the mailbox has a paired device; it reconnects when it drops. */
   const connect = () => {
     if (stopped || socket || retry || !mailbox || served().length === 0) return;
     const url = `${mailbox.url.replace(/^http/, "ws")}${mailboxPath("/socket")}`;
     // Bun's WebSocket takes headers: the Inbox's bearer goes in Authorization, never in the URL.
-    const ws = new WebSocket(url, { headers: { Authorization: `Bearer ${mailbox.secret}` } } as unknown as string[]);
+    const ws = new WebSocket(url, { headers: { Authorization: `Bearer ${mailbox.secret}` } } as unknown as string[]) as RelaySocket;
     socket = ws;
-    let opened = false;
-    ws.onopen = () => {
-      opened = true;
-      reachable = true;
-    };
-    ws.onmessage = (event) => {
-      if (typeof event.data !== "string") return;
-      const text = event.data;
-      frames = frames.then(() => (socket === ws ? onFrame(text) : undefined)).catch((error) => log(`frame failed: ${error instanceof Error ? error.message : String(error)}`));
-    };
-    ws.onclose = () => {
+    drainedAt = 0;
+    let awaiting: Buffer | null = null;
+    const dropped = (reason?: string) => {
       if (socket !== ws) return;
-      if (!opened) reachable = false;
+      clearHeartbeat();
       socket = null;
       sent.clear();
+      reachable = false;
+      if (reason) {
+        log(reason);
+        ws.terminate();
+      }
       if (stopped || served().length === 0) return;
       retry = setTimeout(() => {
         retry = null;
@@ -568,68 +639,156 @@ export function createInboxRelay(context: InboxRelayContext) {
       }, delay);
       delay = Math.min(delay * 2, RECONNECT_LAST_MS);
     };
+    const awaitPong = (due: number, movedAt: number, ms: number) => {
+      heartbeatTimer = setTimeout(() => {
+        if (socket !== ws) return;
+        const left = ws.bufferedAmount;
+        const next = heartbeatLook({ now: Date.now(), left, queued, movedAt, due }, heartbeat);
+        queued = left;
+        if (next.drop) dropped("socket heartbeat timed out");
+        else awaitPong(due, next.movedAt, next.ms);
+      }, ms);
+    };
+    const schedulePing = () => {
+      heartbeatTimer = setTimeout(() => {
+        if (socket !== ws || ws.readyState !== WebSocket.OPEN) return;
+        // Cloudflare answers protocol pings without waking the mailbox or changing its wire format.
+        awaiting = randomBytes(8);
+        ws.ping(awaiting);
+        queued = ws.bufferedAmount;
+        // The ping waits behind every frame already sent: its pong is due once those could have left.
+        const now = Date.now();
+        awaitPong(Math.max(now, drainedAt) + heartbeat.timeoutMs, now, heartbeat.timeoutMs);
+      }, heartbeat.intervalMs);
+    };
+    ws.onopen = () => {
+      if (socket !== ws) return;
+      reachable = true;
+      schedulePing();
+    };
+    ws.addEventListener("pong", (event) => {
+      if (socket !== ws || !awaiting || !(event instanceof MessageEvent)) return;
+      if (!Buffer.isBuffer(event.data) || !awaiting.equals(event.data)) return;
+      awaiting = null;
+      clearHeartbeat();
+      schedulePing();
+    });
+    ws.onmessage = (event) => {
+      if (typeof event.data !== "string") return;
+      const text = event.data;
+      frames = frames.then(() => (socket === ws ? onFrame(text) : undefined)).catch((error) => log(`frame failed: ${error instanceof Error ? error.message : String(error)}`));
+    };
+    ws.onerror = () => dropped("socket error");
+    ws.onclose = () => dropped();
   };
 
   const disconnect = () => {
     if (retry) clearTimeout(retry);
     retry = null;
+    clearHeartbeat();
     const ws = socket;
     socket = null;
     ws?.close(1000, "closed");
   };
 
   /**
-   * One push per phone whose switch is on, for an agent's message with a
-   * question or a guided review, or one that superseded earlier questions
-   * (replaced questions). Pushes collapse per thread, so a withdrawal that
-   * asks nothing new still pushes (with `question: null`, no answer actions)
-   * to replace the older notification and its lock-screen answers.
+   * One push per phone whose switch is on, for an agent's message that
+   * notifies (inbox-relay-push.ts: a question, a guided review, a permission
+   * prompt, a failed turn, a new thread, or replaced questions). Pushes
+   * collapse per thread, so a withdrawal that asks nothing new still pushes
+   * (`kind: "replaced"`, `question: null`, no answer actions) to replace the
+   * older notification and its lock-screen answers. A snoozed thread pushes
+   * nothing.
    */
   const pushFor = async (messageId: string): Promise<void> => {
     const message = store.message(messageId);
-    if (!mailbox || !message) return;
-    const questions = store.questionsOf(messageId);
-    const supersedes = store.supersededBy(messageId).length > 0;
-    if (questions.length === 0 && !message.guide && !supersedes) return;
-    // Only an open question is ever offered for a lock-screen answer (an action item, `kind: "action"`, pushes like one but has no lock-screen Done).
-    const open = questions.filter((q) => q.state === "open" && q.kind !== "action");
-    const only = open.length === 1 ? open[0]! : null;
-    const summary: PushPlaintext = {
-      v: 1,
-      type: "push",
-      thread_id: message.thread_id,
-      message_id: message.id,
-      subject: store.threadSubject(message.thread_id) ?? displayInboxSubject(message.subject) ?? "",
-      project: store.project(message.project_id)?.name ?? "",
-      agent: inboxAgentName(message.author),
-      // Apple shows at most four actions: one single-choice question with up to four choices is answered from the lock screen.
-      question:
-        only && only.kind === "single" && only.choices.length > 0 && only.choices.length <= 4
-          ? {
-              key: only.key,
-              revision: only.revision,
-              prompt: only.prompt,
-              context: only.context || null,
-              choices: only.choices.map((choice) => ({ label: choice.label, recommended: choice.recommended })),
-            }
-          : null,
-    };
-    if (!phonesOn) return;
-    for (const device of devices.list()) {
-      if (!device.carriage || device.platform === AGENT_PLATFORM) continue;
+    if (!mailbox || !message || !phonesOn) return;
+    // The phones that take pushes, first: with none, nothing more is read.
+    const phones = devices.list().filter((device) => device.carriage && device.platform !== AGENT_PLATFORM && devices.secret(device.id) !== null);
+    if (phones.length === 0) return;
+    // A kind push 2 added goes only to a phone whose app registered its topic through relay 1.1 (a phone in use before keeps its pushes as they were).
+    const takes = (deviceId: string, kind: InboxPushKind | undefined) => !kind || !INBOX_PUSH_KINDS_FOR_NEW_APPS.has(kind) || topics.has(deviceId);
+    const summary = inboxPushSummary(store, messageId, context.rows ?? (() => store.listRows()), (kind) => phones.some((device) => takes(device.id, kind)));
+    if (!summary) return;
+    for (const device of phones) {
+      if (!takes(device.id, summary.kind)) continue;
       const secret = devices.secret(device.id);
       if (!secret) continue;
       try {
         const { key, collapseKey } = await deriveRelayKeys(secret, device.id);
-        const ciphertext = await sizedEnvelope(summary, key);
+        const ciphertext = await sizedPushEnvelope(summary, key);
         // The collapse id: the thread id under the phone's collapse key (its own HKDF label, never the envelope key), so a thread's newer push replaces its older one and the relay never learns the thread.
-        const collapseId = createHmac("sha256", Buffer.from(collapseKey, "base64url")).update(message.thread_id).digest("hex");
+        const collapseId = await inboxPushCollapseId(collapseKey, message.thread_id);
         const answer = await call("POST", mailboxPath("/push"), mailbox.secret, { device_id: device.id, collapse_id: collapseId, ciphertext });
         const result = (await answer.json().catch(() => ({}))) as { reason?: string; code?: string };
         log(`push ${message.id} ${device.id} ${answer.status}${result.reason ? ` ${result.reason}` : result.code ? ` ${result.code}` : ""}`);
       } catch (error) {
         log(`push ${message.id} ${device.id} failed: ${error instanceof Error ? error.name : "error"}`);
       }
+    }
+  };
+
+  /**
+   * A Live Activity update to one phone (relay 1.1): counts only, in the
+   * clear, since no extension opens it. Sent only to a relay whose `hello`
+   * said 1.1 or later; to a 1.0 relay it is not sent (`relay_too_old`).
+   */
+  const live = async (deviceId: string, counts: InboxLiveCounts, event: "update" | "end" = "update"): Promise<string> => {
+    if (!mailbox || !phonesOn) return "no_relay";
+    if (relayVersion === null || relayVersion === RELAY_VERSION_BEFORE_HELLO) return "relay_too_old";
+    const body = {
+      device_id: deviceId,
+      kind: "live",
+      live: { timestamp: Math.floor((context.now ?? Date.now)() / 1000), event, "content-state": { working: counts.working, stopped_on_you: counts.stopped_on_you, ended: counts.ended } },
+    };
+    try {
+      const answer = await call("POST", mailboxPath("/push"), mailbox.secret, body);
+      const result = (await answer.json().catch(() => ({}))) as { sent?: boolean; reason?: string; code?: string };
+      log(`live ${deviceId} ${answer.status}${result.reason ? ` ${result.reason}` : result.code ? ` ${result.code}` : ""}`);
+      return result.sent === true ? "sent" : (result.reason ?? result.code ?? String(answer.status));
+    } catch (error) {
+      log(`live ${deviceId} failed: ${error instanceof Error ? error.name : "error"}`);
+      return "failed";
+    }
+  };
+
+  // ── A snoozed thread coming back pushes as the window notifies for it (notify.ts `returnedItems`): once per
+  // return, when it has a question open. A return that came while this Inbox was not running does not push.
+  /** Returns already handled, `<thread>:<until>`. */
+  const returned = new Set<string>();
+  let snoozeTimer: ReturnType<typeof setTimeout> | null = null;
+  let unsubscribeSnoozes: (() => void) | null = null;
+  /** A timer never waits longer than this: a clock moved or a machine asleep is caught at the next look. */
+  const SNOOZE_LOOK_MAX_MS = 60 * 60 * 1000;
+
+  const pushReturn = (threadId: string) => {
+    const messages = store.thread(threadId)?.messages ?? [];
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const message = messages[i]!;
+      if (message.author.kind !== "agent" || !store.questionsOf(message.id).some((q) => q.state === "open")) continue;
+      void pushFor(message.id);
+      return;
+    }
+  };
+
+  const lookAtSnoozes = (push: boolean) => {
+    if (snoozeTimer) clearTimeout(snoozeTimer);
+    snoozeTimer = null;
+    if (stopped) return;
+    const now = (context.now ?? Date.now)();
+    let next = Number.POSITIVE_INFINITY;
+    for (const snooze of store.snoozes()) {
+      const at = Date.parse(snooze.until);
+      const key = `${snooze.thread_id}:${snooze.until}`;
+      if (at > now) next = Math.min(next, at);
+      else if (!returned.has(key)) {
+        returned.add(key);
+        if (push) pushReturn(snooze.thread_id);
+      }
+    }
+    if (Number.isFinite(next)) {
+      snoozeTimer = setTimeout(() => lookAtSnoozes(true), Math.min(next - now, SNOOZE_LOOK_MAX_MS));
+      (snoozeTimer as { unref?: () => void }).unref?.();
     }
   };
 
@@ -657,22 +816,29 @@ export function createInboxRelay(context: InboxRelayContext) {
       if (served().length === 0) disconnect();
     },
     signal,
+    live,
+    /** The relay's version from its last `hello` ("1.0" for a relay that names none); null before the first. */
+    relayVersion: (): string | null => relayVersion,
     reachable: (): boolean | null => (served().some((device) => device.platform === AGENT_PLATFORM && device.revoked_at === null) ? reachable : null),
     start(): void {
       unsubscribe = store.subscribe((line) => {
         // Every line goes down to each phone this socket is carrying.
         for (const id of sent.keys()) void pump(id);
         if (context.agents && mailbox) for (const id of context.agents.signalsFor(line)) void signal(id);
-        // A message's first line: `at` is its `created_at`. Its questions are written in the same turn, so they are read after it.
+        // A message's first line: `at` is its `created_at`. Its questions are written in the same turn, so they are read after it (as is a permission prompt's end of a snooze).
         if (line.kind !== "message" || line.record.author.kind !== "agent" || line.at !== line.record.created_at) return;
         const id = line.record.id;
         queueMicrotask(() => void pushFor(id));
       });
+      lookAtSnoozes(false);
+      unsubscribeSnoozes = store.onSnoozesChange(() => lookAtSnoozes(true));
       connect();
     },
     stop(): void {
       stopped = true;
       unsubscribe?.();
+      unsubscribeSnoozes?.();
+      if (snoozeTimer) clearTimeout(snoozeTimer);
       disconnect();
     },
   };

@@ -3,9 +3,9 @@
  * name where the project sits), the run is the subject ("Run 9"). A running run shows the Running pill with the dots;
  * only a run that didn't finish (or didn't start) gets the warn mark.
  *
- * The list row carries nothing that says a thread is a routine's, so this reads this computer's own list and
- * matches by thread. A row from another linked machine stays an ordinary row (UI-NEEDS.md names the row field that
- * would let it look the same).
+ * The list row carries nothing that says a thread is a routine's, so this reads the routines' list and matches by
+ * thread: this computer's routines and every linked computer's (the merged read), so a linked computer's routine row
+ * looks the same, Running included. Thread ids are ULIDs, so a thread id names one computer's thread.
  */
 import type { InboxListRow } from '@plannotator/core/inbox-types';
 import type { InboxScheduledRow } from '@plannotator/core/inbox-scheduled-types';
@@ -23,16 +23,19 @@ const marks = new WeakMap<InboxListRow, RowScheduled>();
 const looks = new WeakMap<InboxListRow, { from: InboxScheduledRow; look: InboxListRow }>();
 const TIME = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
 const CHANGED = { create: 'Made', update: 'Changed', on: 'Turned on', off: 'Turned off', run: 'Run', delete: 'Deleted' } as const;
+/** A routine's computer (`machine`, absent for this one) is the row's (`machine`, absent or this one's id). */
+const sameComputer = (s: InboxScheduledRow, row: InboxListRow) => (s.machine ?? null) === (row.machine && row.machine !== selfMachineId() ? row.machine : null);
 
-/** The row as the list draws it: unchanged unless it is one of this computer's routines. */
+/** The row as the list draws it: unchanged unless it is a routine's thread, on this computer or a linked one. */
 export function scheduledLook(row: InboxListRow, scheduled: readonly InboxScheduledRow[] | null): InboxListRow {
-  if (!scheduled || scheduled.length === 0 || (row.machine && row.machine !== selfMachineId())) return row;
-  const from = scheduled.find((s) => s.thread_id === row.thread_id);
+  if (!scheduled || scheduled.length === 0) return row;
+  const from = scheduled.find((s) => s.thread_id === row.thread_id && sameComputer(s, row));
   if (!from) return row;
   const had = looks.get(row);
   if (had?.from === from) return had.look;
   const last = from.last_run;
-  const running = from.state === 'running';
+  // A linked computer that is away says no running time (store.ts lastKnownRows): no Running claimed for it.
+  const running = from.state === 'running' && !!from.running_since;
   const failed = !running && (last?.outcome === 'didnt_finish' || last?.outcome === 'didnt_start');
   const run = last?.run ?? null;
   // An agent's change line is the thread's latest: the row says that change, not the run.

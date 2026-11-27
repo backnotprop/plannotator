@@ -1,0 +1,510 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		59B32D5A7D0500B807B8DEB0 /* InboxStandIn in Frameworks */ = {isa = PBXBuildFile; productRef = 72C0A51338AA2D82D5F3BE79 /* InboxStandIn */; };
+		ECC136CB43A28A82797CB1D8 /* Tokens.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = CBF3B2284232045A83451CD0 /* Tokens.xcassets */; };
+		ED3AB375310A0BAE2DAEDB48 /* InboxCore in Frameworks */ = {isa = PBXBuildFile; productRef = 657D8B55611F94C2AB78856C /* InboxCore */; };
+		FC1982707B140D25EF181709 /* AgentMarks.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 0D3BBB2971A094387C2A6BFB /* AgentMarks.xcassets */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		A6A1975F40D7082AD3D30B0F /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 9398F3CF22EFE9377D78345C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 93EEFDDCC5A5E543F9110F1A;
+			remoteInfo = PlannotatorInbox;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		0D3BBB2971A094387C2A6BFB /* AgentMarks.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = AgentMarks.xcassets; sourceTree = "<group>"; };
+		3A5587B5F75C971D6F775EB3 /* InboxCore */ = {isa = PBXFileReference; lastKnownFileType = folder; name = InboxCore; path = InboxCore; sourceTree = SOURCE_ROOT; };
+		CBF3B2284232045A83451CD0 /* Tokens.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Tokens.xcassets; path = ../contract/generated/swift/Tokens.xcassets; sourceTree = "<group>"; };
+		D7D02B77C209F07F462237F8 /* PlannotatorInboxUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PlannotatorInboxUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		DC93F1FEA4DB75ED54A1F63D /* App.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = App.xcconfig; sourceTree = "<group>"; };
+		DF31C7C23C493477CB2577F3 /* PlannotatorInbox.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = PlannotatorInbox.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		314B5807E439DB1164E326EF /* UITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			explicitFileTypes = {
+			};
+			explicitFolders = (
+			);
+			path = UITests;
+			sourceTree = "<group>";
+		};
+		F1E5676A666ED074A2B710FC /* Sources */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			explicitFileTypes = {
+			};
+			explicitFolders = (
+			);
+			name = Sources;
+			path = Sources;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		79F37729132600D5450F7CEF /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				ED3AB375310A0BAE2DAEDB48 /* InboxCore in Frameworks */,
+				59B32D5A7D0500B807B8DEB0 /* InboxStandIn in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		20A2AB1CF6CE21F0F14F3D60 /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				3A5587B5F75C971D6F775EB3 /* InboxCore */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
+		2F9222A57E68C56F41C7DFA5 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				0D3BBB2971A094387C2A6BFB /* AgentMarks.xcassets */,
+				F1E5676A666ED074A2B710FC /* Sources */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		49406BF10B532433FCA900A6 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				DF31C7C23C493477CB2577F3 /* PlannotatorInbox.app */,
+				D7D02B77C209F07F462237F8 /* PlannotatorInboxUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		570D2084F597112A52D6F839 /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				DC93F1FEA4DB75ED54A1F63D /* App.xcconfig */,
+			);
+			path = Config;
+			sourceTree = "<group>";
+		};
+		8A8D92846FF12464DF834A29 /* Contract */ = {
+			isa = PBXGroup;
+			children = (
+				CBF3B2284232045A83451CD0 /* Tokens.xcassets */,
+			);
+			name = Contract;
+			sourceTree = "<group>";
+		};
+		CC120A57DFF37555AE148015 = {
+			isa = PBXGroup;
+			children = (
+				2F9222A57E68C56F41C7DFA5 /* App */,
+				570D2084F597112A52D6F839 /* Config */,
+				8A8D92846FF12464DF834A29 /* Contract */,
+				20A2AB1CF6CE21F0F14F3D60 /* Packages */,
+				314B5807E439DB1164E326EF /* UITests */,
+				49406BF10B532433FCA900A6 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		93EEFDDCC5A5E543F9110F1A /* PlannotatorInbox */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 63DAF7AB1FDC41D6E6AC8EB0 /* Build configuration list for PBXNativeTarget "PlannotatorInbox" */;
+			buildPhases = (
+				7614DEB7D3B1C0308B536851 /* Sources */,
+				BA4688F71BA46B8C0FAE233F /* Resources */,
+				79F37729132600D5450F7CEF /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				F1E5676A666ED074A2B710FC /* Sources */,
+			);
+			name = PlannotatorInbox;
+			packageProductDependencies = (
+				657D8B55611F94C2AB78856C /* InboxCore */,
+				72C0A51338AA2D82D5F3BE79 /* InboxStandIn */,
+			);
+			productName = PlannotatorInbox;
+			productReference = DF31C7C23C493477CB2577F3 /* PlannotatorInbox.app */;
+			productType = "com.apple.product-type.application";
+		};
+		97B8C5D65EA2EC7A24C70E69 /* PlannotatorInboxUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 29B8362DE48CDFAFF4E8234E /* Build configuration list for PBXNativeTarget "PlannotatorInboxUITests" */;
+			buildPhases = (
+				E35E562554394A5E6217DB16 /* Sources */,
+				BA6DEC1EA3E4C1E8E59AFEA4 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				F3B88F2D452EF3366BB60A71 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				314B5807E439DB1164E326EF /* UITests */,
+			);
+			name = PlannotatorInboxUITests;
+			packageProductDependencies = (
+			);
+			productName = PlannotatorInboxUITests;
+			productReference = D7D02B77C209F07F462237F8 /* PlannotatorInboxUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		9398F3CF22EFE9377D78345C /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					93EEFDDCC5A5E543F9110F1A = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+					97B8C5D65EA2EC7A24C70E69 = {
+						DevelopmentTeam = "";
+						TestTargetID = 93EEFDDCC5A5E543F9110F1A;
+					};
+				};
+			};
+			buildConfigurationList = 844BA860701202AAC277F55A /* Build configuration list for PBXProject "PlannotatorInbox" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = CC120A57DFF37555AE148015;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				2F18CABE06A9B3C38F716D8F /* XCLocalSwiftPackageReference "InboxCore" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 49406BF10B532433FCA900A6 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				93EEFDDCC5A5E543F9110F1A /* PlannotatorInbox */,
+				97B8C5D65EA2EC7A24C70E69 /* PlannotatorInboxUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		BA4688F71BA46B8C0FAE233F /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				FC1982707B140D25EF181709 /* AgentMarks.xcassets in Resources */,
+				ECC136CB43A28A82797CB1D8 /* Tokens.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		BA6DEC1EA3E4C1E8E59AFEA4 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		7614DEB7D3B1C0308B536851 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E35E562554394A5E6217DB16 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		F3B88F2D452EF3366BB60A71 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 93EEFDDCC5A5E543F9110F1A /* PlannotatorInbox */;
+			targetProxy = A6A1975F40D7082AD3D30B0F /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		58A50AA04FDCEFB2B9659094 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "$(APP_BUNDLE_ID).uitests";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = PlannotatorInbox;
+			};
+			name = Release;
+		};
+		B7B5CAEC238FC3C82CE404FC /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = DC93F1FEA4DB75ED54A1F63D /* App.xcconfig */;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		C8FDE2A0A83DF99E99347F03 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = "";
+				ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOLS = NO;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				INFOPLIST_FILE = App/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "$(APP_BUNDLE_ID)";
+				PRODUCT_NAME = Plannotator;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		CBF2AA7FF1EC3E21BF6BBAE0 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = DC93F1FEA4DB75ED54A1F63D /* App.xcconfig */;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		FB4AA54DEF443766BBAE7087 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "$(APP_BUNDLE_ID).uitests";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = PlannotatorInbox;
+			};
+			name = Debug;
+		};
+		FC6731E6CEA0D6E8580242A7 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = "";
+				ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOLS = NO;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				INFOPLIST_FILE = App/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "$(APP_BUNDLE_ID)";
+				PRODUCT_NAME = Plannotator;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		29B8362DE48CDFAFF4E8234E /* Build configuration list for PBXNativeTarget "PlannotatorInboxUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				FB4AA54DEF443766BBAE7087 /* Debug */,
+				58A50AA04FDCEFB2B9659094 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		63DAF7AB1FDC41D6E6AC8EB0 /* Build configuration list for PBXNativeTarget "PlannotatorInbox" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				FC6731E6CEA0D6E8580242A7 /* Debug */,
+				C8FDE2A0A83DF99E99347F03 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		844BA860701202AAC277F55A /* Build configuration list for PBXProject "PlannotatorInbox" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B7B5CAEC238FC3C82CE404FC /* Debug */,
+				CBF2AA7FF1EC3E21BF6BBAE0 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		2F18CABE06A9B3C38F716D8F /* XCLocalSwiftPackageReference "InboxCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = InboxCore;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		657D8B55611F94C2AB78856C /* InboxCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = InboxCore;
+		};
+		72C0A51338AA2D82D5F3BE79 /* InboxStandIn */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = InboxStandIn;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 9398F3CF22EFE9377D78345C /* Project object */;
+}

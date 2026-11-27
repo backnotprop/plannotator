@@ -130,7 +130,8 @@ describe("a thread note quoting an agent", () => {
     const note = { author: { host: "fake-agent", session: "s1", name: "Fake Agent" }, body: "It failed.", key: "note-1" };
     writeLaunchNote({ store, onChange: () => changed.push("changed") }, root, note, (line) => lines.push(line));
     const written = store.message(store.threadMessageIds(root.thread_id).at(-1)!)!;
-    expect(written).toMatchObject({ body: "It failed.", reply_to: second.id, author: { kind: "agent", session: "s1" } });
+    // Marked as the Inbox's own note, so the sound never rings for it (the window's notify.ts).
+    expect(written).toMatchObject({ body: "It failed.", reply_to: second.id, author: { kind: "agent", session: "s1" }, launch_note: true });
     expect(changed).toEqual(["changed"]);
 
     const broken = { sendMessage: () => { throw new Error("the disk is full"); }, threadMessageIds: () => [] } as unknown as InboxStore;
@@ -912,5 +913,15 @@ describe("the Inbox list's Hide: what counts as an agent's new activity (attenti
     await post(launchId, "stop");
     expect(await launch.runOf(root.id)).toMatchObject({ state: "stopped", stopped_by_person: true });
     expect(launch.attentionSince()(root.thread_id)).toBeNull();
+  });
+});
+
+describe("each login read reaches the hosts", () => {
+  test("a host with loginRead gets the whole env of every login read the engine makes", async () => {
+    const seen: Record<string, string>[] = [];
+    const t = setup({ adapt: (host) => Object.assign(host, { loginRead: (login: Record<string, string>) => seen.push({ ...login }) }) });
+    await t.context().loginEnv();
+    expect(t.logins.count).toBe(1);
+    expect(seen).toEqual([{ HOME: t.home, PATH: "", FAKE_LOGIN: "yes" }]);
   });
 });

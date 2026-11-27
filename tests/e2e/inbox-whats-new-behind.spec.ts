@@ -21,7 +21,7 @@ import { execSync, spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { dirname, join, resolve } from 'node:path';
-import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
+import { E2E_GROUP_TIP_SEEN, inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
 
 const repo = resolve(__dirname, '../..');
@@ -76,6 +76,7 @@ test.beforeAll(async () => {
       favicon: 'glass',
       // The "themes" dialog (after the tab icon dialog, ahead of the offers): settled, as for someone on another theme.
       inboxThemeChooser: { notNeededAt: '2026-10-01T10:00:00.000Z' },
+      inboxReveals: { ...E2E_GROUP_TIP_SEEN },
     }),
   );
   const bun = realpathSync(process.env.BUN_BINARY ?? execSync('command -v bun').toString().trim());

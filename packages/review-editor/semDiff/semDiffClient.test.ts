@@ -157,7 +157,7 @@ describe('semantic diff client', () => {
 
   test('gives up after the cutoff and replaces the stuck worker', async () => {
     const log = { created: 0, terminated: 0 };
-    const client = createSemDiffClient({ advert, origin: 'http://127.0.0.1:1', createWorker: fakeWorker('hang', log), timeoutMs: 30 });
+    const client = createSemDiffClient({ advert, origin: 'http://127.0.0.1:1', createWorker: fakeWorker('hang', log), timeoutMs: 30, coldTimeoutMs: 30 });
     expect(await client.diff('src/users.ts', before, moved)).toBeNull();
     expect(log.terminated).toBe(1);
     expect((await client.attempt('src/users.ts', before, moved)).failed).toBe(true);
@@ -167,7 +167,7 @@ describe('semantic diff client', () => {
 
   test('one file that stalls the worker fails alone; the files queued behind it still get their answers', async () => {
     const log = { created: 0, terminated: 0 };
-    const client = createSemDiffClient({ advert, origin: 'http://127.0.0.1:1', createWorker: fakeWorker('stuck-on-big', log), timeoutMs: 200 });
+    const client = createSemDiffClient({ advert, origin: 'http://127.0.0.1:1', createWorker: fakeWorker('stuck-on-big', log), timeoutMs: 200, coldTimeoutMs: 200 });
     const big = client.attempt('src/big.ts', before, moved);
     const others = [client.attempt('src/a.ts', before, moved), client.attempt('src/b.ts', before, `${moved}\n`)];
     expect((await big).failed).toBe(true);
@@ -329,4 +329,182 @@ describe('a moved method is named by itself, not its class, in every language', 
     expect(shortName('greet(x)')).toBe('greet(x)');
     expect(shortName('return foo(x);', 'A.java')).toBe('return foo(x);');
   });
+});
+
+test('a slow first answer while the engine and its grammar arrive is not a failure; a warm engine that stalls still is', async () => {
+  const timers: ReturnType<typeof setTimeout>[] = [];
+  const replyAfter = (ms: number) => () =>
+    ({
+      onmessage: null as ((e: MessageEvent<SemDiffReply>) => void) | null,
+      onerror: null,
+      postMessage(request: SemDiffRequest) {
+        timers.push(setTimeout(() => this.onmessage?.({ data: { id: request.id, ok: true, semanticOperations: [], semanticFolds: [], patch: '' } } as MessageEvent<SemDiffReply>), ms));
+      },
+      terminate() {},
+    }) as unknown as Worker;
+  const client = createSemDiffClient({ advert, origin: 'http://x', createWorker: replyAfter(120), timeoutMs: 30, coldTimeoutMs: 400 });
+  expect(await client.attempt('a.ts', 'const a = 1;\n', 'const a = 2;\n')).toEqual({ result: null, failed: false });
+  expect((await client.attempt('b.ts', 'const b = 1;\n', 'const b = 2;\n')).failed).toBe(true);
+  client.dispose();
+  for (const timer of timers) clearTimeout(timer);
+});
+
+test('after a stalled file replaces a warm worker, the files queued behind it get the cold limit on the new one', async () => {
+  const timers: ReturnType<typeof setTimeout>[] = [];
+  let made = 0;
+  const createWorker = () => {
+    const n = ++made;
+    let stuck = false;
+    return {
+      onmessage: null as ((e: MessageEvent<SemDiffReply>) => void) | null,
+      onerror: null,
+      postMessage(request: SemDiffRequest) {
+        if (stuck || request.path.includes('big')) {
+          stuck = true;
+          return;
+        }
+        timers.push(setTimeout(() => this.onmessage?.({ data: { id: request.id, ok: true, semanticOperations: [], semanticFolds: [], patch: '' } } as MessageEvent<SemDiffReply>), n === 1 ? 0 : 120));
+      },
+      terminate() {},
+    } as unknown as Worker;
+  };
+  const client = createSemDiffClient({ advert, origin: 'http://x', createWorker, timeoutMs: 30, coldTimeoutMs: 400 });
+  expect((await client.attempt('a.ts', 'const a = 1;\n', 'const a = 2;\n')).failed).toBe(false);
+  const big = client.attempt('big.ts', 'const b = 1;\n', 'const b = 2;\n');
+  const after = client.attempt('c.ts', 'const c = 1;\n', 'const c = 2;\n');
+  expect((await big).failed).toBe(true);
+  expect((await after).failed).toBe(false);
+  expect(made).toBe(2);
+  client.dispose();
+  for (const timer of timers) clearTimeout(timer);
+});
+
+test('a language whose cold start timed out twice gets only the warm limit after that, and once is not enough', async () => {
+  const hang = () => ({ onmessage: null, onerror: null, postMessage() {}, terminate() {} }) as unknown as Worker;
+  const client = createSemDiffClient({ advert, origin: 'http://x', createWorker: hang, timeoutMs: 30, coldTimeoutMs: 400 });
+  const started = Date.now();
+  const first = client.attempt('a.ts', 'const a = 1;\n', 'const a = 2;\n');
+  const second = client.attempt('b.ts', 'const b = 1;\n', 'const b = 2;\n');
+  const order: string[] = [];
+  await first.then(() => order.push('first'));
+  const firstAt = Date.now() - started;
+  await second.then(() => order.push('second'));
+  expect(Date.now() - started - firstAt).toBeGreaterThan(200);
+  const third = client.attempt('c.ts', 'const c = 1;\n', 'const c = 2;\n');
+  const stop = new Promise<string>((resolve) => {
+    const timer = setTimeout(() => resolve('cold again'), 300);
+    void third.then(() => {
+      clearTimeout(timer);
+      resolve('warm limit');
+    });
+  });
+  expect(await stop).toBe('warm limit');
+  expect(order).toEqual(['first', 'second']);
+  client.dispose();
+});
+
+test('an engine that answered at all, even with an error, is warm: a stall after it gets the warm limit', async () => {
+  let answered = false;
+  const createWorker = () =>
+    ({
+      onmessage: null as ((e: MessageEvent<SemDiffReply>) => void) | null,
+      onerror: null,
+      postMessage(request: SemDiffRequest) {
+        if (answered) return;
+        answered = true;
+        queueMicrotask(() => this.onmessage?.({ data: { id: request.id, ok: false, error: 'boom' } } as MessageEvent<SemDiffReply>));
+      },
+      terminate() {},
+    }) as unknown as Worker;
+  const client = createSemDiffClient({ advert, origin: 'http://x', createWorker, timeoutMs: 30, coldTimeoutMs: 600 });
+  expect((await client.attempt('a.ts', 'const a = 1;\n', 'const a = 2;\n')).failed).toBe(true);
+  const stalled = client.attempt('b.ts', 'const b = 1;\n', 'const b = 2;\n');
+  const outcome = await new Promise<string>((resolve) => {
+    const timer = setTimeout(() => resolve('cold limit'), 300);
+    void stalled.then(() => {
+      clearTimeout(timer);
+      resolve('warm limit');
+    });
+  });
+  expect(outcome).toBe('warm limit');
+  client.dispose();
+});
+
+test('the cold limit starts when the engine and its grammar have arrived, so a slow download is not a stall and is not started again', async () => {
+  const timers: ReturnType<typeof setTimeout>[] = [];
+  let made = 0;
+  const createWorker = () => {
+    made++;
+    return {
+      onmessage: null as ((e: MessageEvent<unknown>) => void) | null,
+      onerror: null,
+      postMessage(request: SemDiffRequest) {
+        const say = (data: unknown, ms: number) => timers.push(setTimeout(() => this.onmessage?.({ data } as MessageEvent<unknown>), ms));
+        say({ download: 'start', language: 'typescript' }, 0);
+        say({ download: 'done', language: 'typescript' }, 150);
+        say({ id: request.id, ok: true, semanticOperations: [], semanticFolds: [], patch: '' }, 180);
+      },
+      terminate() {},
+    } as unknown as Worker;
+  };
+  const client = createSemDiffClient({ advert, origin: 'http://x', createWorker, timeoutMs: 30, coldTimeoutMs: 60 });
+  expect(await client.attempt('a.ts', 'const a = 1;\n', 'const a = 2;\n')).toEqual({ result: null, failed: false });
+  expect(made).toBe(1);
+  client.dispose();
+  for (const timer of timers) clearTimeout(timer);
+});
+
+test('a grammar download that never ends gives up after its bound: that language falls back to the plain diff without starting it again, other languages still answer', async () => {
+  // The client's own timers only, on a clock this test fires: a real 40 ms bound raced the test's awaits on a loaded runner,
+  // and a patched global setTimeout also counted timers that other code in the same process started meanwhile.
+  const live = new Map<number, { fn: () => void; ms: number }>();
+  let nextTimer = 1;
+  const timers = {
+    set: (fn: () => void, ms: number) => {
+      const id = nextTimer++;
+      live.set(id, { fn, ms });
+      return id;
+    },
+    clear: (timer: unknown) => {
+      live.delete(timer as number);
+    },
+  };
+  let made = 0;
+  const posted: string[] = [];
+  const createWorker = () => {
+    made++;
+    return {
+      onmessage: null as ((e: MessageEvent<unknown>) => void) | null,
+      onerror: null,
+      postMessage(request: SemDiffRequest) {
+        posted.push(request.path);
+        const say = (data: unknown) => queueMicrotask(() => this.onmessage?.({ data } as MessageEvent<unknown>));
+        if (request.path.endsWith('.tsx')) say({ id: request.id, ok: true, semanticOperations: [], semanticFolds: [], patch: '' });
+        else say({ download: 'start', language: 'typescript' });
+      },
+      terminate() {},
+    } as unknown as Worker;
+  };
+  const client = createSemDiffClient({ advert, origin: 'http://x', createWorker, timeoutMs: 30, coldTimeoutMs: 60_000, downloadTimeoutMs: 40, timers });
+  let settled = 0;
+  const first = client.attempt('a.ts', 'const a = 1;\n', 'const a = 2;\n');
+  const second = client.attempt('b.ts', 'const b = 1;\n', 'const b = 2;\n');
+  void first.then(() => settled++);
+  void second.then(() => settled++);
+  const other = client.attempt('c.tsx', 'const c = 1;\n', 'const c = 2;\n');
+  expect(await other).toEqual({ result: null, failed: false });
+  // While the download runs, the only bound left is the download's own (the cold limit waits for the grammar).
+  expect([...live.values()].map((t) => t.ms)).toEqual([40]);
+  expect(settled).toBe(0);
+  const [[bound, { fn }]] = [...live];
+  live.delete(bound);
+  fn();
+  expect(await first).toEqual({ result: null, failed: true });
+  expect(await second).toEqual({ result: null, failed: true });
+  expect(await client.attempt('d.ts', 'const d = 1;\n', 'const d = 2;\n')).toEqual({ result: null, failed: true });
+  expect(await client.attempt('e.tsx', 'const e = 1;\n', 'const e = 2;\n')).toEqual({ result: null, failed: false });
+  expect(made).toBe(1);
+  expect(posted).toEqual(['a.ts', 'b.ts', 'c.tsx', 'e.tsx']);
+  client.dispose();
+  expect(live.size).toBe(0);
 });

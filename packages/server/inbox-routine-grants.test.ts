@@ -72,8 +72,8 @@ describe("what mints a grant", () => {
     expect(ownBlock).toContain("--- BEGIN SKILL INSTRUCTIONS: create-routine ---");
     expect(mintsRoutineGrant({ author: { kind: "person" }, body: withSkillsBlock(WORDS, ownBlock) })).toBe(false);
 
-    const shape: SkillCatalogEntry = { name: "shape", root: INBOX_BUILTIN_SKILL_ROOT, humanOnly: true, description: "Shape." };
-    expect(mintsRoutineGrant({ author: { kind: "person" }, body: withSkillsBlock("/shape a board", blockOf(shape)) })).toBe(false);
+    const pictureIt: SkillCatalogEntry = { name: "picture-it", root: INBOX_BUILTIN_SKILL_ROOT, humanOnly: true, description: "Picture it." };
+    expect(mintsRoutineGrant({ author: { kind: "person" }, body: withSkillsBlock("/picture-it the flow", blockOf(pictureIt)) })).toBe(false);
 
     expect(mintsRoutineGrant({ author: { kind: "person" }, body: `${PERSON_SEND}\n\nAnd one more thing.` })).toBe(false);
     expect(mintsRoutineGrant({ author: { kind: "person" }, body: WORDS })).toBe(false);

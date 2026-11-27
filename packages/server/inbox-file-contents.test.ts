@@ -22,7 +22,7 @@ import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { buildGuideSnapshot } from "@plannotator/core/guide-format";
 import { startInboxServer, type InboxServer } from "./inbox";
-import { createInboxPulls, gitBlobId, INBOX_PULL_FILE_MAX_BYTES, type PullFileGitReader } from "./inbox-pulls";
+import { createInboxPulls, gitBlobId, INBOX_PULL_FILE_MAX_BYTES, INBOX_PULL_NOW_JQ, type PullFileGitReader } from "./inbox-pulls";
 import { changedFileOf } from "./inbox-pull-diff-files";
 import { patchBlobIds } from "@plannotator/core/diff-files";
 import type { RefRunner } from "./ref-cards";
@@ -49,7 +49,7 @@ const HEAD = "a".repeat(40);
 const BASE = "b".repeat(40);
 const REPO = { host: "github.com", repo: "northwind/billing-svc", project_id: "prj_1" };
 /** The diff's read of the PR as it is now: its head and its description, one JSON line (inbox-pulls.ts `pullNow`). */
-const PULL_NOW_JQ = "{sha: .head.sha, body: .body} | tojson";
+const PULL_NOW_JQ = INBOX_PULL_NOW_JQ;
 
 const ghPull = (fields: Record<string, unknown> = {}) => ({
   number: 412,
@@ -111,7 +111,8 @@ function scripted(pull: Record<string, unknown> = ghPull()): Scripted {
       if (args.includes("graphql")) {
         return { stdout: JSON.stringify({ data: { viewer: { login: "dana" }, requested: { nodes: [] }, authored: { nodes: [f.pull] }, merged: { nodes: [] } } }), stderr: "", exitCode: 0 };
       }
-      const endpoint = args[3]!;
+      // `gh api --hostname <host> <endpoint>`; the image previews' byte reads name github.com's endpoint first (`gh api <endpoint>`).
+      const endpoint = args[1] === "--hostname" ? args[3]! : (args.find((a) => /^(repos|projects)\//.test(a)) ?? args[3]!);
       f.reads.push(endpoint);
       if (f.failWith) return { stdout: "", stderr: f.failWith.stderr, exitCode: 1 };
       if (args.includes(".merge_base_commit.sha")) return { stdout: `${f.mergeBase}\n`, stderr: "", exitCode: 0 };
@@ -145,6 +146,31 @@ describe("a PR's file", () => {
     const asked = f.reads.length;
     expect(await pulls.fileContents(KEY, "layer", "src/a.ts", [], IDS)).toEqual({ oldContent: "old\n", newContent: "new\n" });
     expect(f.reads.length).toBe(asked);
+  });
+
+  test("a closed request asks the forge nothing, and the next one reads as usual", async () => {
+    const f = scripted();
+    f.files.set(fileAt("src/a.ts", HEAD), "new\n");
+    f.files.set(fileAt("src/a.ts", BASE), "old\n");
+    const pulls = await listed(f);
+    const closed = new AbortController();
+    closed.abort();
+    expect(await pulls.fileContents(KEY, "layer", "src/a.ts", [], IDS, undefined, undefined, closed.signal).catch(() => "refused")).not.toEqual({ oldContent: "old\n", newContent: "new\n" });
+    expect(f.reads).toEqual([]);
+    expect(await pulls.fileContents(KEY, "layer", "src/a.ts", [], IDS)).toEqual({ oldContent: "old\n", newContent: "new\n" });
+  });
+
+  test("a request that closes while another waits on the same file: the one still open gets the text", async () => {
+    const f = scripted();
+    f.files.set(fileAt("src/a.ts", HEAD), "new\n");
+    f.files.set(fileAt("src/a.ts", BASE), "old\n");
+    const pulls = await listed(f);
+    const first = new AbortController();
+    const closed = pulls.fileContents(KEY, "layer", "src/a.ts", [], IDS, undefined, undefined, first.signal).catch(() => "refused");
+    const open = pulls.fileContents(KEY, "layer", "src/a.ts", [], IDS, undefined, undefined, new AbortController().signal);
+    first.abort();
+    expect(await open).toEqual({ oldContent: "old\n", newContent: "new\n" });
+    await closed;
   });
 
   test("the whole stack: the list's head, and where it left the stack's base", async () => {
@@ -821,5 +847,348 @@ describe("a guide's file", () => {
     // A text-looking patch of a file git treats as binary, as an agent could send with --text.
     const id = await w.sendGuide(w.git("diff", "--text"), ["a.ts"]);
     expect(await contentsOf(await w.askGuide(id, "a.ts"))).toEqual(NO_CONTENTS);
+  });
+});
+
+/**
+ * The image previews' routes (review parity B2: `/api/inbox/pulls/review-image` and
+ * `/api/inbox/messages/:id/guide/review-image`) through the running Inbox's doors: the guards inbox.ts puts around the
+ * shared handler (inbox-review-image.test.ts proves the handler's own answers).
+ */
+describe("the image previews' routes", () => {
+  const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
+  const png = (tag: string) => Buffer.concat([PNG, Buffer.from(tag, "latin1")]);
+  const imageOf = async (response: Response) => Buffer.from(await response.arrayBuffer());
+
+  /** A PR that changes img/a.png, its two commits in the project's clone. */
+  async function pictured(w: Awaited<ReturnType<typeof world>>) {
+    mkdirSync(join(w.project, "img"), { recursive: true });
+    writeFileSync(join(w.project, "img/a.png"), png("before"));
+    w.git("add", ".");
+    w.git("commit", "-qm", "one");
+    const baseSha = w.git("rev-parse", "HEAD").trim();
+    writeFileSync(join(w.project, "img/a.png"), png("after"));
+    w.git("commit", "-qam", "two");
+    const headSha = w.git("rev-parse", "HEAD").trim();
+    const patch = w.git("diff", `${baseSha}..${headSha}`);
+    // The Inbox learns of the project from an agent's message, and of the PR from the list.
+    await w.sendGuide(patch, ["img/a.png"]);
+    w.forge.pull = ghPull({ headRefOid: headSha });
+    w.forge.mergeBase = baseSha;
+    w.forge.patch = patch;
+    w.forge.headNow = headSha;
+    expect((await fetch(`${w.base}/api/inbox/pulls?refresh=1`)).status).toBe(200);
+    w.forge.reads.length = 0;
+    return headSha;
+  }
+  const askPull = (base: string, side: "old" | "new", snapshot: string, headers: Record<string, string> = {}) =>
+    fetch(`${base}/api/inbox/pulls/review-image?key=${encodeURIComponent(KEY)}&scope=layer&path=img/a.png&side=${side}&snapshot=${snapshot}`, { headers });
+  const askGuideImage = (base: string, id: string, path: string, side: "old" | "new", headers: Record<string, string> = {}) =>
+    fetch(`${base}/api/inbox/messages/${id}/guide/review-image?path=${encodeURIComponent(path)}&side=${side}&snapshot=${id}`, { headers });
+
+  test("a PR's image: each side from the project's clone at the head on screen", async () => {
+    const w = await world({ codeReview: true });
+    const head = await pictured(w);
+    const before = await askPull(w.base, "old", head);
+    expect(before.status).toBe(200);
+    expect(before.headers.get("content-type")).toBe("image/png");
+    expect((await imageOf(before)).equals(png("before"))).toBe(true);
+    expect((await imageOf(await askPull(w.base, "new", head))).equals(png("after"))).toBe(true);
+    expect(w.forge.reads.filter((r) => r.includes("/contents/"))).toEqual([]);
+  });
+
+  test("a PR's image with Code review off: 409 code_review_off, and nothing runs", async () => {
+    const w = await world({ codeReview: false });
+    const response = await askPull(w.base, "new", HEAD);
+    expect(response.status).toBe(409);
+    expect(((await response.json()) as { code: string }).code).toBe("code_review_off");
+    expect(w.forge.reads).toEqual([]);
+  });
+
+  test("a PR's image asked by another site: 403, and nothing is read", async () => {
+    const w = await world({ codeReview: true });
+    const head = await pictured(w);
+    expect((await askPull(w.base, "new", head, { "Sec-Fetch-Site": "cross-site" })).status).toBe(403);
+    expect((await askPull(w.base, "new", head, { Origin: "https://evil.example", "Sec-Fetch-Site": "cross-site" })).status).toBe(403);
+    expect(w.forge.reads).toEqual([]);
+  });
+
+  test("a guide's image: the blobs its patch names, through the route", async () => {
+    const w = await world({ codeReview: false });
+    mkdirSync(join(w.project, "img"), { recursive: true });
+    writeFileSync(join(w.project, "img/a.png"), png("before"));
+    w.git("add", ".");
+    w.git("commit", "-qm", "one");
+    writeFileSync(join(w.project, "img/a.png"), png("after"));
+    const id = await w.sendGuide(w.git("diff"), ["img/a.png"]);
+    const before = await askGuideImage(w.base, id, "img/a.png", "old");
+    expect(before.status).toBe(200);
+    expect((await imageOf(before)).equals(png("before"))).toBe(true);
+    expect((await imageOf(await askGuideImage(w.base, id, "img/a.png", "new"))).equals(png("after"))).toBe(true);
+    expect((await askGuideImage(w.base, id, "img/a.png", "new", { "Sec-Fetch-Site": "cross-site" })).status).toBe(403);
+    expect(w.forge.reads).toEqual([]);
+  });
+
+  test("a guide in another project naming this PR: the forge is never asked for its image", async () => {
+    const w = await world({ codeReview: true, repoOf: (root) => ({ host: "github.com", display: root.endsWith("billing-svc") ? "northwind/billing-svc" : "someone/third" }) });
+    const bytes = png("forge");
+    w.forge.files.set(`repos/northwind/billing-svc/contents/${encodeURIComponent("img/b.png")}?ref=${HEAD}`, JSON.stringify({ type: "file", sha: "c".repeat(40), size: bytes.length, encoding: "base64", content: bytes.toString("base64") }));
+    const imagePatch = `diff --git a/img/b.png b/img/b.png\nindex ${gitBlobId(png("old")).slice(0, 10)}..${gitBlobId(png("forge")).slice(0, 10)} 100644\nBinary files a/img/b.png and b/img/b.png differ\n`;
+    const pr = (project?: string) =>
+      w.sendGuide("", [], {
+        ...(project ? { project_path: project } : {}),
+        patch: undefined,
+        guide: undefined,
+        snapshot: buildGuideSnapshot({
+          guide: { title: "T", intent: "I", sections: [{ title: "S", overview: "O", diffs: [{ file: "img/b.png", summary: "s" }] }] },
+          review: { rawPatch: imagePatch, gitRef: "main...head", source: { kind: "pr", pr: { url: "https://github.com/northwind/billing-svc/pull/412", number: 412, title: "PR 412", platform: "github" } } },
+          reviewed: [],
+        } as unknown as Parameters<typeof buildGuideSnapshot>[0]),
+      });
+    // The PR's own project is known to the Inbox, from a guide there.
+    const own = await pr();
+    const third = join(w.project, "..", "third");
+    mkdirSync(third, { recursive: true });
+    Bun.spawnSync(["git", "init", "-q"], { cwd: third, env: GIT_ENV });
+    const cross = await pr(third);
+    expect((await fetch(`${w.base}/api/inbox/pulls?refresh=1`)).status).toBe(200);
+    // The PR's own project's guide reads the PR's side from the forge ...
+    const near = await askGuideImage(w.base, own, "img/b.png", "new");
+    expect(near.status).toBe(200);
+    expect((await imageOf(near)).equals(bytes)).toBe(true);
+    // ... and one in another project naming the same PR reads nothing of it.
+    w.forge.reads.length = 0;
+    const response = await askGuideImage(w.base, cross, "img/b.png", "new");
+    expect(response.status).toBe(404);
+    expect(w.forge.reads).toEqual([]);
+  });
+});
+
+/**
+ * The rendered Markdown pictures' routes (review parity B3: `/api/inbox/pulls/review-markdown-image` and
+ * `/api/inbox/messages/:id/guide/review-markdown-image`) through the running Inbox's doors: the guards inbox.ts puts
+ * around the shared handler (inbox-review-markdown-image.test.ts proves the handler's own answers).
+ */
+describe("the rendered Markdown pictures' routes", () => {
+  const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
+  const png = (tag: string) => Buffer.concat([PNG, Buffer.from(tag, "latin1")]);
+  const imageOf = async (response: Response) => Buffer.from(await response.arrayBuffer());
+
+  /** A PR whose README.md comes to show img/logo.png (unchanged), its two commits in the project's clone. */
+  async function documented(w: Awaited<ReturnType<typeof world>>) {
+    mkdirSync(join(w.project, "img"), { recursive: true });
+    writeFileSync(join(w.project, "img/logo.png"), png("logo"));
+    writeFileSync(join(w.project, "README.md"), "# Ledger\n");
+    w.git("add", ".");
+    w.git("commit", "-qm", "one");
+    const baseSha = w.git("rev-parse", "HEAD").trim();
+    writeFileSync(join(w.project, "README.md"), "# Ledger\n\n![logo](img/logo.png)\n");
+    w.git("commit", "-qam", "two");
+    const headSha = w.git("rev-parse", "HEAD").trim();
+    const patch = w.git("diff", `${baseSha}..${headSha}`);
+    await w.sendGuide(patch, ["README.md"]);
+    w.forge.pull = ghPull({ headRefOid: headSha });
+    w.forge.mergeBase = baseSha;
+    w.forge.patch = patch;
+    w.forge.headNow = headSha;
+    expect((await fetch(`${w.base}/api/inbox/pulls?refresh=1`)).status).toBe(200);
+    w.forge.reads.length = 0;
+    return headSha;
+  }
+  const askPull = (base: string, snapshot: string, headers: Record<string, string> = {}) =>
+    fetch(`${base}/api/inbox/pulls/review-markdown-image?key=${encodeURIComponent(KEY)}&scope=layer&doc=README.md&side=new&src=img%2Flogo.png&snapshot=${snapshot}`, { headers });
+  const askGuide = (base: string, id: string, src: string, headers: Record<string, string> = {}) =>
+    fetch(`${base}/api/inbox/messages/${id}/guide/review-markdown-image?doc=README.md&side=new&src=${encodeURIComponent(src)}&snapshot=${id}`, { headers });
+
+  test("a PR's README picture: read from the project's clone at the head on screen", async () => {
+    const w = await world({ codeReview: true });
+    const head = await documented(w);
+    const response = await askPull(w.base, head);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("image/png");
+    expect((await imageOf(response)).equals(png("logo"))).toBe(true);
+    expect(w.forge.reads.filter((r) => r.includes("/contents/"))).toEqual([]);
+  });
+
+  test("a PR's README picture with Code review off: 409 code_review_off, and nothing runs", async () => {
+    const w = await world({ codeReview: false });
+    const response = await askPull(w.base, HEAD);
+    expect(response.status).toBe(409);
+    expect(((await response.json()) as { code: string }).code).toBe("code_review_off");
+    expect(w.forge.reads).toEqual([]);
+  });
+
+  test("a PR's README picture asked by another site: 403, and nothing is read", async () => {
+    const w = await world({ codeReview: true });
+    const head = await documented(w);
+    expect((await askPull(w.base, head, { "Sec-Fetch-Site": "cross-site" })).status).toBe(403);
+    expect(w.forge.reads).toEqual([]);
+  });
+
+  test("a guide's README picture: through the route, never from another site", async () => {
+    const w = await world({ codeReview: false });
+    mkdirSync(join(w.project, "img"), { recursive: true });
+    writeFileSync(join(w.project, "img/logo.png"), png("logo"));
+    writeFileSync(join(w.project, "README.md"), "# Ledger\n");
+    w.git("add", ".");
+    w.git("commit", "-qm", "one");
+    writeFileSync(join(w.project, "README.md"), "# Ledger\n\n![logo](img/logo.png)\n");
+    const id = await w.sendGuide(w.git("diff"), ["README.md"]);
+    const response = await askGuide(w.base, id, "img/logo.png");
+    expect(response.status).toBe(200);
+    expect((await imageOf(response)).equals(png("logo"))).toBe(true);
+    expect((await askGuide(w.base, id, "img/logo.png", { "Sec-Fetch-Site": "cross-site" })).status).toBe(403);
+    expect((await askGuide(w.base, id, "../outside.png")).status).toBe(403);
+    expect(w.forge.reads).toEqual([]);
+  });
+
+  test("a guide in another project naming this PR: the forge is never asked for its README's picture", async () => {
+    const w = await world({ codeReview: true, repoOf: (root) => ({ host: "github.com", display: root.endsWith("billing-svc") ? "northwind/billing-svc" : "someone/third" }) });
+    const readme = Buffer.from("![b](img/b.png)\n");
+    const picture = png("forge");
+    const served = (path: string, bytes: Buffer) =>
+      w.forge.files.set(`repos/northwind/billing-svc/contents/${encodeURIComponent(path)}?ref=${HEAD}`, JSON.stringify({ type: "file", sha: "c".repeat(40), size: bytes.length, encoding: "base64", content: bytes.toString("base64") }));
+    served("README.md", readme);
+    served("img/b.png", picture);
+    const id10 = (bytes: Buffer) => gitBlobId(bytes).slice(0, 10);
+    const rawPatch =
+      `diff --git a/README.md b/README.md\nindex ${id10(Buffer.from("old\n"))}..${id10(readme)} 100644\n--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-old\n+![b](img/b.png)\n` +
+      `diff --git a/img/b.png b/img/b.png\nindex ${id10(png("old"))}..${id10(picture)} 100644\nBinary files a/img/b.png and b/img/b.png differ\n`;
+    const pr = (project?: string) =>
+      w.sendGuide("", [], {
+        ...(project ? { project_path: project } : {}),
+        patch: undefined,
+        guide: undefined,
+        snapshot: buildGuideSnapshot({
+          guide: { title: "T", intent: "I", sections: [{ title: "S", overview: "O", diffs: [{ file: "README.md", summary: "s" }] }] },
+          review: { rawPatch, gitRef: "main...head", source: { kind: "pr", pr: { url: "https://github.com/northwind/billing-svc/pull/412", number: 412, title: "PR 412", platform: "github" } } },
+          reviewed: [],
+        } as unknown as Parameters<typeof buildGuideSnapshot>[0]),
+      });
+    const own = await pr();
+    const third = join(w.project, "..", "third");
+    mkdirSync(third, { recursive: true });
+    Bun.spawnSync(["git", "init", "-q"], { cwd: third, env: GIT_ENV });
+    const cross = await pr(third);
+    expect((await fetch(`${w.base}/api/inbox/pulls?refresh=1`)).status).toBe(200);
+    // The PR's own project's guide reads the document and its picture from the forge ...
+    const near = await askGuide(w.base, own, "img/b.png");
+    expect(near.status).toBe(200);
+    expect((await imageOf(near)).equals(picture)).toBe(true);
+    // ... and one in another project naming the same PR reads nothing of it.
+    w.forge.reads.length = 0;
+    expect((await askGuide(w.base, cross, "img/b.png")).status).not.toBe(200);
+    expect(w.forge.reads).toEqual([]);
+  });
+});
+
+
+/**
+ * The package changes card's routes (review parity B5: `/api/inbox/pulls/package-changes` and
+ * `/api/inbox/messages/:id/guide/package-changes`) through the running Inbox's doors: the guards inbox.ts puts around
+ * the shared service (inbox-package-changes.test.ts proves the rows and the reads).
+ */
+describe("the package changes card's routes", () => {
+  const manifest = (dependencies: Record<string, string>) => `${JSON.stringify({ name: "billing-svc", version: "1.0.0", dependencies }, null, 2)}\n`;
+  type Cards = { cards: { path: string; changes: { name: string; kind: string }[]; lookup: { names: string[] } }[]; lookup: { total: number } };
+  const rowsOf = (body: Cards) => body.cards.flatMap((card) => card.changes.map((change) => `${card.path} ${change.name} ${change.kind}`)).sort();
+
+  /** A PR that bumps a dependency in package.json, its two commits in the project's clone. */
+  async function bumped(w: Awaited<ReturnType<typeof world>>) {
+    writeFileSync(join(w.project, "package.json"), manifest({ "left-pad": "^1.1.0" }));
+    w.git("add", ".");
+    w.git("commit", "-qm", "one");
+    const baseSha = w.git("rev-parse", "HEAD").trim();
+    writeFileSync(join(w.project, "package.json"), manifest({ "left-pad": "^1.3.0", "tiny-queue": "^0.2.1" }));
+    w.git("commit", "-qam", "two");
+    const headSha = w.git("rev-parse", "HEAD").trim();
+    const patch = w.git("diff", `${baseSha}..${headSha}`);
+    await w.sendGuide(patch, ["package.json"]);
+    w.forge.pull = ghPull({ headRefOid: headSha });
+    w.forge.mergeBase = baseSha;
+    w.forge.patch = patch;
+    w.forge.headNow = headSha;
+    expect((await fetch(`${w.base}/api/inbox/pulls?refresh=1`)).status).toBe(200);
+    w.forge.reads.length = 0;
+    return headSha;
+  }
+  const askPull = (base: string, snapshot: string, headers: Record<string, string> = {}) =>
+    fetch(`${base}/api/inbox/pulls/package-changes?key=${encodeURIComponent(KEY)}&scope=layer&snapshot=${snapshot}`, { headers });
+  const askGuide = (base: string, id: string, headers: Record<string, string> = {}) => fetch(`${base}/api/inbox/messages/${id}/guide/package-changes?snapshot=${id}`, { headers });
+
+  test("a PR's card: the rows of the diff at the head on screen, read from the project's clone; no name offered to npm", async () => {
+    const w = await world({ codeReview: true });
+    const head = await bumped(w);
+    const response = await askPull(w.base, head);
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as Cards;
+    expect(rowsOf(body)).toEqual(["package.json left-pad upgraded", "package.json tiny-queue added"]);
+    expect(body.lookup.total).toBe(0);
+    expect(w.forge.reads.filter((r) => r.includes("/contents/"))).toEqual([]);
+  });
+
+  test("a PR's card with Code review off: 409 code_review_off, and nothing runs", async () => {
+    const w = await world({ codeReview: false });
+    const response = await askPull(w.base, HEAD);
+    expect(response.status).toBe(409);
+    expect(((await response.json()) as { code: string }).code).toBe("code_review_off");
+    expect(w.forge.reads).toEqual([]);
+  });
+
+  test("a PR's card asked by another site: 403, and nothing is read", async () => {
+    const w = await world({ codeReview: true });
+    const head = await bumped(w);
+    expect((await askPull(w.base, head, { "Sec-Fetch-Site": "cross-site" })).status).toBe(403);
+    expect((await askPull(w.base, head, { Origin: "https://evil.example", "Sec-Fetch-Site": "cross-site" })).status).toBe(403);
+    expect(w.forge.reads).toEqual([]);
+  });
+
+  test("a guide's card: the blobs its patch names, through the route; another site's ask refused", async () => {
+    const w = await world({ codeReview: false });
+    writeFileSync(join(w.project, "package.json"), manifest({ "left-pad": "^1.1.0" }));
+    w.git("add", ".");
+    w.git("commit", "-qm", "one");
+    writeFileSync(join(w.project, "package.json"), manifest({ "left-pad": "^2.0.0" }));
+    const id = await w.sendGuide(w.git("diff"), ["package.json"]);
+    const response = await askGuide(w.base, id);
+    expect(response.status).toBe(200);
+    expect(rowsOf((await response.json()) as Cards)).toEqual(["package.json left-pad upgraded"]);
+    expect((await askGuide(w.base, id, { "Sec-Fetch-Site": "cross-site" })).status).toBe(403);
+    expect(w.forge.reads).toEqual([]);
+  });
+
+  test("a guide in another project naming this PR: the forge is never asked for its files", async () => {
+    const w = await world({ codeReview: true, repoOf: (root) => ({ host: "github.com", display: root.endsWith("billing-svc") ? "northwind/billing-svc" : "someone/third" }) });
+    const text = manifest({ "tiny-queue": "^0.2.1" });
+    const bytes = Buffer.from(text);
+    w.forge.files.set(`repos/northwind/billing-svc/contents/${encodeURIComponent("tools/package.json")}?ref=${HEAD}`, JSON.stringify({ type: "file", sha: "c".repeat(40), size: bytes.length, encoding: "base64", content: bytes.toString("base64") }));
+    const added = `diff --git a/tools/package.json b/tools/package.json\nnew file mode 100644\nindex 0000000000..${gitBlobId(bytes).slice(0, 10)}\n--- /dev/null\n+++ b/tools/package.json\n@@ -0,0 +1,${text.split("\n").length - 1} @@\n${text.split("\n").slice(0, -1).map((line) => `+${line}`).join("\n")}\n`;
+    const pr = (project?: string) =>
+      w.sendGuide("", [], {
+        ...(project ? { project_path: project } : {}),
+        patch: undefined,
+        guide: undefined,
+        snapshot: buildGuideSnapshot({
+          guide: { title: "T", intent: "I", sections: [{ title: "S", overview: "O", diffs: [{ file: "tools/package.json", summary: "s" }] }] },
+          review: { rawPatch: added, gitRef: "main...head", source: { kind: "pr", pr: { url: "https://github.com/northwind/billing-svc/pull/412", number: 412, title: "PR 412", platform: "github" } } },
+          reviewed: [],
+        } as unknown as Parameters<typeof buildGuideSnapshot>[0]),
+      });
+    const own = await pr();
+    const third = join(w.project, "..", "third");
+    mkdirSync(third, { recursive: true });
+    Bun.spawnSync(["git", "init", "-q"], { cwd: third, env: GIT_ENV });
+    const cross = await pr(third);
+    expect((await fetch(`${w.base}/api/inbox/pulls?refresh=1`)).status).toBe(200);
+    // The PR's own project's guide reads the PR's side from the forge ...
+    const near = await askGuide(w.base, own);
+    expect(near.status).toBe(200);
+    expect(rowsOf((await near.json()) as Cards)).toEqual(["tools/package.json tiny-queue added"]);
+    // ... and one in another project naming the same PR reads nothing of it.
+    w.forge.reads.length = 0;
+    const far = await askGuide(w.base, cross);
+    expect(far.status).toBe(200);
+    expect(rowsOf((await far.json()) as Cards)).toEqual([]);
+    expect(w.forge.reads).toEqual([]);
   });
 });

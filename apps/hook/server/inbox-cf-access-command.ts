@@ -2,7 +2,7 @@ import { rmSync } from "node:fs";
 import { loadConfig, saveConfig } from "@plannotator/shared/config";
 import { readInboxRegistry, type InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
 import { storedCfAccess } from "@plannotator/shared/inbox/cf-access";
-import { createCfApi, type CfApi, type CfSetupStep, type CfTeardownStep } from "@plannotator/shared/inbox/cf-access-api";
+import { createCfApi, normalizeCfSetupHostname, type CfApi, type CfSetupStep, type CfTeardownStep } from "@plannotator/shared/inbox/cf-access-api";
 import { cloudflaredInstallHint, findCloudflared, tunnelTokenPath } from "@plannotator/server/cf-tunnel";
 import { writeUrlQr } from "@plannotator/server/qr";
 import type { EdgeFetch } from "@plannotator/server/cf-access-checks";
@@ -10,7 +10,7 @@ import { runCfAccessRemoveFlow, runCfAccessSetupFlow } from "@plannotator/server
 
 export const CF_ACCESS_USAGE = [
   "Usage:",
-  "  plannotator inbox cloudflare-access setup --email <you@example.com> [--zone <domain>] [--hostname <name>] [--account <id>] [--port <n>]",
+  "  plannotator inbox cloudflare-access setup --email <you@example.com> [--zone <domain>] [--hostname <name>] [--session-hostname <name>] [--account <id>] [--port <n>]",
   "  plannotator inbox cloudflare-access teardown [--local-only]",
   "  plannotator inbox cloudflare-access status [--json]",
   "",
@@ -25,6 +25,10 @@ export const CF_ACCESS_USAGE = [
   "setup      creates the login (one-time PIN), the tunnel, the Access application for --email,",
   "           and only then the DNS record; checks from outside that nothing gets in without",
   "           your login; then turns it on and prints the address.",
+  "           --hostname names the Inbox. --session-hostname names review, annotate and last",
+  "           sessions. Both names must be distinct and one level under the selected zone.",
+  "           On first setup, the sessions name defaults to <inbox-label>-s.<zone>.",
+  "           To change it later, run teardown first.",
   "teardown   turns it off, then deletes the DNS record, the Access application and the tunnel.",
   "           --local-only turns it off here without the token and lists what is left.",
   "status     what is set up, and whether the tunnel is connected.",
@@ -158,6 +162,12 @@ export async function runCfAccessCommand(args: readonly string[], deps: CfAccess
       err("setup needs --email <the address you sign in with>: only that e-mail will get in.");
       return 2;
     }
+    const sessionHostArg = flag(args, "--session-hostname");
+    const wantedSessionHost = normalizeCfSetupHostname(sessionHostArg ?? "");
+    if (sessionHostArg !== undefined && !wantedSessionHost) {
+      err("--session-hostname needs a hostname.");
+      return 2;
+    }
     const binary = deps.binary === undefined ? findCloudflared(env) : deps.binary;
     if (!binary) {
       err(`cloudflared is not installed. ${cloudflaredInstallHint()}`);
@@ -169,9 +179,13 @@ export async function runCfAccessCommand(args: readonly string[], deps: CfAccess
       return 2;
     }
     const before = storedCfAccess(loadConfig());
-    const wantedHost = flag(args, "--hostname")?.trim().toLowerCase().replace(/\.$/, "");
+    const wantedHost = normalizeCfSetupHostname(flag(args, "--hostname") ?? "");
     if (before?.host && (before.tunnel || before.app || before.dnsRecord) && wantedHost && wantedHost !== before.host) {
       err(`Already set up for ${before.host}. Run plannotator inbox cloudflare-access teardown first, then set up ${wantedHost}.`);
+      return 2;
+    }
+    if (before?.sessionHost && (before.tunnel || before.app || before.sessionDnsRecord) && wantedSessionHost && wantedSessionHost !== before.sessionHost) {
+      err(`Sessions already use ${before.sessionHost}. Run plannotator inbox cloudflare-access teardown first, then set up ${wantedSessionHost}.`);
       return 2;
     }
     const portArg = flag(args, "--port");
@@ -182,7 +196,7 @@ export async function runCfAccessCommand(args: readonly string[], deps: CfAccess
     }
     const flow = await runCfAccessSetupFlow(
       { dataDir: deps.dataDir, api: makeApi(token), binary, apply: () => tellInbox(readInboxRegistry(deps.dataDir)), edgeFetch: deps.edgeFetch, checkTimeoutMs: deps.checkTimeoutMs, connectTimeoutMs: deps.connectTimeoutMs },
-      { email, port, account: flag(args, "--account") || undefined, zone: flag(args, "--zone") || undefined, hostname: flag(args, "--hostname") || before?.host || undefined },
+      { email, port, account: flag(args, "--account") || undefined, zone: flag(args, "--zone") || undefined, hostname: wantedHost || before?.host || undefined, sessionHostname: wantedSessionHost || undefined },
       (step, state) => {
         if (step === "checks" && state === "running") err("  Checking from outside that nothing gets in without your login…");
       },

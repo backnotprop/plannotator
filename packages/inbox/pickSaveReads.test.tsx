@@ -292,13 +292,22 @@ test.skipIf(!hasDom)("a save's record that comes after its answer reads nothing 
 
 test.skipIf(!hasDom)('a record that is not a question line is read at once, whatever is saving', async () => {
   const field = await open();
+  // The thread's own message as the Inbox sends it, for a later message of the same agent.
+  const { thread } = JSON.parse((await loopback(threadRoute())).text) as { thread: { messages: Record<string, unknown>[] } };
+  const { questions: _q, actions: _a, subject: _s, subject_question: _sq, seq: _seq, ...root } = thread.messages[0]!;
+  const words = 'Meanwhile the refund worker passed on staging.';
   hang = true;
   type(field, 'a');
   await until(() => saves === 1, 'the save');
-  // An agent wrote meanwhile: the thread is read now, with the save still out.
+  reads = [];
+  // An agent wrote meanwhile: its message shows in the open thread and the list is read now, with the save still out.
+  // The window takes the message into the thread it holds (data/apply/stream.ts), so the thread itself is read again
+  // only when that cannot show everything (openThreadReads.ts): a read of it is not what proves the record was heard.
   seq += 1;
-  frame('record', { seq, kind: 'message', first: false, message: { id: 'msg_x', thread_id: world.waiting, author: { kind: 'agent' }, body: '' } });
-  await until(() => count(threadRoute()) === 1, 'the read of that record');
+  frame('record', { seq, kind: 'message', first: false, message: { ...root, id: 'msg_01MEANWHILE000000000000000', body: words } });
+  await until(() => (host!.textContent ?? '').includes(words), 'the message in the open thread');
+  await until(() => count('/api/inbox/threads') === 1, 'the list read for that record');
+  expect(saves).toBe(1);
 });
 
 const ownQuestion = async () => {

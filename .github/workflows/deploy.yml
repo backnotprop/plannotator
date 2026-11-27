@@ -6,11 +6,37 @@ name: Deploy
 # Test (a fork's included, even from a branch named main) also completes and
 # starts this workflow, but every job below skips it, so no code from a PR ever
 # runs next to the deploy secrets.
+#
+# The site lane: a push to main that touches apps/marketing/ also starts this
+# workflow (push, this repository only; never a PR). The site-lane job decides
+# whether every commit since the last main commit whose Test run passed (the
+# base detect-changes diffs from) changes only the marketing site, and docs the
+# site is not built from (scripts/site-lane.ts). If so, it runs the site's own
+# checks (install, build, every test under apps/marketing/ with
+# security-build.test.ts, and the tests the change reaches, as a PR's plan picks
+# them) and then the same deploy-marketing job publishes the pushed commit,
+# without waiting for Test. Anything else the site is built from (the shared
+# packages and skills it imports, the lockfile, a manifest), a site file the
+# product fetches at runtime (PUSH_RUNTIME_SITE in scripts/ci-affected.ts), any
+# other path, or a base it cannot read leaves the push to the path above. The
+# repo variable SITE_LANE=off turns the lane off. A failed lane is a failed
+# Deploy run on the commit and publishes nothing; Test is not touched by it.
+#
+# Both paths reach one deploy-marketing job: one definition, one concurrency
+# group. Before it syncs, scripts/site-deploy.ts reads the commit live now (a
+# record in the bucket, _site-deploy/<commit>, added before each sync; a
+# person reads https://plannotator.ai/_site-deploy/live.txt or the Deploy run's
+# notice) and never publishes a commit older than it (in its history), nor the
+# same commit or one with no change to what the site is built from again. A
+# manual run publishes what it is asked to.
 on:
   workflow_run:  # zizmor: ignore[dangerous-triggers] Gated to push runs on main of this repository; PR runs skip every job.
     workflows: [Test]
     types: [completed]
     branches: [main]
+  push:
+    branches: [main]
+    paths: ['apps/marketing/**']
   workflow_dispatch:
     inputs:
       target:
@@ -128,24 +154,112 @@ jobs:
           fi
           echo "sha=$CURRENT_SHA" >> "$GITHUB_OUTPUT"
           echo "Changes ${BEFORE_SHA}..${CURRENT_SHA}"
-          CHANGED="$(git diff --name-only "$BEFORE_SHA" "$CURRENT_SHA")"
+          # --no-renames: a moved file lists its old path too, so a page moved out
+          # of a site still deploys that site.
+          CHANGED="$(git diff --no-renames --name-only "$BEFORE_SHA" "$CURRENT_SHA")"
 
           changed() { grep -Eq "$1" <<< "$CHANGED" && echo true || echo false; }
+          # The marketing site's pattern is SITE_INPUTS in scripts/site-deploy.ts
+          # (scripts/site-lane.test.ts holds the two together).
           {
-            echo "marketing=$(changed '^(apps/marketing/|packages/)')"
+            echo "marketing=$(changed '^(apps/marketing/|apps/skills/|packages/|patches/|bun\.lock$|package\.json$|bunfig\.toml$|\.github/workflows/deploy\.yml$)')"
             echo "portal=$(changed '^(apps/portal/|packages/)')"
             echo "paste=$(changed '^apps/paste-service/')"
             echo "waitlist=$(changed '^apps/waitlist-service/')"
           } >> "$GITHUB_OUTPUT"
 
+  # A push to main that touches the site: is everything since the last passed
+  # Test run site-only (scripts/site-lane.ts), and do the site's own checks
+  # pass? Then deploy-marketing publishes the pushed commit. No secrets and no
+  # environment here: the token reads Test's runs and GitHub's compare, and
+  # only the deciding step gets it. Not site-only ends green with a notice
+  # saying why; a failed check fails the run and nothing is published.
+  site-lane:
+    name: Site lane (site-only push, the site's own checks)
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      github.repository == 'backnotprop/plannotator'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      publish: ${{ steps.ready.outputs.publish }}
+      sha: ${{ steps.range.outputs.sha }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+
+      # Before the install: a push that is not site-only stops here, in seconds.
+      - name: Is every commit since the last passed Test run site-only?
+        id: range
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SITE_LANE: ${{ vars.SITE_LANE }}
+          CI_AFFECTED: ${{ vars.CI_AFFECTED }}
+        run: bun run scripts/site-lane.ts range
+
+      - name: Install dependencies
+        if: steps.range.outputs.eligible == 'true'
+        run: bun install --frozen-lockfile
+
+      - name: Generate Pi extension shared copies
+        if: steps.range.outputs.eligible == 'true'
+        run: bash apps/pi-extension/vendor.sh
+
+      - name: Pick the site's tests
+        id: tests
+        if: steps.range.outputs.eligible == 'true'
+        env:
+          BASE: ${{ steps.range.outputs.base }}
+        run: bun run scripts/site-lane.ts tests
+
+      - name: Build marketing
+        if: steps.tests.outputs.eligible == 'true'
+        run: bun run build:marketing
+
+      - name: Run the site's tests
+        if: steps.tests.outputs.eligible == 'true'
+        env:
+          CI_AFFECTED_TESTS: ${{ steps.tests.outputs.unit_tests }}
+          CI_AFFECTED_SHARDS: '1'
+        run: bun run scripts/ci-test-lane.ts unit-1
+
+      - name: Run the site's DOM tests
+        if: steps.tests.outputs.eligible == 'true' && steps.tests.outputs.dom_tests != '[]'
+        env:
+          CI_AFFECTED_TESTS: ${{ steps.tests.outputs.dom_tests }}
+          CI_AFFECTED_SHARDS: '1'
+        run: bun run scripts/ci-test-lane.ts dom-1
+
+      - name: Ready to publish
+        id: ready
+        if: steps.tests.outputs.eligible == 'true'
+        run: echo "publish=true" >> "$GITHUB_OUTPUT"
+
+  # The one publish of the marketing site, reached two ways: after Test passes
+  # (detect-changes) and from a site-only push (site-lane). !cancelled() lets
+  # it run when the path it does not come from was skipped; each way must have
+  # succeeded and asked for it.
   deploy-marketing:
-    needs: detect-changes
-    if: needs.detect-changes.outputs.marketing == 'true'
+    needs: [detect-changes, site-lane]
+    if: >-
+      !cancelled() &&
+      ((needs.detect-changes.result == 'success' && needs.detect-changes.outputs.marketing == 'true') ||
+      (needs.site-lane.result == 'success' && needs.site-lane.outputs.publish == 'true'))
     # One deploy of a site at a time, queued and never cancelled, so two never
     # sync over each other. The group is on the deploy jobs, not the workflow:
     # a skipped Deploy run (a failed Test, a PR) must not replace a pending one.
-    # A queued deploy of the same site from a newer commit can replace a pending
-    # one; it ships the whole newer tree, which includes the older change.
+    # A queued deploy can replace a pending one, which may be from a newer
+    # commit; that change then goes live with the next deploy after Test, and
+    # the guard below keeps the queued one from publishing an older tree.
     concurrency:
       group: deploy-marketing
       cancel-in-progress: false
@@ -154,10 +268,12 @@ jobs:
       contents: read
       id-token: write
     environment: production
+    env:
+      CANDIDATE: ${{ needs.detect-changes.outputs.sha || needs.site-lane.outputs.sha }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          ref: ${{ needs.detect-changes.outputs.sha }}
+          ref: ${{ env.CANDIDATE }}
           persist-credentials: false
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -178,22 +294,46 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: us-east-1
 
+      # Inside the concurrency group, so nothing publishes between the read
+      # and the record. It lists _site-deploy/ (the sync already lists the
+      # bucket) and asks GitHub's compare which commit is newer; it fails the
+      # job on anything it cannot read. An older commit, the live one again,
+      # or one with no change to what the site is built from is not published,
+      # and the job ends green with a notice saying why.
+      - name: Publish only a commit newer than the live one
+        id: guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: bun run scripts/site-deploy.ts guard
+
+      # Before the sync, so from the moment the bucket may hold this tree the
+      # record names it: a publish cut short (a failed step below, a cancelled
+      # run) leaves both commits named, and the guard refuses anything older
+      # than either. The older record goes once the tree is up (below).
+      - name: Add this commit to the live record
+        if: steps.guard.outputs.publish == 'true'
+        run: bun run scripts/site-deploy.ts mark
+
       # The site's videos are not in the repository: they are uploaded by hand
       # to assets/ in this bucket. The excludes keep --delete from removing
       # them (an excluded key is neither uploaded nor deleted). assets/hosted/
       # holds other files uploaded by hand, such as pictures an in-app dialog
       # loads. See "Videos" in docs/agent-guides/project-and-development.md.
+      # _site-deploy/ is the record of the live commit, written below.
       - name: Deploy to S3
+        if: steps.guard.outputs.publish == 'true'
         run: >-
           aws s3 sync apps/marketing/dist/ s3://plannotator-marketing/ --delete
           --exclude "assets/*.mp4" --exclude "assets/*.webm"
-          --exclude "assets/hosted/*"
+          --exclude "assets/hosted/*" --exclude "_site-deploy/*"
 
       # The sync names .md text/markdown and .txt text/plain with no charset, so
       # an agent reads the agent pages' curly quotes and arrows as Latin-1.
       # Every .md and .txt the build emits goes up again with UTF-8 named
       # (apps/marketing/llms.test.ts checks the patterns cover them).
       - name: Set the agent pages' content type
+        if: steps.guard.outputs.publish == 'true'
         run: |
           aws s3 cp apps/marketing/dist/ s3://plannotator-marketing/ --recursive \
             --exclude "*" --include "*.md" \
@@ -202,7 +342,14 @@ jobs:
             --exclude "*" --include "*.txt" \
             --content-type "text/plain; charset=utf-8"
 
+      # The bucket holds this commit's tree now: live.txt names it and the
+      # older records go, before the invalidation.
+      - name: Record the live commit
+        if: steps.guard.outputs.publish == 'true'
+        run: bun run scripts/site-deploy.ts record
+
       - name: Invalidate CloudFront
+        if: steps.guard.outputs.publish == 'true'
         run: |
           aws cloudfront create-invalidation \
             --distribution-id E284ON0A27O2H6 \

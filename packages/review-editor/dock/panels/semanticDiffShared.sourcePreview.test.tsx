@@ -155,12 +155,12 @@ describe('Semantic Changes source preview', () => {
     await act(async () => document.querySelector<HTMLButtonElement>('[data-snippet-open-file]')!.click());
     expect(files).toEqual([['src/checkout.ts', 4]]);
   });
-  test.skipIf(!hasDom)('a link the model made says so, with its band, and Not moved retracts it by candidate', async () => {
+  test.skipIf(!hasDom)('a link from OpenAI Decisions says so, with its band, and Not moved retracts it by candidate', async () => {
     const loadSource = createReviewFileSourceLoader({ files: [{ path: 'src/checkout.ts' }], fetchImpl: fakeFileContent([]) });
     const rejected: string[] = [];
     await mount(
       <SemanticDiffRows
-        changes={[change({ changeType: 'extracted', entityName: 'subtotal', origin: 'second-opinion', band: 'likely', model: 'jev-1.14.0', candidateId: '0123456789abcdef' })]}
+        changes={[change({ changeType: 'extracted', entityName: 'subtotal', origin: 'second-opinion', band: 'likely', model: 'gpt-6-luna', candidateId: '0123456789abcdef' })]}
         binaryChanges={[]}
         onOpenChange={() => {}}
         onOpenBinary={() => {}}
@@ -173,7 +173,7 @@ describe('Semantic Changes source preview', () => {
     expect(row.textContent).toContain('extracted · Likely');
     await hoverRow('subtotal');
     await act(async () => { await wait(250); });
-    expect(document.querySelector('[data-power-up-linked]')?.textContent).toBe('Linked by Jev · Likely');
+    expect(document.querySelector('[data-power-up-linked]')?.textContent).toBe('Linked by OpenAI Decisions · Likely');
     await act(async () => document.querySelector<HTMLButtonElement>('[data-power-up-reject]')!.click());
     expect(rejected).toEqual(['0123456789abcdef']);
   });

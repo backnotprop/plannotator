@@ -5,6 +5,9 @@
  * the action item checklist.
  */
 import { useMemo } from 'react';
+import { inboxInlineMediaKind } from '@plannotator/core/inbox-inline-media';
+import { ImageResolverContext, useImageResolver, type ImageResolver } from '@plannotator/ui/components/ImageResolverContext';
+import { getImageSrc } from '@plannotator/ui/components/ImageThumbnail';
 import type { LocalLinkResolver } from '@plannotator/ui/components/LocalLinkContext';
 import { Viewer } from '@plannotator/ui/components/Viewer';
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
@@ -34,8 +37,14 @@ export function ContextMarkdown({
   className: string;
 } & { [attr: `data-${string}`]: string }) {
   const blocks = useMemo(() => parseMarkdownToBlocks(markdown, { frontmatter: false }), [markdown]);
+  const base = messageId ? inboxMessageImageBase(messageId) : undefined;
+  const parent = useImageResolver();
+  const resolveMedia = useMemo<ImageResolver>(() => (src) => {
+    const media = base && !/^(https?:|data:|blob:)/i.test(src) ? inboxInlineMediaKind(src) : null;
+    return media ? { kind: 'src', src: getImageSrc(src, base), media } : (parent?.(src) ?? null);
+  }, [base, parent]);
   if (!markdown) return null;
-  return (
+  const body = (
     <div className={className} {...data}>
       <Viewer
         blocks={blocks}
@@ -51,7 +60,7 @@ export function ContextMarkdown({
         disableCodePathValidation
         refRepo={refRepo}
         resolveLocalLink={resolveLocalLink}
-        imageBaseDir={messageId ? inboxMessageImageBase(messageId) : undefined}
+        imageBaseDir={base}
         onImageClick={onImage}
         questionDecisionLines={false}
         answerOnly
@@ -59,4 +68,5 @@ export function ContextMarkdown({
       />
     </div>
   );
+  return base ? <ImageResolverContext.Provider value={resolveMedia}>{body}</ImageResolverContext.Provider> : body;
 }

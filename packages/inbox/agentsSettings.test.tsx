@@ -13,6 +13,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { inboxToolCostText, type InboxAgentRow, type InboxAgentsModel } from '@plannotator/core/inbox-types';
 import type { InboxLaunchSettings } from './api';
+import { INBOX_REX_SERVER_AWAY_SETTINGS, INBOX_REX_SHARED_AGAIN } from '@plannotator/core/inbox-run-line';
 
 const hasDom = typeof document !== 'undefined';
 const { AgentsSettings, repliesOf, offWords } = (hasDom ? await import('./components/AgentsSettings') : {}) as typeof import('./components/AgentsSettings');
@@ -206,6 +207,94 @@ test.skipIf(!hasDom)('"Start agents from New message": always shown, saves confi
   expect(sent.filter((r) => r.method === 'POST').map((r) => r.body)).toEqual([{ enabled: false }, { enabled: true }]);
   expect(enabledRow()!.getAttribute('data-launch-enabled-row')).toBe('on');
   expect(launchRows()).toEqual([true, true]);
+});
+
+test.skipIf(!hasDom)('"Start new agents in": only while Rex is open here or chosen; saves the choice; says which agents start in Rex, and when Rex is away', async () => {
+  const base: InboxLaunchSettings = { enabled: true, full_permissions: false, rex_agents: ['claude-code', 'pi'] };
+  // A person without Rex sees no change.
+  expect(mount(model(), base).querySelector('[data-launch-start-in-row]')).toBeNull();
+  act(() => root?.unmount());
+  host?.remove();
+  let state: InboxLaunchSettings = { ...base, rex_here: true, start_in: 'inbox' };
+  const posts: unknown[] = [];
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    const body = init?.body ? JSON.parse(String(init.body)) : null;
+    if ((init?.method ?? 'GET') === 'POST') {
+      posts.push(body);
+      state = { ...state, start_in: body.start_in };
+    }
+    return new Response(JSON.stringify({ launch: state }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }) as typeof fetch;
+  const settle = () => act(async () => void (await new Promise((resolve) => setTimeout(resolve, 0))));
+  const el = mount(model(), state);
+  await settle();
+  const row = () => el.querySelector('[data-launch-start-in-row]')!;
+  expect([...row().querySelectorAll('[data-launch-start-in]')].map((b) => [b.textContent, b.getAttribute('aria-pressed')])).toEqual([
+    ['In the background', 'true'],
+    ['Rex', 'false'],
+  ]);
+  expect(row().textContent).toContain('Claude Code and Pi can start in Rex; Codex and OpenCode always start in the background.');
+  expect(row().querySelector('[data-launch-rex-away]')).toBeNull();
+  await act(async () => (row().querySelector('[data-launch-start-in="rex"]') as HTMLButtonElement).click());
+  await settle();
+  expect(posts).toEqual([{ start_in: 'rex' }]);
+  expect(row().getAttribute('data-launch-start-in-row')).toBe('rex');
+  // Rex chosen, then closed: the choice stays (to turn it back), and the row says what happens meanwhile.
+  act(() => root?.unmount());
+  host?.remove();
+  const away = mount(model(), { ...base, rex_here: false, start_in: 'rex' });
+  expect(away.querySelector('[data-launch-rex-away]')).not.toBeNull();
+});
+
+test.skipIf(!hasDom)('"Start new agents in", Rex chosen and not here: the reason the read gives (a shared server is running, so never "isn\'t running"), kept across a save', async () => {
+  const base: InboxLaunchSettings = { enabled: true, full_permissions: false, rex_agents: ['claude-code', 'pi'], start_in: 'rex', rex_here: false, rex_headless: true };
+  const settle = () => act(async () => void (await new Promise((resolve) => setTimeout(resolve, 0))));
+  const awayText = (el: HTMLElement) => el.querySelector('[data-launch-rex-away]')?.textContent ?? null;
+  for (const [read, words] of [
+    [{ ...base, rex_shared: true }, INBOX_REX_SHARED_AGAIN],
+    [base, INBOX_REX_SERVER_AWAY_SETTINGS],
+  ] as const) {
+    const state: InboxLaunchSettings = read;
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      // A save's answer never asks Rex: no `rex_here`, no `rex_shared`.
+      if ((init?.method ?? 'GET') === 'POST') {
+        const { rex_here: _here, rex_shared: _shared, ...saved } = state;
+        return new Response(JSON.stringify({ launch: { ...saved, ...JSON.parse(String(init!.body)) } }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      return new Response(JSON.stringify({ launch: state }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }) as typeof fetch;
+    const el = mount(model(), read);
+    await settle();
+    expect(awayText(el)).toBe(words);
+    // A save (the full-permissions switch): its answer never says, so the read's reason stays.
+    await act(async () => (el.querySelector('[data-launch-full-row] [role="switch"]') as HTMLButtonElement).click());
+    await settle();
+    expect(el.querySelector('[data-launch-full-row] [role="switch"]')!.getAttribute('aria-checked')).toBe('true');
+    expect(awayText(el)).toBe(words);
+    act(() => root?.unmount());
+    host?.remove();
+  }
+});
+
+test.skipIf(!hasDom)('"Start new agents in" goes by its own read: the window\'s settings model never says whether Rex is here (it never asks Rex)', async () => {
+  const fromModel: InboxLaunchSettings = { enabled: true, full_permissions: false, rex_agents: ['claude-code', 'pi'], start_in: 'rex' };
+  let read: InboxLaunchSettings = { ...fromModel, rex_here: true };
+  globalThis.fetch = (async () => new Response(JSON.stringify({ launch: read }), { status: 200, headers: { 'Content-Type': 'application/json' } })) as unknown as typeof fetch;
+  const settle = () => act(async () => void (await new Promise((resolve) => setTimeout(resolve, 0))));
+  // Rex chosen: before the read lands, no "Rex isn't open" (nothing says so yet); after, still none, as Rex is here.
+  let el = mount(model(), fromModel);
+  expect(el.querySelector('[data-launch-start-in-row]')).not.toBeNull();
+  expect(el.querySelector('[data-launch-rex-away]')).toBeNull();
+  await settle();
+  expect(el.querySelector('[data-launch-rex-away]')).toBeNull();
+  act(() => root?.unmount());
+  host?.remove();
+  // The default choice, Rex here: the row comes with the read.
+  read = { ...fromModel, start_in: 'inbox', rex_here: true };
+  el = mount(model(), { ...fromModel, start_in: 'inbox' });
+  expect(el.querySelector('[data-launch-start-in-row]')).toBeNull();
+  await settle();
+  expect(el.querySelector('[data-launch-start-in-row]')).not.toBeNull();
 });
 
 test.skipIf(!hasDom)('Windows (launch unsupported there): no switch, and no launch rows while off', () => {

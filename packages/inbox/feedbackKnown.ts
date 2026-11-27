@@ -8,8 +8,8 @@
  * list's ⋮ menu → View → Simple list (listView.ts); `settings-<section>` opens that Settings section;
  * `settings-experimental` opens Capabilities on its Experimental group. A link opens real release notes or docs.
  *
- * Code review, Shape and System are not here. Shape and System are held (packages/server/inbox.ts `heldSwitch`,
- * `SYSTEM_SETTINGS_ROW_VISIBLE`): their switches are hidden, so nothing may offer them. Code review's switch shows to
+ * Code review, Shape and System are not here. The window has no Shape, and System is held (packages/server/inbox.ts
+ * `SYSTEM_SETTINGS_ROW_VISIBLE`): its switch is hidden, so nothing may offer either. Code review's switch shows to
  * everyone since the owner's call of 2026-11-17, but it has no answer here yet.
  *
  * Matching is whole words and whole phrases, no stems: "moves" never finds "remove". An entry matches on one of its

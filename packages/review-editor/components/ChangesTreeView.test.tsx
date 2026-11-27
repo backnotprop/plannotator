@@ -155,10 +155,41 @@ describe.skipIf(!hasDom)('The Changes tree on Pierre trees', () => {
     expect(trail(el, 'committed.ts')).toEqual(['+1']);
   });
 
-  test('a renamed file names its old path on hover', async () => {
+  test('a staged file carries a Staged mark before its numbers, redrawn as it is staged and unstaged (#3683)', async () => {
+    // One viewed set and one annotations array across the rerenders, so only
+    // the staged set changes: the rows must redraw for it alone.
+    const viewedFiles = new Set<string>();
+    const annotations: NonNullable<TreeProps['annotations']> = [];
+    const tree = (staged: string[], extra: TreeProps = {}) => (
+      <Tree files={working} activeFileIndex={0} sinceBaseSections={sections} viewedFiles={viewedFiles} annotations={annotations} stagedFiles={new Set(staged)} {...extra} />
+    );
+    const mark = (el: HTMLElement, path: string) => row(el, path).querySelector<HTMLElement>('[data-item-section="trail"] [title="Staged"]');
+    const el = await mount(tree(['src/staged.ts']));
+    expect(mark(el, 'staged.ts')).not.toBeNull();
+    // A mark, not a button.
+    expect(mark(el, 'staged.ts')!.getAttribute('role')).toBeNull();
+    expect(trail(el, 'staged.ts')).toEqual(['\u25cf', '+1']);
+    expect(mark(el, 'edited.ts')).toBeNull();
+    await rerender(tree(['src/edited.ts']));
+    expect(mark(el, 'edited.ts')).not.toBeNull();
+    expect(mark(el, 'staged.ts')).toBeNull();
+    // Off with the header's Git add button, as dimming is off with the Viewed button.
+    await rerender(tree(['src/edited.ts'], { showStageControls: false }));
+    expect(mark(el, 'edited.ts')).toBeNull();
+  });
+
+  test('grouped by git status, the Staged group says it and its rows carry no mark', async () => {
+    const el = await mount(
+      <Tree files={working} activeFileIndex={0} sinceBaseSections={sections} stagedFiles={new Set(['src/staged.ts'])} groupBy="status" onSelectGroupBy={() => {}} statusGroupingAvailable />,
+    );
+    expect(rows(el)).toContain('Staged/staged.ts');
+    expect(row(el, 'Staged/staged.ts').querySelector('[title="Staged"]')).toBeNull();
+  });
+
+  test('a renamed file names its old path then its new path on hover', async () => {
     const el = await mount(<Tree files={[{ ...file('docs/setup.md'), status: 'renamed', oldPath: 'docs/old-setup.md' }, file('src/a.ts')]} activeFileIndex={1} />);
     const path = rows(el).find((p) => p?.endsWith('setup.md'))!;
-    expect(row(el, path).getAttribute('title')).toBe('Renamed from docs/old-setup.md');
+    expect(row(el, path).getAttribute('title')).toBe('docs/old-setup.md → docs/setup.md');
   });
 
   test('hide viewed files drops viewed rows but keeps the open one', async () => {
@@ -233,6 +264,20 @@ describe.skipIf(!hasDom)('The Changes tree on Pierre trees', () => {
     } finally {
       window.removeEventListener('keydown', listen);
     }
+  });
+
+  test('Escape clears the search and keeps the box; Escape on the empty box lands on the current row, not the page', async () => {
+    const el = await mount(<Tree files={[file('src/a.ts'), file('src/b.ts')]} activeFileIndex={1} />);
+    const host = el.querySelector('[data-changes-tree]')!;
+    await typeInSearch(host, 'b');
+    await act(async () => key(searchInput(host), 'Escape'));
+    await settle();
+    expect(searchInput(host).value).toBe('');
+    expect(shadow(el).activeElement).toBe(searchInput(host));
+    await act(async () => key(searchInput(host), 'Escape'));
+    await settle();
+    expect(document.activeElement === host).toBe(true);
+    expect(shadow(el).activeElement?.getAttribute('data-item-path')).toEndWith('b.ts');
   });
 
   test('after a search is cleared, a click on a row moves focus to it and arrows walk the tree', async () => {

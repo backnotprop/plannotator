@@ -65,7 +65,7 @@ export function SoundIntroDialog({ line, playing, onPlay, onTurnOnNotifications,
         </button>
       </div>
       <p className="ib-sum" id="ib-sound-desc">
-        A soft doorbell when an agent asks you something and this tab is hidden.
+        A soft doorbell when an agent sends you something and this tab is hidden.
       </p>
       <div aria-live="polite" ref={wrap}>
         {line === 'not-allowed' && (

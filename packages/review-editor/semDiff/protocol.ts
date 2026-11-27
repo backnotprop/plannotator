@@ -15,6 +15,11 @@ export type SemDiffReply =
   | { id: number; ok: true; semanticOperations: SemanticDiffOperation[]; semanticFolds: SemanticDiffFold[]; patch: string; secondOpinion?: SecondOpinionReport }
   | { id: number; ok: false; error: string };
 
+export interface SemDiffDownload {
+  download: 'start' | 'done';
+  language: string;
+}
+
 const ROUTE = '/assets/sem-diff/';
 
 export function parseSemDiffAdvert(value: unknown): SemDiffAdvert | null {

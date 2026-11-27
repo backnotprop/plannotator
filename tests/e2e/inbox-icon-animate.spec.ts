@@ -22,7 +22,7 @@ import { INBOX_BRIDGE_POLL_PATH } from '../../packages/shared/inbox/connection';
 import { installFakeClaude, type FakeClaude } from '../helpers/fake-claude';
 import { markTourDecided } from '../helpers/tour-decided';
 import { NO_BROWSER } from '../helpers/no-browser';
-import { inboxScratch, removeInboxScratch } from './inbox-scratch';
+import { E2E_GROUP_TIP_SEEN, inboxScratch, removeInboxScratch } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -103,7 +103,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   writeFileSync(join(data, 'agents-home', '.claude', 'settings.json'), JSON.stringify({ enabledPlugins: { 'plannotator@plannotator': true } }));
   const fake = installFakeClaude({ bin, state: join(root, 'fake-claude') });
   markTourDecided(data);
-  writeFileSync(join(data, 'config.json'), JSON.stringify({ inboxLaunch: { enabled: true }, inboxThemeChooser: { notNeededAt: '2026-10-01T10:00:00.000Z' }, inboxMarkReadWarning: false }));
+  writeFileSync(join(data, 'config.json'), JSON.stringify({ inboxLaunch: { enabled: true }, inboxThemeChooser: { notNeededAt: '2026-10-01T10:00:00.000Z' }, inboxMarkReadWarning: false, inboxReveals: { ...E2E_GROUP_TIP_SEEN } }));
   const env: Record<string, string> = {
     PATH: `${bin}:/usr/bin:/bin`,
     HOME: home,

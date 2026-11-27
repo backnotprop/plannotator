@@ -27,7 +27,7 @@
  *  - a file beside the thread: the same, with ‹ Inbox closing the file;
  *  - full screen: the file covers the thread;
  *  - a phone: ‹ Inbox, the subject, Artifacts, Expand, ⋯ More at the right edge, 44 px targets;
- *    Mark read and Snooze lead the ⋯ sheet;
+ *    the read actions (an opened thread whose question waits: Mark read, Mark unread) and Snooze lead the ⋯ sheet;
  *  - a thread that came back from the archive, and an archived thread
  *    (Unarchive in its foot, the header's Archive button reading Unarchive).
  *
@@ -565,7 +565,7 @@ for (const phone of [
   { name: 'Pixel 7', options: devices['Pixel 7'] },
   { name: '320 px', options: { ...devices['Pixel 7'], viewport: { width: 320, height: 640 } } },
 ]) {
-  test(`a phone (${phone.name}): ‹ Inbox, the subject, Artifacts, Expand and ⋯ More at the right edge, 44 px targets; Mark read and Snooze lead ⋯`, async ({ browser }) => {
+  test(`a phone (${phone.name}): ‹ Inbox, the subject, Artifacts, Expand and ⋯ More at the right edge, 44 px targets; Mark read, Mark unread and Snooze lead ⋯`, async ({ browser }) => {
     const { threads } = world;
     const { defaultBrowserType: _ignored, ...options } = phone.options as typeof phone.options & { defaultBrowserType?: string };
     const context = await browser.newContext({ ...options, colorScheme: 'light' });
@@ -581,11 +581,13 @@ for (const phone of [
       await expect(title.locator('[data-header-name-words]')).toHaveText('invoices');
       await expect(title.locator('[data-header-after]')).toHaveText('Invoice list: cards or a table?');
       expect(await title.evaluate((h) => h.getBoundingClientRect().width)).toBeGreaterThanOrEqual(88);
-      // The read button and Snooze moved into the ⋯ sheet, where they lead.
+      // The read actions and Snooze moved into the ⋯ sheet, where they lead. This thread's question still waits and the
+      // person has opened it, so both read actions are there (markRead.ts `canMarkUnread`, the owner, 2026-11-25).
       await pane.locator('[data-thread-more]').click();
       const sheet = page.locator('[data-thread-menu]');
       await expect(sheet.getByRole('menuitem').first()).toHaveText('Mark read');
-      await expect(sheet.getByRole('menuitem').nth(1)).toHaveText('Snooze');
+      await expect(sheet.getByRole('menuitem').nth(1)).toHaveText('Mark unread');
+      await expect(sheet.getByRole('menuitem').nth(2)).toHaveText('Snooze');
       await page.keyboard.press('Escape');
       await expect(sheet).toHaveCount(0);
       // The pin lives in ⋯ More's menu (a phone's way to pin), not the header.

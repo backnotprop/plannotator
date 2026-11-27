@@ -28,6 +28,7 @@
  */
 import * as zlib from "node:zlib";
 import { negotiateAppHtmlEncoding } from "@plannotator/shared/app-html";
+import { INBOX_EMBED_PAGES_PATH } from "./inbox-embeds";
 import { INBOX_PAGES_PATH } from "./inbox-pages";
 
 /** Below this a compressed body saves less than a packet. */
@@ -72,11 +73,14 @@ function addVary(headers: Headers): void {
 
 /** The browser-facing answer for `res`: a JSON body compressed when the client takes it, else `res` untouched. */
 const PAGE_DOCUMENTS = `${INBOX_PAGES_PATH}/`;
+const EMBED_PAGE_DOCUMENTS = `${INBOX_EMBED_PAGES_PATH}/`;
 
 function compressible(req: Request, type: string): boolean {
   const kind = type.toLowerCase();
   if (kind.startsWith("application/json")) return true;
-  return kind.startsWith("text/html") && new URL(req.url).pathname.startsWith(PAGE_DOCUMENTS);
+  if (!kind.startsWith("text/html")) return false;
+  const path = new URL(req.url).pathname;
+  return path.startsWith(PAGE_DOCUMENTS) || path.startsWith(EMBED_PAGE_DOCUMENTS);
 }
 
 export async function encodeInboxResponse(req: Request, res: Response): Promise<Response> {

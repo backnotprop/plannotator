@@ -196,13 +196,16 @@ export async function hidePulls(pulls: readonly HidePick[], now = new Date()): P
   const byKey = new Map(pulls.map((pull) => [pull.key, pull]));
   const was = change(keys, (key) => ({ hide: true, record: { key, title: byKey.get(key)!.title, url: byKey.get(key)!.url, at }, since: now.getTime() }));
   const left = new Set<string>();
+  let applied = 0;
   try {
     for (const part of inParts(pulls)) {
       const answer = await writeHidden({ hide: part.map(({ key, title, url }) => ({ key, title, url })) });
+      applied += part.length;
       for (const id of answer.threads_left ?? []) left.add(id);
     }
   } catch (cause) {
-    putBack(keys, was);
+    putBack(keys.slice(applied), was);
+    if (applied > 0) written();
     throw cause;
   }
   written();
@@ -214,10 +217,18 @@ export async function showPulls(keys: readonly string[]): Promise<void> {
   if (keys.length === 0) return;
   const was = change(keys, () => ({ hide: false, since: Date.now() }));
   const back: string[] = [];
+  let applied = 0;
   try {
-    for (const part of inParts(keys)) back.push(...((await writeHidden({ show: part })).threads_back ?? []));
+    for (const part of inParts(keys)) {
+      back.push(...((await writeHidden({ show: part })).threads_back ?? []));
+      applied += part.length;
+    }
   } catch (cause) {
-    putBack(keys, was);
+    putBack(keys.slice(applied), was);
+    if (applied > 0) {
+      written();
+      threadsBack(back);
+    }
     throw cause;
   }
   written();

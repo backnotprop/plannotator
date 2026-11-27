@@ -31,6 +31,8 @@ export interface PackageChangesCardProps {
   /** Re-measure hook for the virtualized all-files host. */
   onHeightChange?: () => void;
   compactTouchLayout?: boolean;
+  /** Where the card's reads go (absent, code review's own `/api/package-changes`), as `ImageDiffPreview`'s. */
+  fetchImpl?: typeof fetch;
 }
 
 type SortKey = 'change' | 'name' | 'downloads' | 'released';
@@ -186,18 +188,19 @@ export const PackageChangesCard: React.FC<PackageChangesCardProps> = ({
   reviewSnapshotId,
   onHeightChange,
   compactTouchLayout,
+  fetchImpl,
 }) => {
   const setting = usePackageChangesSetting();
   const enabled = setting?.card === true;
   const scope = useMemo(() => ({ snapshot: reviewSnapshotId, base: reviewBase }), [reviewSnapshotId, reviewBase]);
-  const data = usePackageCard(filePath, scope, enabled);
+  const data = usePackageCard(filePath, scope, enabled, fetchImpl);
   const card = data?.card;
   const folded = usePackageChangesFolded();
   const [retry, setRetry] = useState(0);
   const [asking, setAsking] = useState(false);
   const names = card?.lookup.names.length ?? 0;
   const lookupOn = setting?.lookup === true && names > 0;
-  const lookup = usePackageLookup(filePath, scope, lookupOn && !!card, retry);
+  const lookup = usePackageLookup(filePath, scope, lookupOn && !!card, retry, fetchImpl);
 
   if (!enabled || !card) return null;
   return (
@@ -271,14 +274,24 @@ export const CardBody: React.FC<CardBodyProps> = ({ card, folded, lookup, lookup
     return () => ro.disconnect();
   }, []);
 
-  useLayoutEffect(() => { onHeightChange?.(); });
+  // Tell the host only when the card's height really changed (and once when it first draws). The All files view answers
+  // a report by republishing the file's header slot, which draws this card again: a report on every draw was a redraw
+  // every frame.
+  const reportedHeight = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    if (!onHeightChange) return;
+    const height = rootRef.current?.getBoundingClientRect().height ?? 0;
+    if (reportedHeight.current !== null && Math.abs(height - reportedHeight.current) < 1) return;
+    reportedHeight.current = height;
+    onHeightChange();
+  });
 
   const touch = compactTouchLayout || undefined;
   const quietButton = 'rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
 
   if (card.error) {
     return (
-      <div data-package-changes="error" className="flex items-center gap-2 border-b border-border bg-muted/20 px-4 py-1.5 text-xs text-muted-foreground">
+      <div ref={rootRef} data-package-changes="error" className="flex items-center gap-2 border-b border-border bg-muted/20 px-4 py-1.5 text-xs text-muted-foreground">
         <PackageIcon className="h-3.5 w-3.5 flex-none" />
         <Tooltip content={`${card.error.side === 'old' ? 'Previous' : 'New'} side: ${card.error.reason}`}>
           <span>Unreadable {card.path.split('/').pop()}</span>

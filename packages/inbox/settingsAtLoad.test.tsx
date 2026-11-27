@@ -22,6 +22,8 @@ let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
 let savedEventSource: unknown;
 let asked: string[] = [];
+/** Settings reads whose answer has come back (asked counts a read when it is sent). */
+let settingsAnswered = 0;
 let listHeld: Promise<void> | null = null;
 const listeners = new Map<string, ((event: MessageEvent) => void)[]>();
 
@@ -65,6 +67,7 @@ beforeAll(async () => {
     asked.push(String(input).split('?')[0]!);
     if (listHeld && String(input).startsWith('/api/inbox/threads')) await listHeld;
     const answer = await loopback(String(input), init?.method ?? 'GET', init?.body ? String(init.body) : undefined);
+    if (String(input).split('?')[0] === '/api/inbox/settings') settingsAnswered++;
     return new Response(answer.text, { status: answer.status, headers: { 'Content-Type': 'application/json' } });
   }) as typeof fetch;
   savedEventSource = (globalThis as Record<string, unknown>).EventSource;
@@ -146,10 +149,17 @@ test.skipIf(!hasDom)('a settings read that brings the same settings (another win
   await openWindow();
   const status = listeners.get('capabilities') ?? [];
   expect(status.length).toBeGreaterThan(0);
-  const before = asked.filter((path) => path === '/api/inbox/settings').length;
+  // The load's own reads finish first: on a slow runner one still lands after the list, and its draw is not the
+  // settings read's. Quiet means 300 ms with nothing drawn.
+  for (let i = 0; ; i++) {
+    const settling = await drawsDuring(() => act(async () => void (await new Promise((r) => setTimeout(r, 300)))));
+    if (settling.size === 0) break;
+    if (i >= 20) throw new Error(`the window never went quiet: ${[...settling.keys()].join(', ')}`);
+  }
+  const before = settingsAnswered;
   const draws = await drawsDuring(async () => {
     for (const listener of status) listener(new MessageEvent('capabilities', { data: '{}' }));
-    await until(() => asked.filter((path) => path === '/api/inbox/settings').length > before, 'the settings read');
+    await until(() => settingsAnswered > before, 'the settings read');
     await act(async () => {
       await new Promise((r) => setTimeout(r, 300));
     });

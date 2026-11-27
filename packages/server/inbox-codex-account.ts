@@ -11,6 +11,8 @@
  *    account or workspace id, or Codex's own text.
  *  - Read only when a window asks (Settings → Agents shown), one run at a time, and an answer serves for 30 s, a
  *    failure's too. Nothing polls.
+ *  - Launch's own check (inbox-launch-codex.ts `available()`) also reads it, with a reader of its own, when
+ *    `codex login status` says signed out: a provider that needs no OpenAI account still starts.
  */
 import { CodexAppServerProcess } from "@plannotator/ai/providers/codex-app-server";
 import type { InboxCodexAccount, InboxCodexLimit } from "@plannotator/core/inbox-types";

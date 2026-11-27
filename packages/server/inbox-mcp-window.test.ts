@@ -18,9 +18,10 @@ import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/cli
 import { INBOX_TEXT_COMPLETE_META_KEY, inboxToolResultText } from "@plannotator/shared/inbox/connection";
 import { LONG_THREAD_FIRST_CHOICE, seedLongThread } from "../../tests/helpers/inbox-long-thread";
 import { startInboxServer, type InboxServer } from "./inbox";
-import { splitInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
 import type { InboxMessageWire } from "@plannotator/core/inbox-types";
-import { agentMessage, INBOX_BODY_CUT_BYTES, INBOX_EARLIER_PERSON_BYTES, INBOX_THREAD_WINDOW, messageText, windowedThread, windowedThreadText, withoutAnswersSection, type ThreadReadInput } from "./inbox-mcp-read";
+import { agentMessage, messageLineText, INBOX_BODY_CUT_BYTES, INBOX_LINE_MAX_CHARS, INBOX_REASK_SETTLED, INBOX_THREAD_LINES, INBOX_THREAD_WINDOW, messageText, windowedThread, windowedThreadText, type ThreadReadInput } from "./inbox-mcp-read";
+import { BIG_THREAD_AGENT, bigThreadSkillsBlock, seedBigThread } from "../../tests/helpers/inbox-big-thread";
+import { InboxStore } from "@plannotator/shared/inbox/store";
 import { INBOX_RECENT_SEARCHES_FILE } from "./inbox-search";
 
 const roots: string[] = [];
@@ -115,20 +116,18 @@ describe("read_thread reads a window", () => {
     expect((sixty - forty) / 20).toBeLessThan(500);
   });
 
-  test("the window: the newest limit messages in full, the person's earlier messages in full, every other earlier message as one line", async () => {
+  test("the window: the newest limit messages in full, every earlier message as one line", async () => {
     const w = await world();
     const seeded = await seedLongThread({ client: w.client, port: w.server.port, project: w.project, rounds: 10 });
     const all = seeded.messageIds; // 19 messages, oldest first: agent, person, agent, …, agent
     const read = await call(w.client, "read_thread", { thread_id: seeded.threadId, agent_session: "ses_long" });
     const { thread, window } = read.structuredContent;
     expect(ids(thread.messages).slice(-INBOX_THREAD_WINDOW)).toEqual(all.slice(-INBOX_THREAD_WINDOW));
-    // Before the window: the person's replies in full (they fit in 12 KB), the agent's messages one line each.
+    // Before the window, the person's replies and the agent's messages alike are one line each.
     const before = all.slice(0, -INBOX_THREAD_WINDOW);
-    const persons = before.filter((_, i) => i % 2 === 1);
-    const agents = before.filter((_, i) => i % 2 === 0);
-    expect(ids(thread.messages)).toEqual([...persons, ...all.slice(-INBOX_THREAD_WINDOW)].sort((a, b) => all.indexOf(a) - all.indexOf(b)));
-    expect(ids(thread.earlier)).toEqual(agents);
-    expect(window).toMatchObject({ limit: INBOX_THREAD_WINDOW, full: persons.length + INBOX_THREAD_WINDOW, lines: agents.length, left_out: 0 });
+    expect(ids(thread.messages)).toEqual(all.slice(-INBOX_THREAD_WINDOW));
+    expect(ids(thread.earlier)).toEqual(before);
+    expect(window).toMatchObject({ limit: INBOX_THREAD_WINDOW, full: INBOX_THREAD_WINDOW, lines: before.length, left_out: 0 });
     // A one-line message: id, author, time, first words, size, and its questions with their states and answers.
     const line = thread.earlier[0];
     expect(line).toMatchObject({ id: all[0], author: { kind: "agent", name: "Claude Code" }, words: expect.stringMatching(/^Step 1:/), bytes: expect.any(Number) });
@@ -136,10 +135,7 @@ describe("read_thread reads a window", () => {
       [1, "sent", [LONG_THREAD_FIRST_CHOICE]],
       [2, "sent", ["Yes"]],
     ]);
-    // An earlier reply leaves its answers section out (the answers are on the questions); one in the window keeps it.
-    const earlierReply = thread.messages.find((m: any) => m.id === persons[0]);
-    expect(earlierReply.body).toContain("Round 1: go ahead.");
-    expect(earlierReply.body).not.toContain("### Q1.");
+    expect(thread.earlier[1]).toMatchObject({ id: all[1], author: { kind: "person" }, words: "Round 1: go ahead." });
     const windowReply = thread.messages.find((m: any) => m.id === all.at(-2));
     expect(windowReply.body).toContain("## Answers to your questions");
     // The bookkeeping is gone; the fields readers use keep their names.
@@ -209,13 +205,10 @@ describe("read_thread reads a window", () => {
     expect(ids(back.thread.messages).slice(-INBOX_THREAD_WINDOW)).toEqual(all.slice(10 - INBOX_THREAD_WINDOW, 10));
     expect([...ids(back.thread.messages), ...ids(back.thread.earlier)].sort()).toEqual(all.slice(0, 10).sort());
     expect(back.window.left_out).toBe(all.length - 10);
-    // The questions of the messages left out are still there, with their states.
-    const leftOutKeys = all.slice(10).flatMap((id) => (w.server.store.questionsOf(id) ?? []).map((q) => `${id}/${q.key}`));
-    const listed = new Set([
-      ...back.thread.questions.map((q: any) => `${q.message_id}/${q.key}`),
-      ...back.thread.open_questions.map((q: any) => `${q.message_id}/${q.key}`),
-    ]);
-    for (const key of leftOutKeys) expect(listed.has(key)).toBe(true);
+    // Newer messages' settled questions are not repeated (a read without before has them); their open ones stay in the header.
+    expect(back.thread.questions).toBeUndefined();
+    const openKeys = all.slice(10).flatMap((id) => (w.server.store.questionsOf(id) ?? []).filter((q) => q.state === "open").map((q) => `${id}/${q.key}`));
+    expect(back.thread.open_questions.map((q: any) => `${q.message_id}/${q.key}`)).toEqual(openKeys);
 
     const read = (await call(w.client, "read_thread", { thread_id: seeded.threadId })).structuredContent;
     const nothingNew = (await call(w.client, "read_thread", { thread_id: seeded.threadId, after: read.cursor })).structuredContent;
@@ -248,26 +241,196 @@ describe("read_thread reads a window", () => {
     expect(whole.thread.messages[0].body_bytes).toBeUndefined();
   });
 
-  test("the person's earlier messages past 12 KB become one line, newest kept in full", async () => {
+  test("an earlier message from the person is one line, and expand shows it whole", async () => {
     const w = await world();
     const seeded = await seedLongThread({ client: w.client, port: w.server.port, project: w.project, rounds: 2 });
-    let last = seeded.lastAgentMessageId;
-    const words = "This is what I think about the retry worker, at some length. ".repeat(40); // ~2.4 KB a reply
-    const replies: string[] = [];
-    for (let i = 0; i < 9; i++) {
-      const reply = await w.post(`/api/inbox/messages/${last}/reply`, { idempotency_key: `r${i}`, words: `${i}: ${words}` });
-      replies.push(reply.reply.id);
-      last = (await call(w.client, "send_message", { reply_to: reply.reply.id, body: `Noted ${i}.`, agent_session: "ses_long" })).structuredContent.message_id;
+    const words = `My long view on the retry worker. ${"It should drain in order. ".repeat(80)}`;
+    const reply = await w.post(`/api/inbox/messages/${seeded.lastAgentMessageId}/reply`, { idempotency_key: "older", words });
+    const newer = await w.post(`/api/inbox/messages/${seeded.lastAgentMessageId}/reply`, { idempotency_key: "newer", words: "And one more thing." });
+    for (let i = 0; i < 6; i++) await call(w.client, "send_message", { reply_to: newer.reply.id, body: `Noted ${i}.`, agent_session: "ses_long" });
+    const read = await call(w.client, "read_thread", { thread_id: seeded.threadId });
+    expect(ids(read.structuredContent.thread.earlier)).toContain(reply.reply.id);
+    expect(ids(read.structuredContent.thread.messages)).toContain(newer.reply.id);
+    const line = read.content[0]!.text.split("\n").find((l) => l.startsWith(`- ${reply.reply.id} `))!;
+    expect(line).toContain("My long view on the retry worker.");
+    expect(line.length).toBeLessThan(300);
+    const whole = (await call(w.client, "read_thread", { thread_id: seeded.threadId, expand: [reply.reply.id] })).structuredContent;
+    expect(whole.thread.messages.find((m: any) => m.id === reply.reply.id).body).toBe(w.server.store.message(reply.reply.id)!.body);
+  });
+
+  test("a 500-message thread at limit 5 stays small; every open question's ref is listed; older messages are one count line naming before", () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-big-thread-")));
+    roots.push(root);
+    const store = InboxStore.open(root);
+    const seeded = seedBigThread(store);
+    store.markAgentChecked(seeded.threadId);
+    expect(seeded.ids.length).toBeGreaterThan(500);
+    const { result, order } = windowedThread(store, seeded.threadId, { limit: 5 }, "http://localhost/#thread");
+    const text = windowedThreadText(result, order);
+    // Measured: about 10 KB (98 KB before the one-line bound and folding).
+    expect(text.length).toBeLessThan(15_000);
+    const open = store.thread(seeded.threadId)!.messages.flatMap((m) => (m.questions ?? []).filter((q) => q.state === "open").map((q) => `${m.id}/${q.key}`));
+    expect(open).toHaveLength(9);
+    for (const ref of open) expect(text).toContain(`- ${ref} (`);
+    expect(result.thread.earlier).toHaveLength(INBOX_THREAD_LINES);
+    const older = seeded.ids.length - 5 - INBOX_THREAD_LINES;
+    expect(text).toContain(`… ${older} more messages, older than the line below, not shown here (read_thread before: ${result.thread.earlier[0]!.id} reads them)\n- ${result.thread.earlier[0]!.id} `);
+    const back = windowedThread(store, seeded.threadId, { limit: 5, before: result.thread.earlier[0]!.id }, "http://localhost/#thread").result;
+    expect(back.thread.messages.at(-1)!.id).toBe(seeded.ids[seeded.ids.indexOf(result.thread.earlier[0]!.id) - 1]);
+  });
+
+  const readAs = async (w: Awaited<ReturnType<typeof world>>, threadId: string, session: string, args: Record<string, unknown> = {}) =>
+    (await call(w.client, "read_thread", { thread_id: threadId, agent_session: session, ...args })).content[0]!.text;
+  const replyIds = (store: InboxStore, ids: string[]) => ids.filter((id) => store.message(id)!.author.kind === "person");
+
+  test("a read lists the reader's unread replies past the recent lines, so one plain read settles a mark held back; a delivered one never holds it", async () => {
+    const w = await world();
+    const store = w.server.store;
+    const seeded = seedBigThread(store, 40, w.project);
+    const replies = replyIds(store, seeded.ids);
+    const [first, second] = replies as [string, string];
+    for (const id of replies.slice(2)) store.recordDelivery(id, { host: "claude-code", session: BIG_THREAD_AGENT.session!, markThrough: 0 });
+    expect(store.message(seeded.threadId)!.agent_checked_seq ?? 0).toBe(0);
+    const text = await readAs(w, seeded.threadId, BIG_THREAD_AGENT.session!, { limit: 5 });
+    expect(text).toMatch(new RegExp(`… \\d+ more messages, older than the recent lines below, not shown here \\(read_thread before: msg_\\w+ reads them\\); first, the person's 2 unread replies among the older ones\\n- ${first} · the person · .* · unread · `));
+    expect(text).toContain(`- ${second} · the person · `);
+    expect(store.message(seeded.threadId)!.agent_checked_seq).toBeGreaterThanOrEqual(store.messageCursor(replies.at(-1)!)!);
+    const list = (await call(w.client, "read_thread", { project_path: w.project, agent_session: BIG_THREAD_AGENT.session! })).structuredContent;
+    expect(list.threads.find((t: any) => t.thread_id === seeded.threadId).unread).toBe(false);
+    // Read, never woken: the next read lists nothing as unread.
+    const again = await readAs(w, seeded.threadId, BIG_THREAD_AGENT.session!, { limit: 5 });
+    expect(again).not.toContain(" · unread · ");
+    expect(again).not.toContain("unread repl");
+  });
+
+  test("past twenty unread replies a read lists the oldest twenty, names the call for the rest, and marks none it did not show", async () => {
+    const w = await world();
+    const store = w.server.store;
+    const seeded = seedBigThread(store, 40);
+    const text = await readAs(w, seeded.threadId, BIG_THREAD_AGENT.session!, { after: store.cursor() + 1000 });
+    expect(text).toMatch(/; \d+ more unread replies are among the ones not shown \(read_thread after: msg_\w+, before: msg_\w+ reads them\)/);
+    const shown = new Set(text.split("\n").flatMap((line) => /^- (msg_\w+) /.exec(line)?.[1] ?? []));
+    const checked = store.message(seeded.threadId)!.agent_checked_seq ?? 0;
+    for (const id of replyIds(store, seeded.ids).filter((id) => !shown.has(id))) expect(store.messageCursor(id)!).toBeGreaterThan(checked);
+  });
+
+  test("a live review's comments after its lead never hold the mark: one read and the thread is read", async () => {
+    const w = await world();
+    const store = w.server.store;
+    const project = store.ensureProject({ name: "api", root: "/work/api" });
+    const root = store.startPersonThread({ project_id: project.id, body: "40 comments on the page.", to: { host: "claude-code", session: "ses_rev" }, review_batch: { id: "rb_x", lead: true }, idempotency_key: "rev" }).message;
+    const comments = Array.from({ length: 40 }, (_, i) => store.sendReply(root.id, { words: `Comment ${i}.`, idempotency_key: `c${i}`, review_batch: { id: "rb_x", lead: false } }).reply.id);
+    await readAs(w, root.thread_id, "ses_rev");
+    expect(store.message(root.thread_id)!.agent_checked_seq).toBeGreaterThanOrEqual(store.messageCursor(comments.at(-1)!)!);
+  });
+
+  test("two agents in one thread: a read neither lists nor settles replies to the other's messages", async () => {
+    const w = await world();
+    const store = w.server.store;
+    const project = store.ensureProject({ name: "api", root: "/work/api" });
+    const author = (session: string) => ({ ...BIG_THREAD_AGENT, session });
+    let last = store.sendMessage({ project_id: project.id, author: author("ses_a"), body: "Start.", subject: "Two agents" }).message.id;
+    const threadId = last;
+    const toB: string[] = [];
+    for (let i = 0; i < 25; i++) {
+      for (const session of ["ses_a", "ses_b"]) {
+        last = store.sendMessage({ project_id: project.id, author: author(session), body: `${session} step ${i}.`, reply_to: last }).message.id;
+        last = store.sendReply(last, { words: `To ${session}, ${i}.`, idempotency_key: `${session}-${i}` }).reply.id;
+        if (session === "ses_b") toB.push(last);
+      }
     }
-    const { thread } = (await call(w.client, "read_thread", { thread_id: seeded.threadId })).structuredContent;
-    const inFull = replies.filter((id) => ids(thread.messages).includes(id));
-    const asLines = replies.filter((id) => ids(thread.earlier).includes(id));
-    expect(inFull.length + asLines.length).toBe(replies.length);
-    // Contiguous: the oldest ones are the lines.
-    expect(asLines).toEqual(replies.slice(0, asLines.length));
-    expect(asLines.length).toBeGreaterThan(0);
-    const earlierFullBytes = inFull.filter((id) => !replies.slice(-3).includes(id)).reduce((sum, id) => sum + bytes(w.server.store.message(id)!.body), 0);
-    expect(earlierFullBytes).toBeLessThanOrEqual(INBOX_EARLIER_PERSON_BYTES);
+    const text = await readAs(w, threadId, "ses_a", { limit: 3 });
+    const unreadLines = text.split("\n").filter((line) => line.includes(" · unread · "));
+    expect(unreadLines.length).toBeGreaterThan(0);
+    for (const id of toB) expect(unreadLines.some((line) => line.startsWith(`- ${id} `))).toBe(false);
+    expect(store.pendingReplies("ses_b").map((m) => m.id)).toEqual(expect.arrayContaining(toB.slice(0, 5)));
+    await readAs(w, threadId, "ses_b", { limit: 3 });
+    expect(store.pendingReplies("ses_b").filter((m) => toB.slice(0, 5).includes(m.id))).toEqual([]);
+  });
+
+  test("the unread list and the mark follow the wake's routing: a reply to the person's own reply is nobody's, one to their message addressed to a session is that session's", async () => {
+    const w = await world();
+    const store = w.server.store;
+    const seeded = seedBigThread(store, 40, w.project);
+    store.markAgentChecked(seeded.threadId);
+    const replies = replyIds(store, seeded.ids);
+    const ownReply = store.sendReply(replies.at(-1)!, { words: "And one more thing on my own reply.", idempotency_key: "own" }).reply;
+    let last = ownReply.id;
+    for (let i = 0; i < 20; i++) {
+      last = store.sendMessage({ project_id: store.message(seeded.threadId)!.project_id, author: BIG_THREAD_AGENT, body: `Later step ${i}.`, reply_to: last }).message.id;
+      last = store.sendReply(last, { words: `Later ${i}.`, idempotency_key: `later-${i}` }).reply.id;
+    }
+    const addressed = store.startPersonThread({ project_id: store.message(seeded.threadId)!.project_id, body: "New work.", to: { host: "claude-code", session: BIG_THREAD_AGENT.session! }, idempotency_key: "new" }).message;
+    const followUp = store.sendReply(addressed.id, { words: "Also this.", idempotency_key: "follow" }).reply;
+    const session = BIG_THREAD_AGENT.session!;
+    expect(store.owedTo(ownReply, session)).toBe(false);
+    expect(followUp.to?.session).toBe(session);
+    expect(store.owedTo(followUp, session)).toBe(true);
+    const text = await readAs(w, seeded.threadId, session, { limit: 3 });
+    expect(text).toContain("more messages, older than the recent lines below");
+    expect(text).not.toContain(`- ${ownReply.id} `);
+    expect(store.message(seeded.threadId)!.agent_checked_seq).toBeGreaterThanOrEqual(store.messageCursor(ownReply.id)!);
+  });
+
+  test("a one-line message past its length keeps every question key and the Board request pointer, clipping its first words", () => {
+    const line = {
+      id: "msg_01M5C00000000000000000000A",
+      author: { kind: "agent" as const, name: "Claude Code" },
+      created_at: "2026-10-19T12:00:00.000Z",
+      reply_to: null,
+      words: "A long first paragraph about the retry worker ".repeat(5),
+      bytes: 4096,
+      questions: Array.from({ length: 10 }, (_, i) => ({ key: `q-${String(i).padStart(8, "0")}`, q: i + 1, state: "sent" as const, prompt: `Which backoff for queue ${i}?`, answer: { text: "x".repeat(300) } })),
+      board_request: true as const,
+    };
+    const text = messageLineText(line, { previousId: null, previousDate: null, rootId: line.id });
+    for (const q of line.questions) expect(text).toContain(q.key);
+    expect(text).toEndWith(`Board request (read_thread expand: ["${line.id}"] shows it)`);
+    expect(text).toContain("shows them in full)");
+  });
+
+  test("the person's newest message keeps its skills block as sent; an older one shows one line in its place, and expand shows it", async () => {
+    const w = await world();
+    const seeded = seedBigThread(w.server.store, 25);
+    w.server.store.markAgentChecked(seeded.threadId);
+    const [older] = seeded.skillReplies as [string];
+    const read = async (args: Record<string, unknown> = {}) => (await call(w.client, "read_thread", { thread_id: seeded.threadId, limit: 60, ...args })).content[0]!.text;
+    const text = await read();
+    expect(text).toContain(bigThreadSkillsBlock("release-notes-25"));
+    expect(text).not.toContain(bigThreadSkillsBlock("release-notes-5"));
+    expect(text).toContain("- `release-notes-5` (cannot be invoked by a model");
+    expect(text).toContain(`[Left out here (6.1 KB): the instructions of release-notes-5. read_thread expand: ["${older}"] shows them]`);
+    expect(await read({ expand: [older] })).toContain(bigThreadSkillsBlock("release-notes-5"));
+  });
+
+  test("a settled Re-ask note says nothing is left to ask, as the person's newest message too; one still waiting is shown as sent", async () => {
+    const w = await world();
+    const store = w.server.store;
+    const seeded = seedBigThread(store, 30);
+    store.markAgentChecked(seeded.threadId);
+    const [settled] = seeded.reaskNotes as [string];
+    const next = seeded.ids[seeded.ids.indexOf(settled) + 1]!;
+    const read = async (args: Record<string, unknown>) => (await call(w.client, "read_thread", { thread_id: seeded.threadId, ...args })).content[0]!.text;
+    const older = await read({ limit: 60 });
+    expect(older).toContain(`${INBOX_REASK_SETTLED}\n[Its list and steps`);
+    expect(older).not.toContain(`reply_to ${settled}`);
+    const asNewest = await read({ before: next, limit: 1 });
+    expect(asNewest).toContain(`reply_to ${settled}.`);
+    expect(asNewest).toContain(INBOX_REASK_SETTLED);
+    const open = store.sendReask(seeded.ids.at(-1)!, { idempotency_key: "again" }).reply;
+    const waiting = await read({ limit: 3 });
+    expect(waiting).toContain(`Send one message (send_message) with reply_to ${open.id}.`);
+    expect(waiting.split(INBOX_REASK_SETTLED).length).toBe(1);
+  });
+
+  test("the header leaves the choices out past its budget, keeping every ref and prompt", async () => {
+    const w = await world();
+    const block = (i: number) => `:::question\nQuestion ${i}?\n\n${[1, 2, 3, 4].map((c) => `- [ ] Choice ${c}, ${"with a long explanation of what it means ".repeat(3)}`).join("\n")}\n:::`;
+    const sent = (await call(w.client, "send_message", { project_path: w.project, body: Array.from({ length: 12 }, (_, i) => block(i)).join("\n\n"), agent_session: "ses_ch" })).structuredContent;
+    const text = (await call(w.client, "read_thread", { thread_id: sent.thread_id })).content[0]!.text;
+    for (const [i, q] of (sent.questions as { key: string }[]).entries()) {
+      expect(text).toContain(`- ${sent.message_id}/${q.key} (Q${i + 1}) open: Question ${i}? (4 choices; read_thread expand: ["${sent.message_id}"] shows them)`);
+    }
   });
 
   test("format: \"full\" returns every full record, as before the window", async () => {
@@ -359,6 +522,9 @@ describe("no question's state is ever lost from a windowed read", () => {
             (store.questionLineSeq(`${m.id}/${q.key}`) ?? 0) <= after &&
             !(q.state === "closed" && archived !== null && archived > after);
           if (unchangedSinceCursor && !found.has(`${m.id}/${q.key}`)) continue;
+          // A message newer than `before` keeps only its open and picked questions (the header): a read without `before` shows the rest.
+          const before = input.before === undefined ? null : typeof input.before === "number" ? input.before : store.messageCursor(input.before)!;
+          if (before !== null && store.messageCursor(m.id)! >= before && q.state !== "open" && q.state !== "picked" && !found.has(`${m.id}/${q.key}`)) continue;
           expect(found.get(`${m.id}/${q.key}`), context).toBe(q.state);
           expect(text.includes(q.key), context).toBe(true);
         }
@@ -505,22 +671,7 @@ describe("a windowed read marks read only what it showed", () => {
   });
 });
 
-describe("the review's fixes: answers whole, the answers section cut exactly, the person's newest message whole, after stays small", () => {
-  const SKILLS = [
-    "**Skills referenced** (the person is asking you to invoke these skills when acting on this reply):",
-    "- `release-notes` (cannot be invoked by a model; its instructions are included below at the person's request)",
-    "",
-    "--- BEGIN SKILL INSTRUCTIONS: release-notes ---",
-    "# Release notes",
-    "",
-    "## Steps",
-    "",
-    "### 1. Gather the changes",
-    "Answer: this line looks like an answer but belongs to the skill.",
-    "--- END SKILL INSTRUCTIONS: release-notes ---",
-  ].join("\n");
-  const FEEDBACK = ["# Feedback on the attached files", "", "## notes.md", "", "### 1. Feedback on:", "> The worker drains the queue", "Say how it drains."].join("\n");
-
+describe("the review's fixes: one-line messages bounded, the person's newest message whole, after stays small", () => {
   /** A question answered by a reply that carries `feedback` after its answers section, through the real reply route. */
   async function answered(w: Awaited<ReturnType<typeof world>>, feedback: string, text = "In order") {
     const sent = (await call(w.client, "send_message", { project_path: w.project, body: ":::question-text\nHow does the worker drain?\n:::", agent_session: "ses_r" })).structuredContent;
@@ -534,57 +685,25 @@ describe("the review's fixes: answers whole, the answers section cut exactly, th
     return { sent, replyId: reply.reply.id as string, body: w.server.store.message(reply.reply.id)!.body };
   }
 
-  test("withoutAnswersSection cuts only the answers section: a skills block after it (with # headings in its SKILL.md), or feedback, stays exactly", async () => {
-    const w = await world();
-    const marker = "[Answers to your questions: left out here; each answer is on its question above, and expand shows this reply as sent]";
-    for (const feedback of [SKILLS, FEEDBACK, `${FEEDBACK}\n\n${SKILLS}`, ""]) {
-      const { replyId, body } = await answered(w, feedback);
-      expect(body).toContain("## Answers to your questions");
-      const cut = withoutAnswersSection(w.server.store.messageWire(replyId)!);
-      expect(cut).toBe(`Answered 1 question.\n\nHere you go.\n\n${marker}${feedback ? `\n\n${feedback}` : ""}`);
-      if (feedback.includes("**Skills referenced**")) expect(splitInboxSkillsBlock(cut)?.skills.map((skill) => skill.name)).toEqual(["release-notes"]);
-    }
-    // Text that does not follow the section's grammar exactly is never cut.
-    const odd = { ...w.server.store.messageWire((await answered(w, "")).replyId)!, body: "My words.\n\n## Answers to your questions\n\nI wrote this heading myself." } as InboxMessageWire;
-    expect(withoutAnswersSection(odd)).toBe(odd.body);
-  });
-
-  test("withoutAnswersSection cuts a reply's answers on several messages too (one reply for one session), and only that", async () => {
-    const w = await world();
-    const block = (prompt: string) => `:::question\n${prompt}\n\n- [ ] Yes\n- [ ] No\n:::`;
-    const send = async (args: Record<string, unknown>) => (await call(w.client, "send_message", { project_path: w.project, agent_session: "ses_two", agent_name: "Claude Code", ...args })).structuredContent;
-    const first = await send({ body: block("Ship A?"), thread: "two-messages" });
-    const second = await send({ body: block("Ship B?"), reply_to: first.message_id });
-    const answer = (q: { key: string; kind: string; prompt: string }) => ({ v: 1, key: q.key, kind: q.kind, prompt: q.prompt, selected: ["Yes"] });
-    const reply = await w.post(`/api/inbox/messages/${second.message_id}/reply`, {
-      idempotency_key: "both",
-      words: "Both.",
-      feedback: FEEDBACK,
-      questions: [
-        { message_id: first.message_id, key: first.questions[0].key, revision: 0, answer: answer(first.questions[0]) },
-        { key: second.questions[0].key, revision: 0, answer: answer(second.questions[0]) },
-      ],
-    });
-    const wire = w.server.store.messageWire(reply.reply.id)!;
-    expect(wire.body).toContain(`### Your message ${first.message_id}`);
-    const marker = "[Answers to your questions: left out here; each answer is on its question above, and expand shows this reply as sent]";
-    expect(withoutAnswersSection(wire)).toBe(`Answered 2 questions.\n\nBoth.\n\n${marker}\n\n${FEEDBACK}`);
-  });
-
-  test("an answer is shown whole, line breaks kept, however long (4,000 characters), on a one-line message too", async () => {
+  test("a one-line message stays short however long its answer (4,000 characters), keeps its question's key and state, and names the feedback its reply carries", async () => {
     const w = await world();
     const long = Array.from({ length: 60 }, (_, i) => `Line ${i}: the worker drains the queue in order, then retries.`).join("\n");
     expect(long.length).toBeGreaterThan(3000);
-    expect(long.length).toBeLessThanOrEqual(4000);
-    const { sent } = await answered(w, "", long);
-    for (let i = 0; i < 8; i++) await call(w.client, "send_message", { reply_to: sent.message_id, body: `Progress ${i}.`, agent_session: "ses_r" });
-    const read = await call(w.client, "read_thread", { thread_id: sent.thread_id });
-    expect(read.structuredContent.thread.earlier.map((l: any) => l.id)).toContain(sent.message_id);
-    expect(read.content[0]!.text).toContain(JSON.stringify(long));
+    const feedback = ["# Feedback on the attached files", "", "## notes.md", "", "### 1. Feedback on:", "> The worker drains the queue", "Say how it drains."].join("\n");
+    const { sent, replyId } = await answered(w, feedback, long);
+    let last = sent.message_id;
+    for (let i = 0; i < 8; i++) last = (await call(w.client, "send_message", { reply_to: last, body: `Progress ${i}.`, agent_session: "ses_r" })).structuredContent.message_id;
+    await w.post(`/api/inbox/messages/${last}/reply`, { idempotency_key: "later", words: "Later." });
+    const read = await call(w.client, "read_thread", { thread_id: sent.thread_id, limit: 2 });
+    const lines = read.content[0]!.text.split("\n");
+    const asked = lines.find((l) => l.startsWith(`- ${sent.message_id} `))!;
+    expect(asked.length).toBeLessThanOrEqual(INBOX_LINE_MAX_CHARS);
+    expect(asked).toContain(`Q1 ${sent.questions[0].key} sent (read_thread expand: ["${sent.message_id}"] shows them in full)`);
+    expect(lines.find((l) => l.startsWith(`- ${replyId} `))).toContain("with feedback on the attached files (expand shows them)");
     expect(read.structuredContent.thread.earlier[0].questions[0].answer.text).toBe(long);
   });
 
-  test("the person's newest message is whole even past 16 KB, and one long earlier reply does not fold the older ones into lines", async () => {
+  test("the person's newest message is whole even past 16 KB and outside the window; their earlier replies are lines", async () => {
     const w = await world();
     const seeded = await seedLongThread({ client: w.client, port: w.server.port, project: w.project, rounds: 3 });
     let last = seeded.lastAgentMessageId;
@@ -600,11 +719,8 @@ describe("the review's fixes: answers whole, the answers section cut exactly, th
     const newest = thread.messages.find((m: any) => m.id === replies[4]);
     expect(newest.body).toBe(w.server.store.message(replies[4]!)!.body);
     expect(newest.body_bytes).toBeUndefined();
-    const inFull = thread.messages.map((m: any) => m.id);
-    // The 13 KB reply does not fit the 12 KB budget; the short ones before and after it still do.
-    expect(inFull).toEqual(expect.arrayContaining([replies[0], replies[1], replies[3]]));
-    expect(thread.earlier.map((l: any) => l.id)).toContain(replies[2]);
-    expect(window).toMatchObject({ newest: 2, expanded: 0 });
+    expect(thread.earlier.map((l: any) => l.id)).toEqual(expect.arrayContaining(replies.slice(0, 4)));
+    expect(window).toMatchObject({ newest: 2, expanded: 0, full: 3 });
   });
 
   test("after with nothing new stays the same size whether the thread has 60 or 120 messages", async () => {
@@ -615,7 +731,7 @@ describe("the review's fixes: answers whole, the answers section cut exactly, th
       mkdirSync(project, { recursive: true });
       const seeded = await seedLongThread({ client: w.client, port: w.server.port, project, rounds, session: `ses_a${rounds}` });
       await seeded.answerLast();
-      const read = await call(w.client, "read_thread", { thread_id: seeded.threadId });
+      const read = await call(w.client, "read_thread", { thread_id: seeded.threadId, limit: 100 });
       const again = await call(w.client, "read_thread", { thread_id: seeded.threadId, after: read.structuredContent.cursor });
       expect(again.structuredContent.thread.messages).toEqual([]);
       expect(again.structuredContent.thread.questions).toBeUndefined();

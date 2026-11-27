@@ -58,9 +58,9 @@ export interface InboxBranchField {
 
 export const INBOX_BRANCH_SUMMARY_MAX = 200;
 export const INBOX_BRANCH_REPORTS_MAX = 500;
-/** The safety net's window: a branch with no commit for this long is not listed. */
+/** "On this computer"'s window: a branch with no commit for this long is not listed. */
 export const INBOX_UNREPORTED_BRANCH_DAYS = 14;
-/** The safety net lists at most this many branches per project, newest first. */
+/** The most branches a read lists per project, newest first ("On this computer" asks for fewer). */
 export const INBOX_UNREPORTED_BRANCHES_MAX = 30;
 
 const HEAD = /^[0-9a-f]{7,64}$/i;
@@ -221,7 +221,7 @@ export interface InboxBranchReportsAnswer {
   reports: InboxBranchReportRow[];
 }
 
-/** A local branch nobody reported, for the by-hand safety net. Nothing runs on it. */
+/** A local branch nobody reported (Reviews' "On this computer", server/inbox-local-work.ts). Nothing runs on it. */
 export interface InboxUnreportedBranch {
   project_id: string;
   branch: string;
@@ -233,14 +233,6 @@ export interface InboxUnreportedBranch {
   last_commit_at: string;
   /** The folder of the worktree it is checked out in, when one is. */
   worktree: string | null;
-}
-
-/** `GET /api/inbox/reviews/branches/unreported?project=`: read only when the person opens the list. */
-export interface InboxUnreportedBranchesAnswer {
-  project_id: string;
-  /** False: the project is no git repository here (its folder is gone, or never was one). */
-  git: boolean;
-  branches: InboxUnreportedBranch[];
 }
 
 /** The mark's words: what kind of branch a row is. */

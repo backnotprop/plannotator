@@ -2,8 +2,8 @@
  * The list's "N new" line and the project a session started in a checkouts folder files under, proved
  * against the compiled binary with agents writing through `plannotator inbox mcp` (scripts/inbox-sim.ts).
  *
- * The owner, 2026-11-02: the held line read "1 new in appnotes · Users/ramos/workspaces/projects" on two
- * lines beside Show. `~/workspaces/projects/appnotes` is a plain folder of notes whose `worktrees` folder
+ * The owner, 2026-11-02: the held line read "1 new in appnotes · Users/sam/work/projects" on two
+ * lines beside Show. `~/work/projects/appnotes` is a plain folder of notes whose `worktrees` folder
  * holds the repository's checkouts (`worktrees/main` and linked worktrees); a session started in the folder
  * made a folder project beside the repository's, both "appnotes", and the window's name climbed to the root.
  *
@@ -11,8 +11,9 @@
  *   the repository's project (Combine projects' write), so the list and the sidebar read one "appnotes".
  * - A session started in that folder files into the repository's project (no folder project is made).
  * - The line is ONE line at 1440 px (the list wide, and narrow beside a thread), on a 390 px phone and on a
- *   320 px one: the count and Show keep their size, a long project name is cut with "…", and on a desktop the
- *   whole line is the tooltip while it is cut.
+ *   320 px one: it says what came ("New from <agent>: “<thread>”", newsWords.ts); "New from <agent>:" and Show
+ *   keep their size, a long thread name is cut with "…", and on a desktop the whole line is the tooltip while it
+ *   is cut.
  *
  * Build the binary first (see inbox.spec.ts), then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-held-notice-line.spec.ts`.
@@ -139,25 +140,32 @@ test("a session started in the checkouts' folder files into the repository's pro
   expect(list.projects.map((p) => p.root)).not.toContain(world.folder);
 });
 
-/** An agent writes in the long-named project while the person reads a thread: the list holds it behind "1 new". */
-async function newsWhileReading(page: Page, phone: boolean): Promise<void> {
+/** A long thread name: the part of the line that is cut. */
+const SURVEY = 'Survey of every checkout flow we could find in the customer research notes';
+
+/** An agent starts a long-named thread while the person reads another: the list holds it behind the line. */
+async function newsWhileReading(page: Page, phone: boolean): Promise<string> {
   await page.goto(world.url);
   const first = page.locator('.ib-listcol .ib-lbody [data-thread-id]').first();
   await expect(first).toBeVisible();
   await first.click();
   await expect(page.locator('section.ib-pane')).toBeVisible();
   sent += 1;
-  await world.agent.send({ project_path: world.long, subject: `Survey ${sent}`, body: 'The survey results are in.', agent_session: `ses_long_${sent}` } as Parameters<SimAgent['send']>[0]);
+  const subject = `${SURVEY}, round ${sent}`;
+  await world.agent.send({ project_path: world.long, subject, body: 'The survey results are in.', agent_session: `ses_long_${sent}` } as Parameters<SimAgent['send']>[0]);
   if (phone) await page.locator('[data-phone-back]').click();
-  await expect(page.locator('[data-inbox-notice]')).toContainText(`1 new in ${LONG}`);
+  await expect(page.locator('[data-inbox-notice]')).toContainText(`“${subject}”`);
+  await expect(page.locator('[data-inbox-notice]')).toContainText(/^New from .+: “/);
+  return subject;
 }
 
-/** The line's geometry: one line, Show whole inside it, and whether the project name is cut. */
+/** The line's geometry: one line, Show whole inside it, the lead whole, and whether the thread's name is cut. */
 function lineOf(page: Page) {
   return page.locator('[data-inbox-notice]').evaluate((button) => {
     const box = button.getBoundingClientRect();
     const text = button.querySelector<HTMLElement>('.ib-notice-text')!;
     const project = button.querySelector<HTMLElement>('.ib-notice-proj')!;
+    const lead = button.querySelector<HTMLElement>('.ib-notice-n')!;
     const show = button.querySelector<HTMLElement>('b')!.getBoundingClientRect();
     const lineHeight = parseFloat(getComputedStyle(text).lineHeight) || parseFloat(getComputedStyle(text).fontSize) * 1.5;
     return {
@@ -165,6 +173,7 @@ function lineOf(page: Page) {
       oneLine: text.getBoundingClientRect().height <= lineHeight * 1.2 && project.getClientRects().length === 1,
       showInside: show.width > 20 && show.left >= box.left && show.right <= box.right + 0.5,
       cut: project.scrollWidth > project.clientWidth + 0.5,
+      leadWhole: lead.scrollWidth <= lead.clientWidth + 0.5,
       projectText: project.textContent,
     };
   });
@@ -182,21 +191,22 @@ for (const shape of [
     );
     try {
       const page = await context.newPage();
-      await newsWhileReading(page, shape.phone);
+      const subject = await newsWhileReading(page, shape.phone);
       if (shape.close) {
         await page.keyboard.press('Escape');
         await expect(page.locator('section.ib-pane')).toHaveCount(0);
       }
       const line = await lineOf(page);
-      expect(line.projectText).toBe(LONG);
+      expect(line.projectText).toBe(`“${subject}”`);
+      expect(line.leadWhole, JSON.stringify(line)).toBe(true);
       expect(line.oneLine, JSON.stringify(line)).toBe(true);
       expect(line.showInside, JSON.stringify(line)).toBe(true);
       expect(line.height).toBeLessThanOrEqual(shape.phone ? 46 : 40);
-      // Too long for a phone or the list beside a thread: cut with "…", never wrapped.
+      // Too long for a phone or the list beside a thread: the thread's name is cut with "…", never wrapped.
       if (shape.phone || !shape.close) expect(line.cut).toBe(true);
       if (!shape.phone && line.cut) {
         await page.locator('[data-inbox-notice]').hover();
-        await expect(page.locator('[data-pn-tooltip]').filter({ hasText: `1 new in ${LONG}` }).first()).toBeVisible();
+        await expect(page.locator('[data-pn-tooltip]').filter({ hasText: `“${subject}”` }).first()).toBeVisible();
       }
     } finally {
       await context.close();

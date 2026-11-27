@@ -1,9 +1,10 @@
 /**
  * A routine's row in the Inbox list: the routine is the sender (the play mark, its name) and the
  * run is the subject. Only a run that didn't finish carries the warn mark; a running one carries Running with the
- * dots; a replied one carries neither. A row from another linked machine stays an ordinary row (its row carries no
- * scheduled field yet, UI-NEEDS.md). What regresses: the warn mark on a replied or running run, or none on a run that
- * didn't finish.
+ * dots; a replied one carries neither. A linked computer's routine (the merged read names its computer) looks the
+ * same on that computer's row; this computer's routine never marks another computer's row. What regresses: the warn
+ * mark on a replied or running run, or none on a run that didn't finish; a linked computer's running routine not
+ * showing Running.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -108,6 +109,19 @@ test.skipIf(!hasDom)('the warn mark only on the run that didn\'t finish, Running
     for (const id of ['msg_plain', 'msg_far']) {
       expect(of(id).querySelector('[data-scheduled-tile], [data-scheduled-badge], [data-scheduled-sender]')).toBeNull();
     }
+    act(() => root?.unmount());
+    document.body.innerHTML = '';
+  }
+});
+
+test.skipIf(!hasDom)("a linked computer's routine row looks like this computer's: its name as the sender, Running with the dots", () => {
+  // The merged read names the routine's computer; the row is that computer's thread.
+  resetScheduledForTests([scheduledRow('sch_far', { name: 'Studio nightly build', machine: 'ibx_far', thread_id: 'msg_far', state: 'running', runs: 3, running_since: now, last_run: lastRun(3, now, 'running') })], false, [{ id: 'ibx_far', on: true, launch_on: true, away: false }]);
+  for (const shape of ['wide', 'phone'] as const) {
+    const el = render(shape);
+    const far = el.querySelector('[data-thread-id="msg_far"]')!;
+    expect(far.querySelector('[data-scheduled-badge="running"] .st-dots')).not.toBeNull();
+    expect(far.querySelector('[data-scheduled-sender]')?.textContent).toBe('Studio nightly build');
     act(() => root?.unmount());
     document.body.innerHTML = '';
   }

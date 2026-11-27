@@ -32,6 +32,17 @@
  * so as it always did; nothing is sent twice.
  */
 
+/** Told on every (re)connect of the page's stream, once the page has decided on a restarted Inbox's session. */
+const reconnectListeners = new Set<() => void>();
+export function onInboxReconnected(listener: () => void): () => void {
+  reconnectListeners.add(listener);
+  return () => void reconnectListeners.delete(listener);
+}
+/** The stream (re)connected: what did not reach the Inbox while it was away (a reply draft's save) goes again. */
+export function inboxReconnected(): void {
+  for (const listener of [...reconnectListeners]) listener();
+}
+
 export interface RestartHello {
   serverSession: string;
   cursor: number;

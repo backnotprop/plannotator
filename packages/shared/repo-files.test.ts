@@ -1,7 +1,8 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 import {
   createRepoListingCache,
   decodeRepoFileBytes,
+  handleRepoFilesRequest,
   isRepoWatchIgnored,
   isSafeRepoRequestPath,
   parsePorcelainZ,
@@ -107,6 +108,29 @@ describe("createRepoListingCache", () => {
     expect(await cache.get("s3", fail)).toBeNull();
     expect(failing).toBe(2);
   });
+});
+
+test("canceling a filtered request while it waits for the listing skips the on-disk scan", async () => {
+  const controller = new AbortController();
+  const loadOnDisk = mock(async () => ({}));
+  const pending = handleRepoFilesRequest({
+    params: new URLSearchParams({ snapshot: "s1", include: "**/*.ts" }),
+    unavailable: null,
+    isCurrentSnapshot: () => true,
+    loadListing: async () => ({
+      paths: ["a.ts", "b.md"],
+      revision: { kind: "worktree", label: "working tree" },
+      live: true,
+    }),
+    loadOnDisk,
+    lazyThreshold: 1,
+    signal: controller.signal,
+  });
+
+  controller.abort();
+
+  expect((await pending).status).toBe(409);
+  expect(loadOnDisk).not.toHaveBeenCalled();
 });
 
 function runtimeAnswering(stdout: string, exitCode = 0, seen: string[][] = []): PRRuntime {

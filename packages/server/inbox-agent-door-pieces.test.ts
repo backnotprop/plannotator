@@ -91,7 +91,8 @@ describe("a cloud agent sends a big file in pieces", () => {
 
     expect((await door("upload_piece", { upload_id: "../../../etc", index: 0, data: b64(a) })).error).toStartWith("validation_error:");
     expect((await door("send_message", { body: "Path.", attachments: [{ upload: "../../uploads" }] })).error).toStartWith("validation_error:");
-    expect((await door("send_message", { body: "Path.", attachments: [join(w.project, "secret.png")] })).error).toStartWith("attachment_path_refused:");
+    // A path names a file on the person's computer, attached as a local agent's is.
+    expect((await door("send_message", { body: "Path.", attachments: [join(w.project, "secret.png")] })).error).toBeNull();
   });
 
   test("an upload left unfinished is dropped after a day", () => {

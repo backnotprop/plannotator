@@ -1,0 +1,10 @@
+# The native app's contract (docs/agent-guides/mobile.md): LF on every checkout, so the stale check
+# compares the same bytes on Windows; generated files collapsed in pull request diffs.
+apps/mobile/contract/** text eol=lf
+apps/mobile/contract/door.json linguist-generated=true
+apps/mobile/contract/schema/** linguist-generated=true
+apps/mobile/contract/generated/** linguist-generated=true
+apps/mobile/contract/tokens/** linguist-generated=true
+apps/mobile/contract/words/** linguist-generated=true
+apps/mobile/contract/parity/surface.json linguist-generated=true
+apps/mobile/contract/vectors/** linguist-generated=true

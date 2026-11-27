@@ -63,6 +63,7 @@ import { INBOX_ROW_WAITS_MAX, INBOX_ROW_WAIT_ENTRY_MAX, INBOX_ROW_WAIT_HOLDS_MAX
 import type {
   InboxRowWait,
   InboxQuestionContract,
+  InboxQuestionScenarios,
   InboxQuestion,
   InboxQuestionFacts,
   InboxQuestionRecord,
@@ -222,8 +223,29 @@ function prototypeFact(prototype: { target: string; label?: string }): { target:
   return { target: prototype.target, ...(prototype.label ? { label: prototype.label } : {}) };
 }
 
-function contractFacts(parsed: Pick<ParsedQuestion, "stakes" | "shows" | "why" | "reversible" | "prototype">): InboxQuestionContract {
+/** A scenario table as stored and served: a deep copy, absent when malformed (a hand-edited record: a
+ *  missing list, a `null` column, row or cell, a word that is not a string). Never throws. */
+function scenariosFact(table: InboxQuestionScenarios | undefined): InboxQuestionScenarios | undefined {
+  const str = (v: unknown): v is string => typeof v === "string";
+  const obj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null;
+  if (!obj(table) || !Array.isArray(table.columns) || !Array.isArray(table.rows)) return undefined;
+  const { columns, rows } = table as { columns: unknown[]; rows: unknown[] };
+  if (!columns.every((c) => obj(c) && str(c.choice) && str(c.header))) return undefined;
+  const cellOk = (c: unknown) => obj(c) && str(c.verdict) && (c.detail === undefined || str(c.detail));
+  if (!rows.every((r) => obj(r) && str(r.situation) && Array.isArray(r.cells) && r.cells.every(cellOk))) return undefined;
   return {
+    columns: table.columns.map((c) => ({ choice: c.choice, header: c.header })),
+    rows: table.rows.map((r) => ({
+      situation: r.situation,
+      cells: r.cells.map((cell) => ({ verdict: cell.verdict, ...(cell.detail ? { detail: cell.detail } : {}) })),
+    })),
+  };
+}
+
+function contractFacts(parsed: Pick<ParsedQuestion, "stakes" | "shows" | "why" | "reversible" | "prototype" | "scenarios">): InboxQuestionContract {
+  const scenarios = scenariosFact(parsed.scenarios);
+  return {
+    ...(scenarios ? { scenarios } : {}),
     ...(parsed.prototype ? { prototype: prototypeFact(parsed.prototype) } : {}),
     ...(parsed.stakes ? { stakes: parsed.stakes } : {}),
     ...(parsed.shows ? { shows: { kind: parsed.shows.kind, label: parsed.shows.label, src: parsed.shows.src } } : {}),
@@ -240,6 +262,7 @@ function wireContract(facts: InboxQuestionContract): InboxQuestionContract {
     ...(typeof facts.why === "string" && facts.why ? { why: facts.why } : {}),
     ...(facts.reversible ? { reversible: { value: false as const, why: facts.reversible.why ?? null } } : {}),
     ...(facts.prototype && typeof facts.prototype.target === "string" ? { prototype: prototypeFact(facts.prototype) } : {}),
+    ...(scenariosFact(facts.scenarios) ? { scenarios: scenariosFact(facts.scenarios)! } : {}),
   };
 }
 
@@ -519,6 +542,14 @@ export function parseInboxSupersedeRef(value: unknown): { message_id: string; ke
   const match = SUPERSEDE_REF_RE.exec(value.trim());
   if (!match) return null;
   return { message_id: match[1]!, key: match[2] ?? null };
+}
+
+const BARE_KEY_RE = /^(?:q|a)-[0-9a-f]{8}(?:-\d{1,3})?$/;
+
+export function parseInboxBareKey(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const key = value.trim();
+  return BARE_KEY_RE.test(key) ? key : null;
 }
 
 /** A question that can still be superseded: one the person has not answered and sent. */
@@ -1108,6 +1139,22 @@ export const INBOX_SET_ASIDE_HEADING = "Set aside for now; don't wait on these:"
 export function composeInboxSetAsideBody(questions: readonly (Pick<InboxQuestionRecord, "position" | "prompt" | "attachment"> & { kind?: string })[]): string {
   const lines = numberedLines(questions);
   return [INBOX_SET_ASIDE_HEADING, "", ...lines, "", "The person closed them unanswered in the Inbox. Ask again if you still need an answer to go on."].join("\n");
+}
+
+/**
+ * The Inbox's note to an agent whose open questions another session moved into its own thread and then archived
+ * this one (resolve_message's `moved_to`; the owner 2026-11-21: "The Inbox tells it, quietly"). Words approved
+ * 2026-11-22. `{from}` / `{to}`: the threads' names in quotes, `{from_id}` / `{to_id}` their ids (so the
+ * agent can read_thread the other), `{agent}` the session that moved them.
+ */
+export const INBOX_MOVED_NOTE_TEMPLATE =
+  "Your questions in {from} ({from_id}) were moved to another thread by {agent}: {to} ({to_id}). Don't wait on them here. The person answers there, and {agent} gets the answer.";
+
+/** INBOX_MOVED_NOTE_TEMPLATE filled in. A thread with no name reads "your thread" / "a thread". */
+export function composeInboxMovedNoteBody(v: { from: string | null; from_id: string; agent: string; to: string | null; to_id: string }): string {
+  const named = (name: string | null, none: string) => (name && name.trim() ? JSON.stringify(name.replace(/\s+/g, " ").trim()) : none);
+  const values: Record<string, string> = { from: named(v.from, "your thread"), from_id: v.from_id, agent: v.agent, to: named(v.to, "a thread"), to_id: v.to_id };
+  return INBOX_MOVED_NOTE_TEMPLATE.replace(/\{(from|from_id|agent|to|to_id)\}/g, (_, key: string) => values[key]!);
 }
 
 /** The first line of the note an Undo of Mark read sends once the agent was told. */

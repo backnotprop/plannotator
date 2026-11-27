@@ -139,22 +139,22 @@ async function settle(turns = 4) {
   }
 }
 
-function pane(thread: InboxThread, openedWith: ReadonlySet<string> | null) {
+function pane(thread: InboxThread, openedWith: ReadonlySet<string> | null, run: InboxRun = RUN) {
   return (
     <div className="pn-inbox">
-      <ThreadPane thread={thread} sent={null} onQuestions={() => {}} onChanged={async () => {}} onClose={() => {}} file={null} onOpenFile={() => {}} onOpenGuide={() => {}} run={RUN} openedWith={openedWith} />
+      <ThreadPane thread={thread} sent={null} onQuestions={() => {}} onChanged={async () => {}} onClose={() => {}} file={null} onOpenFile={() => {}} onOpenGuide={() => {}} run={run} openedWith={openedWith} />
     </div>
   );
 }
 
-async function render(thread: InboxThread, openedWith: ReadonlySet<string> | null) {
+async function render(thread: InboxThread, openedWith: ReadonlySet<string> | null, run: InboxRun = RUN) {
   // As after a click on a row or a reload: nothing in the page holds focus.
   (document.activeElement as HTMLElement | null)?.blur?.();
   host = document.createElement('div');
   document.body.appendChild(host);
   act(() => {
     root = createRoot(host!);
-    root.render(pane(thread, openedWith));
+    root.render(pane(thread, openedWith, run));
   });
   await settle();
   return host;
@@ -229,5 +229,16 @@ test.skipIf(!hasDom)("the card's header has Stop", async () => {
   const thread = threadOf(card(CARD_1, 'bun run --cwd apps/inbox build', 1));
   await render(thread, idsOf(thread));
   // Compared as booleans (see `focused`).
+  expect(!!host!.querySelector(`[data-message-id="${CARD_1}"] [data-run-stop]`)).toBe(true);
+});
+
+test.skipIf(!hasDom)("an agent that runs in Rex: the card has Stop exactly when its run line does (the Inbox knows its own pane)", async () => {
+  const thread = threadOf(card(CARD_1, 'bun run --cwd apps/inbox build', 1));
+  await render(thread, idsOf(thread), { ...RUN, rex: { line: 'Rex · app / Claude Code' } });
+  expect(!!host!.querySelector(`[data-message-id="${CARD_1}"] [data-perm="once"]`)).toBe(true);
+  expect(!!host!.querySelector(`[data-message-id="${CARD_1}"] [data-run-stop]`)).toBe(false);
+  act(() => root?.unmount());
+  host?.remove();
+  await render(thread, idsOf(thread), { ...RUN, rex: { line: 'Rex · app / Claude Code', stops: true } });
   expect(!!host!.querySelector(`[data-message-id="${CARD_1}"] [data-run-stop]`)).toBe(true);
 });

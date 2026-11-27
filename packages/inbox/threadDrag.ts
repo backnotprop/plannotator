@@ -244,14 +244,23 @@ function onBlur(): void {
   press = null;
 }
 
-/** The click that ends a drag (on the row it started on) opens nothing. */
-function swallowNextClick(): void {
+/**
+ * The click that ends a drag (on the row it started on) opens nothing. A drop released at `at` swallows only the
+ * click there, the release's own: a drop on a place the drop takes away (Archive, Priority) gets no click from the
+ * browser at all (nothing the press and the release share is left), and the person's next click elsewhere within the
+ * 400 ms (the drop's toast's Undo) is theirs. With no release point (Escape, the window left) any click in the 400 ms
+ * is the drag's.
+ */
+function swallowNextClick(at: { x: number; y: number } | null): void {
+  const off = () => window.removeEventListener('click', swallow, true);
   const swallow = (event: MouseEvent) => {
+    off();
+    if (at && Math.hypot(event.clientX - at.x, event.clientY - at.y) > THRESHOLD) return;
     event.preventDefault();
     event.stopPropagation();
   };
-  window.addEventListener('click', swallow, { capture: true, once: true });
-  setTimeout(() => window.removeEventListener('click', swallow, true), 400);
+  window.addEventListener('click', swallow, true);
+  setTimeout(off, 400);
 }
 
 function start(event: PointerEvent): void {
@@ -364,7 +373,7 @@ function autoScroll(d: Drag, step: number): void {
   d.scroll.frame = requestAnimationFrame(tick);
 }
 
-function finish(accepted: boolean): Drag | null {
+function finish(accepted: boolean, releasedAt: { x: number; y: number } | null = null): Drag | null {
   const d = drag;
   if (!d) return null;
   drag = null;
@@ -375,7 +384,7 @@ function finish(accepted: boolean): Drag | null {
   for (const target of targets) target.show(null, d.ids);
   for (const row of d.rows) row.removeAttribute('data-thread-lifted');
   document.documentElement.removeAttribute('data-thread-drag');
-  swallowNextClick();
+  swallowNextClick(releasedAt);
   if (accepted || reduced()) d.ghost.remove();
   else {
     // Back to where it was picked up: nothing happened.
@@ -395,7 +404,7 @@ function end(x: number, y: number): void {
   // A refusing place says why (read before `show(null)` clears what it knows).
   const reason = target && answer === 'refuse' ? target.refused?.(drag.ids) : undefined;
   const source = drag.source;
-  const d = finish(take !== null);
+  const d = finish(take !== null, { x, y });
   if (!d) return;
   if (take) {
     if (take.drop(d.ids, { x, y }) !== false) source.dropped?.(d.ids);

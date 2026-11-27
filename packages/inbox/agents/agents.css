@@ -15,8 +15,7 @@
 /* The phone's sheet lays the heading's buttons out in a row: Add agent first there, and none on a closed heading. */
 .pn-inbox .ib-sb-sheet-in .ib-agentsec .ib-agents-add[data-agents-add="machine"] { order: 1; }
 .pn-inbox .ib-sb-sheet-in .ib-agentsec[data-closed] .ib-agents-add { display: none; }
-.pn-inbox .ib-agents-body { margin-top: 2px; }
-.pn-inbox .ib-agents-body[data-closed] { margin-top: 0; }
+/* Its rows sit right under the heading, as Tags' and Projects' do; its empty line is theirs too (.ib-side-empty). */
 .pn-inbox .ib-agents-group + .ib-agents-group { margin-top: 10px; }
 
 /* A machine: a small quiet grey caption, flush left, no icon. Still the machine's filter (its old Machines row). */
@@ -49,11 +48,7 @@
   .pn-inbox .ib-sbagent .ib-pmore { opacity: 1; }
   .pn-inbox .ib-sbagent:has(> .ib-pmore) .ib-proj { padding-right: 32px; }
 }
-/* The one spacing rule of the sidebar's sections, for a section that is one block: its heading 2 px under a closed
-   section with no row left, and the next heading 2 px under it while it is closed (closed, it draws no row at all). */
-.pn-inbox .ib-sidescroll > [data-closed]:empty + .ib-agentsec > .ib-secrow { margin-top: 2px; }
-.pn-inbox .ib-sidescroll > .ib-agentsec[data-closed] + :is(.ib-side-sec, .ib-secrow) { margin-top: 2px; }
-.pn-inbox .ib-agents-empty { padding: 2px 9px 4px; }
+/* The heading after a closed Agents: the sections' one spacing rule (inbox.css, by .ib-sidescroll). */
 
 /* The hover card: who, where and when, calm. */
 .ib-agtip { display: flex; flex-direction: column; gap: 2px; min-width: 200px; }
@@ -81,6 +76,9 @@
 
 /* ---------- the animated agent mark (motion.ts): 24 px, no tile, always alive ---------- */
 .pn-inbox .am { --am: var(--ib-mark-24); position: relative; display: inline-grid; place-items: center; flex: none; width: var(--am); height: var(--am); cursor: pointer; -webkit-tap-highlight-color: transparent; }
+/* The list's Agents view draws it at 44 (AgentMark's `size`): the same mark, its host's plain mark one step up. */
+.pn-inbox .am[data-size="44"] { --am: var(--ib-mark-44); }
+.pn-inbox .am[data-size="44"] :is(.am-plain, .am-tile) > :is(.ib-mk, .ib-mk > svg, .ib-mk > img) { width: var(--ib-mark-30); height: var(--ib-mark-30); }
 
 /* ---------- the face picker (FaceFan.tsx): a half-circle fan of faces round the mark, an overlay ---------- */
 /* The positioner sits at the mark's centre with no size; each choice is placed from there (fanLayout.ts). */
@@ -104,9 +102,10 @@
   --gl-hi: color-mix(in oklch, #fff 92%, transparent);
   --gl-rim: color-mix(in oklch, var(--foreground) 12%, transparent);
 }
-.am-fan-dial { --o: 18px; position: absolute; left: calc(var(--o) * -1); top: calc(var(--r) * -1); width: calc(var(--r) + var(--o)); height: calc(var(--r) * 2); transform-origin: var(--o) 50%; transform: rotate(var(--a)); transition: transform 180ms cubic-bezier(0.2, 0.9, 0.3, 1); }
+/* `--grow`: half of what the mark is past the sidebar's 28 px button (a 44 px mark), so the plate's hole clears it. */
+.am-fan-dial { --o: calc(18px + var(--grow, 0px)); position: absolute; left: calc(var(--o) * -1); top: calc(var(--r) * -1); width: calc(var(--r) + var(--o)); height: calc(var(--r) * 2); transform-origin: var(--o) 50%; transform: rotate(var(--a)); transition: transform 180ms cubic-bezier(0.2, 0.9, 0.3, 1); }
 .am-fan-shade, .am-fan-edge { position: absolute; inset: 0; }
-.am-fan-plate { --hole: 21px; display: block; width: 100%; height: 100%; border-radius: 14px var(--r) var(--r) 14px / 14px var(--r) var(--r) 14px; transition: opacity 120ms linear; }
+.am-fan-plate { --hole: calc(21px + var(--grow, 0px)); display: block; width: 100%; height: 100%; border-radius: 14px var(--r) var(--r) 14px / 14px var(--r) var(--r) 14px; transition: opacity 120ms linear; }
 /* Its shadow: outside the plate only (a box-shadow is never drawn under its box), so none shows through the glass. */
 .am-fan-plate[data-shade] { box-shadow: 0 10px 24px -8px color-mix(in oklch, #000 26%, transparent), 0 1px 3px color-mix(in oklch, #000 10%, transparent); }
 .am-fan-edge > .am-fan-plate {
@@ -155,8 +154,8 @@
 .am-fan[data-touch] .am-fan-i { left: -20px; top: -20px; width: 40px; height: 40px; border-radius: 12px; }
 .am-fan[data-touch] .am-fan-i[aria-checked="true"]::after { bottom: 0; }
 .am-fan[data-touch] .am-fan-f, .am-fan[data-touch] .am-fan-f > img { width: 30px; height: 30px; }
-.am-fan[data-touch] .am-fan-dial { --o: 24px; }
-.am-fan[data-touch] .am-fan-plate { --hole: 25px; }
+.am-fan[data-touch] .am-fan-dial { --o: calc(24px + var(--grow, 0px)); }
+.am-fan[data-touch] .am-fan-plate { --hole: calc(25px + var(--grow, 0px)); }
 /* Reduced motion: no travel, a plain fade. */
 .am-fan[data-still] .am-fan-i, .am-fan[data-still][data-starting-style] .am-fan-i, .am-fan[data-still][data-ending-style] .am-fan-i { transform: translate(var(--x), var(--y)); transition: opacity 120ms linear; }
 .am-fan[data-still] .am-fan-i:hover { transform: translate(var(--x), var(--y)); }

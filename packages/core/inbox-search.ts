@@ -10,7 +10,8 @@
  *   Cyrillic accents dropped (NFD, U+0300 to U+036F), so `resume` finds
  *   `résumé`. Matching only: every offset this module hands out points into
  *   the ORIGINAL text.
- * - Tokens: maximal runs of letters, digits and combining marks, cut further
+ * - Tokens: maximal runs of letters, digits and combining marks (a soft
+ *   hyphen between two of them does not end the run), cut further
  *   where `Intl.Segmenter` (word granularity) puts a word boundary, so
  *   Japanese and Chinese split into words without spaces. A run of plain
  *   ASCII takes a fast path that gives the same tokens. A token under 2
@@ -37,7 +38,7 @@ const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hang
 /** Scripts written without spaces between words: only these need the segmenter. */
 const NO_SPACES = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}]/u;
 const NON_ASCII = /[^\x00-\x7f]/;
-const WORD_RUN = /[\p{L}\p{N}\p{M}]+/gu;
+const WORD_RUN = /[\p{L}\p{N}\p{M}]+(?:\u00ad+[\p{L}\p{N}\p{M}]+)*/gu;
 
 let wordSegmenter: Intl.Segmenter | null | undefined;
 function segmenter(): Intl.Segmenter | null {
@@ -450,12 +451,15 @@ export interface InboxSearchQuery {
   current?: string | null;
   /** The order: best match (default) or newest first. */
   sort?: InboxSearchSort | null;
+  /** Each row's rank too (`scores`), so answers of two Inboxes merge in one order (a linked machine's agent search). */
+  scores?: boolean;
 }
 
 export interface InboxSearchProjectRef {
   id: string;
   /** The project's name, with its parent folder when two projects share one ('api · work'). */
   name: string;
+  machine?: string;
 }
 
 interface RowBase {
@@ -465,6 +469,7 @@ interface RowBase {
   archived: boolean;
   /** ISO time: a message's, or a thread's latest message's. */
   at: string;
+  score?: number;
 }
 
 export interface InboxSearchThreadRow extends RowBase {
@@ -522,6 +527,7 @@ export interface InboxSearchProjectRow {
   name_marks: [number, number][];
   root: string;
   at: string;
+  score?: number;
 }
 
 export type InboxSearchRow = InboxSearchThreadRow | InboxSearchMessageRow | InboxSearchFileRow | InboxSearchProjectRow;
@@ -539,4 +545,7 @@ export interface InboxSearchAnswer {
   groups: Partial<Record<InboxSearchGroupId, InboxSearchRow[]>> | null;
   /** An empty query with no filters: the threads the person looked at last. */
   recent: InboxSearchThreadRow[] | null;
+  /** With `scores`: each group's rows' ranks, in the rows' order (higher first). */
+  scores?: Partial<Record<InboxSearchGroupId, number[]>>;
+  unanswered?: { id: string; name: string }[];
 }

@@ -165,6 +165,13 @@ test.skipIf(!hasDom)('this Inbox: a running launch has Rename…, a separator, S
   expect(await itemsOf('ses_own')).toEqual(['Rename…']);
 });
 
+test.skipIf(!hasDom)('a launch that runs in Rex: no Stop (Rex owns it; the Inbox never stops it), Delete still', async () => {
+  mount([group([launched('lch_rex', 'working', true, { launch: { id: 'lch_rex', thread_id: 'msg_lch_rex', started: true, run: 'working', rex: true } }), launched('lch_bg', 'working')])]);
+  await settle();
+  expect(await itemsOf('lch_rex')).toEqual(['Rename…', '—', 'Delete Claude Code session…']);
+  expect(await itemsOf('lch_bg')).toEqual(['Rename…', '—', 'Stop Claude Code', 'Delete Claude Code session…']);
+});
+
 test.skipIf(!hasDom)('a named launch: Rename…, Reset name, then Stop and Delete; each calls its action for this Inbox (no machine)', async () => {
   // The Inbox keeps the name with the agent's face (agents/agentFaces.ts).
   globalThis.fetch = (async () => Response.json({ faces: { lch_a: { face: 'agent', sessions: ['ses_lch_a'], name: 'Retry worker' } }, rev: 1 })) as unknown as typeof fetch;

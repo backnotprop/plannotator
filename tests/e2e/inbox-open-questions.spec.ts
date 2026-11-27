@@ -200,12 +200,14 @@ test('desktop: the button sits after Edit draft, its list names state and place,
   await expect(list).not.toContainText('Choose one');
   const rows = list.locator('.ib-oq-row');
   await expect(rows).toHaveCount(6);
-  // This Send's skip first, the rows, then the last row: Re-ask and "Skip…" (approval "oq-skip-select"). No Skip on any row.
-  await expect(list.getByRole('menuitem')).toHaveCount(9);
+  // This Send's skip first, then decision mode's "Decide these N" (on by default), the rows, then the last row: Re-ask
+  // and "Skip…" (approval "oq-skip-select"). No Skip on any row.
+  await expect(list.getByRole('menuitem')).toHaveCount(10);
   await expect(list.locator('[data-open-questions-skip-row]')).toContainText('5 stay open when you send');
   await expect(list.getByRole('menuitem').first()).toHaveText('Skip them');
+  await expect(list.getByRole('menuitem').nth(1)).toHaveAttribute('data-thread-decide', '');
   await expect(list.locator('[data-open-question-skip]')).toHaveCount(0);
-  await expect(list.getByRole('menuitem').nth(7)).toHaveText('Re-ask in one new message');
+  await expect(list.getByRole('menuitem').nth(8)).toHaveText('Re-ask in one new message');
   await expect(list.getByRole('menuitem').last()).toHaveText('Skip…');
   await expect(rows.nth(1)).toContainText('How many times should a rate-limited charge be retried?');
   await expect(rows.nth(1).locator('.ib-oq-when')).toHaveText(/ · in a folded message$/);

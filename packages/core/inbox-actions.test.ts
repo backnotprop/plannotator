@@ -447,3 +447,74 @@ describe("ids", () => {
     expect(checkInboxActionResult({ outcome: "done", note: "x".repeat(2001) })).toEqual({ ok: true, outcome: "done", note: "x".repeat(2001) });
   });
 });
+
+describe("Skip (the owner's variant A, 2026-11-19)", () => {
+  const AT = "2026-11-19T15:12:00.000Z";
+  const skipped = (over: Partial<InboxQuestionRecord> = {}) => record({ revision: 1, action_result: { outcome: "skip", note: null, at: AT, by: "person", staged: true }, ...over });
+  const marked = (key: string, position: number, outcome: "done" | "cant", note: string | null = null) =>
+    record({ key, position, id: `msg_01M5F3B7KD2WQ9XN4C8VJTR6YE/${key}`, revision: 1, action_result: { outcome, note, at: AT, by: "person", staged: true } });
+  const sectionOf = (...reported: InboxQuestionRecord[]) => composeInboxActionsSection({ groups: [{ message_id: "m1", reported, all: reported }], timeZone: "UTC" });
+
+  test("a skip takes no words: none needed, one sent is dropped; the outcome is still checked", () => {
+    expect(checkInboxActionResult({ outcome: "skip" })).toEqual({ ok: true, outcome: "skip", note: null });
+    expect(checkInboxActionResult({ outcome: "skip", note: "   " })).toEqual({ ok: true, outcome: "skip", note: null });
+    expect(checkInboxActionResult({ outcome: "skip", note: "Not this week." })).toEqual({ ok: true, outcome: "skip", note: null });
+    expect(checkInboxActionResult({ outcome: "skipped" })).toMatchObject({ ok: false, field: "outcome" });
+  });
+
+  test("the agent's line and the reply's first sentence: a skip is never counted done, and reads as the person's choice", () => {
+    expect(composeInboxActionsReply({ reported: [skipped()], all: [skipped()], timeZone: "UTC" })).toBe(
+      ["Skipped 1 action item.", "", "## Action items you asked for", "", "0 of 1 done.", "", "### A1. Approve the production deploy on Vercel", "Skipped by the person, 3:12 PM."].join("\n"),
+    );
+    // A note on a stored skip (written by hand, or by a build that kept one) never reaches the agent.
+    const withNote = composeInboxActionsReply({ reported: [skipped({ action_result: { outcome: "skip", note: "Not this week.", at: AT, by: "person", staged: true } })], all: [skipped()], timeZone: "UTC" });
+    expect(withNote.endsWith("Skipped by the person, 3:12 PM.")).toBe(true);
+    expect(withNote).not.toContain("Note:");
+    expect(sectionOf(marked("a-2", 1, "done"), skipped()).split("\n\n")[0]).toBe("Did 1 action item, skipped 1.");
+    expect(sectionOf(marked("a-2", 1, "cant", "No key."), skipped()).split("\n\n")[0]).toBe("Couldn't do 1 action item, skipped 1.");
+    expect(sectionOf(marked("a-2", 1, "done"), marked("a-3", 2, "cant", "No key."), skipped(), skipped({ key: "a-4", position: 3, id: "msg_01M5F3B7KD2WQ9XN4C8VJTR6YE/a-4" })).split("\n\n")[0]).toBe(
+      "Did 1 action item, couldn't do 1, skipped 2.",
+    );
+  });
+
+  test("joined to the answers' line, every skip names its kind, so \"skipped 1\" never leaves the agent guessing", () => {
+    const skipOnly = sectionOf(skipped());
+    const doneAndSkip = sectionOf(marked("a-2", 1, "done"), skipped());
+    const first = (reply: string, section: string) => withInboxActionsSection(reply, section).split("\n")[0];
+    expect(first("Answered 1 question.", skipOnly)).toBe("Answered 1 question, skipped 1 action item.");
+    expect(first("Answered 1 question.", doneAndSkip)).toBe("Answered 1 question, did 1 action item, skipped 1 action item.");
+    // Questions skipped too: both skips are named.
+    expect(first("Answered 1 question, skipped 1.", skipOnly)).toBe("Answered 1 question, skipped 1 question, skipped 1 action item.");
+    expect(first("Answered 1 question, skipped 2.", doneAndSkip)).toBe("Answered 1 question, skipped 2 questions, did 1 action item, skipped 1 action item.");
+    expect(first("Skipped 1 question.", skipOnly)).toBe("Skipped 1 question, skipped 1 action item.");
+    // No action item skipped: the answers' line is left as the store has always written it.
+    expect(first("Answered 1 question, skipped 1.", sectionOf(marked("a-2", 1, "done")))).toBe("Answered 1 question, skipped 1, did 1 action item.");
+  });
+
+  test("the window draws a sent reply with skips without the action sentence and section, the answers' line as it was", () => {
+    const answered = "Answered 1 question, skipped 1.\n\nGo ahead.\n\n## Answers to your questions\n\n### Q1. Ship?\nAnswer: Yes";
+    for (const section of [sectionOf(skipped()), sectionOf(marked("a-2", 1, "done"), skipped()), sectionOf(marked("a-2", 1, "cant", "No key."), skipped())]) {
+      expect(withoutInboxActionsSection(withInboxActionsSection(answered, section))).toBe(answered);
+      expect(withoutInboxActionsSection(withInboxActionsSection("Answered 1 question.", section))).toBe("Answered 1 question.");
+      expect(withoutInboxActionsSection(withInboxActionsSection("Thanks.", section))).toBe("Thanks.");
+    }
+  });
+
+  test("a skip waiting in the draft is unsent work, waits on nobody, and keeps the row where it was until Send", () => {
+    expect(inboxHasUnsent({ reply_at: null, picks: 0, comments: 0, skipped: 1 })).toBe(true);
+    const wire = { ...skipped({ stopped: "release 4.2" }), state: "picked", orphaned: false } as unknown as InboxQuestion;
+    expect(inboxActionInDraft(wire)).toBe(true);
+    expect(summarizeInboxQuestions([wire])).toMatchObject({ open: 0, actions: 0, staged: 1, stopped: true });
+  });
+
+  test("a result stored before Skip (as an older build wrote it) still reads as it did", () => {
+    const stored = JSON.parse(
+      '{"outcome":"cant","note":"I\'m not in the acme team; ask Dana.","at":"2026-10-21T15:13:00.000Z","by":"person"}',
+    ) as InboxQuestionRecord["action_result"];
+    const old = record({ revision: 1, action_result: stored });
+    expect(inboxQuestionState(old, false)).toBe("picked");
+    const body = composeInboxActionsReply({ reported: [old], all: [old], timeZone: "UTC" });
+    expect(body.startsWith("Couldn't do 1 action item.\n\n")).toBe(true);
+    expect(body.endsWith("Can't do it: I'm not in the acme team; ask Dana.")).toBe(true);
+  });
+});

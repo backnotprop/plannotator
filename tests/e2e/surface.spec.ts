@@ -573,7 +573,8 @@ test('diagram: a tap on a node drafts a comment on it; saved, its badge shows', 
   const { page } = world;
   const flow = world.attachments.flow;
   await openAttachment(flow);
-  const node = page.locator('[data-surface-attachment] svg g.node', { hasText: 'Pick a host' }).first();
+  // Pele draws the fence (`g.pele-node`); Mermaid's `g.node` if it falls back.
+  const node = page.locator('[data-surface-attachment] svg :is(g.node, g.pele-node)', { hasText: 'Pick a host' }).first();
   await expect(node).toBeVisible({ timeout: 30_000 });
   const from = mark();
   await node.click();

@@ -132,8 +132,8 @@ export function listBody(root: ParentNode | null): HTMLElement | null {
   return root?.querySelector<HTMLElement>('.ib-listcol .ib-lbody') ?? null;
 }
 
-/** The elements that move: each row (with its hover action), a phone's row, and each section's band. */
-const MOVERS = ':scope > .ib-group > .ib-rw[data-row], :scope > .ib-group > .ib-mrow[data-thread-id], :scope > .ib-group > .ib-band';
+/** The elements that move: each row (with its hover action), a phone's row, each section's band, and the Agents view's agent rows. */
+const MOVERS = ':scope > .ib-group > .ib-rw[data-row], :scope > .ib-group > .ib-mrow[data-thread-id], :scope > .ib-group > .ib-band, :scope > .ib-group > .ib-agh';
 
 function keyOf(el: HTMLElement): string {
   const row = el.getAttribute('data-row') ?? el.getAttribute('data-thread-id');

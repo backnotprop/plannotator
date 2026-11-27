@@ -19,9 +19,10 @@ import { createRequestHostGuard } from "./request-host-guard";
 import { withPlannotatorServerHeader } from "./plannotator-server-marker";
 import { isSameOriginRequest, refuseCrossOriginWrite } from "./request-origin-guard";
 import { getSourceRepoInfo } from "./repo";
-import { createRefCards, refCardRouteResponse, refCardsTailnetAllowed, type RefRunner } from "./ref-cards";
+import { createRefCardsWithLinear, refCardRouteResponse, refCardsTailnetAllowed, type RefRunner } from "./ref-cards";
 import type { Origin } from "@plannotator/shared/agents";
-import { handleImage, handleStarAsk, handleUpload, handleServerReady, handleApiNotFound, handleFavicon, handleReferenceSkills, handleReferenceSkillContent, handleSaveNotes, readDraftGenerationFromBody, readDraftGenerationFromUrl, missingDraftResponse } from "./shared-handlers";
+import { handleAnnotateMedia, handleImage, handleStarAsk, handleLaunchSwitch, handleUpload, handleServerReady, handleApiNotFound, handleFavicon, handleCustomThemesScript, customThemesPage, handleReferenceSkills, handleReferenceSkillContent, handleSaveNotes, readDraftGenerationFromBody, readDraftGenerationFromUrl, missingDraftResponse } from "./shared-handlers";
+import { launchSwitchService } from "@plannotator/shared/launch-switch";
 import { handleDoc, handleDocExists, handleFileBrowserFiles, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc, resolveAllowedDocPath, type FolderAnnotateHistory } from "./reference-handlers";
 import { closeAllFileBrowserWatchers, handleFileBrowserFilesStream } from "./reference-watch";
 import { getExtraMarkdownExtensions, isAnnotatableTextPath, MAX_ANNOTATABLE_FILE_BYTES, resolveUserPath, warmFileListCache } from "@plannotator/shared/resolve-file";
@@ -62,7 +63,7 @@ import {
   type AnnotateClientLeaseStreamSession,
 } from "@plannotator/shared/annotate-client-lease";
 import { createAnnotateDecisionSettler, isNothingToSendFeedbackBody } from "@plannotator/shared/annotate-decision";
-import { agentSwitchConfigToSave, agentToolSaveFailed, cookieHostConfigWrite, saveConfig, detectGitUser, getServerConfig, isAgentTerminalSide, loadConfig, resolveAIEnabled, resolveAnnotateHistory, resolveFeedbackHistory } from "./config";
+import { agentSwitchConfigToSave, agentToolSaveFailed, cookieHostConfigWrite, saveConfig, detectGitUser, getServerConfig, parseDisplayOptionsConfig, isAgentTerminalSide, loadConfig, resolveAIEnabled, resolveAnnotateHistory, resolveFeedbackHistory, resolveHtmlStartsInInteract } from "./config";
 import { getAutoUpdateAdvert, getUpdateAdvert, handleUpdateRoute } from "./auto-update";
 import { appendFeedbackRecord, type FeedbackDecision, type FeedbackSurface } from "@plannotator/shared/feedback-archive";
 import { isFaviconStyle, type FaviconStyle } from "@plannotator/shared/favicon";
@@ -363,11 +364,11 @@ export async function startAnnotateServer(
   // Hover cards for issue, PR and MR links (ref-cards.ts): nothing runs until a card is asked for, and
   // never in remote mode. In a `--tailscale` session only this machine's tabs and the tailnet owner's get
   // them (`refCardsTailnetAllowed`): other devices must not drive the user's gh / glab.
-  const refCards = createRefCards(options.refRunner ? { run: options.refRunner } : {});
+  const refCards = createRefCardsWithLinear(options.refRunner);
   // The app page is served compressed only to sessions reachable from another
   // device: remote mode or --tailscale (#1617). Local sessions are unchanged.
   const compressAppHtml = isRemote || options.tailnetPublished === true;
-  const app = openPackedApp(htmlContent);
+  const app = openPackedApp(htmlContent, { page: (html) => customThemesPage(html) });
   // Save to Notion uses the server's NOTION_TOKEN: never for a session another device can open.
   const notionAvailable = isNotionAvailable(isRemote || options.tailnetPublished === true);
   const wslFlag = await isWSL();
@@ -742,6 +743,8 @@ export async function startAnnotateServer(
   const bundleSourceSavePaths = bundleFiles ? resolveBundleSourceSavePaths(bundlePaths) : null;
   const openedSourceFilePaths = new Set<string>();
   if (initialSingleFileSourcePath) openedSourceFilePaths.add(initialSingleFileSourcePath);
+  const servedMediaDocuments = new Set<string>();
+  if (initialSingleFileSourcePath) servedMediaDocuments.add(initialSingleFileSourcePath);
   const getPrimarySource = () => {
     if (mode === "annotate-last") {
       return { plan: markdown, sourceSave: disabledSourceSave("message-mode") };
@@ -909,6 +912,8 @@ export async function startAnnotateServer(
   let liveAppUrl = "";
 
   const requestHostGuard = createRequestHostGuard();
+  // The launch switch's reader (packages/shared/launch-switch.ts): in the background, never awaited.
+  launchSwitchService().start();
   const server = await startBunServerOnAvailablePort((port) =>
     Bun.serve<AgentTerminalSocketData>(withPlannotatorServerHeader({
         hostname: getServerHostname(),
@@ -1227,7 +1232,7 @@ export async function startAnnotateServer(
               return Response.json({ error: "Cross-origin config writes are not allowed" }, { status: 403 });
             }
             try {
-              const body = (await req.json()) as { agentSwitch?: unknown; displayName?: string; diffOptions?: Record<string, unknown>; theme?: Record<string, unknown>; favicon?: FaviconStyle; autoUpdate?: unknown; updateCheck?: unknown; agentTool?: unknown; conventionalComments?: boolean; conventionalLabels?: unknown[] | null; agentTerminalSide?: unknown; agentTerminalDefaultAgent?: unknown };
+              const body = (await req.json()) as { agentSwitch?: unknown; displayName?: string; diffOptions?: Record<string, unknown>; displayOptions?: unknown; theme?: Record<string, unknown>; favicon?: FaviconStyle; autoUpdate?: unknown; updateCheck?: unknown; agentTool?: unknown; conventionalComments?: boolean; conventionalLabels?: unknown[] | null; agentTerminalSide?: unknown; agentTerminalDefaultAgent?: unknown };
               const toSave: Record<string, unknown> = {};
               // OpenCode's agent switch (#1390): a known shape or nothing is saved.
               const agentSwitch = agentSwitchConfigToSave(body);
@@ -1235,6 +1240,12 @@ export async function startAnnotateServer(
               if (agentSwitch !== undefined) toSave.agentSwitch = agentSwitch;
               if (body.displayName !== undefined) toSave.displayName = body.displayName;
               if (body.diffOptions !== undefined) toSave.diffOptions = body.diffOptions;
+              // The plan / annotate Display settings and the markdown selection mode: a plain object or nothing is saved.
+              if (body.displayOptions !== undefined) {
+                const displayOptions = parseDisplayOptionsConfig(body.displayOptions);
+                if (!displayOptions) return Response.json({ error: "Invalid displayOptions" }, { status: 400 });
+                toSave.displayOptions = displayOptions;
+              }
               if (body.theme !== undefined) toSave.theme = body.theme;
               if (isFaviconStyle(body.favicon)) toSave.favicon = body.favicon;
               if (typeof body.autoUpdate === "boolean") toSave.autoUpdate = body.autoUpdate;
@@ -1262,9 +1273,18 @@ export async function startAnnotateServer(
             return (await handleStarAsk(req, url, "annotate", { remote: isRemote })) ?? handleApiNotFound(url.pathname);
           }
 
+          // The launch switch's one-time dialog (packages/shared/launch-switch.ts).
+          if (url.pathname.startsWith("/api/launch-switch/")) {
+            return (await handleLaunchSwitch(req, url)) ?? handleApiNotFound(url.pathname);
+          }
+
           // API: Serve images (local paths or temp uploads)
           if (url.pathname === "/api/image") {
             return handleImage(req);
+          }
+
+          if (url.pathname === "/api/annotate-media" && req.method === "GET") {
+            return handleAnnotateMedia(req, url, servedMediaDocuments);
           }
 
           const htmlAssetResponse = await htmlAssets.handle(req, url);
@@ -1299,6 +1319,7 @@ export async function startAnnotateServer(
               sourceSaveFolderPath: mode === "annotate-folder" ? folderPath : undefined,
               sourceSaveBundlePaths: bundleSourceSavePaths ?? undefined,
               onSourceDocumentServed: (path) => openedSourceFilePaths.add(path),
+              onDocumentServed: (path) => servedMediaDocuments.add(path),
               rootPaths: getReferenceRootPaths(),
               anyPath: isThisMachineRequest(req),
               annotateHistory:
@@ -1674,6 +1695,7 @@ export async function startAnnotateServer(
 
           // Favicon
           if (url.pathname === "/favicon.png" || url.pathname === "/favicon.ico") return handleFavicon(url.pathname);
+          if (url.pathname === "/plannotator-themes.js" && req.method === "GET") return handleCustomThemesScript(url.searchParams);
 
           // API 404 guard: unknown /api/* routes should return JSON, not HTML
           if (url.pathname.startsWith("/api/")) {
@@ -1750,6 +1772,8 @@ export async function startAnnotateServer(
           annotationCss: liveApp.annotationCss,
           bridgeBootstrap: liveApp.bridgeBootstrap,
           bridgeScript: liveApp.bridgeScript,
+          // Each page load starts in the mode Settings → Display names.
+          startInteract: resolveHtmlStartsInInteract(loadConfig()),
         }),
       });
     } catch (error) {
@@ -1766,7 +1790,7 @@ export async function startAnnotateServer(
   // Start the likely encoding now (gzip for plain-http remote mode, brotli
   // behind tailscale serve) so the first load does not wait for it.
   if (compressAppHtml) {
-    prewarmAppHtml(app.html, likelyAppHtmlEncoding(options.tailnetPublished === true));
+    prewarmAppHtml(app.page(), likelyAppHtmlEncoding(options.tailnetPublished === true));
   }
 
   // Notify caller that server is ready. An async ready handler that rejects

@@ -49,7 +49,7 @@
  */
 import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { markTourDecided } from '../helpers/tour-decided';
@@ -901,6 +901,49 @@ test('Codex: its own models with each one\'s levels; the pick goes on thread/sta
   } finally {
     rmSync(join(world.home, '.codex'), { recursive: true, force: true });
     for (const start of codex.starts()) if (codex.alive(start.pid)) process.kill(start.pid, 'SIGKILL'); // inbox-guard: own child (the fake codex)
+  }
+});
+
+test("OpenCode: a model list that can't be read keeps the button and says why; once read, OpenCode's default is named on it", async () => {
+  const { page } = world;
+  const config = join(world.home, '.config', 'opencode', 'opencode.json');
+  mkdirSync(join(world.home, '.config', 'opencode'), { recursive: true });
+  writeFileSync(config, JSON.stringify({ plugins: ['@plannotator/opencode'] }));
+  const opencode = installFakeOpenCodeLaunch(join(world.root, 'opencode'), { listFails: 'exit' });
+  // A config edit is a new read (its stamp is part of the list's key), never waiting out the failure's.
+  const edit = (seconds: number) => {
+    writeFileSync(config, JSON.stringify({ plugins: ['@plannotator/opencode'], edited: seconds }));
+    const later = new Date(Date.now() + seconds * 1000);
+    utimesSync(config, later, later);
+  };
+  try {
+    await page.goto(world.url);
+    await openCompose(page);
+    const d = dialog(page);
+    await d.locator('[data-compose-to]').click();
+    await d.locator('[data-compose-start="opencode"]').first().click({ timeout: 20_000 });
+    await expect(d.locator('[data-compose-choice]')).toHaveText('Default model', { timeout: 10_000 });
+    await d.locator('[data-compose-choice]').click();
+    const menu = d.locator('[data-compose-choices]');
+    await expect(menu.locator('[data-compose-choice-notice]')).toHaveText("Couldn't read OpenCode's models: OpenCode stopped with an error.", { timeout: 15_000 });
+    await expect(menu.locator('[data-compose-choice-value]')).toHaveCount(1);
+    await expect(menu.locator('[data-compose-choice-value="default"]')).toHaveAttribute('aria-checked', 'true');
+    await page.keyboard.press('Escape');
+    // OpenCode's list reads again after the config is fixed, with its default: named on the button and the Default row.
+    opencode.set({ defaultModel: { providerID: 'opencode', id: 'big-pickle' } });
+    edit(5);
+    await expect(d.locator('[data-compose-choice]')).toHaveText('Default (big-pickle)', { timeout: 20_000 });
+    await d.locator('[data-compose-choice]').click();
+    await expect(menu.locator('[data-compose-choice-notice]')).toHaveCount(0);
+    await expect(menu.locator('[data-compose-choice-menu="model"] [data-compose-choice-value="default"]')).toHaveText('Default (big-pickle)opencode');
+    await page.keyboard.press('Escape');
+    // As the next case expects it: no default named.
+    opencode.set({});
+    edit(10);
+    await expect(d.locator('[data-compose-choice]')).toHaveText('Default model', { timeout: 20_000 });
+    expect(opencode.starts()).toHaveLength(0);
+  } finally {
+    rmSync(join(world.home, '.config', 'opencode'), { recursive: true, force: true });
   }
 });
 

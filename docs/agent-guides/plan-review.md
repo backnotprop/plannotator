@@ -82,7 +82,8 @@ hands off and records a non-triggering `plannotator-handoff` message. Nothing
 is implemented before approval because the phase stays `planning` while the
 review is open, so the planning write gate still holds. The open review is
 closed (and its decision dropped) when plan mode is left, when a `/tree` path is
-not planning, and on `session_shutdown`; a plan decision is never re-targeted to
+not planning, on `session_shutdown`, or when Oh My Pi replaces the session
+in-process; a plan decision is never re-targeted to
 a replacement session. The Esc-aborts-the-review behavior of the old blocking
 tool is gone: leaving plan mode is how to abandon a review. Closing it first
 calls the plan server's in-process `closeKeepingDraft()` (never reachable over
@@ -350,6 +351,19 @@ widget (`InteractiveMode.MAX_WIDGET_LINES`), so `updateWidget` sends
 all items when there are 10 or fewer, else 10 items ending on the first open
 one (the first 10 until it is past them), and the last 10 once everything is
 done. `setWidget` only; the status line keeps the full count.
+
+**A prompt waiting in the terminal (Inbox).** While any blocking UI prompt is
+up (`ui_prompt_start` / `ui_prompt_end`, Pi 0.84+: an extension's confirm,
+select, input or editor), `PiTerminalPrompts` (`apps/pi-extension/inbox.ts`)
+makes the Inbox link say `blocked: { kind: 'question' }` on its polls and in a
+`state` event (Pi asks no permission of its own, so it is always `question`).
+Nested prompts count; a settled run, a session change or shutdown clears it.
+The event does not say what a prompt is for, so a permission-gate extension's
+confirm is told as a question too.
+Only the kind leaves Pi, never the prompt's title. An older Pi never raises the
+events: nothing is said. The Inbox side and the rule: "Status marks for every
+agent" in [inbox-notifications-and-agents.md](inbox-notifications-and-agents.md).
+Tests: `inbox-blocked.test.ts`.
 
 ### DeepSeek Harness: plan review, the `plannotator` tool and commands
 

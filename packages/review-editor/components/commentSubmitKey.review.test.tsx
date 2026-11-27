@@ -57,7 +57,7 @@ function must<T extends Element>(selector: string): T {
 
 // --- The line-comment toolbar ---
 
-function Toolbar({ onSubmit, showSuggestedCode = false }: { onSubmit: () => void; showSuggestedCode?: boolean }) {
+function Toolbar({ onSubmit, onDismiss = () => {}, showSuggestedCode = false }: { onSubmit: () => void; onDismiss?: () => void; showSuggestedCode?: boolean }) {
   const [comment, setComment] = useState('');
   const [code, setCode] = useState('');
   const ref = React.useRef<HTMLDivElement>(null);
@@ -76,7 +76,7 @@ function Toolbar({ onSubmit, showSuggestedCode = false }: { onSubmit: () => void
       setShowCodeModal={() => {}}
       setShowCommentModal={() => {}}
       onSubmit={onSubmit}
-      onDismiss={() => {}}
+      onDismiss={onDismiss}
       onCancel={() => {}}
       conventionalCommentsEnabled={false}
       conventionalLabel={null}
@@ -95,6 +95,18 @@ describeCommentSubmitKeys('review line comment toolbar', async (text) => {
   await typeInto(must<HTMLTextAreaElement>(COMMENT_FIELD), text);
   return { field: () => must(COMMENT_FIELD), saves: () => saves };
 }, { skip });
+
+test.skipIf(skip)('a composing Escape leaves the review line comment open', async () => {
+  let dismisses = 0;
+  await render(<Toolbar onSubmit={() => {}} onDismiss={() => { dismisses++; }} />);
+  const field = must<HTMLTextAreaElement>(COMMENT_FIELD);
+  await typeInto(field, 'draft');
+  const escape = await pressKey(field, 'Escape', { keyCode: 229 });
+  expect(escape.defaultPrevented).toBe(false);
+  expect(dismisses).toBe(0);
+  await pressKey(field, 'Escape');
+  expect(dismisses).toBe(1);
+});
 
 describe('review line comment toolbar: suggested code', () => {
   test.skipIf(skip)('on: Enter in the suggested code is a new line, not a save', async () => {

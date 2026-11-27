@@ -1,0 +1,43 @@
+/* Reviews' "On this computer" + (pulls/OpenLocalPicker.tsx; approval "reviews-open-any-branch-a", pictures A1-A9): a
+   small + at the right end of the group's heading, and the Inbox's own picker under it (New message's folder menu,
+   `.ib-cp-picker`), floating over the pane beside the list; on a phone the picker's full-screen sheet. */
+.ib-pr-foldhead { position: relative; display: flex; align-items: center; }
+.ib-pr-foldhead > .ib-pr-foldbtn { flex: 1 1 auto; min-width: 0; padding-right: 36px; }
+/* Over the fold button, which a phone's list makes sticky with its own z-index (inbox.css). */
+.pn-inbox .ib-iconbtn.ib-lp-plus { position: absolute; z-index: 3; top: 2px; right: 4px; width: 24px; height: 24px; border-radius: 6px; color: var(--muted-foreground); }
+.pn-inbox .ib-iconbtn.ib-lp-plus:hover, .pn-inbox .ib-iconbtn.ib-lp-plus[aria-expanded="true"] { background: var(--muted); color: var(--foreground); }
+.pn-inbox .ib-iconbtn.ib-lp-plus:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+
+/* The picker: one line a row (mark, name, quiet name or commit, then what it holds and its age at the end). */
+/* A phone's sheet keeps its own z-index (inbox.css), over the list's sticky heading and the bars. */
+.ib-cp-picker.ib-lp-picker:not([data-phone]) { z-index: 45; }
+.ib-lp-picker .ib-cp-list.ib-lp-list { display: flex; flex-direction: column; }
+.ib-lp-picker .ib-cp-opt.ib-lp-opt { display: flex; align-items: center; gap: 10px; min-height: 34px; }
+.ib-lp-opt > svg.ib-ic { flex: none; color: var(--muted-foreground); }
+.ib-lp-op { min-width: 0; overflow: hidden; color: var(--foreground); text-overflow: ellipsis; white-space: nowrap; }
+.ib-lp-op b { font-weight: 650; }
+.ib-cp-other .ib-lp-op { color: color-mix(in oklch, var(--foreground) 55%, var(--muted-foreground)); }
+.ib-lp-of { flex: 0 1 auto; min-width: 0; overflow: hidden; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); text-overflow: ellipsis; white-space: nowrap; }
+.ib-lp-r { flex: none; display: flex; align-items: center; gap: 10px; margin-left: auto; padding-left: 8px; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ib-lp-age { min-width: 26px; text-align: right; }
+/* "same as main": dimmed, still picked as any row. */
+.ib-lp-dim { color: color-mix(in oklch, var(--muted-foreground) 70%, transparent); }
+.ib-lp-picker .ib-cp-cap .ib-n { color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+/* A project's step: the project to go back to, before the field. */
+.pn-inbox .ib-lp-back { flex: none; display: inline-flex; align-items: center; gap: 2px; max-width: 45%; height: 24px; padding: 0 7px 0 3px; border: 0; border-radius: 6px; background: var(--muted); color: var(--foreground); font: inherit; font-size: var(--ib-fs-13, 13px); font-weight: 500; cursor: pointer; }
+.ib-lp-back > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  /* The heading stays on top as the list scrolls, its + with it (the fold button alone did before). */
+  .pn-inbox .ib-prlist .ib-lbody .ib-pr-foldhead { position: sticky; top: 0; z-index: 2; background: var(--card); }
+  .pn-inbox .ib-prlist .ib-lbody .ib-pr-foldhead > .ib-pr-foldbtn { position: static; padding-right: 52px; }
+  .pn-inbox .ib-iconbtn.ib-lp-plus { top: 4px; right: 10px; width: 36px; height: 36px; }
+  .ib-lp-picker .ib-cp-opt.ib-lp-opt { min-height: 44px; gap: 12px; }
+  /* Two lines: the name, then its quiet name or commit and what it holds; the age at the end of the first. */
+  .ib-lp-picker .ib-cp-opt.ib-lp-two { align-items: flex-start; padding-top: 7px; padding-bottom: 7px; }
+  .ib-lp-two > svg.ib-ic { margin-top: 2px; }
+  .ib-lp-stk { display: flex; flex: 1 1 auto; flex-direction: column; min-width: 0; }
+  .ib-lp-stk .ib-lp-of { font-size: var(--ib-fs-13, 13px); }
+  .ib-lp-two .ib-lp-r { margin-top: 2px; }
+  .ib-cp-picker[data-phone].ib-lp-picker .ib-cp-cap { padding: 12px 10px 4px; font-size: var(--ib-fs-13-5, 13.5px); }
+}

@@ -43,7 +43,7 @@ interface UseAnnotationToolbarArgs {
   askOnly?: boolean;
   /**
    * A host's choices come first (`DiffSelectionActions`): a new selection
-   * opens on a small chooser (Comment · Ask · Show me), and the comment box
+   * opens on a small chooser (Comment · Ask), and the comment box
    * (or a touch screen's expanded composer) opens only after Comment.
    */
   chooser?: boolean;
@@ -313,7 +313,7 @@ export function useAnnotationToolbar({ patch, filePath, isFocused, onLineSelecti
     onLineSelection(null);
   }, [onLineSelection, saveDraft]);
 
-  // Hide: the toolbar goes and the selection stays painted (a host took the lines elsewhere: Ask, Show me).
+  // Hide: the toolbar goes and the selection stays painted (a host took the lines elsewhere: Ask).
   const handleHide = useCallback(() => {
     saveDraft();
     setChoosing(false);

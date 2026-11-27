@@ -8,6 +8,7 @@ import {
   inboxCardLinkLabel,
   inboxCardRefIsLinkOnly,
   inboxCardRefsOf,
+  inboxSectionWaitsOnPerson,
   type InboxCardColumn,
   type InboxCardHistoryEntry,
   type InboxCardRef,
@@ -640,7 +641,7 @@ function Notes({ card, onSave, text: render }: { card: InboxCardWire; onSave: (n
 function ThreadRow({ threadId, row, sent, now, onOpen }: { threadId: string; row: InboxListRow | null; sent: boolean; now: number; onOpen: () => void }) {
   const subject = row?.subject ?? 'A thread';
   const section = row ? (INBOX_SECTIONS.find((s) => s.id === row.section)?.label ?? null) : null;
-  const waiting = row ? row.section === 'stopped' || row.section === 'holding' || row.section === 'waiting' : false;
+  const waiting = row ? inboxSectionWaitsOnPerson(row.section) : false;
   return (
     <li>
       <button type="button" className="ib-crdp-thread" onClick={onOpen} data-card-thread={threadId} aria-label={`Open the thread “${subject}”${section ? `, ${section}` : ''}`}>

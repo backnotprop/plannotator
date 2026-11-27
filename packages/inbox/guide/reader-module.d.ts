@@ -15,3 +15,5 @@ export default GuideReader;
 export declare const PullAllFiles: ComponentType<PullAllFilesProps>;
 export declare const PullRepoFile: ComponentType<PullRepoFileProps>;
 export declare const PullChangesTree: ComponentType<PullChangesTreeProps>;
+/** The review app's keys beside a review's reader (ReviewKeys.tsx), in the same chunk. */
+export declare const ReviewKeys: ComponentType<{ diff: string; viewed: boolean }>;

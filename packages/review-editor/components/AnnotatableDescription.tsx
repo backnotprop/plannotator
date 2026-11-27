@@ -1,11 +1,11 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { RenderedMarkdown } from '@plannotator/ui/components/RenderedMarkdown';
 import { InlineImageTagsContext } from '@plannotator/ui/components/ImageResolverContext';
 import { CommentPopover } from '@plannotator/ui/components/CommentPopover';
 import { TouchSelectionToolbar } from '@plannotator/ui/components/TouchSelectionToolbar';
 import { useAnnotationHighlighter } from '@plannotator/ui/hooks/useAnnotationHighlighter';
-import { proxiesGitHubImages, resolvePRImage } from '../utils/prImage';
+import { forgejoImageHandling, proxiesGitHubImages, resolvePRImage } from '../utils/prImage';
 import { useReviewState } from '../dock/ReviewStateContext';
 import { renderPRDescriptionVideo } from './PRDescriptionVideo';
 import { PRMediaScope } from './PRMediaScope';
@@ -39,6 +39,10 @@ export const AnnotatableDescription = React.memo(function AnnotatableDescription
   // Only a github.com PR proxies attachment images; elsewhere every image
   // renders exactly as before (no resolver).
   const proxiedImages = proxiesGitHubImages(prMetadata);
+  // A Forgejo PR's own uploads (relative `/attachments/<uuid>` links) load through
+  // the same proxy. The source text is not rewritten, so annotation anchors stay put.
+  const forgejo = useMemo(() => forgejoImageHandling(prMetadata), [prMetadata]);
+  const resolveImage = proxiedImages ? resolvePRImage : forgejo?.resolve;
 
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -68,11 +72,11 @@ export const AnnotatableDescription = React.memo(function AnnotatableDescription
   return (
     <div ref={containerRef}>
       <PRMediaScope>
-        <InlineImageTagsContext.Provider value={proxiedImages}>
+        <InlineImageTagsContext.Provider value={resolveImage !== undefined}>
           <RenderedMarkdown
             markdown={markdown}
             className={className}
-            resolveImage={proxiedImages ? resolvePRImage : undefined}
+            resolveImage={resolveImage}
             renderParagraph={proxiedImages ? renderPRDescriptionVideo : undefined}
             preserveVideos
             responsiveImages

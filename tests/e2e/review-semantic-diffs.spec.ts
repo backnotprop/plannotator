@@ -10,7 +10,7 @@
  * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
  */
 
-import { chromium, expect, test, type Browser, type Page } from '@playwright/test';
+import { chromium, expect, test, type Browser, type Locator, type Page } from '@playwright/test';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -143,8 +143,8 @@ async function review(): Promise<{ url: string; close: () => Promise<void> }> {
   return { url, close };
 }
 
-async function open(browser: Browser, url: string, viewport = { width: 1280, height: 900 }) {
-  const context = await browser.newContext({ viewport, reducedMotion: 'reduce' });
+async function open(browser: Browser, url: string, viewport = { width: 1280, height: 900 }, touch = false) {
+  const context = await browser.newContext({ viewport, reducedMotion: 'reduce', ...(touch ? { hasTouch: true, isMobile: true } : {}) });
   const seen = [
     ['plannotator-plan-look-choice-resolved', 'true'],
     ['plannotator-edit-mode-announcement-seen', '3'],
@@ -174,6 +174,12 @@ async function open(browser: Browser, url: string, viewport = { width: 1280, hei
 }
 
 const note = (page: Page, state: string) => page.locator(`[data-semantic-note="${state}"]`);
+const kinds = (page: Page, said: string) => page.locator(`[data-semantic-note="semantic"][aria-label$=": ${said}"]`);
+
+async function flip(page: Page, chip: Locator) {
+  await chip.click();
+  await page.locator('[data-semantic-file-popover]').last().getByRole('switch', { name: 'Show in the diff' }).click();
+}
 
 async function shot(page: Page, name: string) {
   if (!shots) return;
@@ -181,6 +187,22 @@ async function shot(page: Page, name: string) {
   await page.waitForTimeout(300);
   await page.screenshot({ path: join(shots, `${name}.png`) });
 }
+
+async function headerShot(page: Page, header: Locator, name: string) {
+  await page.waitForTimeout(300);
+  const boxes = [(await header.boundingBox())!];
+  const popover = page.locator('[data-semantic-file-popover]');
+  if (await popover.count()) boxes.push((await popover.last().boundingBox())!);
+  const view = page.viewportSize()!;
+  const x = Math.max(0, Math.min(...boxes.map((b) => b.x)) - 12);
+  const y = Math.max(0, Math.min(...boxes.map((b) => b.y)) - 12);
+  const right = Math.min(view.width, Math.max(...boxes.map((b) => b.x + b.width)) + 12);
+  const bottom = Math.min(view.height, Math.max(...boxes.map((b) => b.y + b.height)) + 12);
+  await page.screenshot({ path: test.info().outputPath(`${name}.png`), clip: { x, y, width: right - x, height: bottom - y } });
+}
+
+const struck = (page: Page) => page.evaluate(() => [...document.querySelectorAll('[data-file-header] *')].filter((el) => getComputedStyle(el).textDecorationLine.includes('line-through')).length);
+const outlined = (chip: Locator) => chip.locator('span').last().evaluate((el) => getComputedStyle(el).boxShadow !== 'none');
 
 let browser: Browser;
 test.beforeAll(async () => {
@@ -197,8 +219,8 @@ test('moved and renamed code is labelled in plain words, and only the TypeScript
     expect(advert?.runtime).toMatch(/^\/assets\/sem-diff\/web-tree-sitter-[0-9a-f]{16}\.wasm$/);
     const { context, page, parsers } = await open(browser, session.url);
     await expect(note(page, 'semantic')).toHaveCount(2, { timeout: 30_000 });
-    await expect(page.getByText('1 renamed', { exact: true })).toBeVisible();
-    await expect(page.getByText('1 moved · 1 moved & edited', { exact: true })).toBeVisible();
+    await expect(kinds(page, '1 renamed')).toBeVisible();
+    await expect(kinds(page, '1 moved, 1 moved & edited')).toBeVisible();
     await expect(page.getByText('Moved 4 lines').first()).toBeAttached();
     expect(parsers.some((path) => path.includes('tree-sitter-typescript-'))).toBe(true);
     expect(parsers.filter((path) => /tree-sitter-(python|go|rust|java|c_sharp|php|ruby|kotlin)-/.test(path))).toEqual([]);
@@ -246,6 +268,7 @@ test("a file header's sem menu lists that file's changes on hover, and a row lan
     await badge.hover();
     const menu = page.locator('[data-semantic-file-popover]');
     await expect(menu.locator('.semantic-diff-row').filter({ hasText: 'saveUser' })).toBeVisible();
+    await expect(menu.getByRole('switch', { name: 'Show in the diff' })).toHaveAttribute('aria-checked', 'true');
     await shot(page, 'file-menu');
     await menu.locator('.semantic-diff-row').filter({ hasText: 'saveUser' }).first().click();
     await expect(menu).toHaveCount(0);
@@ -256,22 +279,83 @@ test("a file header's sem menu lists that file's changes on hover, and a row lan
   }
 });
 
-test('the diff display switch and a file header note each bring back the plain diff', async () => {
+test("the diff display switch and a file's switch in its sem chip each bring back the plain diff", async () => {
   const session = await review();
   try {
     const { context, page } = await open(browser, session.url);
     await expect(note(page, 'semantic')).toHaveCount(2, { timeout: 30_000 });
-    await page.getByText('1 renamed', { exact: true }).click();
+    await flip(page, kinds(page, '1 renamed'));
     await expect(note(page, 'off')).toHaveCount(1);
     await expect(note(page, 'semantic')).toHaveCount(1);
-    await page.locator('[data-semantic-note="off"]').click();
+    await expect(page.locator('[data-file-header] .line-through')).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(page.locator('[data-semantic-file-popover]')).toHaveCount(0);
+    await flip(page, note(page, 'off'));
     await expect(note(page, 'semantic')).toHaveCount(2);
     await page.locator('[data-diff-display-options]').first().click();
     await page.getByText('Show moved & renamed code').click();
     await page.keyboard.press('Escape');
-    await expect(note(page, 'off')).toHaveCount(2);
+    await expect(note(page, 'off')).toHaveCount(0);
+    await expect(note(page, 'semantic')).toHaveCount(0);
     await expect(page.getByText('Moved 4 lines')).toHaveCount(0);
     await context.close();
+  } finally {
+    await session.close();
+  }
+});
+
+test("a file's sem chip keeps its popover open while its switch flips the file, by mouse and by a tap on a phone", async () => {
+  const session = await review();
+  try {
+    const { context, page } = await open(browser, session.url);
+    await expect(note(page, 'semantic')).toHaveCount(2, { timeout: 30_000 });
+    const header = page.locator('[data-file-header]').filter({ hasText: 'users.ts' }).first();
+    const chip = header.locator('[data-semantic-note]');
+    const popover = page.locator('[data-semantic-file-popover]');
+    const toggle = popover.getByRole('switch', { name: 'Show in the diff' });
+    await chip.scrollIntoViewIfNeeded();
+    expect(await outlined(chip)).toBe(false);
+    await expect(chip.locator('svg')).toBeVisible();
+    await expect(page.locator('[data-semantic-file-badge="0"]').first()).toBeVisible();
+    await expect(page.locator('[data-semantic-file-badge="0"] svg')).toHaveCount(0);
+    await headerShot(page, header, 'chip-a-on');
+    await chip.hover();
+    await expect(toggle).toHaveAttribute('aria-checked', 'true');
+    await headerShot(page, header, 'chip-b-popover-switch-on');
+    await toggle.click();
+    await expect(chip).toHaveAttribute('data-semantic-note', 'off');
+    await page.waitForTimeout(600);
+    await expect(popover).toBeVisible();
+    await expect(toggle).toHaveAttribute('aria-checked', 'false');
+    expect(await outlined(chip)).toBe(true);
+    expect(await struck(page)).toBe(0);
+    await headerShot(page, header, 'chip-c-flipped-popover-open-switch-off');
+    await page.keyboard.press('Escape');
+    await expect(popover).toHaveCount(0);
+    await chip.hover();
+    await expect(toggle).toHaveAttribute('aria-checked', 'false');
+    await page.mouse.move(5, 895);
+    await expect(popover).toHaveCount(0);
+    await context.close();
+
+    const phone = await open(browser, session.url, { width: 390, height: 844 }, true);
+    await phone.page.locator('[data-changes-tree] [data-type="item"][data-item-path$="users.ts"]').first().tap({ timeout: 10_000 });
+    await phone.page.getByText('All changes', { exact: true }).first().tap({ timeout: 10_000 });
+    const small = phone.page.locator('[data-file-header]').filter({ hasText: 'users.ts' }).first();
+    const tapped = small.locator('[data-semantic-note]');
+    await expect(tapped).toHaveAttribute('data-semantic-note', /^(semantic|off)$/, { timeout: 30_000 });
+    const was = await tapped.getAttribute('data-semantic-note');
+    await tapped.scrollIntoViewIfNeeded();
+    await tapped.tap();
+    const phoneToggle = phone.page.locator('[data-semantic-file-popover]').getByRole('switch', { name: 'Show in the diff' });
+    await expect(phoneToggle).toHaveAttribute('aria-checked', String(was === 'semantic'));
+    await phoneToggle.tap();
+    await expect(tapped).toHaveAttribute('data-semantic-note', was === 'semantic' ? 'off' : 'semantic');
+    await phone.page.waitForTimeout(600);
+    await expect(phoneToggle).toHaveAttribute('aria-checked', String(was !== 'semantic'));
+    expect(await struck(phone.page)).toBe(0);
+    await headerShot(phone.page, small, 'chip-d-phone-390-popover-open');
+    await phone.context.close();
   } finally {
     await session.close();
   }

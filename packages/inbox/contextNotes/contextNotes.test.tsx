@@ -2,7 +2,7 @@
  * A context note's row (approval "inbox-context-notes", take Line). What
  * regresses: a row that is not a button a keyboard reaches (no aria-expanded,
  * nothing it controls), a note that grows a reply, edit or Post, a stale answer
- * without its words or its Ask again, a picture's note that can't open its board.
+ * without its words or its Ask again.
  *
  * In the thread, an agent's `:::note` block is a chip naming its file and lines (removed lines said so) with its
  * words, never its raw anchor line; "Open in the review" opens those lines on their side, and a note the thread has
@@ -50,7 +50,7 @@ test.skipIf(!hasDom)('a row is a button that opens its note in place, and nothin
   expect(button.getAttribute('aria-expanded')).toBe('false');
   const body = el.querySelector(`#${CSS.escape(button.getAttribute('aria-controls')!)}`) as HTMLElement;
   expect(body.hidden).toBe(true);
-  expect(button.querySelector('.ib-ctxn-peb, .ib-ctxn-risk-mark')).toBeNull();
+  expect(button.querySelector('.ib-ctxn-risk-mark')).toBeNull();
   act(() => button.click());
   expect(button.getAttribute('aria-expanded')).toBe('true');
   expect(body.hidden).toBe(false);
@@ -101,24 +101,16 @@ test.skipIf(!hasDom)('without an Ask (a read-only review) a stale answer offers 
   expect(el.querySelector('[data-context-note-ask-again]')).toBeNull();
 });
 
-test.skipIf(!hasDom)('a risk shows High and the person’s rule; a picture opens its board', () => {
-  const opened: string[] = [];
+test.skipIf(!hasDom)('a risk shows High and the person’s rule', () => {
   const risk: ContextNote = { id: 'r-0', writer: 'risk', file: 'src/a.ts', side: 'new', lineStart: 1, lineEnd: 2, text: 'Charges retry.', level: 'high', rule: 'Anything in billing.' };
-  const picture: ContextNote = { id: 'p-1', writer: 'picture', file: 'src/a.ts', side: 'new', lineStart: 8, lineEnd: 8, text: 'Retries once.', agent: 'Claude', picture: { board: 'b1', title: 'Flow', part: 'Retry' } };
-  const el = mount([risk, picture], { onOpenPicture: (note) => opened.push(note.picture!.board) });
-  const [riskRow, pictureRow] = Array.from(el.querySelectorAll<HTMLButtonElement>('button.ib-ctxn-row'));
+  const el = mount([risk], {});
+  const [riskRow] = Array.from(el.querySelectorAll<HTMLButtonElement>('button.ib-ctxn-row'));
   expect(riskRow!.textContent).toContain('Risk');
   expect(riskRow!.textContent).toContain('High');
-  // Only a Picture carries Show me's mark (it comes from a board); Risk has its own gauge (q-9ad31b4e and the owner's pick).
-  expect(riskRow!.querySelector('.ib-ctxn-peb')).toBeNull();
+  // Risk has its own gauge (q-9ad31b4e and the owner's pick).
   expect(riskRow!.querySelector('.ib-ctxn-risk-mark')).not.toBeNull();
-  expect(pictureRow!.querySelector('.ib-ctxn-peb')).not.toBeNull();
-  expect(pictureRow!.querySelector('.ib-ctxn-risk-mark')).toBeNull();
   act(() => riskRow!.click());
   expect(el.querySelector('[data-context-note-row="r-0"]')!.textContent).toContain('your rule “Anything in billing.”');
-  act(() => pictureRow!.click());
-  act(() => el.querySelector<HTMLButtonElement>('[data-context-note-open-picture]')!.click());
-  expect(opened).toEqual(['b1']);
 });
 
 test.skipIf(!hasDom)('a risk place with no rule of the person’s, and an answer to nothing they said, add no words of their own', () => {

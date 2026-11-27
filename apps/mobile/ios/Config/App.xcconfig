@@ -1,0 +1,5 @@
+// The app's build settings that differ per person. Copy Local.example.xcconfig to Local.xcconfig (untracked)
+// to set your own Team ID and bundle id; without it the app still builds and runs in the Simulator.
+APP_BUNDLE_ID = ai.plannotator.app
+DEVELOPMENT_TEAM =
+#include? "Local.xcconfig"

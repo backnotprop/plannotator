@@ -534,7 +534,7 @@ describe("a reply to an older message when an agent that reads through MCP wrote
 });
 
 describe("Add", () => {
-  test("the added session gets the added wake, then every later reply with the person's words, while the owner keeps the thread", async () => {
+  test("the added session gets the added wake; a later reply to the owner alone reaches only the owner, one naming both reaches both", async () => {
     const { server, client, project, herdr, asked } = await world(60_000);
     const sent = await reply(server, asked.message_id, { idempotency_key: "k1", words: "@Claude Code (herdr) work on this with it.", tags: [{ ...HERDR_TAG, mode: "add" }] });
     expect(sent.status).toBe(200);
@@ -548,12 +548,23 @@ describe("Add", () => {
     expect(wake[2]).toBe(inboxAddedLine("Claude Code", first.id));
     expect(await owner(server, asked.thread_id)).toBe(OWNER);
 
-    // The owner answers; the person's plain reply (no tag) reaches the added session too.
+    // The owner answers; the person's plain reply to it (the box names the owner alone) reaches the owner only:
+    // the added session stays a member, but is not woken and is told nothing about it.
     const answer = await agentSends(client, project, OWNER, "Adding whoami now.", { reply_to: first.id });
     const later = await reply(server, answer.message_id, { idempotency_key: "k2", words: "Good, and keep the title short." });
     const second = later.json.reply as InboxMessageWire;
-    expect(second.tags).toEqual([{ ...HERDR_TAG, wakes: true, joined: true }]);
-    expect((await poll(server, HERDR, herdr)).map((c) => c.id)).toContain(second.id);
-    expect((await poll(server, OWNER, project)).map((c) => c.id)).toContain(second.id);
+    expect(second.tags).toBeUndefined();
+    expect((await poll(server, HERDR, herdr)).map((c) => c.id)).not.toContain(second.id);
+    const ownerWake = (await poll(server, OWNER, project)).find((c) => c.id === second.id);
+    expect(ownerWake).toBeDefined();
+    expect(ownerWake!.also_tagged).toBeUndefined();
+    expect(await owner(server, asked.thread_id)).toBe(OWNER);
+
+    // The box names both (the pill's second recipient rides as a tag): both get it.
+    const both = await reply(server, answer.message_id, { idempotency_key: "k3", words: "Both of you: ship it.", tags: [{ ...HERDR_TAG }] });
+    const third = both.json.reply as InboxMessageWire;
+    expect(third.tags?.map((t) => t.session)).toEqual([HERDR]);
+    expect((await poll(server, HERDR, herdr)).map((c) => c.id)).toContain(third.id);
+    expect((await poll(server, OWNER, project)).map((c) => c.id)).toContain(third.id);
   });
 });

@@ -29,7 +29,9 @@ import {
 
 /**
  * The canvas: the rendered svg inside a transformed wrapper, edge to edge in
- * its host. Wheel and pinch zoom about the pointer, drag pans, `+` `-` `0`
+ * its host. Wheel and pinch zoom about the pointer (inline, with
+ * `wheelZoom="modifier"`, only Ctrl/Cmd+wheel and a pinch do: a plain wheel
+ * scrolls the page), drag pans, `+` `-` `0`
  * (fit) and the arrow keys on the keyboard, a small control in the corner.
  * Click-to-select, drag-to-pan: a press that does not travel the drag
  * threshold (4 px for a mouse or pen, 10 px for a finger) is a click and
@@ -95,6 +97,19 @@ export interface DiagramCanvasHandle {
  * reach whatever holds the canvas (a popout's close). */
 export type DiagramEscapeOutcome = 'consumed' | 'pass';
 
+/** What a wheel over the canvas does. `always`: every wheel zooms (a viewer
+ * that owns the screen: a popout, a diagram file). `modifier`: a plain wheel
+ * is the page's and scrolls past the diagram; Ctrl or Cmd with the wheel, and
+ * a trackpad pinch (which browsers send as a wheel with `ctrlKey`), zoom. */
+export type DiagramWheelZoom = 'always' | 'modifier';
+
+const CANVAS_LABEL_PREFIX = 'Diagram canvas. Drag or arrow keys to pan, ';
+const CANVAS_LABEL_SUFFIX = ' 0 to fit, click a part to comment.';
+const CANVAS_LABEL: Record<DiagramWheelZoom, string> = {
+  always: `${CANVAS_LABEL_PREFIX}wheel or plus and minus to zoom,${CANVAS_LABEL_SUFFIX}`,
+  modifier: `${CANVAS_LABEL_PREFIX}plus and minus or pinch to zoom,${CANVAS_LABEL_SUFFIX}`,
+};
+
 export function DiagramCanvas({
   svgNode,
   targetSelector,
@@ -108,6 +123,7 @@ export function DiagramCanvas({
   children,
   autoFocus,
   className,
+  wheelZoom = 'always',
 }: {
   /** The last good render's sanitized svg root, or null before the first. */
   svgNode: SVGSVGElement | null;
@@ -135,6 +151,9 @@ export function DiagramCanvas({
   /** `touch-none` for a host that owns the whole screen (a popout); the
    * default lets a finger scroll the page past an inline diagram. */
   className?: string;
+  /** Default `always` (today's canvas). An inline diagram in a document
+   * passes `modifier` so the reader's wheel scrolls the page past it. */
+  wheelZoom?: DiagramWheelZoom;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
@@ -169,7 +188,9 @@ export function DiagramCanvas({
   }, [autoFocus]);
 
   // Wheel zoom needs a non-passive listener (React's onWheel is passive,
-  // so preventDefault there cannot stop the page from scrolling).
+  // so preventDefault there cannot stop the page from scrolling). The
+  // listener holds the page's scroll only for a wheel it zooms with: under
+  // `modifier` a plain wheel returns untouched and the page scrolls.
   useEffect(() => {
     const host = hostRef.current;
     if (host === null) return;
@@ -177,12 +198,13 @@ export function DiagramCanvas({
       // A sub-pixel delta (a trackpad coming to rest, a horizontal swipe)
       // is neither a zoom nor a reason to hold the page's scroll.
       if (Math.abs(event.deltaY) < 0.1) return;
+      if (wheelZoom === 'modifier' && !event.ctrlKey && !event.metaKey) return;
       event.preventDefault();
       zoomBy(Math.exp(-event.deltaY * WHEEL_ZOOM_SENSITIVITY), event.clientX, event.clientY);
     };
     host.addEventListener('wheel', onWheel, { passive: false });
     return () => host.removeEventListener('wheel', onWheel);
-  }, [zoomBy]);
+  }, [wheelZoom, zoomBy]);
 
   const targetUnder = useCallback(
     (event: ReactPointerEvent): Element | null => {
@@ -481,7 +503,7 @@ export function DiagramCanvas({
       ref={hostRef}
       data-diagram-canvas=""
       tabIndex={0}
-      aria-label="Diagram canvas. Drag or arrow keys to pan, wheel or plus and minus to zoom, 0 to fit, click a part to comment."
+      aria-label={CANVAS_LABEL[wheelZoom]}
       className={cn(
         'relative h-full w-full touch-pan-y select-none overflow-hidden outline-none',
         panning ? 'cursor-grabbing' : 'cursor-grab',

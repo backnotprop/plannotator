@@ -17,7 +17,6 @@ import { join } from "node:path";
 import { INBOX_CARD_ACTION_ON, INBOX_CARD_TITLE_MAX } from "@plannotator/core/inbox-types";
 import { startInboxServer, type InboxServer } from "@plannotator/server/inbox";
 import { FIXTURE_V1_PR } from "@plannotator/shared/guide-format-fixtures";
-import SHAPE_KIT from "@plannotator/core/shape-kit.mjs" with { type: "text" };
 import { stubbedAgentClis } from "../../../tests/helpers/agent-cli-guard";
 import { removeStubbedHtml, stubHookDistHtml } from "../../../tests/helpers/hook-dist-stub";
 import { NO_BROWSER } from "../../../tests/helpers/no-browser";
@@ -50,8 +49,6 @@ with open(sys.argv[1], "wb") as out:
 sys.exit(proc.wait())
 `;
 const PYTHON = Bun.which("python3");
-/** Well past what SOCKET_PARENT's socket took on macOS (4 to 8 KB) before a CLI that does not wait lost the rest. */
-const SOCKET_HOLDS = 16_384;
 
 const agents = stubbedAgentClis();
 
@@ -160,24 +157,6 @@ describe.skipIf(process.platform === "win32")("CLI output through a pipe", () =>
       const { code, stderr } = await pipeInto(["guide", "export", "--snapshot", inRoot("missing.json"), "--out", "-"], `cat >"$OUT"`);
       expect(code, stderr).not.toBe("0");
       expect(readFileSync(inRoot("out")).length).toBe(0);
-    }, 30_000);
-  });
-
-  describe("shape kit", () => {
-    // Shape is off by default: on in its own data dir, so nothing else here runs with it on.
-    test.skipIf(!PYTHON)("a socket reading at once gets every byte, and the exit code stays 0", async () => {
-      const dataDir = inRoot("shape-data");
-      mkdirSync(dataDir);
-      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxShape: true }));
-      const kit = Buffer.from(SHAPE_KIT);
-      expect(kit.length, "The kit now fits in the socket, so this test no longer sees a cut: make the socket smaller").toBeGreaterThan(SOCKET_HOLDS);
-
-      const { code, stderr } = await readThroughSocket(["shape", "kit"], "out-kit", { env: { PLANNOTATOR_RELAY_URL: "http://127.0.0.1:9", PLANNOTATOR_DATA_DIR: dataDir } });
-
-      const received = readFileSync(inRoot("out-kit"));
-      expect(received.length, stderr).toBe(kit.length);
-      expect(received.equals(kit)).toBe(true);
-      expect(code).toBe("0");
     }, 30_000);
   });
 

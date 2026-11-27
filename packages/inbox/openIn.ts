@@ -5,7 +5,7 @@
  * (`inboxOpenInPolicy`, @plannotator/core). A plain list: Browser (HTML),
  * the editors this computer has, the default app where the policy allows
  * it, the file manager; then Copy path. The current choice is checked.
- * A referenced file (Shape, a review's diff headers) has the same list, by its
+ * A referenced file (a review's diff headers, a message's code spans) has the same list, by its
  * kind on disk, with no Browser: only an attachment has a page to open.
  * A file of a thread on another linked machine (`onAnotherMachine`) lists
  * only what works from here, a page's or an image's new tab and Copy path:
@@ -59,12 +59,18 @@ export function openInMenu(
   remembered: string | null,
   version: 'current' | 'sent',
 ): OpenInMenu {
-  if (onAnotherMachine(attachment)) {
-    const tab = newTabUrl(attachment, version);
-    const items: OpenInItem[] = tab ? [{ kind: 'browser', id: 'browser', label: 'Browser', href: tab }] : [];
-    return { items, primary: items[0] ?? null, missing: false };
-  }
+  if (onAnotherMachine(attachment)) return newTabMenu(attachment, version);
   return openInMenuFor(attachment, detected, platform, remembered, attachmentPageUrl(attachment, version), attachment.unavailable !== null);
+}
+
+/**
+ * What works with no app to launch: a page's or an image's new tab, then Copy path (every list ends with it). A file
+ * on another machine, and any file from a window over the tailnet, where launching an app is refused.
+ */
+export function newTabMenu(attachment: InboxAttachmentState, version: 'current' | 'sent'): OpenInMenu {
+  const tab = newTabUrl(attachment, version);
+  const items: OpenInItem[] = tab ? [{ kind: 'browser', id: 'browser', label: 'Browser', href: tab }] : [];
+  return { items, primary: items[0] ?? null, missing: false };
 }
 
 /** The menu for a file of a kind: `browserPage` is its new-tab page, if it has one; `missing` disables the apps. */
@@ -104,9 +110,10 @@ export function remembersOpenInItem(item: OpenInItem): boolean {
 }
 
 /**
- * Over the tailnet and on a phone the only "Open in" is a new tab: the page
- * route for HTML, the image route for an image, nothing for anything else.
- * The same for a file on another machine, through the forward.
+ * Over the tailnet and on a phone the only app-free "Open in" is a new tab:
+ * the page route for HTML, the image route for an image, nothing for anything
+ * else (Copy path goes beside it, `newTabMenu`). The same for a file on
+ * another machine, through the forward.
  */
 export function newTabUrl(attachment: InboxAttachmentState, version: 'current' | 'sent'): string | null {
   const kind = readInboxAttachmentKind(attachment.kind);

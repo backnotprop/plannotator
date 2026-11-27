@@ -3,7 +3,7 @@
  * it is on. The Inbox core (packages/server/inbox.ts) knows each one only by its key: it routes, answers the
  * settings and starts them through the list below, and never imports a capability's records, routes or text.
  *
- * Plans is the only one on it (packages/server/plans-capability.ts). Shape, Routines, the Board and code review are
+ * Plans is the only one on it (packages/server/plans-capability.ts). Routines, the Board and code review are
  * still wired by hand in inbox.ts; each may move here later, one at a time, once this holds.
  *
  * A capability's agent tool (`tools`) and the window's capability rows come with the first capability that has
@@ -28,6 +28,8 @@ export interface InboxCapability {
   settingsWire?(): Record<string, unknown>;
   /** The Inbox is up (it runs any background work it needs while on). */
   started?(): void;
+  /** The Inbox is going down: it ends what it has going (runs, listeners, watches). */
+  stopped?(): void;
 }
 
 /** What a capability may use of the Inbox core: only this. */
@@ -56,7 +58,7 @@ const NOT_FOUND = () => Response.json({ error: "Not found", code: "not_found" },
 const owns = (prefix: string, pathname: string) => pathname === prefix || pathname.startsWith(`${prefix}/`);
 
 /**
- * A capability's path, behind the guards Shape's routes have: off, or reached any way but the owner's window on this
+ * A capability's path, behind its guards: off, or reached any way but the owner's window on this
  * computer, it is the unknown-route 404, as if absent (reads included: a plan names files and folders); another site
  * is refused; a POST must carry the page's server session (or none). Null: no capability owns the path.
  */
@@ -126,6 +128,17 @@ export function answerInboxCapabilities(list: readonly InboxCapability[], body: 
     Object.assign(answer, c.settingsWire?.() ?? {}, body[c.key] !== undefined ? { [c.key]: { on: c.on() } } : {});
   }
   return answer;
+}
+
+/** The Inbox is going down: each capability ends what it has going. */
+export function stopInboxCapabilities(list: readonly InboxCapability[]): void {
+  for (const c of list) {
+    try {
+      c.stopped?.();
+    } catch {
+      // A capability that cannot end cleanly never holds the Inbox's own stop.
+    }
+  }
 }
 
 /** The Inbox is up: each capability that is on starts its background work. */

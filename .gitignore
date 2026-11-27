@@ -124,3 +124,9 @@ tests/helpers/.outside-scratch-*
 
 __pycache__/
 *.pyc
+
+# The native iPhone app (apps/mobile/ios): Xcode's build output and per-user state
+apps/mobile/ios/build/
+DerivedData/
+xcuserdata/
+*.xcuserstate

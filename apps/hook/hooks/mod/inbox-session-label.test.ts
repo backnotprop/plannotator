@@ -356,6 +356,8 @@ function engineOver(firstSession: string) {
   const files = new Map<string, string>([
     ['/bin/sh', ''],
     [inboxRegistryPathOf(DATA), REGISTRY],
+    // The person turned the Inbox on here (inbox-turned-on.ts).
+    [`${DATA}/inbox/turned-on`, '{"on":true,"by":"command"}'],
   ])
   const store = new Map<string, unknown>()
   /** Each `$.clock.every` fires on its own period, as the engine's: the self-heal's 30 s is not the tick's 1 s. */

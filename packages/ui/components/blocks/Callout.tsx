@@ -40,7 +40,7 @@ export const Callout: React.FC<CalloutProps> = ({
     blockType === 'alert' ? { 'data-alert-kind': kindAttribute } : { 'data-directive-kind': kindAttribute };
   return (
     <div
-      className={`${containerClassName} relative`}
+      className={`${containerClassName} relative [overflow-wrap:anywhere]`}
       data-block-id={blockId}
       data-block-type={blockType}
       {...kindAttr}

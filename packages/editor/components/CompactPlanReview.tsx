@@ -14,7 +14,8 @@ export type CompactPlanReviewAction = Omit<CompactPlanAction, 'id'> & {
 interface CompactPlanCompletionProps {
   feedbackSummary: string;
   onOpenReview: () => void;
-  maxWidth: number;
+  /** null: no cap, the same as the document above it. */
+  maxWidth: number | null;
 }
 
 /** End-of-document handoff into the compact review decision surface. */
@@ -26,7 +27,7 @@ export const CompactPlanCompletion: React.FC<CompactPlanCompletionProps> = ({
   <section
     data-pn-compact-plan-completion="true"
     className="mt-10 w-full px-2 pt-2"
-    style={{ maxWidth, paddingBottom: 'calc(1.25rem + var(--pn-safe-bottom))' }}
+    style={{ maxWidth: maxWidth ?? undefined, paddingBottom: 'calc(1.25rem + var(--pn-safe-bottom))' }}
     aria-labelledby="pn-compact-plan-completion-title"
   >
     <div className="flex flex-col gap-4 border-t border-border/60 pt-6">

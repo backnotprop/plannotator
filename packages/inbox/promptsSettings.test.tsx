@@ -377,3 +377,52 @@ test.skipIf(!hasDom)("Rules for one agent: For picks the agent's own box; Save w
   expect(q(el, '[data-rules-text="pi"]')?.textContent).toBe('Never send from reviewer sessions.');
   expect(q(el, '[data-rules-text="shared"]')?.textContent).toBe('Keep messages short.');
 });
+
+/** The rooms as the server computes them (packages/server/inbox-mcp-instructions.ts): a fixture, the page shows whatever it is given. */
+const ROOMS = { claude_code_old: 397, claude_code: 1913, other: 8827 };
+const mcp = (over: Partial<NonNullable<NonNullable<InboxPromptsSettings['rules']>['mcp']>> = {}) => ({ room: ROOMS.claude_code, rooms: ROOMS, dropped: [], reminder_dropped: [], ...over });
+
+test.skipIf(!hasDom)("agents connected through MCP: the rules for all agents show current Claude Code's room near it, and Save is never refused for it", async () => {
+  const start = withRules({ mcp: mcp() });
+  server(start);
+  const el = mount(start, false);
+  await click(q(el, '[data-rules-add]'));
+  const field = q<HTMLTextAreaElement>(document.body, '[data-rules-field]')!;
+  type(field, 'a'.repeat(1000));
+  expect(q(document.body, '[data-rules-count="mcp"]')).toBeNull();
+  type(field, 'a'.repeat(1600));
+  expect(q(document.body, '[data-rules-count="mcp"]')?.textContent?.trim()).toBe('1,600 / 1,913 for Claude Code through MCP');
+  expect(q(document.body, '[data-rules-count="mcp"]')?.hasAttribute('data-over')).toBe(false);
+  type(field, 'a'.repeat(2000));
+  expect(q(document.body, '[data-rules-count="mcp"]')?.hasAttribute('data-over')).toBe(true);
+  expect(q<HTMLButtonElement>(document.body, '[data-rules-save]')!.disabled).toBe(false);
+  // One agent's own rules never reach an MCP session: no MCP count there.
+  await click(q(document.body, '[data-rules-for="pi"]'));
+  type(q<HTMLTextAreaElement>(document.body, '[data-rules-field]')!, 'a'.repeat(2000));
+  expect(q(document.body, '[data-rules-count="mcp"]')).toBeNull();
+});
+
+test.skipIf(!hasDom)('agents connected through MCP: the note names who misses the rules, widest first, with the room', () => {
+  const note = (dropped: ('claude_code_old' | 'claude_code' | 'other')[]) => {
+    act(() => root?.unmount());
+    host?.remove();
+    const el = mount(withRules({ shared: 'r'.repeat(500), mcp: mcp({ dropped }) }), false);
+    return q(el, '[data-rules-dropped="mcp"]')?.textContent ?? null;
+  };
+  expect(note([])).toBeNull();
+  expect(note(['claude_code_old'])).toBe(
+    'Not sent to older Claude Code (before 2.1.296), other Claude apps, or clients that do not name themselves, when they connect through MCP: they take rules up to 397 characters there.',
+  );
+  expect(note(['claude_code_old', 'claude_code'])).toBe(
+    "Not sent to Claude Code or other Claude apps when they connect through MCP (T3 Code's Claude threads too): Claude Code 2.1.296 and later takes rules up to 1,913 characters there, the others 397. Codex and other agents get them.",
+  );
+  expect(note(['claude_code_old', 'claude_code', 'other'])).toBe('Not sent to agents connected through MCP (T3 Code, Codex and others): they take rules up to 8,827 characters.');
+});
+
+test.skipIf(!hasDom)('agents connected through MCP: a reminder left out names the clients it misses', () => {
+  const withReminder = withRules({ shared: 'Ask first.', mcp: mcp({ reminder_dropped: ['claude_code_old'] }) });
+  withReminder.reminder = { ...withReminder.reminder, shared: 'Ping me when you are done.' };
+  const el = mount(withReminder);
+  expect(q(el, '[data-rules-dropped="mcp"]')).toBeNull();
+  expect(q(el, '[data-prompt-over="mcp"]')?.textContent).toBe('Not sent to older Claude Code (before 2.1.296) and other Claude apps through MCP: it does not fit in the room there.');
+});

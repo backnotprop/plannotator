@@ -16,7 +16,7 @@
  * changed or the list reordered (review of #3503, 2026-11-16: stability won over stepping the hue of same-letter
  * projects apart). A linked machine from before tiles keeps its agents' own marks (`useProjectDefault`).
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { HostMark as UiHostMark } from '@plannotator/ui/components/inbox-thread/icons';
 import type { AgentFace } from './faceChoices';
 import { LetterMark, hueOf, projectLetters, useRowMarks, type Letters } from '../letterMarks';
@@ -162,7 +162,7 @@ export function useAgentProjectTile(agent: string | null | undefined): ProjectTi
  * The tile in a mark's box (icons.tsx `.ib-mk`, its sizes): the project's letters, and `host`'s own mark on the
  * corner where the box is 20 px or more. Decorative, as every mark: the agent's name is in words beside it.
  */
-export function ProjectTile({ tile, host, big, badge = true }: { tile: ProjectTileLook; host: string | null | undefined; big?: boolean; badge?: boolean }) {
+export function ProjectTile({ tile, host, big, badge = true, children }: { tile: ProjectTileLook; host: string | null | undefined; big?: boolean; badge?: boolean; children?: ReactNode }) {
   return (
     <span className={`ib-mk${big ? ' ib-big' : ''} ib-face ib-pf`} data-agent-face="project">
       <LetterMark name={tile.label} seed={projectSeed(tile.label)} letters={tile.letters} hue={tile.hue} solid split className="ib-pf-t" />
@@ -171,14 +171,23 @@ export function ProjectTile({ tile, host, big, badge = true }: { tile: ProjectTi
           <UiHostMark host={host} />
         </span>
       )}
+      {children}
     </span>
   );
 }
 
 /** An agent's project tile, or its own mark when the tile has nothing to draw. */
-export function ProjectFaceMark({ agent, host, big, badge = true }: { agent: string | null | undefined; host: string | null | undefined; big?: boolean; badge?: boolean }) {
+export function ProjectFaceMark({ agent, host, big, badge = true, children }: { agent: string | null | undefined; host: string | null | undefined; big?: boolean; badge?: boolean; children?: ReactNode }) {
   const tile = useAgentProjectTile(agent);
-  return tile ? <ProjectTile tile={tile} host={host} big={big} badge={badge} /> : <UiHostMark host={host} big={big} />;
+  return tile ? (
+    <ProjectTile tile={tile} host={host} big={big} badge={badge}>
+      {children}
+    </ProjectTile>
+  ) : (
+    <UiHostMark host={host} big={big}>
+      {children}
+    </UiHostMark>
+  );
 }
 
 /** Tests: forget the Agents list's projects. */

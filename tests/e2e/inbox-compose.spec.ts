@@ -309,7 +309,8 @@ test('an agent connects: the draft (saved with nobody in To) reopens with To emp
   await toast.locator('[data-toast-action]').click();
 
   const command = await waitFor('the new-thread command', () => claude.commands[0]);
-  expect(command).toMatchObject({ type: 'message', reply_to: null, new_thread: true, subject: 'Idea: let the Inbox list show which agent session wrote…' });
+  // The wake's title is compose's suggestion the person left as it was, and the agent is still asked to name the thread.
+  expect(command).toMatchObject({ type: 'message', reply_to: null, new_thread: true, subject: 'Inbox list', name_thread: true });
   expect(inboxWakeText(command).split('\n')[1]).toBe(INBOX_NEW_THREAD_INSTRUCTION);
   expect(command.body).toMatch(/\n\nAttached: notes\.md \(\/.+\/inbox\/uploads\/att_[0-9A-Z]+\/notes\.md\)$/);
   expect(readFileSync(command.body.match(/\((\/.+notes\.md)\)$/)![1]!, 'utf8')).toContain('The screenshot and the export');

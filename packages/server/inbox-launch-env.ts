@@ -115,8 +115,21 @@ export function launchStartOf(input: {
  */
 export function launchSpawnEnv(env: Readonly<LaunchEnv>, platform: NodeJS.Platform = process.platform): LaunchEnv {
   // Windows: PATH under the one key `PATH`, whatever its spelling (`Path`), so a later copy that sets it is the one used.
-  return foldEnvPath(Object.fromEntries(Object.entries(env).filter(([name]) => !SPAWN_DROP.test(name) && !PER_SESSION_CLAUDE.test(name) && name !== CLAUDE_SKIP_PERMISSIONS_ENV)), platform);
+  return foldEnvPath(Object.fromEntries(Object.entries(withoutRexPane(env)).filter(([name]) => !SPAWN_DROP.test(name) && !PER_SESSION_CLAUDE.test(name) && name !== CLAUDE_SKIP_PERMISSIONS_ENV)), platform);
 }
+
+/**
+ * `env` without the names Rex's terminal gives what runs in one of its panes (`REX_SESSION`, `REX_BLOCK`,
+ * `REX_SERVER`, `REX_BIN_DIR`, and `TERM_PROGRAM`/`TERM_PROGRAM_VERSION` while they say `rex`). `REX_RUNTIME_DIR` stays:
+ * the person sets it, and it says where this computer's Rex server is (inbox-rex-where.ts). An Inbox started from a Claude Code
+ * in a Rex pane has them; an agent it starts in the background must not, or it reports that pane as its own place
+ * (its place line, marks and Show would be the person's pane). An agent started in a Rex tab gets them from Rex.
+ */
+export function withoutRexPane<T extends Readonly<Record<string, string | undefined>>>(env: T): T {
+  const rex = env.TERM_PROGRAM === "rex";
+  return Object.fromEntries(Object.entries(env).filter(([name]) => !REX_PANE_NAMES.test(name) && !(rex && (name === "TERM_PROGRAM" || name === "TERM_PROGRAM_VERSION")))) as T;
+}
+const REX_PANE_NAMES = /^REX_(SESSION|BLOCK|SERVER|BIN_DIR)$/;
 
 /** The Inbox's own env for the calls that are not a start: the same filter, `extraPath` after its PATH (`;`-joined on Windows). */
 export function launchPlainEnv(own: Readonly<Record<string, string | undefined>>, extraPath: readonly string[] = [], platform: NodeJS.Platform = process.platform): LaunchEnv {
@@ -187,6 +200,9 @@ export function loginSeedEnv(own: Readonly<Record<string, string | undefined>>):
  * from `loginSeedEnv`. When the shell cannot be read in time, the Inbox's
  * plain env stands in, and the cause is logged.
  */
+/** The envs `createLoginEnv` gave when the login shell did not answer (its own env instead): never kept as the login one. */
+export const LOGIN_ENV_FALLBACKS = new WeakSet<object>();
+
 export function createLoginEnv(options: {
   run: LoginEnvRunner;
   env: () => Readonly<Record<string, string | undefined>>;
@@ -208,6 +224,9 @@ export function createLoginEnv(options: {
     }
     if (!env) options.log?.(`Inbox launch: could not read the login shell's env (${shell}); using the Inbox's own.`);
     else options.log?.(`Inbox launch: login env read, ${Object.keys(env).length} names: ${Object.keys(env).filter((n) => n.startsWith("CLAUDE")).join(" ") || "no CLAUDE_*"}`);
-    return env ?? launchPlainEnv(own);
+    if (env) return env;
+    const fallback = launchPlainEnv(own);
+    LOGIN_ENV_FALLBACKS.add(fallback);
+    return fallback;
   };
 }

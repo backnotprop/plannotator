@@ -1,4 +1,4 @@
-import { SemanticFileBadge } from './SemanticFileBadge';
+import { SemanticFileBadge, type SemanticFileSwitch } from './SemanticFileBadge';
 import { COMPACT_FILE_HEADER_HEIGHT } from '../utils/diffChromeMetrics';
 import { EllipsisName } from './EllipsisName';
 import React, { useRef } from 'react';
@@ -11,6 +11,7 @@ import type { DiffFileStatus } from '../types';
 import { FileKindIcon } from '@plannotator/guide-viewer/FileKindIcon';
 import { fileStatusLetter } from '@plannotator/ui/utils/fileStatusLetter';
 import { formatCount } from '@plannotator/ui/utils/countFormat';
+import { countPatchChanges } from '@plannotator/core/diff-files';
 
 interface FileHeaderProps {
   /** Read-only host: no open-in affordance (it probes the review server). */
@@ -70,7 +71,7 @@ interface FileHeaderProps {
   renderMarkdownView?: (fit: { iconOnly: boolean; touch: boolean }) => React.ReactNode;
   /** A host control drawn before the view menu (code review's Changes | Whole file switch). */
   accessory?: React.ReactNode;
-  semanticNote?: React.ReactNode;
+  semantic?: SemanticFileSwitch;
   /** A host's own "Open in" (the Inbox's, where a read-only header has none), in the place the app's sits. */
   openIn?: React.ReactNode;
   /**
@@ -108,17 +109,6 @@ const FileStatusLetter: React.FC<{ status: DiffFileStatus; oldPath?: string }> =
   );
 };
 
-/** Count +/- lines in a unified patch (ignores the +++/--- file headers). */
-function countChanges(patch: string): { additions: number; deletions: number } {
-  let additions = 0;
-  let deletions = 0;
-  for (const line of patch.split('\n')) {
-    if (line[0] === '+' && !line.startsWith('+++')) additions++;
-    else if (line[0] === '-' && !line.startsWith('---')) deletions++;
-  }
-  return { additions, deletions };
-}
-
 /** Sticky file header with file path, Viewed toggle, Git Add, and Copy Diff button */
 const TIGHT_LABEL = '@max-[479px]/file-header:hidden';
 const TIGHT_PAD = 'gap-1 px-2 py-1 @max-[479px]/file-header:px-1.5';
@@ -153,7 +143,7 @@ const FileHeaderView: React.FC<FileHeaderProps> = ({
   isTest = false,
   renderMarkdownView,
   accessory,
-  semanticNote,
+  semantic,
   openIn,
   keepsFolder = false,
   openInLine,
@@ -169,7 +159,7 @@ const FileHeaderView: React.FC<FileHeaderProps> = ({
   const headerWidthNow = () => headerRef.current?.clientWidth ?? Infinity;
   const tinyNow = () => !readOnly && headerWidthNow() < ACTIONS_FOLD_WIDTH;
   const actionFold = readOnly ? '' : ACTIONS_FOLD;
-  const { additions, deletions } = React.useMemo(() => countChanges(patch), [patch]);
+  const { additions, deletions } = React.useMemo(() => countPatchChanges(patch), [patch]);
 
   return (
     <div
@@ -246,8 +236,7 @@ const FileHeaderView: React.FC<FileHeaderProps> = ({
       </div>
       {!isCompactTouchLayout && <div className={`flex flex-shrink-0 items-center pl-2 gap-1`}>
         <CallFlowFileBadge filePath={filePath} oldPath={oldPath} />
-        <SemanticFileBadge filePath={filePath} />
-        {semanticNote && <span className={`contents ${TIGHT_LABEL}`}>{semanticNote}</span>}
+        <SemanticFileBadge filePath={filePath} semantic={semantic} />
         {openIn}
         {!readOnly && <OpenInAppButton
           quiet
@@ -371,6 +360,7 @@ const FileHeaderView: React.FC<FileHeaderProps> = ({
           </button>
         )}
       </div>}
+      {isCompactTouchLayout && semantic && <SemanticFileBadge filePath={filePath} semantic={semantic} touch />}
       {isCompactTouchLayout && readOnly && renderMarkdownView?.({ iconOnly: false, touch: true })}
       {isCompactTouchLayout && !readOnly && (
         <CompactFileActions
