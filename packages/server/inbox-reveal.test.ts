@@ -13,10 +13,12 @@
  * "inbox-checklist-reveal", 2026-11-04): its claim writing `inboxSteps` or touching a Checklist the person set; agent
  * text after Not now not byte-equal to a Checklist off, or not the steps text after Turn it on; its
  * 5 days or 5 threads moving; it needing the Board on. Code review's day-0 offer (approval "code-review-offer-card"):
- * not next for someone who used an earlier Inbox and never decided Code review (shown again, `CODE_REVIEW_OFFER_SHOWN`,
- * approval "inbox-code-review-offer"), or offered to a new user (a fresh install); its claim turning anything on, changing a word agents read, being spent twice or letting
+ * while shown (`CODE_REVIEW_OFFER_SHOWN`; the `codeReviewOffer` option shows it whichever way the release has it), not next
+ * for someone who used an earlier Inbox and never decided Code review (approval "inbox-code-review-offer"), or offered
+ * to a new user (a fresh install); its claim turning anything on, changing a word agents read, being spent twice or letting
  * another dialog follow inside the gap; Not now turning it on or letting it come back; asked of someone who switched
- * Code review off or on. The view choice
+ * Code review off or on. Switched off (as from 0.29.6): offered, holding the next dialog back, writing a record for
+ * someone who never saw it, or touching the record of someone who did. The view choice
  * (`view_choice`): closed by List view's retired `list_view` stamp, holding the line, or claimed twice.
  */
 import { afterEach, describe, expect, test } from "bun:test";
@@ -112,6 +114,8 @@ interface Options {
    * below, so the other offers are what these cases see.
    */
   viewChoice?: "open";
+  /** Code review's one-time offer shown or not (the Inbox's `codeReviewOffer` test option). Absent: `CODE_REVIEW_OFFER.enabled` decides. */
+  codeReviewOffer?: boolean;
 }
 
 /** A cloud agent of `preset` in the data dir's inbox/cloud-agents.json, as Settings → Cloud agents pairs one. */
@@ -211,6 +215,7 @@ async function world(options: Options = {}) {
     binaryPath: null,
     phones: false,
     version: options.version ?? RELEASE,
+    ...(options.codeReviewOffer === undefined ? {} : { codeReviewOffer: options.codeReviewOffer }),
     ...(options.tailnet ? { tailscale: fakeTailscale(options.tailnet === "tagged") } : {}),
     agentEnvironment: createAgentEnvironmentFor({ platform: "linux", homeDir: home, env: {} }),
   });
@@ -1150,11 +1155,12 @@ describe("the \"themes\" dialog (approval inbox-theme-chooser): after the tab ic
 describe("Code review's day-0 offer (approval code-review-offer-card)", () => {
   const KEY = "page-key-aaaa";
   /** A fresh install on day 0 (no Inbox ran here before): first use not known yet, nothing in the store, Code review never decided. */
-  const freshDay0 = (config: Record<string, unknown> = {}) => world({ fresh: true, days: 0, threads: 0, config: { inboxSnoozeIntro: {}, inboxCodeReview: undefined, ...config } });
+  const freshDay0 = (config: Record<string, unknown> = {}) => world({ fresh: true, days: 0, threads: 0, codeReviewOffer: true, config: { inboxSnoozeIntro: {}, inboxCodeReview: undefined, ...config } });
   /** Someone who already uses the Inbox (day 4, six threads, Snooze seen 3 days ago), Code review never decided. */
-  const existing = (config: Record<string, unknown> = {}, version?: string) => world({ ...(version ? { version } : {}), config: { inboxCodeReview: undefined, ...config } });
+  const existing = (config: Record<string, unknown> = {}, version?: string) => world({ ...(version ? { version } : {}), codeReviewOffer: true, config: { inboxCodeReview: undefined, ...config } });
 
-  // Shown again from the release after 2026-11-23 (`CODE_REVIEW_OFFER_SHOWN`, approval "inbox-code-review-offer").
+  // While shown (`CODE_REVIEW_OFFER_SHOWN`, approval "inbox-code-review-offer"; off since 0.29.6): these cases show it
+  // with the `codeReviewOffer` option, so they test it whichever way the release has it.
   test("someone who already uses the Inbox, Code review never decided: next, ahead of the offers that are due; the claim stamps it once, turns nothing on and starts the gap", async () => {
     const w = await existing({ inboxBoard: undefined });
     const before = await w.settings();
@@ -1224,6 +1230,50 @@ describe("Code review's day-0 offer (approval code-review-offer-card)", () => {
       expect(w.saved().inboxCodeReview).toBe(decided);
       expect(w.saved().inboxReveals?.code_review).toBeUndefined();
     }
+  });
+});
+
+describe("Code review's offer switched off (as from 0.29.6: the owner, \"I will eventually, just not yet\")", () => {
+  const KEY = "page-key-aaaa";
+  /** Someone who already uses the Inbox (day 4, six threads), Code review never decided, the Board due, the offer off. */
+  const existingOff = (config: Record<string, unknown> = {}) => world({ codeReviewOffer: false, config: { inboxCodeReview: undefined, inboxBoard: undefined, ...config } });
+
+  test("someone who already uses the Inbox, Code review never decided: never offered, nothing written for it, and the Board (next behind it) is next at once", async () => {
+    const w = await existingOff();
+    const read = await w.settings();
+    expect(read.reveal.next).toBe("board");
+    expect(read.code_review).toEqual({ on: false });
+    // No mark at the release start: switched on again later, it is still asked of them once.
+    expect(w.saved().inboxReveals?.code_review).toBeUndefined();
+    expect((await w.claim("code_review", KEY)).show).toBe(false);
+    expect(w.saved().inboxReveals?.code_review).toBeUndefined();
+    expect(w.saved().inboxCodeReview).toBeUndefined();
+    // The Board is claimed at once: nothing waits for an offer that never comes.
+    expect((await w.claim("board")).show).toBe(true);
+  });
+
+  test("a fresh install on day 0: nothing written for it either", async () => {
+    const w = await world({ fresh: true, days: 0, threads: 0, codeReviewOffer: false, config: { inboxSnoozeIntro: {}, inboxCodeReview: undefined } });
+    expect(await w.next()).not.toBe("code_review");
+    expect(w.saved().inboxReveals?.code_review).toBeUndefined();
+  });
+
+  test("someone it was already marked for, shown or not: the record stays as it is, and it is never next", async () => {
+    const records = [{ dueAt: "2026-11-24T09:00:00.000Z" }, { dueAt: "2026-11-24T09:00:00.000Z", shownAt: "2026-11-24T09:00:05.000Z", key: KEY }];
+    for (const record of records) {
+      const w = await existingOff({ inboxReveals: { code_review: record } });
+      expect(await w.next()).toBe("board");
+      expect((await w.claim("code_review", KEY)).show).toBe(false);
+      expect(w.saved().inboxReveals.code_review).toEqual(record);
+    }
+  });
+
+  test("Code review is still turned on as Settings → Capabilities turns it on", async () => {
+    const w = await existingOff();
+    const saved = (await (await w.post("/api/inbox/settings", { code_review: { on: true } })).json()) as Json;
+    expect(saved.code_review).toEqual({ on: true });
+    expect(w.saved().inboxCodeReview).toBe(true);
+    expect((await w.settings()).code_review).toEqual({ on: true });
   });
 });
 

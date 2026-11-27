@@ -341,6 +341,7 @@ import {
   revealStamp,
   revealStampNotNow,
   revealWaitStarts,
+  revealsWithCodeReviewOffer,
   type RevealId,
   type RevealState,
 } from "@plannotator/shared/inbox/reveals";
@@ -677,6 +678,11 @@ export interface InboxServerOptions {
   scheduled?: boolean;
   /** Code review, decided here instead of config.json `inboxCodeReview` (tests). Absent: config.json decides on every request. */
   codeReview?: boolean;
+  /**
+   * Tests: Code review's one-time offer shown or not, over `CODE_REVIEW_OFFER.enabled` (packages/shared/inbox/reveals.ts,
+   * `CODE_REVIEW_OFFER_SHOWN`), so either state can be tested whichever way the release has it. Absent: the entry decides.
+   */
+  codeReviewOffer?: boolean;
   /** Branch reviews, decided here instead of config.json `inboxBranchReviews` (tests). Absent: config.json decides on every request. Only with Code review on. */
   branchReviews?: boolean;
   /** System, decided here instead of config.json `inboxSystem` (tests). Absent: config.json decides on every request. Shown only while Code review is on. */
@@ -3761,9 +3767,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const config = loadConfig();
     return INBOX_PROMPT_HOSTS.every((host) => inboxReminderRulesText(config, host) === null);
   };
+  // Code review's one-time offer shown at all (`CODE_REVIEW_OFFER_SHOWN`, off since 0.29.6; a test may decide it), and
+  // the line's queue with the offer as that says: every reveal rule below reads this queue.
+  const codeReviewOfferShown = options.codeReviewOffer ?? CODE_REVIEW_OFFER_SHOWN;
+  const revealTable = revealsWithCodeReviewOffer(codeReviewOfferShown);
   // Who Code review's offer is for, decided at the first release start that shows it, as the tab icon's is
   // (inbox-code-review-offer.ts): someone who used an earlier Inbox is marked due; a fresh install never sees it.
-  if (CODE_REVIEW_OFFER_SHOWN && normalizeStableVersion(version) !== null) {
+  if (codeReviewOfferShown && normalizeStableVersion(version) !== null) {
     const mark = codeReviewOfferAtStart(loadConfig().inboxReveals?.code_review, loadConfig().inboxCodeReview !== undefined, usedBefore, new Date().toISOString());
     if (mark) saveConfig({ inboxReveals: { ...loadConfig().inboxReveals, code_review: mark } });
   }
@@ -3772,10 +3782,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * shared/inbox/reveals.ts): only for someone who used an earlier Inbox (marked due at a release start, above), only
    * while config.json `inboxCodeReview` is unset (nobody decided; `false` is the person's own off; `true` is theirs
    * too), and only while the offer is shown at all: `CODE_REVIEW_OFFER_SHOWN` (held from 2026-11-17, shown again from
-   * the release after 2026-11-23, approval "inbox-code-review-offer": "for people who already use the Inbox").
+   * the release after 2026-11-23, approval "inbox-code-review-offer": "for people who already use the Inbox"; off again
+   * from 0.29.6, when it is never open and nothing is marked at a release start).
    */
   const codeReviewUndecided = () =>
-    CODE_REVIEW_OFFER_SHOWN && options.codeReview === undefined && loadConfig().inboxCodeReview === undefined && codeReviewOfferDue(loadConfig().inboxReveals?.code_review);
+    codeReviewOfferShown && options.codeReview === undefined && loadConfig().inboxCodeReview === undefined && codeReviewOfferDue(loadConfig().inboxReveals?.code_review);
   /**
    * The offers the line claims for itself (approval "inbox-one-time-dialogs"): each one's "undecided" (the person never
    * set its switch). The claim stamps `inboxReveals[id]` with the page's key and turns nothing on; its dialog's "Turn it
@@ -3922,10 +3933,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // would refuse it anyway), so they come after it.
     for (const [id, undecided] of Object.entries(lineOffers)) open[id as RevealId] = !lineOfferSaved(id as RevealId)?.shownAt && undecided!(state, now);
     // Read only while an entry that asks for heavy use is still open (a walk of every thread; a release build).
-    state.heavy = snoozeIntroRelease && INBOX_REVEALS.some((entry) => entry.heavyUse && entry.enabled && open[entry.id] === true) && revealHeavyUse(seenAgentMessages(), now);
+    state.heavy = snoozeIntroRelease && revealTable.some((entry) => entry.heavyUse && entry.enabled && open[entry.id] === true) && revealHeavyUse(seenAgentMessages(), now);
     // The grill-me tip (reveals.ts `lastResort`): its gap (a walk of the store) is read only while it is unshown, in a
     // release build, and the line has nothing else for this moment; otherwise it could not be claimed anyway.
-    if (open.grill_me_tip) open.grill_me_tip = snoozeIntroRelease && revealMayClaim("grill_me_tip", state, now) && revealGrillMeGap(grillMeUse());
+    if (open.grill_me_tip) open.grill_me_tip = snoozeIntroRelease && revealMayClaim("grill_me_tip", state, now, revealTable) && revealGrillMeGap(grillMeUse());
     return state;
   };
   /** The line's stamps to save with a claim at `at` (a release build only): the day, the load and, unless `spaced` is false, the spacing clock. */
@@ -3941,12 +3952,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (!snoozeIntroRelease) return null;
     const now = read?.now ?? new Date();
     const state = read?.state ?? revealState(now, load);
-    const starts = revealWaitStarts(state, now);
+    const starts = revealWaitStarts(state, now, revealTable);
     if (starts.length > 0) {
       const reveals = loadConfig().inboxReveals;
       saveConfig({ inboxReveals: { ...reveals, waitingSince: { ...reveals?.waitingSince, ...Object.fromEntries(starts.map((id) => [id, now.toISOString()])) } } });
     }
-    return revealNext(state, now);
+    return revealNext(state, now, revealTable);
   };
   /**
    * The page about to show a reveal claims it: a compare-and-set over the whole queue (no await between the read and
@@ -3975,7 +3986,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const now = new Date();
     // A theme picked elsewhere (plan review, code review) since the last look: marked now, so the claim is refused for good.
     if (id === "theme_chooser") themeChooserLookNow();
-    if (!revealMayClaim(id, revealState(now, load), now) || !undecided()) return false;
+    if (!revealMayClaim(id, revealState(now, load), now, revealTable) || !undecided()) return false;
     const at = now.toISOString();
     // An `aside` card (the grill-me tip) stamps only its own record: no other dialog's day moves.
     const aside = INBOX_REVEALS.some((entry) => entry.id === id && entry.aside);
@@ -3998,7 +4009,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         release: snoozeIntroRelease,
         mayClaim: () => {
           const now = new Date();
-          return revealMayClaim("star", revealState(now, load), now);
+          return revealMayClaim("star", revealState(now, load), now, revealTable);
         },
       },
       key,
@@ -4105,7 +4116,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const soonest = (a: number | null, b: number | null): number | null => (a === null ? b : b === null ? a : Math.min(a, b));
   /** `state` with the waits `revealNow` starts at `now` (reveals.ts `revealWaitStarts`) kept. */
   const waitingFrom = (state: RevealState, now: Date): RevealState => {
-    const starts = revealWaitStarts(state, now);
+    const starts = revealWaitStarts(state, now, revealTable);
     return starts.length === 0 ? state : { ...state, waitingSince: { ...state.waitingSince, ...Object.fromEntries(starts.map((id) => [id, now.toISOString()])) } };
   };
   const lineReport = (load: string | null) => {
@@ -4114,9 +4125,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const next = revealNow(load, { now, state });
     return {
       next,
-      ahead: snoozeIntroRelease ? revealAhead(state, now) : [],
+      ahead: snoozeIntroRelease ? revealAhead(state, now, revealTable) : [],
       // The star ask (reveals.ts `aside`): armed beside `next` while the line is free; it moves no one.
-      aside: snoozeIntroRelease ? revealAsideNow(state, now) : [],
+      aside: snoozeIntroRelease ? revealAsideNow(state, now, revealTable) : [],
       // Day 0's setup asks: this computer's, and its owner's on their other devices (owner ruling 2026-11-11).
       setup: revealLineFree("setup", state, now),
       line: snoozeIntroRelease,
@@ -4125,7 +4136,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // With `next` and the `ahead` offers waiting from this read on (`revealNow` has just kept them), so the end of
       // their patience and their 14 days is named too.
       // A kept launch that starts later names its start too (inbox-launch-queue.ts `startsIn`).
-      again_in: soonest(snoozeIntroRelease ? againIn(revealAgainAt(waitingFrom(state, now), now), now) : null, launchQueue.startsIn(now.getTime())),
+      again_in: soonest(snoozeIntroRelease ? againIn(revealAgainAt(waitingFrom(state, now), now, revealTable), now) : null, launchQueue.startsIn(now.getTime())),
       // The Launch tip (outside the line): compose may claim it at the first plain New message.
       launch_tip: launchTipDue(launchTipState()) && revealLineFree("setup", state, now),
       // The Sidebar tip (outside the line): the page may claim it at a calm moment beside the open sidebar.

@@ -103,24 +103,28 @@ export interface RevealEntry {
  * gap and waits for a later load. Only for someone who used an earlier Inbox (approval "inbox-code-review-offer"; the
  * server marks who at a release start, as the tab icon's, packages/server/inbox-code-review-offer.ts: a fresh install
  * never gets it), and only while Code review was never decided (config.json `inboxCodeReview` unset). To move the
- * slot, change this entry (its `tenureMs`) or its place in `INBOX_REVEALS`.
+ * slot, change this entry (its `tenureMs`) or its place in `INBOX_REVEALS`. Its `enabled` is the offer's one switch
+ * (`CODE_REVIEW_OFFER_SHOWN` follows it).
  */
-export const CODE_REVIEW_OFFER: RevealEntry = { id: "code_review", kind: "offer", tenureMs: 0, minThreads: 0, enabled: true };
+// Off since 0.29.6 at the owner's word (27 Nov 2026: not advertised to normal users yet); flip to true to show it again.
+export const CODE_REVIEW_OFFER: RevealEntry = { id: "code_review", kind: "offer", tenureMs: 0, minThreads: 0, enabled: false };
 
 /**
- * Whether Code review's one-time offer is ever shown. Held back from 2026-11-17 (the owner: "keep code review, no need
- * for the code review dialogue, but enable it in the capabilities"); shown again from the release after 2026-11-23,
- * with its four new lines (approval "inbox-code-review-offer"; the owner: "show it in the next release? Yes, in the
- * next release"). True: the server lists the offer as open for someone who used an earlier Inbox while config.json
- * `inboxCodeReview` is unset (packages/server/inbox.ts `codeReviewUndecided`), so it takes its slot
- * (`CODE_REVIEW_OFFER`) under the line's rules.
- * False: never next and never claimed, and any stamp already in config.json is kept as it is.
+ * Whether Code review's one-time offer is ever shown: `CODE_REVIEW_OFFER.enabled`, so one line switches it. Held back
+ * from 2026-11-17 (the owner: "keep code review, no need for the code review dialogue, but enable it in the
+ * capabilities"); shown again from the release after 2026-11-23, with its four new lines (approval
+ * "inbox-code-review-offer"); off again from 0.29.6 (the owner, 2026-11-27: "I will eventually, just not yet"). True:
+ * the server marks who it is for at a release start and lists the offer as open for someone who used an earlier Inbox
+ * while config.json `inboxCodeReview` is unset (packages/server/inbox.ts `codeReviewUndecided`), so it takes its slot
+ * (`CODE_REVIEW_OFFER`) under the line's rules. False: never next and never claimed, it holds no other dialog back,
+ * nothing new is written at a release start (so switched on again, it is still asked once of everyone who never saw
+ * it), and any stamp already in config.json is kept as it is. Code review's Settings switch is unchanged either way.
  */
-export const CODE_REVIEW_OFFER_SHOWN = true;
+export const CODE_REVIEW_OFFER_SHOWN: boolean = CODE_REVIEW_OFFER.enabled;
 
 /** The queue, in order. */
 export const INBOX_REVEALS: readonly RevealEntry[] = [
-  // Code review's offer (shown again, `CODE_REVIEW_OFFER_SHOWN`): first, ahead of the owner's order below.
+  // Code review's offer (while `CODE_REVIEW_OFFER_SHOWN`; off since 0.29.6): first, ahead of the owner's order below.
   CODE_REVIEW_OFFER,
   // The order below is the owner's (2026-11-10, "Alright, let's ship it"). First the same-day group: no tenure, so each
   // may show on a person's first day, the line's gap apart (`REVEAL_SPACING_MS`), as each one's own "who" holds. Then
@@ -200,6 +204,15 @@ export const INBOX_REVEALS: readonly RevealEntry[] = [
   // stamps anything; starred already, nothing shows.
   { id: "star", kind: "offer", tenureMs: 0, minThreads: 0, laterDay: true, aside: true, enabled: true },
 ];
+
+/**
+ * The queue with Code review's offer shown (`shown`) or not, every other entry as it is: how a test exercises either
+ * state of `CODE_REVIEW_OFFER.enabled` whichever way the release has it (and the Inbox's `codeReviewOffer` test option).
+ */
+export function revealsWithCodeReviewOffer(shown: boolean, table: readonly RevealEntry[] = INBOX_REVEALS): readonly RevealEntry[] {
+  if (table.every((entry) => entry.id !== CODE_REVIEW_OFFER.id || entry.enabled === shown)) return table;
+  return table.map((entry) => (entry.id === CODE_REVIEW_OFFER.id ? { ...entry, enabled: shown } : entry));
+}
 
 /**
  * Never two dialogs within this long on one machine: 40 minutes (the owner, 2026-11-09: "the user can wait 20, 40
