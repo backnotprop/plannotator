@@ -14,7 +14,7 @@ import type { InboxAgent, InboxAgentsGroup, InboxListRow, InboxListSection, Inbo
 
 const hasDom = typeof document !== 'undefined';
 const { createRoot } = (hasDom ? await import('react-dom/client') : {}) as typeof import('react-dom/client');
-const { InboxList } = (hasDom ? await import('./components/InboxList') : {}) as typeof import('./components/InboxList');
+const { InboxList, ListRow } = (hasDom ? await import('./components/InboxList') : {}) as typeof import('./components/InboxList');
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
 const { adoptSavedRows, listLookWatchersForTests, resetListLookForTests } = await import('./listLook');
 const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
@@ -78,11 +78,17 @@ function listRow(n: number, extra: Partial<InboxListRow> = {}): InboxListRow {
 const none = () => {};
 
 function mount(rows: InboxListRow[] = Array.from({ length: ROWS }, (_, i) => listRow(i))): HTMLElement {
-  const sections: InboxListSection[] = [{ id: 'new', label: 'New', threads: rows }];
   host = document.createElement('div');
   host.className = 'pn-inbox';
   document.body.append(host);
   root = createRoot(host);
+  draw(rows);
+  return host;
+}
+
+/** The list drawn again with `rows`, as the next list read would. */
+function draw(rows: InboxListRow[]): void {
+  const sections: InboxListSection[] = [{ id: 'new', label: 'New', threads: rows }];
   act(() =>
     root!.render(
       <SidebarProvider>
@@ -90,7 +96,6 @@ function mount(rows: InboxListRow[] = Array.from({ length: ROWS }, (_, i) => lis
       </SidebarProvider>,
     ),
   );
-  return host;
 }
 
 const rowEls = (el: HTMLElement) => [...el.querySelectorAll<HTMLElement>('[data-thread-id]')];
@@ -134,4 +139,36 @@ test.skipIf(!hasDom)("the rows' agent icons watch the agents' Rex marks once for
   const rows = rowEls(el);
   expect(rows.filter((row, i) => i % 3 === 1 && rexOf(row) === 'permission').length).toBe(ROWS / 3);
   expect(rows.filter((row, i) => i % 3 !== 1 && rexOf(row) !== null).length).toBe(0);
+});
+
+/** Hooks a row holds: every hook of every component under its `ListRow` (React's own tree, read from the row's element). */
+function rowHooks(row: HTMLElement): number {
+  const key = Object.keys(row).find((k) => k.startsWith('__reactFiber$'))!;
+  type Fiber = { tag: number; elementType: unknown; memoizedState: { next: unknown } | null; child: Fiber | null; sibling: Fiber | null; return: Fiber | null };
+  let top = (row as unknown as Record<string, Fiber>)[key]!;
+  while (top.elementType !== ListRow) top = top.return!;
+  let hooks = 0;
+  const walk = (fiber: Fiber | null) => {
+    for (let f = fiber; f; f = f.sibling) {
+      if (f.tag === 0 || f.tag === 11 || f.tag === 15) for (let h = f.memoizedState as { next: unknown } | null; h; h = h.next as typeof h) hooks++;
+      walk(f.child);
+    }
+  };
+  walk(top.child);
+  return hooks;
+}
+
+test.skipIf(!hasDom)('a row with no pull request sets up no PR card; a PR that comes after the list drew shows its mark, and goes again', () => {
+  const pr = { count: 1, headline: { key: 'github.com/acme/app#7', state: 'open' as const } };
+  const el = mount([listRow(0, { pulls: pr }), listRow(1)]);
+  const [withPr, plain] = rowEls(el);
+  expect(withPr!.querySelector('[data-pr-mark="open"]')).not.toBeNull();
+  expect(plain!.querySelector('[data-pr-mark]')).toBeNull();
+  // The card's hooks (its popover and its read: eleven) are only in the row that has a PR to show.
+  expect(rowHooks(withPr!) - rowHooks(plain!)).toBeGreaterThanOrEqual(11);
+  // The next list read brings a PR on the second thread, then takes the first one's away.
+  draw([listRow(0), listRow(1, { pulls: { ...pr, count: 2, headline: { key: 'github.com/acme/app#8', state: 'merged' as const } } })]);
+  const [first, second] = rowEls(el);
+  expect(second!.querySelector('[data-pr-mark="merged"]')?.getAttribute('data-pr-n')).toBe('2');
+  expect(first!.querySelector('[data-pr-mark]')).toBeNull();
 });
