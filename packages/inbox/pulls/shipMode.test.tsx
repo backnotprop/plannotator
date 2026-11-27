@@ -11,7 +11,7 @@
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt. The log's one read is a stubbed fetch,
  * put back after each test.
  */
-import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { afterAll, afterEach, beforeEach, expect, setSystemTime, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { inboxPullStacks, type InboxPull, type InboxPullsAnswer, type InboxReviewRow, type InboxReviewsAnswer } from '@plannotator/core/inbox-types';
@@ -23,6 +23,11 @@ import type { PullThreadOption } from './threadTo';
 const hasDom = typeof document !== 'undefined';
 const { ReviewsList, ReviewsMenu } = (hasDom ? await import('./ReviewsList') : {}) as typeof import('./ReviewsList');
 const { ShipLogBody } = (hasDom ? await import('./ShipLog') : {}) as typeof import('./ShipLog');
+
+// The clock is pinned to a midday, before any time below is made: a merge "5 minutes ago" is today's ("Merged 2:47 PM")
+// whenever the file runs. On the real clock, in the first minutes after midnight it was yesterday's ("Merged Nov 26").
+setSystemTime(new Date(2026, 10, 24, 12, 0, 0));
+afterAll(() => setSystemTime());
 
 const HOUR = 3_600_000;
 const ago = (ms: number) => new Date(Date.now() - ms).toISOString();

@@ -142,7 +142,7 @@ import { systemShown } from './system/gate';
 import { useSystemProjects } from './system/projects';
 import { systemDropped, systemEscapeTo, systemKept } from './system/route';
 import { feedbackCopiedToast, feedbackPrompt } from './feedbackPrompt';
-import { connectLineNews, noteQuestionRows } from './agents';
+import { agentsRead, connectLineNews, noteQuestionRows } from './agents';
 import { ScheduledRoute, useScheduledOn } from './scheduled/ScheduledPage';
 import { PlansRoute, usePlansOn } from './plans/PlansPage';
 import { GridRoute, useGridOn } from './grid/GridPage';
@@ -1362,7 +1362,7 @@ function Inbox() {
   const refreshAgents = useCallback(async () => {
     try {
       const mine = ++agentsSeq.current;
-      const next = await inboxApi.agents();
+      const next = agentsRead(await inboxApi.agents());
       if (mine === agentsSeq.current) setAgentsState(next);
       return next;
     } catch {
@@ -4572,7 +4572,7 @@ function Inbox() {
     const news = connectLineNews(agents);
     if (!news) return;
     setConnectLine(news);
-    void inboxApi.agentsSeen(news.report?.at ?? null, news.notes).then(setAgents, () => {});
+    void inboxApi.agentsSeen(news.report?.at ?? null, news.notes).then(agentsRead).then(setAgents, () => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agents, agentsSettled, settings?.via, connectLine]);
   const connectLineEl =

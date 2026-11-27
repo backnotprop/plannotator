@@ -20,6 +20,15 @@ import {
   type InboxNoteAutoAdd,
 } from '@plannotator/core/inbox-types';
 
+/**
+ * A read of the agents the window may keep: one with its list. Anything else (an answer whose body was lost and read
+ * as `{}`, a stranger's JSON) throws, so the read counts as failed and the model the window holds stays.
+ */
+export function agentsRead(model: InboxAgentsModel): InboxAgentsModel {
+  if (!Array.isArray((model as Partial<InboxAgentsModel> | null)?.agents)) throw new TypeError('GET /api/inbox/agents answered without its agents list');
+  return model;
+}
+
 /** Agents that can take a note now: found, reaching the Inbox, no note yet, a file to put it in, and not failed this run. */
 export function noteCandidates(model: InboxAgentsModel): InboxAgentRow[] {
   const failed = new Set(model.last_report?.failed.map((f) => f.agent) ?? []);

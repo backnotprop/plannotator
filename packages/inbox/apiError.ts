@@ -20,8 +20,16 @@ export class InboxApiError extends Error {
   }
 }
 
+/**
+ * An answer's JSON. An empty or unparsable body reads as `{}` (a 204, a refusal with no JSON). A body that could not
+ * be read at all (the connection cut or aborted after the headers: the page leaving, the Inbox restarting) is no
+ * answer: an OK one throws, as the fetch would have before its headers, never `{}` passed off as the model.
+ */
 export async function readJson<T>(response: Response): Promise<T> {
-  const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+  const body = (await response.json().catch((cause: unknown) => {
+    if (response.ok && !(cause instanceof SyntaxError)) throw cause;
+    return {};
+  })) as Record<string, unknown>;
   if (!response.ok) {
     throw new InboxApiError(
       response.status,
