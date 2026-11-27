@@ -21,12 +21,24 @@ interface SlotSources {
  */
 const RowSlotSources = createContext<SlotSources | null>(null);
 
+/** The session labels alone, for the rows' agent tiles (RowAgents.tsx): they draw again when a label changes, not a title. */
+const ListSessionLabels = createContext<SessionLabels | null>(null);
+
+/** The labels the list read for its rows; null outside a list (the caller reads them itself). */
+export function useListSessionLabels(): SessionLabels | null {
+  return useContext(ListSessionLabels);
+}
+
 export function RowSlotNames({ children }: { children: ReactNode }) {
   const labels = useSessionLabels();
   const titles = useSessionTitles();
   const sessions = useRowSessions();
   const sources = useMemo(() => ({ labels, titles, sessions }), [labels, titles, sessions]);
-  return <RowSlotSources.Provider value={sources}>{children}</RowSlotSources.Provider>;
+  return (
+    <RowSlotSources.Provider value={sources}>
+      <ListSessionLabels.Provider value={labels}>{children}</ListSessionLabels.Provider>
+    </RowSlotSources.Provider>
+  );
 }
 
 type RowSlotProps = { row: InboxListRow; session: string | null; project: string; tip?: boolean };
