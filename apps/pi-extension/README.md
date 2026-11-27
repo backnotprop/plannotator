@@ -251,8 +251,9 @@ Use these inside `instructions` strings. They render once, when the phase is ent
 - The resolved list is then turned on *alongside* whatever tools are already active in the session, so Plannotator still preserves tools provided by other extensions, and on phase exit it turns off only the tools it added.
 - `plannotator_submit_plan` is always enabled during planning even if your `activeTools` omits it — the planning instructions tell the model to call it, so the phase cannot complete without it.
 - Execution progress remains dynamic (`[DONE:n]` + checklist tracking), even if `statusLabel` is set.
+- If you change the model or thinking level during a plan, that choice takes precedence over the saved pre-plan value and later phase settings for the rest of that plan. Without a manual change, temporary phase settings are restored on exit.
 - `executionMode` defaults to `automatic`, preserving the existing approval-to-execution flow.
-- In `external` mode, approval restores the pre-planning model, thinking level, and active tools before emitting the handoff event.
+- In `external` mode, approval restores the model, thinking level, and active tools before emitting the handoff event, while preserving any choices made during planning.
 
 #### Example files
 

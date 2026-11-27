@@ -331,11 +331,13 @@ type ModelRef = { provider: string; id: string };
  * model the context reports and every call is recorded, so a test can tell a
  * model Plannotator set apart from one the user picked.
  */
-function createModelHost(options: { cwd: string; initialModel: ModelRef; entries: SessionEntry[] }) {
+function createModelHost(options: { cwd: string; initialModel: ModelRef; initialThinking?: string; entries: SessionEntry[] }) {
 	const handlers = new Map<string, Handler[]>();
+	const commands = new Map<string, { handler: (args: string, context: ReturnType<typeof createContext>) => unknown }>();
+	const registeredTools = new Map<string, { name: string; execute: (...args: any[]) => Promise<unknown> }>();
 	const host = {
 		model: options.initialModel,
-		thinking: "medium",
+		thinking: options.initialThinking ?? "medium",
 		modelCalls: [] as ModelRef[],
 		thinkingCalls: [] as string[],
 		entries: options.entries,
@@ -353,18 +355,22 @@ function createModelHost(options: { cwd: string; initialModel: ModelRef; entries
 		on: (event: string, handler: Handler) => {
 			handlers.set(event, [...(handlers.get(event) ?? []), handler]);
 		},
-		registerCommand: () => undefined,
+		registerCommand: (name: string, command: { handler: (args: string, context: ReturnType<typeof createContext>) => unknown }) => commands.set(name, command),
 		registerFlag: () => undefined,
 		registerShortcut: () => undefined,
-		registerTool: () => undefined,
+		registerTool: (tool: { name: string; execute: (...args: any[]) => Promise<unknown> }) => registeredTools.set(tool.name, tool),
 		sendMessage: () => undefined,
 		sendUserMessage: () => undefined,
 		setActiveTools: (next: string[]) => {
 			tools.active = [...next];
 		},
 		setModel: async (model: ModelRef) => {
+			const previousModel = host.model;
 			host.modelCalls.push({ provider: model.provider, id: model.id });
 			host.model = model;
+			if (previousModel.provider !== model.provider || previousModel.id !== model.id) {
+				for (const handler of handlers.get("model_select") ?? []) await handler({ source: "set", model, previousModel }, context as never);
+			}
 			return true;
 		},
 		setThinkingLevel: (level: string) => {
@@ -386,10 +392,16 @@ function createModelHost(options: { cwd: string; initialModel: ModelRef; entries
 	return {
 		host,
 		tools,
+		command: async () => commands.get("plannotator-plan-mode")!.handler("", context as never),
+		submit: async () => registeredTools.get("plannotator_submit_plan")!.execute("call", { filePath: "PLAN.md" }, undefined, undefined, context),
 		/** The user picks a model in the host's own UI, not through Plannotator. */
 		userPicks: (model: ModelRef, thinking?: string) => {
+			const previousModel = host.model;
 			host.model = model;
 			if (thinking) host.thinking = thinking;
+			if (previousModel.provider !== model.provider || previousModel.id !== model.id) {
+				for (const handler of handlers.get("model_select") ?? []) handler({ source: "set", model, previousModel }, context as never);
+			}
 			host.modelCalls.length = 0;
 			host.thinkingCalls.length = 0;
 		},
@@ -401,7 +413,114 @@ function createModelHost(options: { cwd: string; initialModel: ModelRef; entries
 
 const SOL = { provider: "openai", id: "gpt-6-sol" };
 const LUNA = { provider: "openai", id: "gpt-6-luna" };
+const ASTRA = { provider: "openai", id: "gpt-6-astra" };
 const PLAN = "- [ ] Step one\n- [ ] Step two\n";
+
+describe("Plannotator preserves user model selections during plan transitions", () => {
+	test("approval and completion preserve a model and thinking level changed during the plan", async () => {
+		const cwd = makeWorkspace();
+		writeFileSync(join(cwd, "PLAN.md"), PLAN, "utf-8");
+		const runtime = createModelHost({ cwd, initialModel: SOL, entries: [] });
+		await runtime.run("session_start");
+		await runtime.command();
+		runtime.userPicks(LUNA, "high");
+		await runtime.submit();
+		expect(runtime.host.model).toEqual(LUNA);
+		expect(runtime.host.thinking).toBe("high");
+		writeFileSync(join(cwd, "PLAN.md"), "- [x] Step one\n- [x] Step two\n", "utf-8");
+		await runtime.run("agent_end");
+		expect(runtime.host.model).toEqual(LUNA);
+		expect(runtime.host.thinking).toBe("high");
+	});
+
+	test("a temporary configured planning model still restores the original if the user did not change it", async () => {
+		const cwd = makeWorkspace({ phases: { planning: { model: LUNA, thinking: "low" } } });
+		writeFileSync(join(cwd, "PLAN.md"), PLAN, "utf-8");
+		const runtime = createModelHost({ cwd, initialModel: SOL, entries: [] });
+		await runtime.run("session_start");
+		await runtime.command();
+		expect(runtime.host.model).toEqual(LUNA);
+		await runtime.submit();
+		expect(runtime.host.model).toEqual(SOL);
+		expect(runtime.host.thinking).toBe("medium");
+	});
+
+	test("a user choice after a configured planning model becomes the restored baseline", async () => {
+		const cwd = makeWorkspace({ phases: { planning: { model: LUNA, thinking: "low" } } });
+		writeFileSync(join(cwd, "PLAN.md"), PLAN, "utf-8");
+		const runtime = createModelHost({ cwd, initialModel: SOL, entries: [] });
+		await runtime.run("session_start");
+		await runtime.command();
+		runtime.userPicks(ASTRA, "high");
+		await runtime.submit();
+		expect(runtime.host.model).toEqual(ASTRA);
+		expect(runtime.host.thinking).toBe("high");
+	});
+
+	test("a model chosen during execution survives completion", async () => {
+		const cwd = makeWorkspace();
+		writeFileSync(join(cwd, "PLAN.md"), PLAN, "utf-8");
+		const runtime = createModelHost({ cwd, initialModel: SOL, entries: [] });
+		await runtime.run("session_start");
+		await runtime.command();
+		await runtime.submit();
+		runtime.userPicks(LUNA, "high");
+		writeFileSync(join(cwd, "PLAN.md"), "- [x] Step one\n- [x] Step two\n", "utf-8");
+		await runtime.run("agent_end");
+		expect(runtime.host.model).toEqual(LUNA);
+		expect(runtime.host.thinking).toBe("high");
+	});
+
+	test("a manual selection wins over a configured executing model at approval", async () => {
+		const cwd = makeWorkspace({ phases: { planning: { model: LUNA }, executing: { model: SOL, thinking: "low" } } });
+		writeFileSync(join(cwd, "PLAN.md"), PLAN, "utf-8");
+		const runtime = createModelHost({ cwd, initialModel: SOL, entries: [] });
+		await runtime.run("session_start");
+		await runtime.command();
+		runtime.userPicks(ASTRA, "high");
+		await runtime.submit();
+		expect(runtime.host.model).toEqual(ASTRA);
+		expect(runtime.host.thinking).toBe("high");
+	});
+
+	test("resuming a planning session keeps a manual model choice", async () => {
+		const cwd = makeWorkspace({ phases: { planning: { model: LUNA, thinking: "low" } } });
+		const first = createModelHost({ cwd, initialModel: SOL, entries: [] });
+		await first.run("session_start");
+		await first.command();
+		first.userPicks(ASTRA, "high");
+		const resumed = createModelHost({ cwd, initialModel: ASTRA, initialThinking: "high", entries: structuredClone(first.host.entries) });
+		await resumed.run("session_start");
+		expect(resumed.host.model).toEqual(ASTRA);
+		expect(resumed.host.thinking).toBe("high");
+	});
+
+	test("resuming execution does not reapply a profile over a persisted user choice", async () => {
+		const cwd = makeWorkspace({ phases: { planning: { model: LUNA }, executing: { model: SOL, thinking: "low" } } });
+		writeFileSync(join(cwd, "PLAN.md"), PLAN, "utf-8");
+		const first = createModelHost({ cwd, initialModel: SOL, entries: [] });
+		await first.run("session_start");
+		await first.command();
+		first.userPicks(ASTRA, "high");
+		await first.submit();
+		const resumed = createModelHost({ cwd, initialModel: ASTRA, initialThinking: "high", entries: structuredClone(first.host.entries) });
+		await resumed.run("session_start");
+		expect(resumed.host.model).toEqual(ASTRA);
+		expect(resumed.host.thinking).toBe("high");
+	});
+
+	test("a user choosing away from and back to the current model still wins over the next phase", async () => {
+		const cwd = makeWorkspace({ phases: { executing: { model: LUNA } } });
+		writeFileSync(join(cwd, "PLAN.md"), PLAN, "utf-8");
+		const runtime = createModelHost({ cwd, initialModel: SOL, entries: [] });
+		await runtime.run("session_start");
+		await runtime.command();
+		runtime.userPicks(ASTRA);
+		runtime.userPicks(SOL);
+		await runtime.submit();
+		expect(runtime.host.model).toEqual(SOL);
+	});
+});
 
 function executingEntries(): SessionEntry[] {
 	return [
@@ -472,7 +591,7 @@ describe("Plannotator keeps the user's model across /tree (#1722)", () => {
 		expect(runtime.host.modelCalls.at(-1)).toEqual(SOL);
 	});
 
-	test("a /tree navigation out of plan mode still restores the pre-plan model", async () => {
+	test("a /tree navigation out of plan mode preserves a later user choice", async () => {
 		const cwd = makeWorkspace();
 		writeFileSync(join(cwd, "PLAN.md"), PLAN, "utf-8");
 		const runtime = createModelHost({ cwd, initialModel: SOL, entries: executingEntries() });
@@ -483,7 +602,7 @@ describe("Plannotator keeps the user's model across /tree (#1722)", () => {
 		runtime.host.entries.length = 0;
 		await runtime.run("session_tree");
 
-		expect(runtime.host.model).toEqual(SOL);
-		expect(runtime.host.modelCalls).toEqual([SOL]);
+		expect(runtime.host.model).toEqual(LUNA);
+		expect(runtime.host.modelCalls).toEqual([]);
 	});
 });

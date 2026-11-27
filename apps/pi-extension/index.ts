@@ -192,6 +192,11 @@ async function loadAnnotateCommandModules() {
 type SavedPhaseState = {
 	model?: { provider: string; id: string };
 	thinkingLevel: ThinkingLevel;
+	// Last settings the extension applied. A different current value belongs to the user.
+	managedModel?: { provider: string; id: string } | null;
+	managedThinkingLevel?: ThinkingLevel;
+	userSelectedModel?: boolean;
+	userSelectedThinking?: boolean;
 };
 
 type PersistedPlannotatorState = {
@@ -488,6 +493,7 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 	let approvedPlanContent: string | null = null;
 	let checklistItems: ChecklistItem[] = [];
 	let savedState: SavedPhaseState | null = null;
+	let settingPhaseModel: { provider: string; id: string } | null = null;
 	let phaseAddedTools: string[] = [];
 	let plannotatorConfig = {};
 	let justApprovedPlan = false;
@@ -696,9 +702,13 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 	}
 
 	function captureSavedState(ctx: ExtensionContext): void {
+		const model = ctx.model ? { provider: ctx.model.provider, id: ctx.model.id } : undefined;
+		const thinkingLevel = pi.getThinkingLevel();
 		savedState = {
-			model: ctx.model ? { provider: ctx.model.provider, id: ctx.model.id } : undefined,
-			thinkingLevel: pi.getThinkingLevel(),
+			model,
+			thinkingLevel,
+			managedModel: model ?? null,
+			managedThinkingLevel: thinkingLevel,
 		};
 	}
 
@@ -706,12 +716,28 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 		pi.appendEntry("plannotator", {
 			phase,
 			lastSubmittedPath,
-			savedState,
+			savedState: savedState ? structuredClone(savedState) : null,
 			phaseAddedTools,
 			framingDelivered,
 			idleNoticePending,
 		});
 	}
+
+	pi.on("model_select", (event) => {
+		if (!savedState || event.source === "restore") return;
+		if (settingPhaseModel?.provider === event.model.provider && settingPhaseModel.id === event.model.id) return;
+		const model = { provider: event.model.provider, id: event.model.id };
+		savedState.model = model;
+		savedState.managedModel = model;
+		savedState.userSelectedModel = true;
+		const thinking = pi.getThinkingLevel();
+		if (savedState.managedThinkingLevel !== undefined && thinking !== savedState.managedThinkingLevel) {
+			savedState.thinkingLevel = thinking;
+			savedState.managedThinkingLevel = thinking;
+			savedState.userSelectedThinking = true;
+		}
+		persistState();
+	});
 
 	async function applyModelRef(
 		ref: { provider: string; id: string },
@@ -724,19 +750,46 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 			return;
 		}
 
-		const success = await pi.setModel(model);
+		let success: boolean;
+		settingPhaseModel = ref;
+		try {
+			success = await pi.setModel(model);
+		} finally {
+			settingPhaseModel = null;
+		}
 		if (!success) {
 			ctx.ui.notify(`Plannotator: no API key for ${ref.provider}/${ref.id}.`, "warning");
+		} else if (savedState) {
+			savedState.managedModel = { provider: model.provider, id: model.id };
+			savedState.managedThinkingLevel = pi.getThinkingLevel();
 		}
 	}
 
 	async function restoreSavedState(ctx: ExtensionContext): Promise<void> {
 		if (!savedState) return;
 
-		if (savedState.model) {
+		const current = ctx.model ? { provider: ctx.model.provider, id: ctx.model.id } : null;
+		const managed = savedState.managedModel;
+		const currentThinking = pi.getThinkingLevel();
+		const modelChanged = managed !== undefined && (current?.provider !== managed?.provider || current?.id !== managed?.id);
+		const thinkingChanged = savedState.managedThinkingLevel !== undefined && currentThinking !== savedState.managedThinkingLevel;
+		if (modelChanged) {
+			savedState.model = current ?? undefined;
+			savedState.managedModel = current;
+			savedState.userSelectedModel = true;
+		}
+		if (thinkingChanged) {
+			savedState.thinkingLevel = currentThinking;
+			savedState.userSelectedThinking = true;
+		}
+
+		if (savedState.model && (managed === undefined || current?.provider !== savedState.model.provider || current?.id !== savedState.model.id)) {
 			await applyModelRef(savedState.model, ctx, "restore");
 		}
-		pi.setThinkingLevel(savedState.thinkingLevel);
+		if (savedState.managedThinkingLevel === undefined || pi.getThinkingLevel() !== savedState.thinkingLevel) {
+			pi.setThinkingLevel(savedState.thinkingLevel);
+		}
+		savedState.managedThinkingLevel = pi.getThinkingLevel();
 	}
 
 	function releaseAddedPhaseTools(): void {
@@ -790,16 +843,17 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 			}
 		}
 
-		if (applyModelSettings && profile?.model) {
+		if (applyModelSettings && !savedState?.userSelectedModel && profile?.model) {
 			await applyModelRef(profile.model, ctx, phase);
 		}
 
-		if (applyModelSettings && profile?.thinking) {
+		if (applyModelSettings && !savedState?.userSelectedThinking && profile?.thinking) {
 			// The config accepts every level current Pi knows, which is a superset
 			// of the `ThinkingLevel` union of the pinned Pi floor (#1304). Pi clamps
 			// a level the running model does not support, so handing it one this
 			// build's types have not heard of yet is safe.
 			pi.setThinkingLevel(profile.thinking as ThinkingLevel);
+			if (savedState) savedState.managedThinkingLevel = pi.getThinkingLevel();
 		}
 
 		updateStatus(ctx);
@@ -829,8 +883,8 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 
 	/**
 	 * The single exit sequence every idle transition shares: drop phase state,
-	 * hand back the tools the phase added, restore the pre-phase model/thinking
-	 * level, then refresh the UI and persist. Callers add their own messaging,
+	 * hand back the tools the phase added, restore the model/thinking level unless
+	 * the user changed them, then refresh the UI and persist. Callers add their own messaging,
 	 * session entries, and events around it.
 	 */
 	/**
@@ -2524,7 +2578,7 @@ Call ${PLAN_MARK_DONE_TOOL} immediately after each completed step and before the
 		if (stateEntry?.data) {
 			phase = stateEntry.data.phase ?? options.phaseWhenUnrecorded;
 			lastSubmittedPath = stateEntry.data.lastSubmittedPath ?? lastSubmittedPath;
-			savedState = stateEntry.data.savedState ?? savedState;
+			savedState = stateEntry.data.savedState ? structuredClone(stateEntry.data.savedState) : savedState;
 			phaseAddedTools = stateEntry.data.phaseAddedTools ?? phaseAddedTools;
 			// The framing message persists in the restored conversation history,
 			// so a resumed phase must not deliver it again. A path recorded
