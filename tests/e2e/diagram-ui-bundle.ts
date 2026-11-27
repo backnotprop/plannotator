@@ -6,8 +6,10 @@
  * entry. Used by diagram-label-scrub.spec.ts and diagram-label-scrub-webkit.spec.ts.
  *
  * The page's handle, `window.__d`:
- * - `render(source)`: `renderDiagram`, the drawn svg mounted in `#host`;
- *   `{ ok, refused, message }`.
+ * - `render(source, refuse?)`: `renderDiagram`, the drawn svg mounted in `#host`;
+ *   `{ ok, refused, message }`. With `refuse`, a host's `accept` check is
+ *   passed that refuses an svg in which any attribute or `<style>` holds that
+ *   text (diagram-remote-loads.spec.ts).
  * - `measure(source)`: Mermaid alone, as `renderDiagram` runs it (same runtime,
  *   same config), with no sanitizer after it: what Mermaid's own drawing into
  *   the live page holds. The raw svg, or null.
@@ -69,8 +71,12 @@ function describe(el: Element): string[] {
   });
 }
 (window as any).__d = {
-  async render(source: string) {
-    const r = await renderDiagram('mermaid', 'pn-scrub-' + ++seq, source, { colorTheme: 'plannotator', mode: 'light' });
+  async render(source: string, refuse?: string) {
+    const accept = (svg: SVGSVGElement) =>
+      ![svg, ...Array.from(svg.querySelectorAll('*'))].some(
+        (e) => Array.from(e.attributes).some((a) => a.value.includes(refuse!)) || (e.localName === 'style' && (e.textContent ?? '').includes(refuse!)),
+      );
+    const r = await renderDiagram('mermaid', 'pn-scrub-' + ++seq, source, { colorTheme: 'plannotator', mode: 'light' }, refuse ? { accept } : undefined);
     if (!r.ok) return { ok: false, refused: r.refused === true, message: r.message };
     host().replaceChildren(r.svgNode);
     return { ok: true, refused: false, message: '' };
