@@ -618,3 +618,68 @@ describe("Plannotator keeps the user's model across /tree (#1722)", () => {
 		expect(runtime.host.modelCalls).toEqual([]);
 	});
 });
+
+function lastState(entries: SessionEntry[]) {
+	return entries.filter((entry) => entry.customType === "plannotator").at(-1)?.data as { phase?: string; savedState?: Record<string, unknown> };
+}
+
+/** Pi reports a model pick with model_select; oh-my-pi has no such event. */
+const HOSTS = [
+	{ name: "Pi", omp: false },
+	{ name: "oh-my-pi", omp: true },
+];
+
+describe("Plannotator re-applies phase settings after /tree into another phase", () => {
+	for (const { name, omp } of HOSTS) {
+		test(`${name}: /tree from execution back to the planning node applies the planning profile, and leaving plan mode restores the pre-plan settings`, async () => {
+			const cwd = makeWorkspace({ phases: { planning: { model: LUNA, thinking: "low" }, executing: { model: ASTRA, thinking: "high" } } });
+			writeFileSync(join(cwd, "PLAN.md"), PLAN, "utf-8");
+			const runtime = createModelHost({ cwd, initialModel: SOL, initialThinking: "xhigh", entries: [], omp });
+			await runtime.run("session_start");
+			await runtime.command();
+			const planningNode = runtime.host.entries.length;
+			await runtime.submit();
+			expect([runtime.host.model, runtime.host.thinking]).toEqual([ASTRA, "high"]);
+
+			// /tree to the planning node: the host keeps the executing model.
+			runtime.host.entries.length = planningNode;
+			await runtime.run("session_tree");
+			expect(lastState(runtime.host.entries).phase).toBe("planning");
+			expect([runtime.host.model, runtime.host.thinking]).toEqual([LUNA, "low"]);
+
+			await runtime.command();
+			expect([runtime.host.model, runtime.host.thinking]).toEqual([SOL, "xhigh"]);
+		});
+
+		test(`${name}: /tree from after completion back into execution applies the executing profile`, async () => {
+			const cwd = makeWorkspace({ phases: { executing: { model: ASTRA, thinking: "high" } } });
+			writeFileSync(join(cwd, "PLAN.md"), PLAN, "utf-8");
+			const runtime = createModelHost({ cwd, initialModel: SOL, initialThinking: "xhigh", entries: [], omp });
+			await runtime.run("session_start");
+			await runtime.command();
+			await runtime.submit();
+			const executingPath = runtime.host.entries.slice();
+			await runtime.run("agent_end");
+			await runtime.markDone(1);
+			await runtime.markDone(2);
+			await runtime.run("agent_end");
+			expect(lastState(runtime.host.entries).phase).toBe("idle");
+			expect([runtime.host.model, runtime.host.thinking]).toEqual([SOL, "xhigh"]);
+
+			// /tree back into execution: the host keeps the pre-plan model.
+			writeFileSync(join(cwd, "PLAN.md"), PLAN, "utf-8");
+			runtime.host.entries.splice(0, runtime.host.entries.length, ...executingPath);
+			await runtime.run("session_tree");
+			expect(lastState(runtime.host.entries).phase).toBe("executing");
+			expect([runtime.host.model, runtime.host.thinking]).toEqual([ASTRA, "high"]);
+
+			// Completing the plan on this branch gives back the pre-plan settings, not the executing ones.
+			await runtime.run("agent_end");
+			await runtime.markDone(1);
+			await runtime.markDone(2);
+			await runtime.run("agent_end");
+			expect(lastState(runtime.host.entries).phase).toBe("idle");
+			expect([runtime.host.model, runtime.host.thinking]).toEqual([SOL, "xhigh"]);
+		});
+	}
+});

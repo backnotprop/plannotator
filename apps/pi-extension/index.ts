@@ -2698,6 +2698,17 @@ Call ${PLAN_MARK_DONE_TOOL} immediately after each completed step and before the
 			}
 		}
 
+		// /tree leaves the model and thinking level alone, so they still belong to
+		// the branch just left. When the new branch is in another phase, the
+		// entry's record of what Plannotator last set describes a different
+		// moment, and comparing the two would read Plannotator's own phase model
+		// as the user's pick. Forget that record: the saved settings are restored
+		// and the phase profile applied, as before user picks were tracked.
+		if (options.keepModelWhenPhaseUnchanged && phase !== phaseBefore && stateEntry?.data?.savedState && savedState) {
+			savedState.managedModel = undefined;
+			savedState.managedThinkingLevel = undefined;
+		}
+
 		// A branch whose path is not planning has no plan waiting on review.
 		if (phase !== "planning") stopPendingPlanReview();
 
