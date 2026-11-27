@@ -17,7 +17,7 @@
  * found again as Send is pressed); once it went, they are sent and the plan has the thread. With neither, Send is
  * disabled and says why in the Inbox's words for a project with no live agent.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import type { InboxAnnotationRecord, InboxAttachmentState } from '@plannotator/core/inbox-types';
 import { planCommentAnnotationId, planDocumentFileName, type PlanComment, type PlanDocument, type PlanVersion } from '@plannotator/core/plans';
 import { exportAnnotations, parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
@@ -26,6 +26,9 @@ import { attachmentBlocks } from '../attachments';
 import { AttachmentPane } from '../components/AttachmentPane';
 import { INBOX_FILE_SOURCE, InboxFileSourceProvider, type InboxFileSource } from '../fileSource';
 import { Icon } from '../icons';
+import { Tip } from '../components/Tip';
+import type { PaneHost, PaneHostHandle } from '../parts/paneHost';
+import { useTitleAway } from './PlanChrome';
 import { plansApi, type PlanRead } from './client';
 import { deliverToPlanAgent, noAgentWords, planAgentNow, type PlanAgent } from './deliver';
 import { PlanContentRules, planBlocks, resolvePlanImage, resolvePlanLink } from './planContent';
@@ -97,7 +100,22 @@ function useCloseNotOnEscape(onClose: () => void): () => void {
   }, [onClose]);
 }
 
-export function PlanAnnotate({ read, document, docRef, versions, shown, phone, agent: found, onClose, onChanged }: { read: PlanRead; document: PlanDocument; docRef: string | null; versions: readonly PlanVersion[]; shown: number; phone: boolean; agent: PlanAgent; onClose: () => void; onChanged: () => void }) {
+/**
+ * The page's bars (approval "inbox-plan-page-header-a3", PlanChrome.tsx): out of full screen the pane draws no
+ * file-name row; its tools and comments button join Send in one bar at the bottom (a computer adds Global comment as
+ * a mark and the Send line where it fits; a phone draws Send as its mark, the line staying its description, and a
+ * failed Send's words on a row of their own). `a3`: a phone's top bar follows whether the document's title is in view.
+ */
+export interface PlanAnnotateChrome {
+  full: boolean;
+  onFull: (full: boolean) => void;
+  handle: MutableRefObject<PaneHostHandle | null>;
+  a3: boolean;
+  onContents: (open: ((back: HTMLElement | null) => void) | null) => void;
+  onTitleAway: ((away: boolean) => void) | null;
+}
+
+export function PlanAnnotate({ read, document, docRef, versions, shown, phone, agent: found, onClose, onChanged, chrome }: { read: PlanRead; document: PlanDocument; docRef: string | null; versions: readonly PlanVersion[]; shown: number; phone: boolean; agent: PlanAgent; onClose: () => void; onChanged: () => void; chrome: PlanAnnotateChrome }) {
   const planId = read.plan.id;
   const byAttachment = useMemo(() => new Map(versions.map((v) => [planAttachment(planId, document, v).id, v])), [planId, document, versions]);
   const attachmentOf = useCallback((v: PlanVersion) => planAttachment(planId, document, v), [planId, document]);
@@ -117,8 +135,16 @@ export function PlanAnnotate({ read, document, docRef, versions, shown, phone, a
   useEffect(() => setRecords(kept), [kept]);
   const waiting = useMemo(() => records.filter((r) => r.sent_reply_id === null), [records]);
   const earlier = useMemo(() => records.filter((r) => r.sent_reply_id !== null), [records]);
-  const [full, setFull] = useState(false);
+  const { full, onFull: setFull } = chrome;
   const close = useCloseNotOnEscape(onClose);
+  const [root, setRoot] = useState<HTMLDivElement | null>(null);
+  const [tools, setTools] = useState<HTMLSpanElement | null>(null);
+  const [commentsSlot, setCommentsSlot] = useState<HTMLSpanElement | null>(null);
+  // A saved global comment opens again on the page's own Global comment (the bar's mark; a phone's menu button).
+  const globalMark = useRef<HTMLButtonElement | null>(null);
+  const globalAnchor = useCallback(() => globalMark.current ?? root?.closest('.ib-plan-page')?.querySelector<HTMLElement>('[data-plan-more]') ?? null, [root]);
+  const host = useMemo<PaneHost>(() => ({ tools, comments: commentsSlot, marks: phone, globalAnchor, handle: chrome.handle, onContents: chrome.onContents }), [tools, commentsSlot, phone, globalAnchor, chrome.handle, chrome.onContents]);
+  useTitleAway(root, read.plan.name, !full && chrome.a3, chrome.onTitleAway);
   const source = useMemo<InboxFileSource>(() => {
     const numberOf = (a: InboxAttachmentState) => byAttachment.get(a.id)?.version_number ?? shown;
     return {
@@ -171,7 +197,7 @@ export function PlanAnnotate({ read, document, docRef, versions, shown, phone, a
     }
   };
   return (
-    <div className="ib-plan-annotate" data-plan-document={version.version_number} data-plan-annotate="">
+    <div ref={setRoot} className="ib-plan-annotate" data-plan-document={version.version_number} data-plan-annotate="">
       <PlanContentRules>
         <InboxFileSourceProvider source={source}>
           <AttachmentPane
@@ -189,7 +215,7 @@ export function PlanAnnotate({ read, document, docRef, versions, shown, phone, a
             fullLocked={phone}
             exitCloses={false}
             phone={phone}
-            onToggleFull={() => setFull((f) => !f)}
+            onToggleFull={() => setFull(!full)}
             onKeepView={() => setFull(false)}
             focusId={null}
             readOnly={false}
@@ -198,17 +224,28 @@ export function PlanAnnotate({ read, document, docRef, versions, shown, phone, a
             onOpenAt={noop}
             onClose={close}
             strip={{ picks: 0, annotations: onScreen.length, onWriteReply: () => (canSend ? void send() : setFull(false)) }}
+            host={host}
           />
         </InboxFileSourceProvider>
       </PlanContentRules>
-      <div className="ib-plan-send" data-plan-send="">
-        <p className="ib-plan-send-t" id={`plan-send-${attachment.id}`} role={failed ? 'alert' : undefined}>
+      <div className={full ? 'ib-plan-send' : 'ib-plan-send ib-plan-dock'} data-plan-send="" data-plan-dock={full ? undefined : ''}>
+        {!full && <span className="ib-plan-dock-tools" ref={setTools} />}
+        {!full && !phone && (
+          <Tip content="Global comment">
+            <button type="button" ref={globalMark} className="ib-plan-globalmark" aria-label="Global comment" onClick={(event) => chrome.handle.current?.globalComment(event.currentTarget)} data-plan-global="">
+              <Icon name="globe" size={15} />
+            </button>
+          </Tip>
+        )}
+        {!full && <span className="ib-plan-dock-sp" />}
+        <p className="ib-plan-send-t" id={`plan-send-${attachment.id}`} role={failed ? 'alert' : undefined} data-plan-send-line={failed ? 'failed' : phone && !full ? 'described' : 'shown'}>
           {/* The pane's own chip words (its full screen foot), or the Inbox's for a project with no live agent. */}
           {failed ?? (!reachable ? noAgentWords(project) : `${onScreen.length} annotation${onScreen.length === 1 ? '' : 's'} ${onScreen.length === 1 ? 'rides' : 'ride'} your next Send to ${agent}.`)}
         </p>
-        <button type="button" className="ib-btn ib-sm ib-pri" disabled={!canSend || sending} aria-describedby={`plan-send-${attachment.id}`} onClick={() => void send()} data-plan-send-button="">
+        {!full && <span className="ib-plan-dock-comments" ref={setCommentsSlot} />}
+        <button type="button" className="ib-btn ib-sm ib-pri" disabled={!canSend || sending} aria-label={phone && !full ? 'Send' : undefined} aria-describedby={`plan-send-${attachment.id}`} onClick={() => void send()} data-plan-send-button="">
           <Icon name="send" size={14} />
-          Send
+          {(!phone || full) && 'Send'}
         </button>
       </div>
     </div>

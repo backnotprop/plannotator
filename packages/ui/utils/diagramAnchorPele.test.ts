@@ -18,7 +18,7 @@ function load(name: string): SVGSVGElement {
   return svg;
 }
 
-describe.if(hasDom)('Pele 1.3.0 flowchart anchors', () => {
+describe.if(hasDom)('Pele flowchart anchors', () => {
   test('detects Pele output and maps stable data-id groups to the shared anchor wire shape', () => {
     const svg = load('pele-flowchart');
     expect(diagramFamilyOf(svg)).toBe('flowchart');
@@ -323,7 +323,22 @@ describe.if(hasDom)('Pele finders make the anchors Mermaid makes', () => {
 
   test('class: two relations with the same ends restore by their label; a self-relation; a note is not a part', async () => {
     const svgs = await drawn('22-class-parts');
-    const targets = expectParity(svgs);
+    const targets = expectParity(svgs, false);
+    // Mermaid's labels for every part but one: Pele (since 1.9) draws `class Odd["Odd & <x>"]` as written,
+    // where Mermaid drops `<x>` as a tag, so a comment there is labelled with the text the person sees.
+    expect(ids(targets)).toEqual([
+      'edge Odd -> User: "a < b"',
+      'edge Order -> BigOrder: ',
+      'edge User -> Order: owns',
+      'edge User -> Order: places',
+      'edge User -> User: self',
+      'node BigOrder: BigOrder',
+      'node Odd: Odd & <x>',
+      'node Order: Order<T>',
+      'node User: User',
+    ]);
+    // A comment made on that class under Mermaid (or Pele 1.3) still restores on it.
+    expect(PELE_FINDER.findTarget(svgs.pele, { family: 'class', kind: 'node', id: 'Odd', label: 'Odd &' }, PELE_ID)?.getAttribute('data-id')).toBe('Odd');
     const twins = targets.filter((t) => t.from === 'User' && t.to === 'Order');
     expect(twins.map((t) => t.label).sort()).toEqual(['owns', 'places']);
     expect(PELE_FINDER.findTarget(svgs.pele, twins[0]!, PELE_ID)).not.toBe(PELE_FINDER.findTarget(svgs.pele, twins[1]!, PELE_ID));

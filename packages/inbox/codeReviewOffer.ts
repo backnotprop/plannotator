@@ -13,7 +13,8 @@
  * line's Not now (`inboxApi.revealNotNow('code_review')`) and leave it off. Every way out is final.
  *
  * The server opens it only while `CODE_REVIEW_OFFER_SHOWN` (packages/shared/inbox/reveals.ts; held from 2026-11-17,
- * shown again from the release after 2026-11-23, approval "inbox-code-review-offer").
+ * shown again from the release after 2026-11-23, approval "inbox-code-review-offer"; switched off since 0.29.6, when
+ * `reveal.next` is never `code_review`, so this stays `settled` and holds nothing back).
  */
 import type { InboxListRow } from '@plannotator/core/inbox-types';
 import { useRef } from 'react';

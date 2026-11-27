@@ -20,7 +20,7 @@
  * and every waiting mark moves to the pile's outer corner, the first at the last tile's, each next one a step to its
  * left, clear of a "+N" chip. Done, idle and error marks stay on their own tile. Status never changes layout.
  */
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import type { InboxAgent, InboxAgentsGroup, InboxRexMark } from '@plannotator/core/inbox-types';
 import { inboxAgentsNow } from '../agentsList';
 import { agentStatusOn, subscribeAgentStatus } from './agentStatus';
@@ -112,6 +112,50 @@ function sharedMark(key: string): ShownMark | null {
 export function useRexMarkOf(agent: string | null | undefined, statusMarks = false): ShownMark | null {
   const read = () => (agent ? markKey(marksNow(inboxAgentsNow(), statusMarks && agentStatusOn())?.get(agent)) : '');
   return sharedMark(useSyncExternalStore(subscribeAgentStatus, read, read));
+}
+
+const NO_MARKS: ReadonlyMap<string, string> = new Map();
+let rowMarks: { from: Map<string, ShownMark>; keys: ReadonlyMap<string, string>; said: string } | null = null;
+
+/**
+ * Every listed agent's mark as a row's icon shows it (`useRexMarkOf` with no status marks), by id and session: the
+ * mark's key (`markKey`). The same map while no mark changed, and one empty map while no agent has one (nobody using
+ * Rex), so a list's icons draw again only when a mark they could show changed.
+ */
+function rowRexMarks(): ReadonlyMap<string, string> {
+  const marks = marksNow(inboxAgentsNow(), false);
+  if (!marks || marks.size === 0) return NO_MARKS;
+  if (rowMarks?.from === marks) return rowMarks.keys;
+  const keys = new Map<string, string>();
+  for (const [id, mark] of marks) keys.set(id, markKey(mark));
+  const said = [...keys].join('\n');
+  if (rowMarks?.said === said) {
+    rowMarks.from = marks;
+    return rowMarks.keys;
+  }
+  rowMarks = { from: marks, keys, said };
+  return keys;
+}
+
+const ListRexMarks = createContext<ReadonlyMap<string, string> | null>(null);
+
+/**
+ * Around a list's rows (rowParts.tsx `ListRows`): the agents' marks read once for every row's icon. A list mounts every
+ * row of its open groups (about 2,200 on a large Inbox); each icon's own subscription was two listeners per row.
+ */
+export function ListRexMarksScope({ children }: { children: ReactNode }) {
+  const keys = useSyncExternalStore(subscribeAgentStatus, rowRexMarks, rowRexMarks);
+  return <ListRexMarks.Provider value={keys}>{children}</ListRexMarks.Provider>;
+}
+
+/** The list's marks (`ListRexMarksScope`); null outside a list's rows, where an icon reads its own (`useRexMarkOf`). */
+export function useListRexMarks(): ReadonlyMap<string, string> | null {
+  return useContext(ListRexMarks);
+}
+
+/** An icon's mark from the list's marks: what `useRexMarkOf(agent)` reads. */
+export function listedRexMark(marks: ReadonlyMap<string, string>, agent: string | null | undefined): ShownMark | null {
+  return agent ? sharedMark(marks.get(agent) ?? '') : null;
 }
 
 const reducedMotion = () => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
