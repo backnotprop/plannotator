@@ -25,11 +25,27 @@ const { hover, openTooltips, settle, unhover } = await import('./testing/tooltip
 const { undeliveredLabel } = await import('./deliveryLine');
 const { agentFaceWatchersForTests, hearAgentFacesEvent, resetAgentFaces } = (hasDom ? await import('./agents/agentFaces') : {}) as typeof import('./agents/agentFaces');
 
+const { LazyRowTips, RowTip } = (hasDom ? await import('./components/RowTip') : {}) as typeof import('./components/RowTip');
+const { FaceOfMark } = (hasDom ? await import('./icons') : {}) as typeof import('./icons');
+const { RELATIVE_TICK_MS } = await import('./relativeTime');
+
 const realFetch = globalThis.fetch;
+const realNow = Date.now;
+const realSetInterval = globalThis.setInterval;
 let root: Root | null = null;
 let host: HTMLElement | null = null;
+/** How far the test moved the clock, and the relative-time clock's ticks (relativeTime.ts), to run by hand. */
+let clockAhead = 0;
+let relativeTicks: (() => void)[] = [];
 
 beforeEach(() => {
+  clockAhead = 0;
+  relativeTicks = [];
+  Date.now = () => realNow() + clockAhead;
+  globalThis.setInterval = ((fn: () => void, ms?: number, ...rest: unknown[]) => {
+    if (ms === RELATIVE_TICK_MS) relativeTicks.push(fn);
+    return realSetInterval(fn, ms, ...rest);
+  }) as typeof setInterval;
   const stored = new Map<string, string>();
   setStorageBackend({ getItem: (k) => stored.get(k) ?? null, setItem: (k, v) => void stored.set(k, v), removeItem: (k) => void stored.delete(k) });
   // Nothing here asks the server; a stray request answers empty rather than reaching a network.
@@ -38,6 +54,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  Date.now = realNow;
+  globalThis.setInterval = realSetInterval;
   globalThis.fetch = realFetch;
   resetStorageBackend();
   if (!hasDom) return;
@@ -286,4 +304,108 @@ test.skipIf(!hasDom)('a row with no badge makes no keyboard-focus handlers; one 
   act(() => holding.blur());
   await settle();
   expect(card()).toBeUndefined();
+});
+
+type Drawn = Fiber & { flags: number; alternate: Drawn | null; child: Drawn | null; sibling: Drawn | null };
+
+/** Every fiber of the tree drawn into `el` now (React's current tree, from its root). */
+function eachFiber(el: HTMLElement, visit: (fiber: Drawn) => void): void {
+  const container = (el as unknown as Record<string, { stateNode: { current: Drawn } }>)[Object.keys(el).find((k) => k.startsWith('__reactContainer$'))!]!;
+  const stack: (Drawn | null)[] = [container.stateNode.current];
+  while (stack.length) {
+    const fiber = stack.pop();
+    if (!fiber) continue;
+    visit(fiber);
+    stack.push(fiber.child, fiber.sibling);
+  }
+}
+
+/** How many times `type` drew during `change` (React marks a fiber whose function ran: PerformedWork, 1). */
+function drawsDuring(el: HTMLElement, type: unknown, change: () => void): number {
+  eachFiber(el, (fiber) => {
+    fiber.flags &= ~1;
+    if (fiber.alternate) fiber.alternate.flags &= ~1;
+  });
+  change();
+  let draws = 0;
+  eachFiber(el, (fiber) => {
+    if (fiber.elementType === type && fiber.flags & 1) draws++;
+  });
+  return draws;
+}
+
+test.skipIf(!hasDom)("one agent's Rex mark changing draws again only that agent's icons, not every icon in the list", () => {
+  act(() => setInboxAgents(agentsWith({ ses_0: { state: 'working' }, ses_2: { state: 'working' } })));
+  const el = mount();
+  // The first agent asks for permission: its 20 rows' icons draw again; the other 40 read the list's marks and stop there.
+  const draws = drawsDuring(el, FaceOfMark, () => act(() => setInboxAgents(agentsWith({ ses_0: { state: 'blocked', kind: 'permission' }, ses_2: { state: 'working' } }))));
+  expect(draws).toBe(ROWS / 3);
+  expect(rowEls(el).filter((row, i) => i % 3 === 0 && rexOf(row) === 'permission').length).toBe(ROWS / 3);
+  expect(rowEls(el).filter((row, i) => i % 3 === 2 && rexOf(row) === 'working').length).toBe(ROWS / 3);
+  // A face picked for the second agent: only its icons draw again.
+  // (A revision past the faces test's: a stream's older revision is ignored.)
+  expect(drawsDuring(el, FaceOfMark, () => act(() => void hearAgentFacesEvent({ faces: { ses_1: { face: 'glass', sessions: [] } }, rev: 10 })))).toBe(ROWS / 3);
+  expect(el.querySelectorAll('[data-agent-face="glass"]').length).toBe(ROWS / 3);
+});
+
+test.skipIf(!hasDom)('a waiting tooltip on a control that takes keyboard focus shows on that focus, keeps it, and Escape hides it', async () => {
+  host = document.createElement('div');
+  document.body.append(host);
+  root = createRoot(host);
+  act(() =>
+    root!.render(
+      <LazyRowTips.Provider value={true}>
+        <RowTip content="Pin this thread">
+          <button type="button" data-probe="">
+            Pin
+          </button>
+        </RowTip>
+      </LazyRowTips.Provider>,
+    ),
+  );
+  expect(host.querySelector('[data-probe]')!.hasAttribute('data-base-ui-tooltip-trigger')).toBe(true);
+  // happy-dom matches :focus-visible for every focus, so this is a keyboard focus (a Tab onto it).
+  act(() => host!.querySelector<HTMLElement>('[data-probe]')!.focus());
+  await settle();
+  const probe = host.querySelector<HTMLElement>('[data-probe]')!;
+  // The trigger drawn again as the tip mounted has the focus back.
+  expect(document.activeElement).toBe(probe);
+  expect(openTooltips()).toEqual(['Pin this thread']);
+  act(() => void probe.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+  await settle();
+  expect(openTooltips()).toEqual([]);
+});
+
+test.skipIf(!hasDom)('a list taken away while a tooltip waits for its task (the pointer just came in) throws nothing and opens nothing', async () => {
+  const errors: unknown[] = [];
+  const realError = console.error;
+  const onError = (event: ErrorEvent) => void errors.push(event.error ?? event.message);
+  console.error = (...args: unknown[]) => void errors.push(args);
+  window.addEventListener('error', onError);
+  try {
+    const el = mount([listRow(0), listRow(1)]);
+    // The pointer comes onto a row's agent tiles: the trigger arms in the task after, and the list goes first.
+    hover(rowEls(el)[1]!.querySelector<HTMLElement>('[data-row-agents]')!);
+    act(() => root!.unmount());
+    root = null;
+    await settle(50);
+    expect(errors).toEqual([]);
+    expect(openTooltips()).toEqual([]);
+  } finally {
+    console.error = realError;
+    window.removeEventListener('error', onError);
+  }
+});
+
+test.skipIf(!hasDom)("with relative time on, a row's words move on with the clock after the list drew", () => {
+  const recent = new Date(Date.now() - 5.5 * 60_000).toISOString();
+  const el = mount([listRow(0, { created_at: recent, last_at: recent }), listRow(1, { created_at: recent, last_at: recent })]);
+  act(() => adoptSavedRows(['smallNames', 'relativeTime'], 1));
+  const words = () => [...el.querySelectorAll('[data-relative-time] .ib-sr')].map((node) => node.textContent);
+  expect(words()).toEqual(['5 minutes ago', '5 minutes ago']);
+  // One shared clock for the list; ten minutes on, its tick reaches every row.
+  expect(relativeTicks.length).toBe(1);
+  clockAhead = 10 * 60_000;
+  act(() => relativeTicks[0]!());
+  expect(words()).toEqual(['15 minutes ago', '15 minutes ago']);
 });

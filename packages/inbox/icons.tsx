@@ -11,7 +11,7 @@
 import { inboxMarkFaceHost, isInboxMarkFace, type InboxAuthor } from '@plannotator/core/inbox-types';
 import { HostMark as UiHostMark, Icon } from '@plannotator/ui/components/inbox-thread/icons';
 import { isScriptAuthor } from './scriptAuthor';
-import type { CSSProperties, ReactNode } from 'react';
+import { memo, type CSSProperties, type ReactNode } from 'react';
 import { listedRexMark, RexMark, useListRexMarks, useRexMarkOf, type ShownMark } from './agents/rexMark';
 import { ProjectFaceMark, shownAgentFace, useShownAgentFace } from './agents/projectFace';
 import { agentFaceOf, agentTakesTiles } from './agents/agentFaces';
@@ -41,10 +41,18 @@ export function HostMark(props: HostMarkProps) {
   const { agent } = props;
   const kept = world ? ((agent ? world.faces.get(agent) : undefined) ?? 'agent') : agentFaceOf(agent);
   const face = agent ? shownAgentFace(kept, given.projectIcons && agentTakesTiles(agent)) : kept;
-  return drawHostMark(props, listedRexMark(marks, agent), face);
+  return <ListedHostMark {...props} rex={listedRexMark(marks, agent)} face={face} />;
 }
 
 type HostMarkProps = { host: string | null | undefined; big?: boolean; agent?: string | null; script?: boolean };
+
+/**
+ * A list icon drawn from its own mark and face: when any agent's mark or face changes, every icon above reads the list's
+ * values again, but only an icon whose own mark (one shared object per mark, agents/rexMark.tsx) or face changed draws.
+ */
+const ListedHostMark = memo(function ListedHostMark({ rex, face, ...props }: HostMarkProps & { rex: ShownMark | null; face: AgentFace }) {
+  return drawHostMark(props, rex, face);
+});
 
 function OwnHostMark({ host, big, agent, script }: HostMarkProps) {
   // An agent started in Rex carries its pane's status on the icon's corner (agents/rexMark.tsx); any other: today's icon.
