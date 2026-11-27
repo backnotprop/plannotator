@@ -10,7 +10,7 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import type { Root } from 'react-dom/client';
-import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
+import type { InboxAgent, InboxAgentsGroup, InboxListRow, InboxListSection, InboxRexMark } from '@plannotator/core/inbox-types';
 
 const hasDom = typeof document !== 'undefined';
 const { createRoot } = (hasDom ? await import('react-dom/client') : {}) as typeof import('react-dom/client');
@@ -18,6 +18,8 @@ const { InboxList } = (hasDom ? await import('./components/InboxList') : {}) as 
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
 const { adoptSavedRows, listLookWatchersForTests, resetListLookForTests } = await import('./listLook');
 const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
+const { setInboxAgents } = (hasDom ? await import('./agentsList') : {}) as typeof import('./agentsList');
+const { agentStatusWatchersForTests } = (hasDom ? await import('./agents/agentStatus') : {}) as typeof import('./agents/agentStatus');
 
 const realFetch = globalThis.fetch;
 let root: Root | null = null;
@@ -39,7 +41,10 @@ afterEach(() => {
   host?.remove();
   root = null;
   host = null;
-  act(() => resetListLookForTests());
+  act(() => {
+    resetListLookForTests();
+    setInboxAgents(null);
+  });
 });
 
 const ROWS = 60;
@@ -103,4 +108,30 @@ test.skipIf(!hasDom)('the rows read the Rows look once for the list; letter mark
   // Then Avatar: every row swaps to the avatar, none keeps the title's tile.
   act(() => adoptSavedRows(['smallNames', 'marksThreads', 'marksProjects'], 2));
   expect(rowEls(el).filter((row) => row.querySelector('.ib-lm-av') && !row.querySelector('.ib-lm-tt')).length).toBe(ROWS);
+});
+
+/** Three sessions' agents, `marks` giving each one's Rex record (none: today's icon). */
+function agentsWith(marks: Partial<Record<string, InboxRexMark>>): InboxAgentsGroup[] {
+  const agents = ['ses_0', 'ses_1', 'ses_2'].map(
+    (id): InboxAgent => ({ id, session: id, host: 'claude-code', project: { id: 'prj_billing', name: 'billing-svc' }, state: 'idle', waiting: 0, live: true, started_at: null, last_seen_at: null, ...(marks[id] ? { rex_mark: marks[id] } : {}) }),
+  );
+  return [{ agents, total: agents.length, ended_today: 0 }];
+}
+
+const rexOf = (row: HTMLElement) => row.querySelector<HTMLElement>('.ib-rxm')?.dataset.rxState ?? null;
+
+test.skipIf(!hasDom)("the rows' agent icons watch the agents' Rex marks once for the list; a mark that comes or changes after it drew shows on all of that agent's rows", () => {
+  act(() => setInboxAgents(agentsWith({ ses_0: { state: 'working' } })));
+  const before = agentStatusWatchersForTests();
+  const el = mount();
+  // One watcher for the list, whatever its length (each row's icon had its own: 60 here).
+  expect(agentStatusWatchersForTests() - before).toBeLessThanOrEqual(1);
+  const states = () => rowEls(el).map(rexOf);
+  expect(states().filter((state) => state === 'working').length).toBe(ROWS / 3);
+  expect(states().filter((state) => state !== null).length).toBe(ROWS / 3);
+  // After it drew: the first agent stops, the second asks for permission. Every row of each follows; none keeps the old mark.
+  act(() => setInboxAgents(agentsWith({ ses_1: { state: 'blocked', kind: 'permission' } })));
+  const rows = rowEls(el);
+  expect(rows.filter((row, i) => i % 3 === 1 && rexOf(row) === 'permission').length).toBe(ROWS / 3);
+  expect(rows.filter((row, i) => i % 3 !== 1 && rexOf(row) !== null).length).toBe(0);
 });

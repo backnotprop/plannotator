@@ -12,8 +12,10 @@ import { inboxMarkFaceHost, isInboxMarkFace, type InboxAuthor } from '@plannotat
 import { HostMark as UiHostMark, Icon } from '@plannotator/ui/components/inbox-thread/icons';
 import { isScriptAuthor } from './scriptAuthor';
 import type { CSSProperties, ReactNode } from 'react';
-import { RexMark, useRexMarkOf } from './agents/rexMark';
-import { ProjectFaceMark, useShownAgentFace } from './agents/projectFace';
+import { listedRexMark, RexMark, useListRexMarks, useRexMarkOf, type ShownMark } from './agents/rexMark';
+import { ProjectFaceMark, shownAgentFace, useShownAgentFace } from './agents/projectFace';
+import { useAgentFace, useAgentTakesTiles } from './agents/agentFaces';
+import { useGivenRowMarks } from './letterMarks';
 import { useAgentFaceSources } from './agents/faceArtLoad';
 import { isOwnFace, type AgentFace, type OurFace, type OwnFace } from './agents/faceChoices';
 import { ownIconSrc } from './agents/ownIcons';
@@ -26,10 +28,31 @@ export * from '@plannotator/ui/components/inbox-thread/icons';
  * The mark for an agent host; with `agent`, that agent's chosen face when it has one, else, with Settings → Rows' Agent
  * icons "From the project name", its project's tile (agents/projectFace.tsx).
  */
-export function HostMark({ host, big, agent, script }: { host: string | null | undefined; big?: boolean; agent?: string | null; script?: boolean }) {
+export function HostMark(props: HostMarkProps) {
+  // In a list's rows: the agents' marks and the Rows look the list read once for every row (rowParts.tsx `ListRows`).
+  const marks = useListRexMarks();
+  const given = useGivenRowMarks();
+  return marks && given ? <ListedHostMark {...props} marks={marks} projectIcons={given.projectIcons} /> : <OwnHostMark {...props} />;
+}
+
+type HostMarkProps = { host: string | null | undefined; big?: boolean; agent?: string | null; script?: boolean };
+
+function OwnHostMark({ host, big, agent, script }: HostMarkProps) {
   // An agent started in Rex carries its pane's status on the icon's corner (agents/rexMark.tsx); any other: today's icon.
   const rex = useRexMarkOf(agent);
   const face = useShownAgentFace(agent);
+  return drawHostMark({ host, big, agent, script }, rex, face);
+}
+
+/** `useShownAgentFace` with the list's `projectIcons`: the agent's own face stays its own subscription. */
+function ListedHostMark({ marks, projectIcons, ...props }: HostMarkProps & { marks: ReadonlyMap<string, string>; projectIcons: boolean }) {
+  const kept = useAgentFace(props.agent);
+  const takes = useAgentTakesTiles(props.agent);
+  const face = props.agent ? shownAgentFace(kept, projectIcons && takes) : kept;
+  return drawHostMark(props, listedRexMark(marks, props.agent), face);
+}
+
+function drawHostMark({ host, big, agent, script }: HostMarkProps, rex: ShownMark | null, face: AgentFace) {
   if (script) return <ScriptMark big={big} />;
   return (
     <FaceOfMark host={host} big={big} face={face} agent={agent}>
