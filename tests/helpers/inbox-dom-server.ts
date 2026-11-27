@@ -385,6 +385,9 @@ const leakedIds =
   if (reveals?.band_tip === undefined) Object.assign(settled, { inboxReveals: { ...reveals, band_tip: { shownAt: "2026-10-01T10:00:00.000Z" } } });
   const revealsNow = (settled.inboxReveals ?? config.inboxReveals) as Record<string, unknown> | undefined;
   if (revealsNow?.code_review === undefined) Object.assign(settled, { inboxReveals: { ...revealsNow, code_review: { shownAt: "2026-10-01T10:00:00.000Z" } } });
+  // The Search tip (search-tip.ts) as shown, so no test's first search opens it beside the palette.
+  const revealsLast = (settled.inboxReveals ?? config.inboxReveals) as Record<string, unknown> | undefined;
+  if (revealsLast?.search_tip === undefined) Object.assign(settled, { inboxReveals: { ...revealsLast, search_tip: { shownAt: "2026-10-01T10:00:00.000Z" } } });
   if (Object.keys(settled).length > 0) writeFileSync(file, JSON.stringify({ ...config, ...settled }));
 }
 const server = await startInboxServer({

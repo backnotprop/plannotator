@@ -6148,9 +6148,9 @@ function Inbox() {
       {ask.layer}
       {toast && !toast.hidden && soundDialog !== 'open' && !agentNoteOpen && <InboxToast toast={toast} phone={phone} onDismiss={dismissToast} onHold={holdToast} />}
       <SearchHost
-        mounted={searchMounted}
-        open={searchOpen}
+        mounted={searchMounted} open={searchOpen}
         phone={phone}
+        searchTip={settings?.reveal?.search_tip === true && !tourOn && !firstRun && !revealBlocked && !lineBusy}
         tintOf={listColours?.tintOfThread}
         currentProject={route.page === 'inbox' ? route.project : null}
         projects={projects} projectLabels={anyMachineLinked ? projectNames : undefined} linkedMachines={machines.linked}

@@ -156,7 +156,7 @@ import { openPackedApp, packedAppResponse, PACKED_ASSET_ROUTE_PREFIX, PACKED_ASS
 import { encodeInboxResponse } from "./inbox-encoding";
 import type { InboxSearchIndex, InboxSearchIndexOptions } from "@plannotator/shared/inbox/search";
 import { DecisionDataAborted, decisionDataCsv, decisionDataSummary, readDecisionLines } from "@plannotator/shared/inbox/decision-data";
-import { createInboxSearchRoutes } from "./inbox-search";
+import { createInboxSearchRoutes, readRecentSearches } from "./inbox-search";
 import { createInboxCombine } from "./inbox-combine";
 import { createInboxCombineFar, type InboxCombineFar } from "./inbox-combine-far";
 import { combineArchiveAgain, combineArchiveSkip } from "./inbox-combine-guard";
@@ -347,6 +347,8 @@ import {
 import { launchTipClaim, launchTipDue, launchTipLaunched, type LaunchTipState } from "@plannotator/shared/inbox/launch-tip";
 import { sidebarTipClaim, sidebarTipDue, type SidebarTipState } from "@plannotator/shared/inbox/sidebar-tip";
 import { bandTipClaim, bandTipDue, bandTipUsed, type BandTipState } from "@plannotator/shared/inbox/band-tip";
+import { searchTipClaim, searchTipDue, type SearchTipState } from "@plannotator/shared/inbox/search-tip";
+import { inboxSearchQuoted } from "@plannotator/core/inbox-search";
 import { revealGrillMeGap, type GrillMeTipQuestion } from "@plannotator/shared/inbox/grill-me-tip";
 import { routinesIntroGoodDaysOnce, routinesIntroOpen, routinesIntroSend, routinesIntroWaits } from "@plannotator/shared/inbox/routines-intro";
 import { splitInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
@@ -3913,8 +3915,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // The star ask's show (aside): the grill-me tip (`lastResort`) never goes on its day.
       // The grill-me tip's too: the gap counts from either (`revealGapFree`).
       asideShownAt: revealLastShown([reveals?.star?.shownAt, reveals?.grill_me_tip?.shownAt]),
-      // The tips outside the line (the Sidebar tip, the Launch tip) and the launch dialog: they start the gap too.
-      tipShownAt: revealLastShown([reveals?.sidebar_tip?.shownAt, reveals?.launch_tip?.shownAt, ...Object.values(config.launch ?? {}).map((record) => record?.shownAt)]),
+      // The tips outside the line (the Sidebar tip, the Launch tip, the Search tip) and the launch dialog: they start the gap too.
+      tipShownAt: revealLastShown([reveals?.sidebar_tip?.shownAt, reveals?.launch_tip?.shownAt, reveals?.search_tip?.shownAt, ...Object.values(config.launch ?? {}).map((record) => record?.shownAt)]),
       // The launch dialog (launch-switch.ts), due here: ahead of everything, so the line holds until it is shown.
       launchDue: launchQueue.holdsLine(),
     };
@@ -4098,6 +4100,27 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return loadConfig().inboxReveals?.band_tip?.shownAt === at;
   };
   /**
+   * The Search tip (packages/shared/inbox/search-tip.ts): at the search palette's box, a day or more after first use,
+   * until it was shown once, and never for someone whose recent searches already hold a quote. Outside the line's
+   * order, as the Sidebar tip: its claim stamps only `inboxReveals.search_tip`, and it keeps the gap both ways.
+   */
+  const searchTipState = (): SearchTipState => ({
+    quoted: readRecentSearches(store.dir).some(inboxSearchQuoted),
+    firstUseAt: snoozeIntroSaved()?.firstUseAt ?? null,
+    tenure: snoozeIntroRelease,
+    saved: loadConfig().inboxReveals?.search_tip,
+  });
+  const claimSearchTip = (key: string | null): boolean => {
+    const at = new Date().toISOString();
+    const claim = searchTipClaim(searchTipState(), key, at);
+    if (!claim.save) return claim.show;
+    // Inside the gap after a dialog or another tip: not now (nothing is spent; the next open asks again).
+    if (!tipFree()) return false;
+    saveConfig({ inboxReveals: { ...loadConfig().inboxReveals, search_tip: claim.save } });
+    // Not written (a read-only data dir): showing it anyway would show it at every open.
+    return loadConfig().inboxReveals?.search_tip?.shownAt === at;
+  };
+  /**
    * What a settings read reports of the line (`reveal`), from one read of its state (one walk of the threads for heavy
    * use): the dialog this page may arm, the `ahead` offers it may also arm at their moment, and the agent note's `setup`.
    */
@@ -4132,6 +4155,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       sidebar_tip: sidebarTipDue(sidebarTipState(), now.toISOString()) && revealLineFree("setup", state, now),
       // The Group tip (outside the line): the page may claim it at the first hover of a band with a menu.
       band_tip: bandTipDue(bandTipState(), now.toISOString()) && revealLineFree("setup", state, now),
+      // The Search tip (outside the line): the search palette may claim it as it opens.
+      search_tip: searchTipDue(searchTipState(), now.toISOString()) && revealLineFree("setup", state, now),
       // The launch dialog (launch-switch.ts): due on this computer, so the page claims it now (`/api/inbox/launch-switch`).
       launch: launchQueue.due(),
     };
@@ -7820,8 +7845,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // Not now keeps the usual day, approval "inbox-one-time-dialogs").
         if (body.answer === "not_now") {
           if (!revealNotNowAllowed(id)) throw new InboxError("validation_error", `id: ${INBOX_REVEALS.filter((entry) => entry.kind === "offer").map((entry) => entry.id).join(", ")}.`, { field: "id" });
-        } else if (!(id === "snooze" || id === "agent_note" || id === "launch_tip" || id === "sidebar_tip" || id === "band_tip" || (typeof id === "string" && id in lineOffers))) {
-          throw new InboxError("validation_error", `id: snooze, agent_note, launch_tip, sidebar_tip, band_tip or ${Object.keys(lineOffers).join(", ")}.`, { field: "id" });
+        } else if (!(id === "snooze" || id === "agent_note" || id === "launch_tip" || id === "sidebar_tip" || id === "band_tip" || id === "search_tip" || (typeof id === "string" && id in lineOffers))) {
+          throw new InboxError("validation_error", `id: snooze, agent_note, launch_tip, sidebar_tip, band_tip, search_tip or ${Object.keys(lineOffers).join(", ")}.`, { field: "id" });
         }
         // The agent note's agents (the ones it would ask about): it shows once for each. Optional (an older page).
         const agents = id === "agent_note" ? revealAgentNoteAgents(body.agents) : null;
@@ -7848,6 +7873,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // The Group tip: outside the line, its own stamp only (packages/shared/inbox/band-tip.ts).
         if (id === "band_tip") {
           return json({ show: claimBandTip(key ?? null, body.used === true), reveal: { next: revealNow(load) }, board: { on: boardOn() }, steps: { on: stepsOn() } });
+        }
+        // The Search tip: outside the line, its own stamp only (packages/shared/inbox/search-tip.ts).
+        if (id === "search_tip") {
+          return json({ show: claimSearchTip(key ?? null), reveal: { next: revealNow(load) }, board: { on: boardOn() }, steps: { on: stepsOn() } });
         }
         // The star ask: its claim waits on the already-starred check (gh, up to 3 s) and says how the button works.
         if (id === "star") {

@@ -196,6 +196,11 @@ export function inboxSearchTerms(query: string): string[] {
  */
 const QUOTE_MARKS = /["“”„«»]/;
 
+/** The query holds a quote mark (any of `QUOTE_MARKS`): it asks for an exact phrase, or is typing one. */
+export function inboxSearchQuoted(q: string): boolean {
+  return QUOTE_MARKS.test(q);
+}
+
 /** A phrase to confirm in text: its tokens as typed (folded, one-letter tokens kept), and whether its last token is a prefix (a quote not closed yet). */
 export interface InboxSearchPhrase {
   tokens: string[];
