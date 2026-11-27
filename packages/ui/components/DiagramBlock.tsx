@@ -341,8 +341,15 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
 
   // The restore verdict the panel's "Unanchored" chip runs on: this block's
   // own comments, the unowned ones it shows, and (from the first diagram
-  // block only, so it is said once) the unowned ones nobody resolved.
+  // block only, so it is said once) the unowned ones nobody resolved. The
+  // host's callback is read through a ref, as the highlighter reads it: a host
+  // passing a new function each render that stores the report as state would
+  // otherwise re-run this effect on every render it causes, without end.
+  const onRestoreReportRef = useRef(onRestoreReport);
+  onRestoreReportRef.current = onRestoreReport;
+  const reportsRestore = onRestoreReport !== undefined;
   useEffect(() => {
+    const onRestoreReport = onRestoreReportRef.current;
     if (onRestoreReport === undefined || (resolution === null && !renderFailed)) return;
     const attempted: string[] = [];
     const unanchored: string[] = [];
@@ -359,7 +366,7 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
       }
     }
     if (attempted.length > 0) onRestoreReport({ attempted, unanchored });
-  }, [block.id, claims, claimsVersion, onRestoreReport, ownAnnotations, renderFailed, resolution, unownedAnnotations]);
+  }, [block.id, claims, claimsVersion, ownAnnotations, renderFailed, reportsRestore, resolution, unownedAnnotations]);
 
   const renderFallback = useCallback(
     (state: DiagramRenderState) => {

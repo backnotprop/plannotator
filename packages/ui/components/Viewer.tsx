@@ -1929,7 +1929,14 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
 
   // The highlighter skips region comments; one whose image is no longer in
   // the document (or whose region is malformed) is unanchored, and says so.
+  // The host's callback is read through a ref (as the highlighter and the
+  // diagram blocks read it): a host passing a new function each render that
+  // stores the report as state would otherwise re-run this without end.
+  const onRestoreReportRef = useRef(onRestoreReport);
+  onRestoreReportRef.current = onRestoreReport;
+  const reportsRestore = onRestoreReport !== undefined;
   useEffect(() => {
+    const onRestoreReport = onRestoreReportRef.current;
     if (onRestoreReport === undefined) return;
     const rows = annotations.filter((ann) => ann.imageRegion != null);
     if (rows.length === 0) return;
@@ -1941,7 +1948,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
       })
       .map((ann) => ann.id);
     onRestoreReport({ attempted: rows.map((ann) => ann.id), unanchored });
-  }, [annotations, blocks, onRestoreReport]);
+  }, [annotations, blocks, reportsRestore]);
 
   // The document's diagram blocks, in order: a diagram comment that names
   // none of them (an external POST, a deleted fence) is resolved by anchor
@@ -1956,14 +1963,16 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   );
   // With no diagram in the document nobody can resolve a diagram comment:
   // it is unanchored, and the highlighter (which skips it) will not say so.
+  // The host's callback through the ref above, for the same reason.
   useEffect(() => {
+    const onRestoreReport = onRestoreReportRef.current;
     if (diagramBlockKey !== '' || onRestoreReport === undefined) return;
     // `!= null`, not `!== undefined`: a nullish anchor is no anchor at all —
     // the highlighter restores such a row by text, so it must not be counted
     // here as a diagram comment nothing could resolve.
     const ids = annotations.filter((ann) => ann.diagramAnchor != null).map((ann) => ann.id);
     if (ids.length > 0) onRestoreReport({ attempted: ids, unanchored: ids });
-  }, [annotations, diagramBlockKey, onRestoreReport]);
+  }, [annotations, diagramBlockKey, reportsRestore]);
 
   // The host's `belowTitle` slot (see the prop). Absent → the block list is
   // returned as is, so the DOM is the one without the prop. The wrapper's
