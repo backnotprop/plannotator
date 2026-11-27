@@ -8,17 +8,17 @@
  * so. Windows: none (routines are not offered there). Tests pass their own `home` and `run`.
  */
 import { execFile } from "node:child_process";
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, renameSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
 export const INBOX_LOGIN_LABEL = "ai.plannotator.inbox";
 export const INBOX_LOGIN_UNIT = "plannotator-inbox.service";
 
-export type LoginRunner = (argv: string[]) => Promise<{ code: number }>;
+export type LoginRunner = (argv: string[]) => Promise<{ code: number; stdout?: string }>;
 
-/** The real runner: `launchctl` or `systemctl`, its exit code only, bounded so a hung one never holds Settings. */
+/** The real runner: `systemctl` or `plutil`, its exit code and output, bounded so a hung one never holds Settings. */
 export const execLoginCommand: LoginRunner = ([file, ...args]) =>
-  new Promise((resolve) => execFile(file!, args, { timeout: 10_000, windowsHide: true }, (error) => resolve({ code: error ? (typeof error.code === "number" ? error.code : 1) : 0 })));
+  new Promise((resolve) => execFile(file!, args, { timeout: 10_000, windowsHide: true }, (error, stdout) => resolve({ code: error ? (typeof error.code === "number" ? error.code : 1) : 0, stdout: String(stdout ?? "") })));
 
 export type InboxLoginItem = {
   /** Where it would be written, or null where there is none (Windows). */
@@ -27,20 +27,38 @@ export type InboxLoginItem = {
   remove(): Promise<void>;
 };
 
-const xml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-/** Reverse `xml` for a value read back out of an existing plist, so entities are not escaped twice on rewrite. */
-const unescapeXml = (s: string) => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&");
+// `\r` as a reference: an XML reader turns a literal one into `\n`.
+const xml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/\r/g, "&#13;");
+/** A character XML 1.0 cannot carry at all (a binary plist can): such an entry would make the whole file unloadable. */
+const isXmlText = (s: string) => {
+  for (const ch of s) {
+    const c = ch.codePointAt(0)!;
+    if (c < 0x20 ? c !== 0x9 && c !== 0xa && c !== 0xd : (c >= 0xd800 && c <= 0xdfff) || c === 0xfffe || c === 0xffff) return false;
+  }
+  return true;
+};
 
-/** String-valued entries of a prior plist's `EnvironmentVariables`; a missing, corrupt or env-less file gives none. */
-function existingEnvOf(plistText: string): Record<string, string> {
-  const dict = plistText.match(/<key>EnvironmentVariables<\/key>\s*<dict>([\s\S]*?)<\/dict>/);
-  if (!dict) return {};
-  const env: Record<string, string> = {};
-  const pair = /<key>([^<]*)<\/key>\s*<string>([\s\S]*?)<\/string>/g;
-  let match: RegExpExecArray | null;
-  while ((match = pair.exec(dict[1]!))) env[unescapeXml(match[1]!)] = unescapeXml(match[2]!);
-  // Anything else in the dictionary (an integer, an array) is not an environment entry we can carry: start fresh.
-  return dict[1]!.replace(pair, "").trim() === "" ? env : {};
+/**
+ * String-valued entries of the existing plist's `EnvironmentVariables`, read by `plutil` so any plist launchd reads
+ * reads the same here (binary, as `defaults write` leaves it; XML with comments, CDATA or character references).
+ * Other values are skipped. A missing file, no such key, or plutil missing, failing, timing out or printing anything
+ * but a JSON object gives none: the file is then written as on a fresh install. The values can be secrets: never logged.
+ */
+async function existingEnvOf(path: string, run: LoginRunner): Promise<Record<string, string>> {
+  if (!existsSync(path)) return {};
+  try {
+    const { code, stdout } = await run(["/usr/bin/plutil", "-extract", "EnvironmentVariables", "json", "-o", "-", path]);
+    if (code !== 0 || !stdout) return {};
+    const parsed: unknown = JSON.parse(stdout);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const env: Record<string, string> = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      if (typeof value === "string" && isXmlText(key) && isXmlText(value)) env[key] = value;
+    }
+    return env;
+  } catch {
+    return {};
+  }
 }
 /** One argument of a systemd ExecStart line: quoted, with `%` doubled (systemd's specifiers). */
 const unitArg = (s: string) => `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/%/g, "%%")}"`;
@@ -103,14 +121,7 @@ export function inboxLoginItem(o: { platform: NodeJS.Platform; home: string; arg
       path,
       async add() {
         mkdirSync(dir, { recursive: true });
-        let existing: Record<string, string> = {};
-        if (existsSync(path)) {
-          try {
-            existing = existingEnvOf(readFileSync(path, "utf8"));
-          } catch {
-            existing = {};
-          }
-        }
+        const existing = await existingEnvOf(path, o.run);
         writeAtomic(path, inboxLoginPlist({ argv: o.argv, dataDir: o.dataDir, log: join(o.dataDir, "inbox", "inbox.log") }, existing));
         return "added";
       },
