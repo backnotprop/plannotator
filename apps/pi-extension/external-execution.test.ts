@@ -70,7 +70,7 @@ function createHarness(cwd: string) {
 		hasUI: false,
 		isProjectTrusted: () => true,
 		isIdle: () => true,
-		get model() { return state.selectedModel; },
+		model: { provider: "test", id: "original-model" },
 		modelRegistry: { find: (provider: string, id: string) => ({ provider, id }) },
 		sessionManager: {
 			getBranch: () => [],

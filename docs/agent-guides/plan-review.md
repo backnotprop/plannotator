@@ -145,27 +145,18 @@ execute the unreviewed edits (to keep them, the user returns to plan mode and
 the agent resubmits). Auto-approved plans (no UI) keep the file as their
 source.
 
-**A model or thinking level the user picks mid-plan is kept (#4111).**
-`savedState` records what Plannotator last set (`managedModel`,
-`managedThinkingLevel`) and whether the user picked (`userSelectedModel`,
-`userSelectedThinking`); a pick replaces the baseline restored at approval,
-completion, plan-mode off and the external hand-off, and the phase profile
-does not replace it. A model pick is Pi's `model_select` (not Plannotator's
-own call, compared with the model the registry returned), or on oh-my-pi
-(no such event) a model Plannotator did not set when it next restores,
-except the fallback oh-my-pi reports with `retry_fallback_applied`. A
-thinking choice is only Pi's `thinking_level_select` for a change the user
-made, never a compared level: the reset `setModel` makes is the entry right
-after its `model_change`, and Plannotator's own calls are remembered by entry
-id, so the check holds when another extension's listener delays the event.
-oh-my-pi has no thinking event, so there configured and pre-plan thinking
-always apply. A `/tree` jump into another phase drops the `managed*` record
-(the live model belongs to the branch left) and restores and re-applies as
-before; a same-phase jump keeps the model (#1722); resume compares, since the
-host restores the branch's model. Whether a planning pick beats
-`phases.executing.*` at approval is the single constant
-`USER_PICK_BEATS_EXECUTING_CONFIG_AT_APPROVAL` (owner decision pending).
-Tests: `apps/pi-extension/phase-tools-runtime.test.ts`.
+**A model the user picks mid-plan is kept (#4111).** Only the host's word
+counts, never a comparison of models: Pi's `model_select` during plan mode,
+except for Plannotator's own `setModel` calls, replaces `savedState.model`
+and sets `savedState.userSelectedModel`, persisted with the state. Every
+later restore of that state (completion, plan mode off, external hand-off,
+`/tree` out of plan mode, resume) brings back the pick, and the phase profile's model is not
+applied over it. Pi gives an extension's `pi.setModel` the same `source` as
+the user's `/model`, so another extension's switch counts too. oh-my-pi has
+no `model_select`, so there the pre-plan model always comes back. Thinking
+level is not tracked. Whether a planning pick beats `phases.executing.model`
+at approval is the constant `USER_PICK_BEATS_EXECUTING_CONFIG_AT_APPROVAL`
+(owner decision pending). Tests: `apps/pi-extension/phase-tools-runtime.test.ts`.
 
 ### Pi: the `plannotator` tool
 
