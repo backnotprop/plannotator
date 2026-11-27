@@ -10,6 +10,9 @@
  *  4. New message…, first on the menu of a live agent: New message opens with that agent in To and the cursor in the
  *     message.
  *
+ * The agent writes through `plannotator inbox mcp` as a session that polls the bridge, as the mod does: a session
+ * heard only over MCP is not live (To does not list it), so its menu has no New message….
+ *
  * Build the binary first (see inbox.spec.ts).
  */
 import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
@@ -19,9 +22,11 @@ import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { E2E_LAUNCH_OFF, inboxScratch, removeInboxScratch } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
+import { INBOX_BRIDGE_POLL_PATH } from '../../packages/shared/inbox/connection';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
+const SESSION = 'ses-retry-worker';
 
 interface World {
   data: string;
@@ -30,6 +35,30 @@ interface World {
   context: BrowserContext;
 }
 let world: World;
+/** Stopped after the tests, whether or not the setup finished. */
+let live: { stop: () => Promise<void> } | null = null;
+
+/** The session's bridge long-poll, held and renewed until stopped (the mod's), so it is live. */
+function poll(data: string, projectPath: string): { stop: () => Promise<void> } {
+  let stopped = false;
+  const loop = (async () => {
+    while (!stopped) {
+      const { port, token } = JSON.parse(readFileSync(join(data, 'inbox', 'inbox.json'), 'utf8')) as { port: number; token: string };
+      const response = await fetch(`http://127.0.0.1:${port}${INBOX_BRIDGE_POLL_PATH}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ session: SESSION, host: 'claude-code', project_path: projectPath, busy: false, waitMs: 500 }),
+      }).catch(() => null);
+      await response?.text().catch(() => '');
+    }
+  })();
+  return {
+    stop: async () => {
+      stopped = true;
+      await loop;
+    },
+  };
+}
 
 test.describe.configure({ mode: 'serial' });
 
@@ -53,14 +82,16 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   const project = scratchProject(join(root, 'src'), 'billing-svc');
+  live = poll(data, project);
   const agent = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
-  await agent.send({ project_path: project, subject: 'Invoice retries', thread: 'retries', body: ['Invoice retries: one decision waits on you.', '', ':::question', 'Ship it?', '', '- [ ] Yes', '- [ ] No', ':::'].join('\n') });
+  await agent.send({ project_path: project, agent_session: SESSION, subject: 'Invoice retries', thread: 'retries', body: ['Invoice retries: one decision waits on you.', '', ':::question', 'Ship it?', '', '- [ ] Yes', '- [ ] No', ':::'].join('\n') } as Parameters<SimAgent['send']>[0]);
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
   world = { data, url: started.stdout.trim(), agents: [agent], context };
 });
 
 test.afterAll(async () => {
   try {
+    await live?.stop();
     if (!world) return;
     for (const agent of world.agents) await agent.close().catch(() => {});
     await world.context.close();

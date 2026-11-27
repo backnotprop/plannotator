@@ -13,7 +13,10 @@ export const AGENT_NEW_MESSAGE_LABEL = 'New message…';
  *
  * - its session is live and its own (not a launch's `launch:` placeholder, which has nothing to write to yet);
  * - it said where it works (`project`): To lists a live session only under its project (inbox-compose.ts `placeOf`);
- * - a launch the person stopped no longer polls: a reply starts it again, a new message would be refused;
+ * - a launch the person stopped no longer polls: a reply starts it again, and a new message is refused once its last
+ *   poll ages out;
+ * - a session heard only over MCP (no poll, nothing that wakes it) is not live: the server lists it only while a
+ *   thread of its waits on the person (`live: false`), and To leaves it out;
  * - on a linked machine, only while To lists that machine's sessions: launch is on here (`linked`; ComposeDialog reads
  *   other machines only then), and the machine is online with an Inbox that says whether launch is on there
  *   (useMachineLaunches `readable`).

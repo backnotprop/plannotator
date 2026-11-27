@@ -1,11 +1,12 @@
 /**
  * New message… on a sidebar agent's menu (right-click, ⋯, the phone's sheet): New message with that agent in To.
  *
- * What this catches: the item missing, not first, or offered where To would not take the agent (an ended agent, a
- * launch's placeholder, a stopped launch, an agent that never said where it works, a linked machine's agent while
- * launch is off here or that machine is away or too old to say); a pick that does not hand the agent's session to New
- * message; New message opened that way not showing the agent
- * in To (this computer's, or a linked machine's) with the cursor in the message.
+ * What this catches: the item missing, not first, or offered where To would not take the agent (an ended agent, one
+ * heard only over MCP whose thread waits on the person, a launch's placeholder, a stopped launch, an agent that never
+ * said where it works, a linked machine's agent while launch is off here or that machine is away or too old to say), or
+ * missing for a polled agent whose thread waits on the person; a pick that does not hand the agent's session to New
+ * message; New message opened that way not showing the agent in To (this computer's, or a linked machine's) with the
+ * cursor in the message.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt. Fetch is mocked: no server.
  */
@@ -75,8 +76,16 @@ const MAC = `ibx_01K${'0'.repeat(22)}M`;
 const view = (id: string, name: string, over: Partial<MachineView> = {}): MachineView =>
   ({ id, name, self: id === SELF, state: 'online', since: '2026-11-09T08:00:00.000Z', reason: null, version: '0.29.0', address: null, both_ways: true, waiting: 0, list_cursor: 1, snoozes: true, launch: true, ...over }) as MachineView;
 
-const agent = (id: string, over: Partial<InboxAgent> = {}): InboxAgent => ({ id, session: id, host: 'claude-code', project: { id: 'prj_harbor', name: 'harbor' }, state: 'idle', waiting: 0, live: true, started_at: null, last_seen_at: null, ...over });
-const launched = (id: string, run: InboxRunState | null, started = true): InboxAgent => agent(id, { session: started ? `ses_${id}` : `launch:${id}`, launch: { id, thread_id: `msg_${id}`, started, run } });
+// The agents as the server sends them (packages/server/inbox-agents-list.ts `inboxAgentsGroup`). A session that polls
+// (or that the Inbox wakes): its sessions branch, live, its project from its root, its start and last poll.
+const agent = (id: string, over: Partial<InboxAgent> = {}): InboxAgent => ({ id, session: id, host: 'claude-code', project: { id: 'prj_harbor', name: 'harbor' }, state: 'idle', waiting: 0, live: true, started_at: '2026-11-09T09:14:00.000Z', last_seen_at: '2026-11-09T09:46:00.000Z', ...over });
+// A launch: its launches branch, the launch's id, `scratch` null in a project.
+const launched = (id: string, run: InboxRunState | null, started = true): InboxAgent => agent(id, { session: started ? `ses_${id}` : `launch:${id}`, launch: { id, thread_id: `msg_${id}`, started, run, scratch: null } });
+// A thread waiting on the person adds to its owner (the waits branch) and marks it blocked in the Inbox. An owner
+// that is no polled session (one heard only over MCP: `plannotator inbox mcp` with nothing that wakes it) is listed by
+// that alone: not live, no start, last heard when it wrote.
+const WAITS = { state: 'waiting', waiting: 1, status_mark: { state: 'blocked', where: 'inbox' } } as const;
+const waitsOnly = (id: string): InboxAgent => ({ id, session: id, host: 'claude-code', project: { id: 'prj_billing', name: 'billing-svc' }, ...WAITS, live: false, started_at: null, last_seen_at: '2026-11-09T09:46:00.000Z' });
 const group = (agents: InboxAgent[], machine?: string): InboxAgentsGroup => ({ agents, total: agents.length, ended_today: 0, ...(machine ? { machine } : {}) });
 
 function mount(groups: InboxAgentsGroup[], options: { phone?: boolean; machines?: MachineView[]; newMessage?: { linked: boolean } | null } = {}) {
@@ -181,7 +190,8 @@ test.skipIf(!hasDom)("picking it hands the agent's session to New message, throu
 test.skipIf(!hasDom)('not offered where To would not take the agent: ended, a launch not started or stopped, no project; nor without the prop', async () => {
   mount([
     group([
-      agent('ses_ended', { state: 'waiting', waiting: 1, live: false }),
+      // Ended, still owning a thread that waits on the person (an ended agent with none is not drawn).
+      waitsOnly('ses_ended'),
       launched('lch_new', 'starting', false),
       launched('lch_stop', 'stopped'),
       launched('lch_card', 'waiting_answer'),
@@ -202,6 +212,17 @@ test.skipIf(!hasDom)('not offered where To would not take the agent: ended, a la
   mount([group([agent('ses_here')])], { newMessage: null });
   await settle();
   expect(await itemsOf('ses_here')).toEqual(['Rename…']);
+});
+
+test.skipIf(!hasDom)('an agent whose question waits on the person: offered while its session polls; not for one heard only over MCP, which To leaves out', async () => {
+  mount([group([agent('ses_polls', WAITS), waitsOnly('ses_mcp')])]);
+  await settle();
+  await rightClick('ses_polls');
+  expect(menu()).toEqual([AGENT_NEW_MESSAGE_LABEL, 'Rename…']);
+  await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+  await settle();
+  await rightClick('ses_mcp');
+  expect(menu()).toEqual(['Rename…']);
 });
 
 test.skipIf(!hasDom)("a linked machine's agent: offered while To lists that machine (launch on here, the machine online and new enough to say), else no item", async () => {
