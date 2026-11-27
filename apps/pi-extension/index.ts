@@ -859,14 +859,19 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 	 * Apply the current phase's tools, model and thinking level. With
 	 * `applyModelSettings: false` only the tools are re-applied: the model and
 	 * thinking level stay as they are and the saved pre-phase state is not
-	 * restored (the same-phase /tree resync, #1722).
+	 * restored (the same-phase /tree resync, #1722). `atApproval` marks the
+	 * planning-to-execution switch, where USER_PICK_BEATS_EXECUTING_CONFIG_AT_APPROVAL
+	 * decides between a hand-picked setting and the configured one.
 	 */
 	async function applyPhaseConfig(
 		ctx: ExtensionContext,
-		opts: { restoreSavedState?: boolean; applyModelSettings?: boolean } = {},
+		opts: { restoreSavedState?: boolean; applyModelSettings?: boolean; atApproval?: boolean } = {},
 	): Promise<void> {
 		const profile = getPhaseProfile();
 		const applyModelSettings = opts.applyModelSettings !== false;
+		// A setting the user picked by hand stays, except where the owner's
+		// decision lets the configured executing setting win at approval.
+		const configWinsOverPick = opts.atApproval === true && !USER_PICK_BEATS_EXECUTING_CONFIG_AT_APPROVAL;
 		if (applyModelSettings && opts.restoreSavedState !== false && savedState) {
 			await restoreSavedState(ctx);
 		}
@@ -899,11 +904,11 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 			}
 		}
 
-		if (applyModelSettings && !savedState?.userSelectedModel && profile?.model) {
+		if (applyModelSettings && (configWinsOverPick || !savedState?.userSelectedModel) && profile?.model) {
 			await applyModelRef(profile.model, ctx, phase);
 		}
 
-		if (applyModelSettings && !savedState?.userSelectedThinking && profile?.thinking) {
+		if (applyModelSettings && (configWinsOverPick || !savedState?.userSelectedThinking) && profile?.thinking) {
 			// The config accepts every level current Pi knows, which is a superset
 			// of the `ThinkingLevel` union of the pinned Pi floor (#1304). Pi clamps
 			// a level the running model does not support, so handing it one this
@@ -2104,7 +2109,7 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 				approvedPlanContent = null;
 				phase = "executing";
 				framingDelivered = false;
-				await applyPhaseConfig(ctx, { restoreSavedState: true });
+				await applyPhaseConfig(ctx, { restoreSavedState: true, atApproval: true });
 				pi.appendEntry("plannotator-execute", { lastSubmittedPath });
 				persistState();
 				justApprovedPlan = true;
@@ -2336,7 +2341,7 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 			}
 			phase = "executing";
 			framingDelivered = false;
-			await applyPhaseConfig(ctx, { restoreSavedState: true });
+			await applyPhaseConfig(ctx, { restoreSavedState: true, atApproval: true });
 			pi.appendEntry("plannotator-execute", { lastSubmittedPath, approvedPlan: planContent });
 			persistState();
 

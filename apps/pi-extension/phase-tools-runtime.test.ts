@@ -400,7 +400,7 @@ function createModelHost(options: ModelHostOptions) {
 		appendEntry: (customType: string, data: unknown) => {
 			host.entries.push({ type: "custom", customType, data });
 		},
-		events: { on: () => () => undefined },
+		events: { on: () => () => undefined, emit: () => undefined },
 		getActiveTools: () => [...tools.active],
 		getFlag: () => false,
 		getThinkingLevel: () => host.thinking,
@@ -831,7 +831,8 @@ describe("Plannotator counts a thinking level as the user's only when the user s
 		await first.submit();
 		expect([first.host.model, first.host.thinking]).toEqual([LUNA, "low"]);
 
-		const cwd2 = makeWorkspace({ phases: { executing: { thinking: "low" } } });
+		// No configured executing thinking here: without the choice, approval would bring back "xhigh".
+		const cwd2 = makeWorkspace();
 		writeFileSync(join(cwd2, "PLAN.md"), PLAN, "utf-8");
 		const second = createModelHost({ cwd: cwd2, initialModel: SOL, initialThinking: "xhigh", entries: [], thinkingListenerAhead: true });
 		await second.run("session_start");
@@ -890,5 +891,91 @@ describe("Plannotator tells a model pick from a model the host or Plannotator ch
 		expect(runtime.host.model).toEqual(LUNA);
 		await runtime.submit();
 		expect(runtime.host.model).toEqual(SOL);
+	});
+});
+
+// These follow USER_PICK_BEATS_EXECUTING_CONFIG_AT_APPROVAL in index.ts (owner decision pending).
+describe("A model picked by hand while planning beats phases.executing.model at approval", () => {
+	for (const { name, omp } of HOSTS) {
+		test(`${name}: the pick stays at approval and at completion`, async () => {
+			const cwd = makeWorkspace({ phases: { executing: { model: ASTRA } } });
+			writeFileSync(join(cwd, "PLAN.md"), PLAN, "utf-8");
+			const runtime = createModelHost({ cwd, initialModel: SOL, entries: [], omp });
+			await runtime.run("session_start");
+			await runtime.command();
+			runtime.userPicks(LUNA);
+			await runtime.submit();
+			expect(runtime.host.model).toEqual(LUNA);
+			await completePlan(runtime);
+			expect(runtime.host.model).toEqual(LUNA);
+		});
+	}
+});
+
+describe("Plannotator keeps a pick when plan mode ends early", () => {
+	for (const { name, omp } of HOSTS) {
+		test(`${name}: turning plan mode off keeps a model picked while planning`, async () => {
+			const cwd = makeWorkspace({ phases: { planning: { thinking: "low" } } });
+			const runtime = createModelHost({ cwd, initialModel: SOL, initialThinking: "xhigh", entries: [], omp });
+			await runtime.run("session_start");
+			await runtime.command();
+			runtime.userPicks(LUNA, "high");
+			await runtime.command();
+			expect(lastState(runtime.host.entries).phase).toBe("idle");
+			// Only Pi reports the thinking change as the user's; oh-my-pi gets the pre-plan level back.
+			expect([runtime.host.model, runtime.host.thinking]).toEqual([LUNA, omp ? "xhigh" : "high"]);
+		});
+	}
+
+	test("Pi: an approved plan handed off for external execution keeps a model and thinking level picked while planning", async () => {
+		const cwd = makeWorkspace({ executionMode: "external", phases: { planning: { model: ASTRA, thinking: "low" } } });
+		writeFileSync(join(cwd, "PLAN.md"), PLAN, "utf-8");
+		const runtime = createModelHost({ cwd, initialModel: SOL, initialThinking: "xhigh", entries: [] });
+		await runtime.run("session_start");
+		await runtime.command();
+		runtime.userPicks(LUNA, "high");
+		await runtime.submit();
+		expect(runtime.host.entries.some((entry) => entry.customType === "plannotator-handoff")).toBe(true);
+		expect(lastState(runtime.host.entries).phase).toBe("idle");
+		expect([runtime.host.model, runtime.host.thinking]).toEqual([LUNA, "high"]);
+	});
+
+	test("Pi: external hand-off with no pick still gives back the pre-plan settings", async () => {
+		const cwd = makeWorkspace({ executionMode: "external", phases: { planning: { model: ASTRA, thinking: "low" } } });
+		writeFileSync(join(cwd, "PLAN.md"), PLAN, "utf-8");
+		const runtime = createModelHost({ cwd, initialModel: SOL, initialThinking: "xhigh", entries: [] });
+		await runtime.run("session_start");
+		await runtime.command();
+		expect([runtime.host.model, runtime.host.thinking]).toEqual([ASTRA, "low"]);
+		await runtime.submit();
+		expect(lastState(runtime.host.entries).phase).toBe("idle");
+		expect([runtime.host.model, runtime.host.thinking]).toEqual([SOL, "xhigh"]);
+	});
+});
+
+describe("Plannotator resumes a session saved by an older version (no record of what it set)", () => {
+	test("with no pick, completion restores the saved model and thinking level", async () => {
+		const cwd = makeWorkspace({ phases: { executing: { model: ASTRA, thinking: "high" } } });
+		writeFileSync(join(cwd, "PLAN.md"), PLAN, "utf-8");
+		const runtime = createModelHost({ cwd, initialModel: ASTRA, initialThinking: "high", entries: executingEntries() });
+		await runtime.run("session_start");
+		await runtime.markDone(1);
+		await runtime.markDone(2);
+		await runtime.run("agent_end");
+		expect(lastState(runtime.host.entries).phase).toBe("idle");
+		expect([runtime.host.model, runtime.host.thinking]).toEqual([SOL, "medium"]);
+	});
+
+	test("Pi: a model and thinking level picked after resuming survive completion", async () => {
+		const cwd = makeWorkspace({ phases: { executing: { model: ASTRA, thinking: "high" } } });
+		writeFileSync(join(cwd, "PLAN.md"), PLAN, "utf-8");
+		const runtime = createModelHost({ cwd, initialModel: ASTRA, initialThinking: "high", entries: executingEntries() });
+		await runtime.run("session_start");
+		runtime.userPicks(LUNA, "low");
+		await runtime.markDone(1);
+		await runtime.markDone(2);
+		await runtime.run("agent_end");
+		expect(lastState(runtime.host.entries).phase).toBe("idle");
+		expect([runtime.host.model, runtime.host.thinking]).toEqual([LUNA, "low"]);
 	});
 });
