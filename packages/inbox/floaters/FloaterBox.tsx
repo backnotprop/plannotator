@@ -18,7 +18,7 @@ import type { InboxDraftFile, InboxMessageWire, InboxReplyDraftRow, InboxThread 
 import type { ReplyDraftFileRef } from '@plannotator/core/inbox-reply-draft';
 import { ChatFrame, type ChatWindowStore } from '@plannotator/ui/components/chat';
 import { fetchSkillCatalog, getCachedSkillCatalog } from '@plannotator/ui/utils/skillCatalog';
-import { inboxApi } from '../api';
+import { heldWords, inboxApi, type MachineView } from '../api';
 import { AttachFilesButton, ComposeFileTiles, attachedAnnouncement, pastedSignature, useComposeFiles, useFileDrop } from '../compose/ComposeFiles';
 import { InboxComposerField } from '../components/ComposerField';
 import { conflictText, DraftHead, DraftStamp } from '../components/DraftLabel';
@@ -26,7 +26,9 @@ import { ReplyRow } from '../components/ReplyRow';
 import { Tip } from '../components/Tip';
 import { VoiceMicButton, VoiceStatusLine } from '../components/VoiceMic';
 import { Icon } from '../icons';
+import { linkedMachineFacts, machineOf } from '../inboxUrl';
 import { landInReplyDraft, replySendStarts, useReplyDraft, type ReplyBoxTook } from '../replyDraft';
+import { lostDraftFilesOf, replyDraftHost } from '../machineDrafts';
 import { tookOverReply, wordsMessage } from '../sendTargets';
 import { useFloatingReplyWords } from '../threadMentions';
 import { inboxThreadShortcuts } from '../shortcuts';
@@ -69,7 +71,8 @@ export interface FloaterBoxProps {
   /** × : it stops floating and stays in Drafts. */
   onPutAway: () => void;
   onOpenThread: () => void;
-  onSent: (agent: string) => void;
+  /** `held`: the words of a reply held for a linked machine that is away ("Waiting for …"), else null. */
+  onSent: (agent: string, held: string | null) => void;
   /** Discarded; the words and files, for Undo. */
   onDiscarded: (words: string, files: readonly ReplyDraftFileRef[]) => void;
   /** Sent or discarded in another window. */
@@ -88,11 +91,14 @@ export function FloaterBox({ row, phone, frame, takeFocus, onMinimize, onPutAway
   const takeFiles = useRef<(threadId: string, draft: { files?: readonly InboxDraftFile[] }, wanted: readonly string[]) => void>(() => {});
   const takeWords = useRef<(threadId: string, draft: { body: string; files?: readonly InboxDraftFile[] }, was: string) => ReplyBoxTook>(() => 'hidden');
   const draft = useReplyDraft(threadId, {
+    ...replyDraftHost,
     onFiles: (id, saved, wanted) => takeFiles.current(id, saved, wanted),
     onWords: (id, saved, was) => takeWords.current(id, saved, was),
   });
   const files = useComposeFiles(NO_UPLOADS, {
     onPasted: (names) => setSaid(attachedAnnouncement(names)),
+    // A linked machine's thread: its files go to that machine, beside its draft.
+    machine: machineOf(threadId),
     text: {
       get value() {
         return textRef.current;
@@ -132,12 +138,13 @@ export function FloaterBox({ row, phone, frame, takeFocus, onMinimize, onPutAway
   useEffect(() => {
     if (loaded.current || draft.loadedFor !== threadId) return;
     loaded.current = true;
-    const body = draft.conflict ?? draft.draft?.body ?? '';
+    // As the thread's box: a conflict's words, else words whose save did not land, else the draft.
+    const body = draft.conflict ?? draft.unsaved ?? draft.draft?.body ?? '';
     setText(body);
     textRef.current = body;
     const kept = draft.draft?.files ?? [];
-    if (kept.length > 0) {
-      files.restoreDraft(kept, body, 'replace', []);
+    if (kept.length > 0 || lostDraftFilesOf(threadId).length > 0) {
+      files.restoreDraft(kept, body, 'replace', [], lostDraftFilesOf(threadId));
       filesSaved.current = pastedSignature(files.draftFiles());
       draft.boxTook(threadId, kept.map((file) => file.upload_id));
     }
@@ -174,7 +181,7 @@ export function FloaterBox({ row, phone, frame, takeFocus, onMinimize, onPutAway
     const want = new Set(wanted);
     const now = files.draftFiles(textRef.current).map((file) => file.upload_id);
     if (now.length === want.size && now.every((upload) => want.has(upload))) return;
-    files.restoreDraft((saved.files ?? []).filter((file) => want.has(file.upload_id)), textRef.current, 'replace', wanted);
+    files.restoreDraft((saved.files ?? []).filter((file) => want.has(file.upload_id)), textRef.current, 'replace', wanted, lostDraftFilesOf(id));
     filesSaved.current = pastedSignature(files.draftFiles());
     draft.boxTook(id, files.draftFiles().map((file) => file.upload_id));
   };
@@ -211,6 +218,12 @@ export function FloaterBox({ row, phone, frame, takeFocus, onMinimize, onPutAway
         }
         if (changed !== threadId) return;
         void draft.reload(() => ({ text: textRef.current, files: files.draftFiles(textRef.current) })).then((answer) => {
+          // Words of the person's held for another computer, put to them now as the conflict: in the box.
+          if (answer?.offered !== undefined) {
+            setText(answer.offered);
+            textRef.current = answer.offered;
+            return;
+          }
           if (!answer?.replaceBox) return;
           if (!answer.draft) {
             onGone();
@@ -281,7 +294,7 @@ export function FloaterBox({ row, phone, frame, takeFocus, onMinimize, onPutAway
       // A retry of the same reply keeps its key (a lost answer is not sent twice); changed words are a new reply.
       const content = `${words}\u0000${uploads.join(',')}`;
       if (sendKey.current?.content !== content) sendKey.current = { key: crypto.randomUUID(), content };
-      await inboxApi.reply(target.id, {
+      const answer = await inboxApi.reply(target.id, {
         idempotency_key: sendKey.current.key,
         words,
         questions: [],
@@ -296,7 +309,8 @@ export function FloaterBox({ row, phone, frame, takeFocus, onMinimize, onPutAway
       });
       sendKey.current = null;
       draft.sent();
-      onSent(target.author.kind === 'agent' ? (target.author.name ?? agentLabel) : agentLabel);
+      const away = answer.held ? linkedMachineFacts(machineOf(threadId) ?? '') : null;
+      onSent(target.author.kind === 'agent' ? (target.author.name ?? agentLabel) : agentLabel, answer.held ? heldWords(away && { name: away.name, state: away.state as MachineView['state'] }) : null);
     } catch (cause) {
       if (claimed) draft.release();
       if (textRef.current.trim() !== '') draft.save(textRef.current, files.draftFiles(textRef.current));
@@ -421,6 +435,12 @@ export function FloaterBox({ row, phone, frame, takeFocus, onMinimize, onPutAway
                 setText(kept?.body ?? '');
                 textRef.current = kept?.body ?? '';
                 fieldRef.current?.focus();
+                // Read again: words of the person's held for another computer that waited on this choice are offered now.
+                void draft.reload(() => ({ text: textRef.current, files: files.draftFiles(textRef.current) })).then((answer) => {
+                  if (answer?.offered === undefined) return;
+                  setText(answer.offered);
+                  textRef.current = answer.offered;
+                });
               },
             }}
           />

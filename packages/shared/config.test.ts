@@ -31,6 +31,9 @@ import {
   resolveExperimental,
   savedExperimental,
   parseExperimentalEnv,
+  EXPERIMENTAL_FEATURES,
+  inboxDecisionModeEnvOff,
+  inboxDecisionModeOn,
   agentToolHostOf,
   agentToolSaveFailed,
   AGENT_TOOL_DEFAULTS,
@@ -42,6 +45,7 @@ import {
   isValidUrlHost,
   parseReviewAnalysisConfig,
   parseDisplayOptionsConfig,
+  resolveHtmlStartsInInteract,
   loadConfig,
   saveConfig,
   getServerConfig,
@@ -215,6 +219,7 @@ describe("parseDisplayOptionsConfig", () => {
       planWidth: "wide",
       taterMode: true,
       inputMethod: "pinpoint",
+      htmlAnnotateOnStartup: false,
     };
     expect(parseDisplayOptionsConfig(all)).toEqual(all);
     expect(parseDisplayOptionsConfig({ textSize: "19", showGrid: 1, extra: true, planWidth: "wide" })).toEqual({ planWidth: "wide" });
@@ -223,6 +228,15 @@ describe("parseDisplayOptionsConfig", () => {
 
   test("refuses anything that is not a plain object", () => {
     for (const bad of [null, [], "wide", 17, true]) expect(parseDisplayOptionsConfig(bad)).toBeUndefined();
+  });
+});
+
+describe("resolveHtmlStartsInInteract (the live bridge's start mode)", () => {
+  test("only an explicit off starts pages in Interact; unset or unreadable stays armed", () => {
+    expect(resolveHtmlStartsInInteract({ displayOptions: { htmlAnnotateOnStartup: false } })).toBe(true);
+    expect(resolveHtmlStartsInInteract({ displayOptions: { htmlAnnotateOnStartup: true } })).toBe(false);
+    expect(resolveHtmlStartsInInteract({})).toBe(false);
+    expect(resolveHtmlStartsInInteract({ displayOptions: { htmlAnnotateOnStartup: "false" } } as unknown as PlannotatorConfig)).toBe(false);
   });
 });
 
@@ -1395,14 +1409,45 @@ describe("experimental features", () => {
   });
 
   test("off by default; config.json turns it on; the env var decides both ways", () => {
-    expect(resolveExperimental({}, "decision-mode", {})).toBe(false);
-    expect(resolveExperimental({ experimental: { decisionMode: true } }, "decision-mode", {})).toBe(true);
-    expect(resolveExperimental({ experimental: { decisionMode: "true" as unknown as boolean } }, "decision-mode", {})).toBe(true);
-    expect(resolveExperimental({ experimental: [] as unknown as { decisionMode?: boolean } }, "decision-mode", {})).toBe(false);
-    expect(resolveExperimental({}, "decision-mode", { PLANNOTATOR_EXPERIMENTAL: "x, Decision-Mode" })).toBe(true);
-    expect(resolveExperimental({ experimental: { decisionMode: true } }, "decision-mode", { PLANNOTATOR_EXPERIMENTAL: "-decision-mode" })).toBe(false);
-    expect(resolveExperimental({ experimental: { decisionMode: true } }, "decision-mode", { PLANNOTATOR_EXPERIMENTAL: "something-else" })).toBe(true);
-    expect(parseExperimentalEnv("decision-mode", { PLANNOTATOR_EXPERIMENTAL: "" })).toBeUndefined();
+    expect(resolveExperimental({}, "grid", {})).toBe(false);
+    expect(resolveExperimental({ experimental: { grid: true } }, "grid", {})).toBe(true);
+    expect(resolveExperimental({ experimental: { grid: "true" as unknown as boolean } }, "grid", {})).toBe(true);
+    expect(resolveExperimental({ experimental: [] as unknown as { grid?: boolean } }, "grid", {})).toBe(false);
+    expect(resolveExperimental({}, "grid", { PLANNOTATOR_EXPERIMENTAL: "x, Grid" })).toBe(true);
+    expect(resolveExperimental({ experimental: { grid: true } }, "grid", { PLANNOTATOR_EXPERIMENTAL: "-grid" })).toBe(false);
+    expect(resolveExperimental({ experimental: { grid: true } }, "grid", { PLANNOTATOR_EXPERIMENTAL: "something-else" })).toBe(true);
+    expect(parseExperimentalEnv("grid", { PLANNOTATOR_EXPERIMENTAL: "" })).toBeUndefined();
+  });
+
+  test("decision mode is no longer an experimental feature: PLANNOTATOR_EXPERIMENTAL does not name it", () => {
+    expect(Object.keys(EXPERIMENTAL_FEATURES)).not.toContain("decision-mode");
+    // The env var's old name is ignored like any unknown name.
+    expect(resolveExperimental({}, "grid", { PLANNOTATOR_EXPERIMENTAL: "-decision-mode, decision-mode" })).toBe(false);
+  });
+
+  test("decision mode is on unless turned off; an old experimental choice is kept; the new key wins", () => {
+    expect(inboxDecisionModeOn({})).toBe(true);
+    expect(inboxDecisionModeOn({ inboxDecisionMode: false })).toBe(false);
+    expect(inboxDecisionModeOn({ inboxDecisionMode: true })).toBe(true);
+    expect(inboxDecisionModeOn({ experimental: { decisionMode: false } })).toBe(false);
+    expect(inboxDecisionModeOn({ experimental: { decisionMode: true } })).toBe(true);
+    expect(inboxDecisionModeOn({ experimental: { grid: true } })).toBe(true);
+    expect(inboxDecisionModeOn({ inboxDecisionMode: true, experimental: { decisionMode: false } })).toBe(true);
+    expect(inboxDecisionModeOn({ inboxDecisionMode: false, experimental: { decisionMode: true } })).toBe(false);
+    // A hand-edited value that is not a boolean decides nothing: the next reading does.
+    expect(inboxDecisionModeOn({ inboxDecisionMode: "maybe" as unknown as boolean, experimental: { decisionMode: false } })).toBe(false);
+    expect(inboxDecisionModeOn({ experimental: [] as unknown as { decisionMode?: boolean } })).toBe(true);
+  });
+
+  test("PLANNOTATOR_EXPERIMENTAL=-decision-mode, the documented way to force it off, still turns it off; any other mention is ignored", () => {
+    expect(inboxDecisionModeOn({}, { PLANNOTATOR_EXPERIMENTAL: "-decision-mode" })).toBe(false);
+    expect(inboxDecisionModeOn({ inboxDecisionMode: true }, { PLANNOTATOR_EXPERIMENTAL: "grid, -Decision-Mode " })).toBe(false);
+    expect(inboxDecisionModeEnvOff({ PLANNOTATOR_EXPERIMENTAL: "grid,-decision-mode" })).toBe(true);
+    // The plain name, or no mention: the config decides, without error.
+    expect(inboxDecisionModeOn({ inboxDecisionMode: false }, { PLANNOTATOR_EXPERIMENTAL: "decision-mode" })).toBe(false);
+    expect(inboxDecisionModeOn({}, { PLANNOTATOR_EXPERIMENTAL: "decision-mode" })).toBe(true);
+    expect(inboxDecisionModeOn({}, { PLANNOTATOR_EXPERIMENTAL: "grid" })).toBe(true);
+    expect(inboxDecisionModeOn({}, {})).toBe(true);
   });
 
   test("saving one flag keeps the other experimental keys", () => {
@@ -1437,7 +1482,8 @@ describe("experimental features", () => {
   test("a saved experimental choice is told from the untouched default", () => {
     expect(savedExperimental({}, "grid")).toBeUndefined();
     expect(savedExperimental({ experimental: { grid: false } }, "grid")).toBe(false);
-    expect(savedExperimental({ experimental: { decisionMode: "true" as unknown as boolean } }, "decision-mode")).toBe(true);
+    // Decision mode left Experimental (its own `inboxDecisionMode`): Grid is the one feature read here.
+    expect(savedExperimental({ experimental: { grid: "true" as unknown as boolean } }, "grid")).toBe(true);
   });
 
   test("a hand-edited experimental value that is not an object is replaced, never spread", () => {
@@ -1452,10 +1498,10 @@ describe("experimental features", () => {
   // hidden `plannotator telemetry --off` could write `usageCounts`. Such a file
   // still loads quietly, its flags still work, and a save leaves the old keys be.
   test("a config.json with the removed usage-count keys loads with no warning and keeps them on save", () => {
-    writeFileSync(join(dir, "config.json"), JSON.stringify({ experimental: { decisionMode: true }, usageCounts: false, usageCountsNotice: { decisionMode: 1 } }));
+    writeFileSync(join(dir, "config.json"), JSON.stringify({ experimental: { grid: true }, usageCounts: false, usageCountsNotice: { decisionMode: 1 } }));
     const warn = spyOn(process.stderr, "write");
     try {
-      expect(resolveExperimental(loadConfig(), "decision-mode", {})).toBe(true);
+      expect(resolveExperimental(loadConfig(), "grid", {})).toBe(true);
       saveConfig({ inboxTextSize: 13 });
       expect(warn).not.toHaveBeenCalled();
     } finally {

@@ -4,6 +4,7 @@ import { COMPACT_FILE_HEADER_HEIGHT, COMPACT_HUNK_SEPARATOR_HEIGHT, FILE_HEADER_
 import React, { memo, startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ContextNoteAnchor } from '../utils/contextNoteAnchor';
 import { createPortal } from 'react-dom';
+import { RegionBoundary } from '@plannotator/ui/components/RegionBoundary';
 import { revealFirstChange } from '../utils/revealFirstChange';
 import { DEFAULT_CODE_VIEW_FILE_METRICS, getSingularPatch, hydratePartialDiff, processFile } from '@pierre/diffs';
 import type {
@@ -894,7 +895,19 @@ function stickyHeaderHeight(node: HTMLElement | undefined): number {
   return node?.shadowRoot?.querySelector('[data-diffs-header]')?.getBoundingClientRect().height || FILE_HEADER_HEIGHT;
 }
 
-export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
+/**
+ * The diff in its own boundary: a draw that throws (a "+" on a line, the comment box under it) says so in the diff's
+ * place, and the page around it stays (ui's RegionBoundary). The selection a "+" sets is the host's, above the
+ * boundary: Try again clears it first, or the diff would draw it again and fail again. The words typed in the comment
+ * box are not in it (the toolbar's draft store keeps them by file and lines), so they are there when the box opens again.
+ */
+export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = (props) => (
+  <RegionBoundary name="Diff" onRetry={() => props.onLineSelection(null)}>
+    <AllFilesCodeViewBody {...props} />
+  </RegionBoundary>
+);
+
+const AllFilesCodeViewBody: React.FC<AllFilesCodeViewProps> = ({
   files,
   diffStyle,
   diffOverflow,

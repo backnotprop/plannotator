@@ -108,6 +108,13 @@ describe('what came on a row', () => {
     expect(arrivalOf(row('a', { author: { kind: 'agent', host: 'claude-code', session: 'ses_1', name: 'Reviewer' } }), undefined).agent).toBe('Reviewer');
   });
 
+  test("a script's new thread is from Script; one a session took over and wrote in last is from that session, as the row's tiles name them", () => {
+    const script = { kind: 'agent' as const, host: null, session: null, name: null };
+    expect(hereLine([arrivalOf(row('a', { author: script }), undefined)])?.full).toBe('New from Script: “Thread a”');
+    const over = row('a', { author: script, participants: [{ host: 'claude-code', session: 'ses_1', name: 'Claude Code' }], last_agent_at: T1 });
+    expect(hereLine([arrivalOf(over, row('a', { author: script }))])?.full).toBe('Claude Code replied in “Thread a”');
+  });
+
   test('the title is the row\'s: its name, else its subject; the project its window name', () => {
     expect(arrivalOf(row('a'), undefined).title).toBe('Thread a');
     expect(arrivalOf(row('a', { thread_name: null }), undefined).title).toBe('Subject a');

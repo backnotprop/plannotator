@@ -545,6 +545,22 @@
       "relay": true
     },
     {
+      "name": "GET pulls/pull",
+      "method": "GET",
+      "path": "pulls/pull",
+      "params": [],
+      "call": "getPullsPull",
+      "window": "/api/inbox/pulls/pull",
+      "grant": "machine",
+      "auth": "token",
+      "kind": "read",
+      "write": null,
+      "key": null,
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
       "name": "GET pulls/details",
       "method": "GET",
       "path": "pulls/details",
@@ -1224,6 +1240,42 @@
       "relay": true
     },
     {
+      "name": "POST threads/:id/draft",
+      "method": "POST",
+      "path": "threads/{thread}/draft",
+      "params": [
+        "thread"
+      ],
+      "call": "postThreadDraft",
+      "window": "/api/inbox/threads/{thread}/draft",
+      "grant": "machine",
+      "auth": "token",
+      "kind": "now",
+      "write": "draft",
+      "key": "body",
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
+      "name": "POST threads/:id/draft/delete",
+      "method": "POST",
+      "path": "threads/{thread}/draft/delete",
+      "params": [
+        "thread"
+      ],
+      "call": "postThreadDraftDelete",
+      "window": "/api/inbox/threads/{thread}/draft/delete",
+      "grant": "machine",
+      "auth": "token",
+      "kind": "now",
+      "write": "draft",
+      "key": "body",
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
       "name": "GET threads/:id/attachments",
       "method": "GET",
       "path": "threads/{thread}/attachments",
@@ -1524,6 +1576,114 @@
       "kind": "hold",
       "write": "set",
       "key": "body",
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
+      "name": "GET messages/:id/guide/file",
+      "method": "GET",
+      "path": "messages/{message}/guide/file",
+      "params": [
+        "message"
+      ],
+      "call": "getMessageGuideFile",
+      "window": "/api/inbox/messages/{message}/guide/file",
+      "grant": "machine",
+      "auth": "token",
+      "kind": "read",
+      "write": null,
+      "key": null,
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
+      "name": "GET messages/:id/guide/review-image",
+      "method": "GET",
+      "path": "messages/{message}/guide/review-image",
+      "params": [
+        "message"
+      ],
+      "call": "getMessageGuideReviewImage",
+      "window": "/api/inbox/messages/{message}/guide/review-image",
+      "grant": "machine",
+      "auth": "token",
+      "kind": "read",
+      "write": null,
+      "key": null,
+      "answer": "bytes",
+      "range": false,
+      "relay": true
+    },
+    {
+      "name": "GET messages/:id/guide/review-markdown-image",
+      "method": "GET",
+      "path": "messages/{message}/guide/review-markdown-image",
+      "params": [
+        "message"
+      ],
+      "call": "getMessageGuideReviewMarkdownImage",
+      "window": "/api/inbox/messages/{message}/guide/review-markdown-image",
+      "grant": "machine",
+      "auth": "token",
+      "kind": "read",
+      "write": null,
+      "key": null,
+      "answer": "bytes",
+      "range": false,
+      "relay": true
+    },
+    {
+      "name": "GET messages/:id/guide/package-changes",
+      "method": "GET",
+      "path": "messages/{message}/guide/package-changes",
+      "params": [
+        "message"
+      ],
+      "call": "getMessageGuidePackageChanges",
+      "window": "/api/inbox/messages/{message}/guide/package-changes",
+      "grant": "machine",
+      "auth": "token",
+      "kind": "read",
+      "write": null,
+      "key": null,
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
+      "name": "POST messages/:id/guide/viewed",
+      "method": "POST",
+      "path": "messages/{message}/guide/viewed",
+      "params": [
+        "message"
+      ],
+      "call": "postMessageGuideViewed",
+      "window": "/api/inbox/messages/{message}/guide/viewed",
+      "grant": "machine",
+      "auth": "token",
+      "kind": "hold",
+      "write": "set",
+      "key": "body",
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
+      "name": "GET threads/:id/steps",
+      "method": "GET",
+      "path": "threads/{thread}/steps",
+      "params": [
+        "thread"
+      ],
+      "call": "getThreadSteps",
+      "window": "/api/inbox/threads/{thread}/steps",
+      "grant": "machine",
+      "auth": "token",
+      "kind": "read",
+      "write": null,
+      "key": null,
       "answer": "json",
       "range": false,
       "relay": true
@@ -2055,6 +2215,38 @@
       "relay": true
     },
     {
+      "name": "GET open-in/file/code",
+      "method": "GET",
+      "path": "open-in/file/code",
+      "params": [],
+      "call": "getOpenInFileCode",
+      "window": "/api/inbox/open-in/file/code",
+      "grant": "machine",
+      "auth": "token",
+      "kind": "read",
+      "write": null,
+      "key": null,
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
+      "name": "GET open-in/file",
+      "method": "GET",
+      "path": "open-in/file",
+      "params": [],
+      "call": "getOpenInFile",
+      "window": "/api/inbox/open-in/file",
+      "grant": "machine",
+      "auth": "token",
+      "kind": "read",
+      "write": null,
+      "key": null,
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
       "name": "POST open-in/file/attach",
       "method": "POST",
       "path": "open-in/file/attach",
@@ -2545,6 +2737,54 @@
       "auth": "token",
       "kind": "hold",
       "write": "set",
+      "key": "body",
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
+      "name": "POST link-through-ask",
+      "method": "POST",
+      "path": "link-through-ask",
+      "params": [],
+      "call": "postLinkThroughAsk",
+      "window": null,
+      "grant": "machine",
+      "auth": "token",
+      "kind": "hold",
+      "write": "set",
+      "key": "body",
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
+      "name": "POST link-through-offer",
+      "method": "POST",
+      "path": "link-through-offer",
+      "params": [],
+      "call": "postLinkThroughOffer",
+      "window": null,
+      "grant": "machine",
+      "auth": "token",
+      "kind": "now",
+      "write": "now",
+      "key": "body",
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
+      "name": "POST link-through-introduce",
+      "method": "POST",
+      "path": "link-through-introduce",
+      "params": [],
+      "call": "postLinkThroughIntroduce",
+      "window": null,
+      "grant": "machine",
+      "auth": "token",
+      "kind": "now",
+      "write": "now",
       "key": "body",
       "answer": "json",
       "range": false,

@@ -464,7 +464,8 @@ describe("questions end to end: MCP send, window picks and Send, agent reads", (
   test("send_message with question blocks, pick, Send, read_thread returns the answer", async () => {
     const root = tempRoot();
     const project = gitProject(root);
-    const server = await start(join(root, "data"));
+    // The default tool list: the switches decided here, never by a config.json an earlier file in this process left on.
+    const server = await start(join(root, "data"), { board: false, steps: false, scheduled: false });
     const client = await mcpClient(server);
 
     expect(client.getInstructions()).toBe(INBOX_MCP_INSTRUCTIONS);
@@ -1231,14 +1232,14 @@ describe("the window's routes: settings, restart, favicon", () => {
     process.env.PLANNOTATOR_DATA_DIR = dataDir;
     try {
       mkdirSync(dataDir, { recursive: true });
-      // What code review saved: these read back under the wire's names, Whole file among them; the font and Hide whitespace are code review's own.
+      // What code review saved: these read back under the wire's names, Whole file among them; Hide whitespace is code review's own, and a font size no build writes reads as never chosen.
       writeFileSync(join(dataDir, "config.json"), JSON.stringify({ diffOptions: { lineDiffType: "char", tabSize: 4, expandUnchanged: true, hideWhitespace: true, fontSize: "13", diffIndicators: "sideways" } }));
       const server = await start(dataDir);
       const read = async () => (await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/settings`)).json()) as { diff_options: Record<string, unknown>; diff_style: unknown };
       const onDisk = () => (JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")) as { diffOptions?: Record<string, unknown> }).diffOptions;
       const save = (body: Record<string, unknown>) => post(server, "/api/inbox/settings", { serverSession: server.serverSession, ...body });
       // A value no build writes reads as never chosen.
-      expect((await read()).diff_options).toEqual({ diff_style: null, overflow: null, indicators: null, line_diff_type: "char", line_numbers: null, background: null, background_intensity: null, tab_size: 4, semantic: null, expand_unchanged: true });
+      expect((await read()).diff_options).toEqual({ diff_style: null, overflow: null, indicators: null, line_diff_type: "char", line_numbers: null, background: null, background_intensity: null, tab_size: 4, semantic: null, expand_unchanged: true, font_family: null, font_size: null, power_up: null, power_up_motion: null });
 
       // Every field is checked, and the refusal names it; nothing is written.
       const refusals: [unknown, string][] = [
@@ -1263,6 +1264,7 @@ describe("the window's routes: settings, restart, favicon", () => {
         [{ tab_size: 2.5 }, "diff_options.tab_size"],
         [{ overflow: "wrap", tab_size: "4" }, "diff_options.tab_size"],
         [{ semantic: "off" }, "diff_options.semantic"],
+        [{ power_up: "on" }, "diff_options.power_up"],
       ];
       for (const [bad, field] of refusals) {
         const refused = await save({ diff_options: bad });
@@ -1276,12 +1278,18 @@ describe("the window's routes: settings, restart, favicon", () => {
       expect(onDisk()).toEqual({ lineDiffType: "char", tabSize: 4, expandUnchanged: true, hideWhitespace: true, fontSize: "13", diffIndicators: "sideways" });
 
       // A change saves only its fields; the others, code review's included, stay.
-      const saved = await save({ diff_options: { overflow: "wrap", indicators: "classic", line_numbers: false, background_intensity: "strong", tab_size: 8, semantic: false, expand_unchanged: false } });
+      const saved = await save({ diff_options: { overflow: "wrap", indicators: "classic", line_numbers: false, background_intensity: "strong", tab_size: 8, semantic: false, expand_unchanged: false, power_up: false } });
       expect(saved.status).toBe(200);
       const answer = (await saved.json()) as { diff_options: Record<string, unknown> };
-      expect(answer.diff_options).toEqual({ diff_style: null, overflow: "wrap", indicators: "classic", line_diff_type: "char", line_numbers: false, background: null, background_intensity: "strong", tab_size: 8, semantic: false, expand_unchanged: false });
-      expect(onDisk()).toEqual({ lineDiffType: "char", tabSize: 8, expandUnchanged: false, hideWhitespace: true, fontSize: "13", diffIndicators: "classic", overflow: "wrap", showLineNumbers: false, lineBgIntensity: "strong", semantic: false });
+      expect(answer.diff_options).toEqual({ diff_style: null, overflow: "wrap", indicators: "classic", line_diff_type: "char", line_numbers: false, background: null, background_intensity: "strong", tab_size: 8, semantic: false, expand_unchanged: false, font_family: null, font_size: null, power_up: false, power_up_motion: null });
+      expect(onDisk()).toEqual({ lineDiffType: "char", tabSize: 8, expandUnchanged: false, hideWhitespace: true, fontSize: "13", diffIndicators: "classic", overflow: "wrap", showLineNumbers: false, lineBgIntensity: "strong", semantic: false, powerUp: false });
       expect((await read()).diff_options).toEqual(answer.diff_options);
+
+      // Settings → Reviews' code font, its size, Power Up and its motion save under code review's names.
+      const reviews = await save({ diff_options: { font_family: "Hack", font_size: "15px", power_up: false, power_up_motion: "stream" } });
+      expect(reviews.status).toBe(200);
+      expect(((await reviews.json()) as { diff_options: Record<string, unknown> }).diff_options).toMatchObject({ font_family: "Hack", font_size: "15px", power_up: false, power_up_motion: "stream" });
+      expect(onDisk()).toMatchObject({ fontFamily: "Hack", fontSize: "15px", powerUp: false, powerUpMotion: "stream" });
 
       // `diff_style` alone (pages from before) sets the same field and is answered both ways.
       const alias = await save({ diff_style: "unified" });
@@ -1303,6 +1311,100 @@ describe("the window's routes: settings, restart, favicon", () => {
     } finally {
       if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
       else process.env.PLANNOTATOR_DATA_DIR = previous;
+    }
+  });
+
+  test("code review's \"Semantic changes\" switch (`review_analysis`) reads and writes config.json `reviewAnalysis.semanticDiff`, keeping Call flow", async () => {
+    const root = tempRoot();
+    const dataDir = join(root, "data");
+    const previous = process.env.PLANNOTATOR_DATA_DIR;
+    process.env.PLANNOTATOR_DATA_DIR = dataDir;
+    try {
+      mkdirSync(dataDir, { recursive: true });
+      // What code review saved: the switch off, Call flow on.
+      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ reviewAnalysis: { semanticDiff: false, callFlow: true } }));
+      const server = await start(dataDir);
+      const read = async () => ((await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/settings`)).json()) as { review_analysis: unknown }).review_analysis;
+      const onDisk = () => (JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")) as { reviewAnalysis?: Record<string, unknown> }).reviewAnalysis;
+      const save = (body: Record<string, unknown>) => post(server, "/api/inbox/settings", { serverSession: server.serverSession, ...body });
+      // The window reads code review's choice, so off there is off here on any address.
+      expect(await read()).toEqual({ semantic_diff: false });
+
+      // Only the switch, as a boolean; Call flow is code review's to turn on. Nothing is written.
+      for (const [bad, field] of [[true, "review_analysis"], [{}, "review_analysis.semantic_diff"], [{ semantic_diff: "on" }, "review_analysis.semantic_diff"], [{ call_flow: false }, "review_analysis.call_flow"]] as const) {
+        const refused = await save({ review_analysis: bad });
+        expect(refused.status).toBe(422);
+        expect((await refused.json()).field).toBe(field);
+      }
+      expect(onDisk()).toEqual({ semanticDiff: false, callFlow: true });
+
+      // Turned on in the Inbox: config.json says so, and Call flow stays.
+      const saved = await save({ review_analysis: { semantic_diff: true } });
+      expect(saved.status).toBe(200);
+      expect(((await saved.json()) as { review_analysis: unknown }).review_analysis).toEqual({ semantic_diff: true });
+      expect(onDisk()).toEqual({ semanticDiff: true, callFlow: true });
+      expect(await read()).toEqual({ semantic_diff: true });
+    } finally {
+      if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = previous;
+    }
+  });
+
+  test("Power Up: the window's worker gets a second opinion from this computer's key, and only the window changes the key", async () => {
+    // A stand-in provider on loopback (the systemone contract a Custom provider speaks): every unsure call is "moved".
+    let asked = 0;
+    let refuse = false;
+    const provider = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: async (req) => {
+        asked++;
+        if (refuse) return new Response("no", { status: 401 });
+        expect(req.headers.get("authorization")).toBe("Bearer fake-key-not-real");
+        return Response.json({ answers: { q: { probabilities: { moved: 0.95, new: 0.05 } } } });
+      },
+    });
+    try {
+      const root = tempRoot();
+      const dataDir = join(root, "data");
+      mkdirSync(join(dataDir, "secrets"), { recursive: true });
+      const keyFile = join(dataDir, "secrets", "sem-diff-opinion.json");
+      // The key code review's Settings › Semantic diffs saved (an obviously fake one).
+      writeFileSync(keyFile, JSON.stringify({ provider: "custom", url: `http://127.0.0.1:${provider.port}/`, auth: "bearer", apiKey: "fake-key-not-real" }));
+      const server = await start(dataDir);
+      const base = `http://127.0.0.1:${server.port}`;
+      const settings = (await (await fetch(`${base}/api/sem-diff/opinion/settings`)).json()) as { configured: boolean; provider: string; endpoint?: string };
+      expect([settings.configured, settings.provider, settings.endpoint]).toEqual([true, "custom", `127.0.0.1:${provider.port}`]);
+
+      const question = { candidates: [{ kind: "extract", helper: "applyDiscount", caller: "checkout", file: "src/cart.ts", code: { helper: "function applyDiscount(t) { return t * 0.9; }", caller: "function checkout(t) { return t * 0.9; }", callerNew: "function checkout(t) { return applyDiscount(t); }" } }] };
+      const fromWindow = { Origin: base, "Sec-Fetch-Site": "same-origin" };
+      const answered = await post(server, "/api/sem-diff/opinion", question, fromWindow);
+      expect(answered.status).toBe(200);
+      const reply = (await answered.json()) as { ok: boolean; answers?: { accept: boolean }[] };
+      expect([reply.ok, reply.answers?.map((answer) => answer.accept)]).toEqual([true, [true]]);
+      expect(asked).toBe(1);
+
+      // Another site's page asks nothing and learns nothing.
+      const cross = await post(server, "/api/sem-diff/opinion", question, { Origin: "https://evil.example", "Sec-Fetch-Site": "cross-site" });
+      expect(cross.status).toBe(403);
+      expect((await fetch(`${base}/api/sem-diff/opinion/settings`, { headers: { Origin: "https://evil.example", "Sec-Fetch-Site": "cross-site" } })).status).toBe(403);
+      expect(asked).toBe(1);
+
+      // A refused key reads as refused, so the window's mark says why and offers Retry.
+      refuse = true;
+      const refused = (await (await post(server, "/api/sem-diff/opinion", { candidates: [{ ...question.candidates[0], helper: "applyTax" }] }, fromWindow)).json()) as { ok: boolean; state?: string };
+      expect([refused.ok, refused.state]).toEqual([false, "refusedKey"]);
+
+      // The key is changed only by a request that looks like the window's (its Origin and this run's serverSession).
+      const bare = await fetch(`${base}/api/sem-diff/opinion/settings`, { method: "DELETE" });
+      expect(bare.status).toBe(403);
+      expect(existsSync(keyFile)).toBe(true);
+      const cleared = await fetch(`${base}/api/sem-diff/opinion/settings`, { method: "DELETE", headers: { ...fromWindow, "Content-Type": "application/json" }, body: JSON.stringify({ serverSession: server.serverSession }) });
+      expect(cleared.status).toBe(200);
+      expect(existsSync(keyFile)).toBe(false);
+      expect(((await (await fetch(`${base}/api/sem-diff/opinion/settings`)).json()) as { configured: boolean }).configured).toBe(false);
+    } finally {
+      provider.stop(true);
     }
   });
 

@@ -29,6 +29,7 @@
  * that ends changes only its state words until the list settles. A row or an agent that is new takes its place by
  * the rule. The open thread (`ListSort.keep`) keeps its place through a sort, and so does the agent it is under.
  */
+import { INBOX_PRIORITY_GROUP, inboxEverySection, inboxGroupWaitsOnPerson } from '@plannotator/core/inbox-types';
 import type { InboxAgent, InboxAgentsGroup, InboxListGroupId, InboxListRow, InboxListSection, InboxParticipant } from '@plannotator/core/inbox-types';
 import { INBOX_SNOOZED_BAND } from '@plannotator/core/inbox-snooze';
 import { agentHostName, agentRowName, agentSessions, namedAgents } from '../agents/model';
@@ -37,16 +38,18 @@ import type { ListSort } from '../listView';
 import { rowTimeIso } from '../rowDelivery';
 
 /** The list's urgency order: a row's group, most urgent first; anything else after. It orders the agents, never the rows under one. */
-export const AGENT_ROW_ORDER: readonly InboxListGroupId[] = ['priority', 'stopped', 'holding', 'waiting', 'new', 'sent', 'quiet'];
+export const AGENT_ROW_ORDER: readonly InboxListGroupId[] = inboxEverySection(['priority', 'stopped', 'holding', 'waiting', 'tagged', 'new', 'sent', 'quiet']);
 /** Up to here a row is for the person: its agent comes first and starts open. */
 export const FOR_YOU = AGENT_ROW_ORDER.indexOf('new');
-/** Up to here a row waits on the person (Priority, Stopped, Holding up work, Waiting on you): it opens a folded agent. */
-export const WAITS = AGENT_ROW_ORDER.indexOf('waiting');
 const rankOf = (group: InboxListGroupId): number => {
   const at = AGENT_ROW_ORDER.indexOf(group);
   return at < 0 ? AGENT_ROW_ORDER.length : at;
 };
-export const rowWaits = (group: InboxListGroupId): boolean => rankOf(group) <= WAITS;
+/**
+ * A row in this group waits on the person (Priority, and core's `inboxSectionWaitsOnPerson`: Stopped, Holding up work,
+ * Waiting on you, Tagged you): it opens a folded agent.
+ */
+export const rowWaits = (group: InboxListGroupId): boolean => group === INBOX_PRIORITY_GROUP.id || inboxGroupWaitsOnPerson(group);
 
 /** One agent as the view draws it. */
 export interface ViewAgent {

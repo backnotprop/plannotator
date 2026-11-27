@@ -430,3 +430,28 @@ extension RowActionTests {
     XCTAssertGreaterThan(offer.expires.timeIntervalSinceNow, 20)
   }
 }
+
+extension RowActionTests {
+  /// Whom a reply goes to in a thread a script started (the window's `rowRecipientName`, which the thread's lines
+  /// name on the phone): the session that took it over, even after the script posted again; the script only where
+  /// the reply is its own (`delivery.script`); a script's thread no session took over, Script.
+  func testAScriptsThreadNamesWhomTheReplyGoesToAsTheWindowDoes() throws {
+    var row = try XCTUnwrap(try rows().first)
+    row.author = InboxAuthor(kind: .agent)
+    row.participants = nil
+    row.delivery = nil
+    XCTAssertEqual(ActionWords.rowRecipient(row), "Script")
+    // A Claude Code session took it over; the script posted again after it (its row is still the script's).
+    row.participants = [InboxParticipant(host: "claude-code", session: "ses_1", name: "Claude Code")]
+    XCTAssertEqual(ActionWords.rowRecipient(row), "Claude Code")
+    row.delivery = InboxRowDelivery(kind: .reply, state: .saved, reason: .reads, sendNow: false, messageId: MessageID("msg_3"), host: "claude-code", name: "Claude Code")
+    XCTAssertEqual(ActionWords.rowRecipient(row), "Claude Code")
+    // The person answered the script's own post: that reply is the script's.
+    row.delivery = InboxRowDelivery(kind: .reply, state: .saved, reason: .reads, sendNow: false, messageId: MessageID("msg_3"), script: true)
+    XCTAssertEqual(ActionWords.rowRecipient(row), "Script")
+    // An agent's own row: its agent, whatever the delivery says.
+    row.author = InboxAuthor(kind: .agent, host: "claude-code", session: "ses_1", name: "Claude Code")
+    row.delivery = InboxRowDelivery(kind: .reply, state: .saved, reason: .reads, sendNow: false, messageId: MessageID("msg_3"), host: "pi")
+    XCTAssertEqual(ActionWords.rowRecipient(row), "Claude Code")
+  }
+}

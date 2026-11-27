@@ -7,6 +7,7 @@
 export const INBOX_CAPABILITY_SWITCHES = [
   { key: "board", name: "Board", agent: "board" },
   { key: "steps", name: "Checklist", agent: "checklist" },
+  { key: "decision_mode", name: "Decision mode", agent: "decision_mode" },
   { key: "scheduled_threads", name: "Routines", agent: "routines" },
   { key: "code_review", name: "Code review", agent: "code_review" },
   { key: "chapter_diagrams", name: "Chapter diagrams", agent: "chapter_diagrams" },
@@ -43,8 +44,8 @@ export const INBOX_CAPABILITY_SWITCH_KEYS: readonly string[] = INBOX_CAPABILITY_
 
 /**
  * The switches that are one set across linked computers (docs/agent-guides/inbox-machines.md, "One set of
- * capabilities"): every switch a person sees in Settings → Capabilities, Experimental included (`decision_mode` and
- * `grid` are the settings' `experimental` ones). A flip on any linked computer applies on all of them, the newer flip
+ * capabilities"): every switch a person sees in Settings → Capabilities, Experimental included (`grid` is the settings'
+ * `experimental` one; `decision_mode` is its own setting, on by default). A flip on any linked computer applies on all of them, the newer flip
  * winning. System is not among them while its row is hidden (`INBOX_SYSTEM_SWITCH_SHOWN`). A new switch is one line
  * here and one in the server's host (packages/server/inbox-capability-set.ts).
  */

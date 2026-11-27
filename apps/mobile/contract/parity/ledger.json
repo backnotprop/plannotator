@@ -17972,11 +17972,13 @@
       "id": "window-only-sem-diff",
       "title": "Window endpoints under sem-diff with no door route",
       "surface": [
-        "window:/api/inbox/sem-diff"
+        "window:/api/inbox/sem-diff",
+        "window:/api/sem-diff/opinion",
+        "window:/api/sem-diff/opinion/settings"
       ],
       "flows": [],
       "mobile": "later",
-      "why": "L-nodoor: the phone reaches these only once a door route is added for them (sem-diff).",
+      "why": "L-nodoor: the phone reaches these only once a door route is added for them (sem-diff; Power Up's ask and its key settings answer the window only, from this computer's key).",
       "reason": "L-nodoor",
       "source": "seed: no SCOPE row names it",
       "ios": {
@@ -20087,6 +20089,7 @@
         "setting:sidebar",
         "setting:diff_options",
         "setting:diff_style",
+        "setting:review_analysis",
         "setting:chapter_diagrams",
         "setting:experimental",
         "setting:bro",
@@ -20094,7 +20097,7 @@
       ],
       "flows": [],
       "mobile": "later",
-      "why": "L-door: update checks, the agent tools switch and Tailscale are slice S9 (SCOPE 64, Settings map 3 and 6); chapter diagrams and the Experimental group are capability switches (SCOPE 178). L-size: prompts (Settings map 5), the sidebar (74), diff options and style (F 130, 132). L-off: Bro mode and floating drafts (115, M 28).",
+      "why": "L-door: update checks, the agent tools switch and Tailscale are slice S9 (SCOPE 64, Settings map 3 and 6); chapter diagrams and the Experimental group are capability switches (SCOPE 178). L-size: prompts (Settings map 5), the sidebar (74), diff options and style (F 130, 132), and code review's Semantic changes switch, which goes with them. L-off: Bro mode and floating drafts (115, M 28).",
       "reason": "L-door",
       "source": "seed: SCOPE 64, 74, 115, 178, Settings map 3, 5, 6, F 130, 132, M 28",
       "ios": {
@@ -23139,6 +23142,328 @@
       }
     },
     {
+      "id": "undecided-door-post-link-through-ask",
+      "title": "door:POST link-through-ask",
+      "surface": [
+        "door:POST link-through-ask"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-link-through-introduce",
+      "title": "door:POST link-through-introduce",
+      "surface": [
+        "door:POST link-through-introduce"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-link-through-offer",
+      "title": "door:POST link-through-offer",
+      "surface": [
+        "door:POST link-through-offer"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-machines-link-through",
+      "title": "window:/api/inbox/machines/link-through",
+      "surface": [
+        "window:/api/inbox/machines/link-through"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-frame-links",
+      "title": "frame:links",
+      "surface": [
+        "frame:links"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-linkthroughstatus-failed",
+      "title": "enum:LinkThroughStatus.failed",
+      "surface": [
+        "enum:LinkThroughStatus.failed"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-linkthroughstatus-idle",
+      "title": "enum:LinkThroughStatus.idle",
+      "surface": [
+        "enum:LinkThroughStatus.idle"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-linkthroughstatus-linking",
+      "title": "enum:LinkThroughStatus.linking",
+      "surface": [
+        "enum:LinkThroughStatus.linking"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-linkthroughstatus-waiting",
+      "title": "enum:LinkThroughStatus.waiting",
+      "surface": [
+        "enum:LinkThroughStatus.waiting"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-linkthroughpairview-a",
+      "title": "field:LinkThroughPairView.a",
+      "surface": [
+        "field:LinkThroughPairView.a"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-linkthroughpairview-c",
+      "title": "field:LinkThroughPairView.c",
+      "surface": [
+        "field:LinkThroughPairView.c"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-linkthroughpairview-status",
+      "title": "field:LinkThroughPairView.status",
+      "surface": [
+        "field:LinkThroughPairView.status"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-linkthroughpairview-waiting-for",
+      "title": "field:LinkThroughPairView.waiting_for",
+      "surface": [
+        "field:LinkThroughPairView.waiting_for"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-linkthroughpairview-why",
+      "title": "field:LinkThroughPairView.why",
+      "surface": [
+        "field:LinkThroughPairView.why"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-linkthroughrowview-id",
+      "title": "field:LinkThroughRowView.id",
+      "surface": [
+        "field:LinkThroughRowView.id"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-linkthroughrowview-name",
+      "title": "field:LinkThroughRowView.name",
+      "surface": [
+        "field:LinkThroughRowView.name"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-linkthroughrowview-status",
+      "title": "field:LinkThroughRowView.status",
+      "surface": [
+        "field:LinkThroughRowView.status"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-linkthroughrowview-via",
+      "title": "field:LinkThroughRowView.via",
+      "surface": [
+        "field:LinkThroughRowView.via"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-linkthroughrowview-waiting-for",
+      "title": "field:LinkThroughRowView.waiting_for",
+      "surface": [
+        "field:LinkThroughRowView.waiting_for"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-linkthroughrowview-why",
+      "title": "field:LinkThroughRowView.why",
+      "surface": [
+        "field:LinkThroughRowView.why"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-linkthroughview-pairs",
+      "title": "field:LinkThroughView.pairs",
+      "surface": [
+        "field:LinkThroughView.pairs"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-linkthroughview-through",
+      "title": "field:LinkThroughView.through",
+      "surface": [
+        "field:LinkThroughView.through"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-machineview-link-through",
+      "title": "field:MachineView.link_through",
+      "surface": [
+        "field:MachineView.link_through"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
       "id": "undecided-frame-capability-set",
       "title": "frame:capability-set",
       "surface": [
@@ -23148,6 +23473,371 @@
       "mobile": "undecided",
       "why": "",
       "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxlistrow-scheduled-running",
+      "title": "field:InboxListRow.scheduled_running",
+      "surface": [
+        "field:InboxListRow.scheduled_running"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-setting-decision-mode",
+      "title": "setting:decision_mode",
+      "surface": [
+        "setting:decision_mode"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxrowdelivery-script",
+      "title": "field:InboxRowDelivery.script",
+      "surface": [
+        "field:InboxRowDelivery.script"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-skills-file",
+      "title": "window:/api/inbox/skills/file",
+      "surface": [
+        "window:/api/inbox/skills/file"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-settings-reviews",
+      "title": "settings:reviews",
+      "surface": [
+        "settings:reviews"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxagent-runtime-oh-my-pi",
+      "title": "enum:InboxAgent.runtime.oh-my-pi",
+      "surface": [
+        "enum:InboxAgent.runtime.oh-my-pi"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxcomposesession-runtime-oh-my-pi",
+      "title": "enum:InboxComposeSession.runtime.oh-my-pi",
+      "surface": [
+        "enum:InboxComposeSession.runtime.oh-my-pi"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxagent-runtime",
+      "title": "field:InboxAgent.runtime",
+      "surface": [
+        "field:InboxAgent.runtime"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxcomposesession-runtime",
+      "title": "field:InboxComposeSession.runtime",
+      "surface": [
+        "field:InboxComposeSession.runtime"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-pulls-pull",
+      "title": "door:GET pulls/pull",
+      "surface": [
+        "door:GET pulls/pull"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-pulls-pull",
+      "title": "window:/api/inbox/pulls/pull",
+      "surface": [
+        "window:/api/inbox/pulls/pull"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxlistgroupid-tagged",
+      "title": "enum:InboxListGroupId.tagged",
+      "surface": [
+        "enum:InboxListGroupId.tagged"
+      ],
+      "flows": [],
+      "mobile": "v1",
+      "why": "The list: a server that places rows in Tagged you (Spaces) gets them drawn fourth and counted as waiting on the person, never dropped (owner, 2026-11-25: \"A · It counts\").",
+      "decoded": true,
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxsectionid-tagged",
+      "title": "enum:InboxSectionId.tagged",
+      "surface": [
+        "enum:InboxSectionId.tagged"
+      ],
+      "flows": [],
+      "mobile": "v1",
+      "why": "The list: a server that places rows in Tagged you (Spaces) gets them drawn fourth and counted as waiting on the person, never dropped (owner, 2026-11-25: \"A · It counts\").",
+      "decoded": true,
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-messages-id-guide-file",
+      "title": "door:GET messages/:id/guide/file",
+      "surface": [
+        "door:GET messages/:id/guide/file"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-messages-id-guide-package-changes",
+      "title": "door:GET messages/:id/guide/package-changes",
+      "surface": [
+        "door:GET messages/:id/guide/package-changes"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-messages-id-guide-review-image",
+      "title": "door:GET messages/:id/guide/review-image",
+      "surface": [
+        "door:GET messages/:id/guide/review-image"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-messages-id-guide-review-markdown-image",
+      "title": "door:GET messages/:id/guide/review-markdown-image",
+      "surface": [
+        "door:GET messages/:id/guide/review-markdown-image"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-open-in-file",
+      "title": "door:GET open-in/file",
+      "surface": [
+        "door:GET open-in/file"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-open-in-file-code",
+      "title": "door:GET open-in/file/code",
+      "surface": [
+        "door:GET open-in/file/code"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-threads-id-steps",
+      "title": "door:GET threads/:id/steps",
+      "surface": [
+        "door:GET threads/:id/steps"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-messages-id-guide-viewed",
+      "title": "door:POST messages/:id/guide/viewed",
+      "surface": [
+        "door:POST messages/:id/guide/viewed"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-outboxview-viewed",
+      "title": "field:OutboxView.viewed",
+      "surface": [
+        "field:OutboxView.viewed"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-threads-id-draft",
+      "title": "door:POST threads/:id/draft",
+      "surface": [
+        "door:POST threads/:id/draft"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-threads-id-draft-delete",
+      "title": "door:POST threads/:id/draft/delete",
+      "surface": [
+        "door:POST threads/:id/draft/delete"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-machineview-drafts-held",
+      "title": "field:MachineView.drafts_held",
+      "surface": [
+        "field:MachineView.drafts_held"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-launch-switch",
+      "title": "Launch switch: the one-time launch dialog's claim, shown and answer",
+      "surface": [
+        "window:/api/inbox/launch-switch"
+      ],
+      "flows": [],
+      "mobile": "later",
+      "why": "L-size: a one-time launch dialog. The web Inbox draws it at every width, the phone-width page and a session opened from another device included; only the native phone app leaves it out (the owner, 2026-11-25)",
+      "reason": "L-size",
+      "since": "2026-11-26",
       "ios": {
         "state": "not-started"
       }

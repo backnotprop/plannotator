@@ -13,7 +13,8 @@
  * browser's six connections to the Inbox until threads stopped opening), or a
  * card left on "Loading…" for ever when the read gets no answer. With Code
  * review on, "Open review thread" on a row it should not be on (merged, a PR
- * Reviews does not list, the thread's own review), missing where it should be,
+ * Reviews does not list), the thread's own review linking back to itself instead
+ * of "Open in Reviews", missing where it should be,
  * going to the wrong place, or taking over the row's own link to the forge.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
@@ -696,13 +697,18 @@ describe.skipIf(!hasDom)('Open review thread (Code review on)', () => {
     expect(popover()).toBeNull();
   });
 
-  test('the row whose review thread is this thread has no line', async () => {
+  test('the row whose review thread is this thread: "Open in Reviews", its page there, never a link back to this thread', async () => {
     answer = answerOf([withThread, noThread]);
-    render(<ThreadPullsButton threadId={THREAD} summary={undefined} review={{ linkOf: reviewsList(THREAD).linkOf, onOpen: () => {} }} />);
+    const opened: PullReviewLink[] = [];
+    const { model, linkOf } = reviewsList(THREAD);
+    render(<ThreadPullsButton threadId={THREAD} summary={undefined} review={{ linkOf, onOpen: (l) => opened.push(l) }} />);
     await settle();
     await click(host!.querySelector('[data-pr-button]'));
-    expect(line(withThread.ref)).toBeNull();
-    expect(line(noThread.ref)).not.toBeNull();
+    expect(line(withThread.ref)!.textContent).toBe('Open in Reviews');
+    expect(line(noThread.ref)!.textContent).toBe('Open review thread');
+    await click(line(withThread.ref));
+    const stack = inboxPullStacks(model.pulls).find((s) => s.layers.some((l) => l.key === withThread.pull))!;
+    expect(opened).toEqual([{ kind: 'launchpad', stackId: stack.id, here: true }]);
   });
 
   test('Code review off (no review links given): no line on any row', async () => {

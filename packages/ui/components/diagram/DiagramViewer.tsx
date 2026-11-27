@@ -6,9 +6,11 @@ import { diagramFinder, type DiagramTheme } from '../../utils/diagram-render';
 import { DiagramCanvas, type DiagramCanvasHandle, type DiagramEscapeOutcome, type DiagramWheelZoom } from './DiagramCanvas';
 import { DiagramComposer } from './DiagramComposer';
 import { DiagramOverlay } from './DiagramOverlay';
+import { inlineFitMaxScale } from './svgContentSize';
 import { useDiagramComments, type DiagramComment, type DiagramCreateComment } from './useDiagramComments';
 import { useDiagramRender, type DiagramRenderState } from './useDiagramRender';
 import { useDiagramSourceDraft, type SaveResult } from './useDiagramSourceDraft';
+import type { ControlsReserve } from './useDiagramViewport';
 import { LazyBlockBoundary } from '../LazyBlockBoundary';
 import type { DiagramReopenRequest } from './reopen';
 
@@ -115,6 +117,14 @@ export interface DiagramViewerProps {
    * (a popout, a diagram file). `modifier`: it scrolls the page, and only
    * Ctrl/Cmd+wheel or a pinch zooms (an inline diagram in a document). */
   readonly wheelZoom?: DiagramWheelZoom;
+  /** Opt-in: Fit never draws a Pele diagram above its own size
+   * (`inlineFitMaxScale`; an inline diagram in a document). Absent: Fit
+   * fills the canvas, as before. */
+  readonly fitAtMostNaturalSize?: boolean;
+  /** Opt-in: room the host adds under the canvas so the zoom strip is clear
+   * of the drawing at rest (`fitInHost`; an inline diagram, whose box is no
+   * taller than the drawing). Absent: nothing changes. */
+  readonly controlsReserve?: ControlsReserve;
   /** Opt-in: a comment being written that the host kept, put back (see
    * `DiagramReopenRequest`): the composer opens at its part once the diagram
    * is drawn, holding its words. Absent: nothing changes. */
@@ -156,6 +166,8 @@ export function DiagramViewer({
   className,
   canvasClassName,
   wheelZoom,
+  fitAtMostNaturalSize,
+  controlsReserve,
   reopenComment,
 }: DiagramViewerProps) {
   const finder = diagramFinder(kind);
@@ -380,6 +392,8 @@ export function DiagramViewer({
             overlay={overlay}
             autoFocus={autoFocus}
             wheelZoom={wheelZoom}
+            fitMaxScale={fitAtMostNaturalSize && render.svgNode !== null ? inlineFitMaxScale(render.svgNode) : undefined}
+            controlsReserve={controlsReserve}
           >
             {render.error !== null && (
               <div

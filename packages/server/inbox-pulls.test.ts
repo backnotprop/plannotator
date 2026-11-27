@@ -310,11 +310,11 @@ const GL_MR = (iid: number, fields: Record<string, unknown> = {}) => ({
 });
 
 /** glab signed in to gitlab.com only; gh signed in nowhere. One MR, !61, by jun, asking dana for a review. */
-function gitlabForge(): Forge {
+function gitlabForge(mr = GL_MR(61)): Forge {
   const f: Forge = {
     calls: [],
     fail: null,
-    othersAnswer: { data: { currentUser: { username: "dana" }, p0: { mergeRequests: { count: 1, nodes: [GL_MR(61)] } } } },
+    othersAnswer: { data: { currentUser: { username: "dana" }, p0: { mergeRequests: { count: 1, nodes: [mr] } } } },
     othersFail: null,
     heads: null,
     bodies: {},
@@ -331,7 +331,7 @@ function gitlabForge(): Forge {
         return { stdout: JSON.stringify(f.othersAnswer), stderr: "", exitCode: 0 };
       }
       if (cli === "glab" && args.includes("graphql")) {
-        return { stdout: JSON.stringify({ data: { currentUser: { username: "dana", requested: { nodes: [GL_MR(61)] }, authored: { nodes: [] }, merged: { nodes: [] } } } }), stderr: "", exitCode: 0 };
+        return { stdout: JSON.stringify({ data: { currentUser: { username: "dana", requested: { nodes: [mr] }, authored: { nodes: [] }, merged: { nodes: [] } } } }), stderr: "", exitCode: 0 };
       }
       if (cli === "glab" && args[3]?.endsWith("/commits?per_page=100")) return { stdout: JSON.stringify((f.mrCommits ?? []).map((id) => ({ id }))), stderr: "", exitCode: 0 };
       if (cli === "glab" && args[3]?.endsWith("/versions?per_page=100")) return { stdout: JSON.stringify((f.mrVersions ?? []).map((head_commit_sha, id) => ({ id, head_commit_sha }))), stderr: "", exitCode: 0 };
@@ -1715,6 +1715,151 @@ describe("the whole stack's diff (finding C and merged layers)", () => {
       const answer = await pulls.diff("gitlab.com/northwind/data/ledger#61:pull", "layer");
       expect(answer.description).toBe("Adds the CSV export.");
       expect(answer.head_sha).toBe("c".repeat(40));
+    });
+  });
+
+  describe("a GitLab layer whose raw diff endpoint is missing", () => {
+    const endpoint = "projects/northwind%2Fdata%2Fledger/merge_requests/61";
+    const pagedEndpoint = `${endpoint}/diffs?per_page=100`;
+    const key = "gitlab.com/northwind/data/ledger#61:pull";
+    const head = "c".repeat(40);
+    const entry = (path: string) => ({
+      old_path: path, new_path: path, new_file: false, deleted_file: false, renamed_file: false,
+      diff: "@@ -1 +1 @@\n-before\n+after\n",
+    });
+    const pages = JSON.stringify([entry("ledger.py")]) + "\n" + JSON.stringify([entry("format.py")]);
+
+    async function layer(
+      { rawError = "glab: 404 Not Found (HTTP 404)", paged = pages, pagedError, listedHead = head, firstHead = head, lastHead = head, changesCount }:
+      { rawError?: string; paged?: string; pagedError?: string; listedHead?: string; firstHead?: string | null; lastHead?: string; changesCount?: string } = {},
+    ) {
+      const f = gitlabForge(GL_MR(61, { diffHeadSha: listedHead }));
+      let headReads = 0;
+      f.rest = (cli, args) => {
+        if (cli !== "glab" || args[2] !== "gitlab.com") return null;
+        if (args[3] === endpoint) {
+          const sha = headReads++ === 0 ? firstHead : lastHead;
+          const counted = changesCount === undefined ? {} : { changes_count: changesCount };
+          return sha
+            ? { stdout: JSON.stringify({ sha, state: "opened", description: "Adds the ledger.", ...counted }), stderr: "", exitCode: 0 }
+            : { stdout: "", stderr: "glab: 404 Not Found (HTTP 404)", exitCode: 1 };
+        }
+        if (args[3] === `${endpoint}/raw_diffs`) return { stdout: "", stderr: rawError, exitCode: 1 };
+        if (args[3] === pagedEndpoint) return { stdout: paged, stderr: pagedError ?? "", exitCode: pagedError ? 1 : 0 };
+        return null;
+      };
+      const pulls = createInboxPulls({ run: f.run });
+      await pulls.list([{ host: "gitlab.com", repo: "northwind/data/ledger", project_id: "prj_1" }]);
+      return {
+        diff: () => pulls.diff(key, "layer"),
+        pagedCalls: () => f.calls.filter(({ args }) => args[3] === pagedEndpoint),
+      };
+    }
+
+    test("reads both pages through the same glab host and preserves the reviewed head", async () => {
+      const { diff, pagedCalls } = await layer();
+      const answer = await diff();
+      expect(answer).toMatchObject({ head_sha: head, description: "Adds the ledger.", state: "open" });
+      for (const path of ["ledger.py", "format.py"]) {
+        expect(answer.patch).toContain(`diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n@@ -1 +1 @@\n-before\n+after\n`);
+      }
+      expect(pagedCalls()).toEqual([{ cli: "glab", args: ["api", "--hostname", "gitlab.com", pagedEndpoint, "--paginate"] }]);
+    });
+
+    test.each(["HTTP 401 Unauthorized", "HTTP 403 Forbidden", "HTTP 429 Too Many Requests"])(
+      "does not fall back on %s", async (rawError) => {
+        const { diff, pagedCalls } = await layer({ rawError });
+        await expect(diff()).rejects.toMatchObject({ code: "pull_diff_failed" });
+        expect(pagedCalls()).toEqual([]);
+      },
+    );
+
+    test.each(["ERROR: 404 Not Found", "glab: 404 Project Not Found (HTTP 404)", "error: HTTP 404: 404 Not Found (https://gitlab.com/api/v4/projects/northwind%2Fdata%2Fledger/merge_requests/61/raw_diffs)"])(
+      "falls back on %s", async (rawError) => {
+        const { diff, pagedCalls } = await layer({ rawError });
+        expect((await diff()).patch).toContain("diff --git a/format.py b/format.py\n");
+        expect(pagedCalls()).toHaveLength(1);
+      },
+    );
+
+    test("a repeated entry does not stand in for a missing file", async () => {
+      const { diff } = await layer({ paged: JSON.stringify([entry("ledger.py"), entry("ledger.py")]), changesCount: "2" });
+      await expect(diff()).rejects.toMatchObject({ code: "pull_diff_failed" });
+    });
+
+    test("does not read a second diff endpoint when the merge request itself is missing", async () => {
+      const { diff, pagedCalls } = await layer({ firstHead: null });
+      await expect(diff()).rejects.toMatchObject({ code: "pull_diff_failed" });
+      expect(pagedCalls()).toEqual([]);
+    });
+
+    test("the existing byte cap also applies to the paginated response", async () => {
+      const { diff } = await layer({ paged: "x".repeat(INBOX_PULL_DIFF_MAX_BYTES + 1) });
+      await expect(diff()).rejects.toMatchObject({ code: "pull_diff_too_large" });
+    });
+
+    test("rejects malformed or incomplete fallback results", async () => {
+      const heldBack = { ...entry("format.py"), diff: "", collapsed: true };
+      for (const paged of ["not JSON", JSON.stringify([entry("ledger.py")]), JSON.stringify([entry("ledger.py"), heldBack])]) {
+        const { diff } = await layer({ paged });
+        await expect(diff()).rejects.toMatchObject({ code: "pull_diff_failed" });
+      }
+    });
+
+    test("refuses an empty added file that an older GitLab may have held back", async () => {
+      const emptyAdded = { ...entry("seed.sql"), new_file: true, diff: "" };
+      const { diff } = await layer({ paged: JSON.stringify([entry("ledger.py"), emptyAdded]) });
+      await expect(diff()).rejects.toMatchObject({ code: "pull_diff_failed" });
+      const added = { ...entry("seed.sql"), new_file: true, diff: "@@ -0,0 +1 @@\n+insert into ledger\n" };
+      const complete = await layer({ paged: JSON.stringify([entry("ledger.py"), added]) });
+      expect((await complete.diff()).patch).toContain("+insert into ledger\n");
+    });
+
+    test("checks the count only against the head it describes", async () => {
+      const paged = JSON.stringify([entry("ledger.py")]);
+      const { diff } = await layer({ paged, listedHead: "b".repeat(40), changesCount: "1", rawError: "glab: Not Found (HTTP 404)" });
+      const answer = await diff();
+      expect(answer.head_sha).toBe(head);
+      expect(answer.patch).toContain("+after\n");
+    });
+
+    test("refuses when a push since the list leaves GitLab's own count short", async () => {
+      // The list (an older head) counted 2, which no longer applies; GitLab counts 3 for the head read now, 2 came.
+      const stale = await layer({ listedHead: "b".repeat(40), changesCount: "3" });
+      await expect(stale.diff()).rejects.toMatchObject({ code: "pull_diff_failed" });
+      // With no count for the head read now, nothing says every file came.
+      const uncounted = await layer({ listedHead: "b".repeat(40) });
+      await expect(uncounted.diff()).rejects.toMatchObject({ code: "pull_diff_failed" });
+      // GitLab's count is checked with the list's current one too.
+      const short = await layer({ changesCount: "3" });
+      await expect(short.diff()).rejects.toMatchObject({ code: "pull_diff_failed" });
+    });
+
+    test("refuses a merge request GitLab stopped storing files for", async () => {
+      const { diff } = await layer({ changesCount: "2+" });
+      await expect(diff()).rejects.toMatchObject({ code: "pull_diff_failed" });
+    });
+
+    test("refuses an empty renamed or deleted file that an older GitLab may have held back", async () => {
+      const renamed = { ...entry("ledger_v2.py"), old_path: "ledger.py", renamed_file: true, diff: "" };
+      const deleted = { ...entry("seed.sql"), deleted_file: true, diff: "" };
+      for (const held of [renamed, deleted]) {
+        const { diff } = await layer({ paged: JSON.stringify([entry("format.py"), held]) });
+        await expect(diff()).rejects.toMatchObject({ code: "pull_diff_failed" });
+      }
+      const withLines = { ...renamed, diff: "@@ -1 +1 @@\n-before\n+after\n" };
+      const complete = await layer({ paged: JSON.stringify([entry("format.py"), withLines]) });
+      expect((await complete.diff()).patch).toContain("rename from ledger.py\nrename to ledger_v2.py\n");
+    });
+
+    test("refuses when a page fails partway", async () => {
+      const { diff } = await layer({ paged: JSON.stringify([entry("ledger.py")]), pagedError: "glab: 500 Internal Server Error (HTTP 500)" });
+      await expect(diff()).rejects.toMatchObject({ code: "pull_diff_failed" });
+    });
+
+    test("refuses when the head moves during the paged read", async () => {
+      const { diff } = await layer({ lastHead: "d".repeat(40) });
+      await expect(diff()).rejects.toMatchObject({ code: "pull_diff_failed" });
     });
   });
 

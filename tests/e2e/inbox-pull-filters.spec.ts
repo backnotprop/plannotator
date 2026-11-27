@@ -84,7 +84,7 @@ function writeForge(dir: string) {
     'fi',
     'if [ "$1" = api ] && [ "$4" = graphql ]; then',
     '  case "$*" in *"query InboxPullsOthers"*) record "glab others $*"; cat "$dir/glab-others.json"; exit 0;; esac',
-    '  case "$*" in *reviewRequestedMergeRequests*) record "glab pulls $*"; cat "$dir/glab-pulls.json"; exit 0;; esac',
+    '  case "$*" in *"query InboxPulls "*) record "glab pulls $*"; cat "$dir/glab-pulls.json"; exit 0;; esac',
     '  record "glab graphql-other"; echo \'{"data":null}\'; exit 1',
     'fi',
     'record "glab other $1"; exit 1',
@@ -418,7 +418,8 @@ test('the read: the person\'s own lists, then Others as a call of its own scoped
   const ghOthers = calls.filter((c) => c.startsWith('gh others'));
   const glabOthers = calls.filter((c) => c.startsWith('glab others'));
   expect(gh).toHaveLength(1);
-  expect(glab).toHaveLength(1);
+  // GitLab: a query per list (the four in one are over GitLab's complexity limit).
+  expect(glab).toHaveLength(4);
   expect(ghOthers).toHaveLength(1);
   expect(glabOthers).toHaveLength(1);
   expect(gh[0]).toContain('assigned=is:pr is:open archived:false assignee:@me');
@@ -427,8 +428,8 @@ test('the read: the person\'s own lists, then Others as a call of its own scoped
   expect(ghOthers[0]).toMatch(/others0=is:pr is:open archived:false sort:updated-desc repo:/);
   for (const r of ['northwind/billing-svc', 'northwind/customer-billing-portal-v2', 'northwind/web-app']) expect(ghOthers[0]).toContain(`repo:${r}`);
   expect(ghOthers[0]).not.toContain('others1=');
-  expect(glab[0]).toContain('assignedMergeRequests(state: opened');
-  expect(glab[0]).not.toContain('p0: project');
+  expect(glab.filter((c) => c.includes('assignedMergeRequests(state: opened'))).toHaveLength(1);
+  for (const c of glab) expect(c).not.toContain('p0: project');
   expect(glabOthers[0]).toContain('p0: project(fullPath: "northwind/ledger")');
   expect(calls.filter((c) => c.includes('graphql-other'))).toEqual([]);
 });

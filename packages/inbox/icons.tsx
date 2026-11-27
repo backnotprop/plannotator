@@ -9,10 +9,15 @@
  * keeps its plain mark.
  */
 import { inboxMarkFaceHost, isInboxMarkFace, type InboxAuthor } from '@plannotator/core/inbox-types';
-import { HostMark as UiHostMark } from '@plannotator/ui/components/inbox-thread/icons';
-import type { CSSProperties, ReactNode } from 'react';
-import { RexMark, useRexMarkOf } from './agents/rexMark';
-import { ProjectFaceMark, useShownAgentFace } from './agents/projectFace';
+import { HostMark as UiHostMark, Icon } from '@plannotator/ui/components/inbox-thread/icons';
+import { isScriptAuthor } from './scriptAuthor';
+import { memo, type CSSProperties, type ReactNode } from 'react';
+import { listedRexMark, RexMark, useListRexMarks, useRexMarkOf, type ShownMark } from './agents/rexMark';
+import { ProjectFaceMark, shownAgentFace, useShownAgentFace } from './agents/projectFace';
+import { agentFaceOf, agentTakesTiles } from './agents/agentFaces';
+import { useListAgentFaces } from './agents/listFaces';
+import { useGivenRowMarks } from './letterMarks';
+import { usePictureWorld } from './pictureWorld';
 import { useAgentFaceSources } from './agents/faceArtLoad';
 import { isOwnFace, type AgentFace, type OurFace, type OwnFace } from './agents/faceChoices';
 import { ownIconSrc } from './agents/ownIcons';
@@ -25,11 +30,41 @@ export * from '@plannotator/ui/components/inbox-thread/icons';
  * The mark for an agent host; with `agent`, that agent's chosen face when it has one, else, with Settings → Rows' Agent
  * icons "From the project name", its project's tile (agents/projectFace.tsx).
  */
-export function HostMark({ host, big, agent }: { host: string | null | undefined; big?: boolean; agent?: string | null }) {
+export function HostMark(props: HostMarkProps) {
+  // In a list's rows: the agents' marks, their faces and the Rows look, heard once for every row (rowParts.tsx `ListRows`).
+  const marks = useListRexMarks();
+  const given = useGivenRowMarks();
+  const faces = useListAgentFaces();
+  const world = usePictureWorld();
+  if (!marks || !given || faces === null) return <OwnHostMark {...props} />;
+  // `useShownAgentFace`, read as the icon draws: the list draws its icons again when any face changes.
+  const { agent } = props;
+  const kept = world ? ((agent ? world.faces.get(agent) : undefined) ?? 'agent') : agentFaceOf(agent);
+  const face = agent ? shownAgentFace(kept, given.projectIcons && agentTakesTiles(agent)) : kept;
+  return <ListedHostMark {...props} rex={listedRexMark(marks, agent)} face={face} />;
+}
+
+type HostMarkProps = { host: string | null | undefined; big?: boolean; agent?: string | null; script?: boolean };
+
+/**
+ * A list icon drawn from its own mark and face: when any agent's mark or face changes, every icon above reads the list's
+ * values again, but only an icon whose own mark (one shared object per mark, agents/rexMark.tsx) or face changed draws.
+ */
+const ListedHostMark = memo(function ListedHostMark({ rex, face, ...props }: HostMarkProps & { rex: ShownMark | null; face: AgentFace }) {
+  return drawHostMark(props, rex, face);
+});
+
+function OwnHostMark({ host, big, agent, script }: HostMarkProps) {
   // An agent started in Rex carries its pane's status on the icon's corner (agents/rexMark.tsx); any other: today's icon.
   const rex = useRexMarkOf(agent);
+  const face = useShownAgentFace(agent);
+  return drawHostMark({ host, big, agent, script }, rex, face);
+}
+
+function drawHostMark({ host, big, agent, script }: HostMarkProps, rex: ShownMark | null, face: AgentFace) {
+  if (script) return <ScriptMark big={big} />;
   return (
-    <FaceOfMark host={host} big={big} face={useShownAgentFace(agent)} agent={agent}>
+    <FaceOfMark host={host} big={big} face={face} agent={agent}>
       {rex && agent ? <RexMark mark={rex} seed={agent} size={big ? 30 : 16} /> : null}
     </FaceOfMark>
   );
@@ -138,10 +173,22 @@ function SetMark({ face, host, big, children }: { face: SetFace; host: string | 
   );
 }
 
-/** An author's mark: an agent's is its session's face when it has one. */
+/**
+ * A script's post (scriptAuthor.ts): a terminal (Heroicons command-line) in the mark's tile, where an agent's icon
+ * would be. No face: no agent chose one, and no project tile stands in for it.
+ */
+export function ScriptMark({ big }: { big?: boolean }) {
+  return (
+    <span className={`ib-mk${big ? ' ib-big' : ''}`} data-script-mark="">
+      <Icon name="terminal" />
+    </span>
+  );
+}
+
+/** An author's mark: an agent's is its session's face when it has one; a script's post's is the terminal. */
 export function AuthorMark({ author, big }: { author: InboxAuthor | null | undefined; big?: boolean }) {
   const agent = author?.kind === 'agent' ? author : null;
-  return <HostMark host={agent?.host ?? null} big={big} agent={agent?.session ?? null} />;
+  return <HostMark host={agent?.host ?? null} big={big} agent={agent?.session ?? null} script={isScriptAuthor(agent)} />;
 }
 
 /**

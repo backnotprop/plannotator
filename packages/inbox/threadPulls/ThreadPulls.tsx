@@ -20,7 +20,8 @@
  *   ⋯ menus do.
  * - With Code review on, the thread's card gives each open or draft PR that
  *   Reviews lists a line under it, "Open review thread": its review thread,
- *   or with none yet its page in Reviews (`pullReviewLinks`). The row itself
+ *   or with none yet its page in Reviews (`pullReviewLinks`); in its own review
+ *   thread, "Open in Reviews", its page there. The row itself
  *   still goes to the forge.
  *
  * Nothing here has a keyboard shortcut.
@@ -38,6 +39,7 @@ import { PullProblems, pullProblems } from './PullProblems';
 import { inboxApi } from '../api';
 import { INBOX_UNREACHABLE } from '../toastError';
 import { RefMarkIcon } from '../board/RefMark';
+import { OPEN_IN_REVIEWS } from '../pulls/refCardReviews';
 import { CountBadge, countBadgeText } from '../components/CountBadge';
 import { isPhone } from '../phone';
 import { HostMark, Icon } from '../icons';
@@ -390,16 +392,19 @@ export interface ThreadPullReview {
 }
 
 /**
- * A PR's line under its row: "Open review thread", then the review thread's agent when there is one. The row's own
+ * A PR's line under its row: "Open review thread", then the review thread's agent when there is one; "Open in Reviews"
+ * in the PR's own review thread (its page in Reviews, where its diff opens). The row's own
  * link still goes to the forge; this one stays in the Inbox.
  */
 function ReviewLine({ link, onOpen, of }: { link: PullReviewLink; onOpen: (link: PullReviewLink) => void; of?: string }) {
+  // The icon of a review card's "In Reviews" link: this line goes to Reviews, not to a thread.
+  const inReviews = link.kind === 'launchpad' && link.here === true;
   return (
     <button type="button" className="ib-prpop-rv" onClick={() => onOpen(link)} aria-describedby={of} data-pr-review={link.kind}>
       <span className="ib-prpop-rv-ic" aria-hidden="true">
-        <Icon name="questionBubble" size={14} />
+        <Icon name={inReviews ? 'reviews' : 'questionBubble'} size={14} />
       </span>
-      <span className="ib-prpop-rv-w">Open review thread</span>
+      <span className="ib-prpop-rv-w">{inReviews ? OPEN_IN_REVIEWS : 'Open review thread'}</span>
       {link.kind === 'thread' && link.agent && (
         <span className="ib-prpop-rv-with">
           {' · with'}
@@ -665,9 +670,13 @@ export function PullsCard({
  * opens the card after the hover card's delay; on a touch screen a tap opens the sheet instead of the thread.
  */
 export function RowPullsMark({ threadId, summary }: { threadId: string; summary: InboxThreadPullsSummary | undefined }) {
+  // Most rows have no PR: they set up no card (its hooks were eleven per row, on all ~2,200 rows a large Inbox mounts).
+  return summary ? <RowPullsMarkShown threadId={threadId} summary={summary} /> : null;
+}
+
+function RowPullsMarkShown({ threadId, summary }: { threadId: string; summary: InboxThreadPullsSummary }) {
   const { open, setOpen, hover, cardHover, close } = usePopover();
   const { answer, failed, retrying, setAnswer, retry } = useThreadPulls(threadId, !!open);
-  if (!summary) return null;
   // Once read, the card's answer is the newest (the row's summary follows on the next list read).
   const shown = (answer && pullsSummaryOf(answer)) ?? summary;
   const words = pullsMarkWords(shown, labelOfKey(shown.headline.key));

@@ -106,7 +106,9 @@ export function MessageReactHost({ body, api, copy, phone, takeBackOf }: { body:
   const find = (id: string | undefined) => (id ? (copy.current.thread.messages.find((m) => m.id === id) ?? null) : null);
   api.trayAsk.current = (message) => {
     faceHover.close();
-    trayAnchor.current = body.current?.querySelector<HTMLElement>(`[data-react-face-slot="${CSS.escape(message.id)}"]`) ?? null;
+    // A phone draws no face: the tray opens at the message's ⋯ (its sheet's "All reactions"), over its head line.
+    const id = CSS.escape(message.id);
+    trayAnchor.current = body.current?.querySelector<HTMLElement>(`[data-react-face-slot="${id}"]`) ?? (phone ? body.current?.querySelector<HTMLElement>(`[data-message-more="${id}"]`) : null) ?? null;
     if (trayAnchor.current) setTray((t) => ({ id: message.id, n: (t?.n ?? 0) + 1 }));
   };
 

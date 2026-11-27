@@ -1,4 +1,5 @@
-import React, { useRef } from 'react';
+import { LineFeedbackToolsContext } from './LineFeedbackTools';
+import React, { useContext, useRef, useState } from 'react';
 import { Dialog } from '@base-ui/react/dialog';
 import { SparklesIcon } from '@plannotator/ui/components/SparklesIcon';
 import { useReviewAnnotationToolbarShortcuts } from '@plannotator/ui/shortcuts';
@@ -6,6 +7,7 @@ import { useConfigValue } from '@plannotator/ui/config';
 import { isCommentSubmitKey } from '@plannotator/ui/utils/commentSubmitKey';
 
 interface ExpandedCommentDialogProps {
+  voiceTarget?: string;
   title: string;
   commentText: string;
   setCommentText: (text: string) => void;
@@ -24,10 +26,11 @@ interface ExpandedCommentDialogProps {
 
 export const ExpandedCommentDialog: React.FC<ExpandedCommentDialogProps> = ({
   title,
+  voiceTarget,
   commentText,
   setCommentText,
   isEditing,
-  canSubmit,
+  canSubmit: hasContent,
   aiAvailable = false,
   onAskAI,
   onSubmit,
@@ -38,6 +41,9 @@ export const ExpandedCommentDialog: React.FC<ExpandedCommentDialogProps> = ({
   onEditSuggestion,
   hasSuggestedCode = false,
 }) => {
+  const FeedbackTools = useContext(LineFeedbackToolsContext);
+  const [voiceBusy, setVoiceBusy] = useState(false);
+  const canSubmit = hasContent && !voiceBusy;
   const dialogRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const askAIEnabled = aiAvailable && !!onAskAI && commentText.trim().length > 0;
@@ -125,6 +131,8 @@ export const ExpandedCommentDialog: React.FC<ExpandedCommentDialogProps> = ({
           </div>
 
           <div className="px-4 py-3 min-h-0 flex-1 flex">
+            {/* The host's tools (the Inbox's mic) draw inside this box: over the field's right edge, and below it. */}
+            <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
             <textarea
               data-pn-mobile-editable="true"
               ref={textareaRef}
@@ -141,6 +149,8 @@ export const ExpandedCommentDialog: React.FC<ExpandedCommentDialogProps> = ({
               placeholder="Leave feedback..."
               className="w-full h-full min-h-0 max-h-full bg-muted text-sm leading-relaxed placeholder:text-muted-foreground resize-y focus:outline-none rounded-lg border-0 px-3 py-2"
             />
+            {FeedbackTools && <FeedbackTools key={voiceTarget} textareaRef={textareaRef} onBusyChange={setVoiceBusy} />}
+            </div>
           </div>
 
           <div className="shrink-0 flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-t border-border/50">

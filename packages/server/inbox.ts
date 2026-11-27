@@ -39,8 +39,9 @@
  * No CORS headers anywhere, so another site cannot read an answer.
  */
 
-import { INBOX_LINKED_MARKS, INBOX_PROMPT_HOSTS, inboxMachineTags, inboxRowsBy, inboxTagColoursOf, isInboxCombineRun, type InboxRowsBy } from "@plannotator/core/inbox-types";
+import { INBOX_LINKED_MARKS, INBOX_PROMPT_HOSTS, inboxMachineTags, inboxRowsBy, inboxSectionWaitsOnPerson, inboxTagColoursOf, isInboxCombineRun, type InboxRowsBy } from "@plannotator/core/inbox-types";
 import { inboxDiffOptionsOf, inboxDiffOptionsSaved, parseInboxDiffOptionsChange } from "./inbox-diff-options";
+import { inboxReviewAnalysisOf, parseInboxReviewAnalysisChange } from "./inbox-review-analysis";
 import { listIntroAtStart, listIntroDue, listIntroLookPicked } from "./inbox-list-intro";
 import { codeReviewOfferAtStart, codeReviewOfferDue } from "./inbox-code-review-offer";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
@@ -122,6 +123,8 @@ import {
   INBOX_TOOL_HOSTS,
   cookieHostState,
   inboxChapterDiagramsOn,
+  inboxDecisionModeEnvOff,
+  inboxDecisionModeOn,
   loadConfig,
   saveCookieHost,
   parseAutoUpdateEnv,
@@ -153,7 +156,7 @@ import { openPackedApp, packedAppResponse, PACKED_ASSET_ROUTE_PREFIX, PACKED_ASS
 import { encodeInboxResponse } from "./inbox-encoding";
 import type { InboxSearchIndex, InboxSearchIndexOptions } from "@plannotator/shared/inbox/search";
 import { DecisionDataAborted, decisionDataCsv, decisionDataSummary, readDecisionLines } from "@plannotator/shared/inbox/decision-data";
-import { createInboxSearchRoutes } from "./inbox-search";
+import { createInboxSearchRoutes, recentSearchesQuotedReader } from "./inbox-search";
 import { createInboxCombine } from "./inbox-combine";
 import { createInboxCombineFar, type InboxCombineFar } from "./inbox-combine-far";
 import { combineArchiveAgain, combineArchiveSkip } from "./inbox-combine-guard";
@@ -248,10 +251,12 @@ import { INBOX_DECISION_POST_ROUTE, postThreadDecisions } from "./inbox-decision
 import { DECISION_POST_DESTINATIONS, decisionPostDestinationOf } from "@plannotator/shared/inbox/decision-post";
 import { createInboxAccountsFor, switchTarget } from "./inbox-accounts";
 import { INBOX_ACCOUNT_SWITCHING, INBOX_ACTIVITY_MAX_DAYS, type InboxNoteAutoAdd, type InboxPullRiskAnswer } from "@plannotator/core/inbox-types";
-import { createInboxOpenInRoute, systemOpenInLauncher, type InboxOpenInLauncher } from "./inbox-open-in";
+import { createInboxOpenInRoute, systemOpenInLauncher, type InboxLinkPulls, type InboxOpenInLauncher } from "./inbox-open-in";
+import type { InboxSendLinkPulls } from "./inbox-links-not-found";
 import { recordInboxAttachments, sweepStaleInboxSendTemps } from "@plannotator/shared/inbox/attachments";
 import { assertInboxUploadsPending, inboxBodyForAgent, inboxDiskFullError, inboxUploadAttachments, removeInboxAttachmentFiles, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
 import { createInboxLiveSessions, takesOver, thereInThread } from "./inbox-sessions";
+import { withRuntimeAgentName } from "./inbox-runtime-name";
 import { inboxAgentsEndedSince, inboxAgentsGroup, inboxFolderProject, inboxMergedAgents, inboxStartOfDay, type InboxAgentWait } from "./inbox-agents-list";
 import { createInboxFirstSeen } from "./inbox-first-seen";
 import { createInboxCodexWake, type InboxCodexWake } from "./inbox-codex-wake";
@@ -263,6 +268,7 @@ import { createInboxT3Wake, createT3ModOwner, type InboxT3Wake, type T3Connect }
 import { createInboxAntigravityWake, type InboxAntigravityWake } from "./inbox-antigravity-wake";
 import { CloudAgentError, createInboxCloudAgents, hasCloudWake } from "./inbox-cloud-agents";
 import { PERSONAL_AGENTS_BANNER_BASE } from "@plannotator/core/inbox-personal-agents";
+import { DIFF_FONT_SOURCES } from "@plannotator/shared/diff-fonts";
 import { personalAgentConnectedHere } from "./inbox-personal-agents";
 import { createInboxAgentDoor, INBOX_AGENT_DOOR_PATH } from "./inbox-agent-door";
 import { createInboxCloudWake, type InboxCloudWaker } from "./inbox-cloud-wake";
@@ -279,6 +285,7 @@ import {
 } from "./inbox-restart";
 import { createInboxCompose, INBOX_UPLOAD_SWEEP_MS } from "./inbox-compose";
 import { createInboxLiveReview } from "./inbox-live-review";
+import { powerUpRoute } from "./inbox-power-up";
 import { INBOX_CROSS_SITE_BODY, INBOX_MACHINE_PULL_WINDOW_ONLY_BODY, INBOX_MACHINE_WINDOW_ONLY_BODY, isCrossSiteRequest, isWindowRequest } from "./inbox-cross-site";
 import { createInboxLaunch } from "./inbox-launch";
 import { createInboxRex, type InboxRex, type InboxRexReach, type InboxRexStatus } from "./inbox-rex";
@@ -335,17 +342,21 @@ import {
   revealStamp,
   revealStampNotNow,
   revealWaitStarts,
+  revealsWithCodeReviewOffer,
   type RevealId,
   type RevealState,
 } from "@plannotator/shared/inbox/reveals";
 import { launchTipClaim, launchTipDue, launchTipLaunched, type LaunchTipState } from "@plannotator/shared/inbox/launch-tip";
 import { sidebarTipClaim, sidebarTipDue, type SidebarTipState } from "@plannotator/shared/inbox/sidebar-tip";
 import { bandTipClaim, bandTipDue, bandTipUsed, type BandTipState } from "@plannotator/shared/inbox/band-tip";
+import { searchTipClaim, searchTipDue, type SearchTipState } from "@plannotator/shared/inbox/search-tip";
 import { revealGrillMeGap, type GrillMeTipQuestion } from "@plannotator/shared/inbox/grill-me-tip";
 import { routinesIntroGoodDaysOnce, routinesIntroOpen, routinesIntroSend, routinesIntroWaits } from "@plannotator/shared/inbox/routines-intro";
 import { splitInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
 import { configStarAskStore, createStarAsk, readStarAskRecord, runGh, starAskEnabled, starAskOpen, type StarAskClaim } from "@plannotator/shared/star-ask";
 import { claimInboxStar, inboxStarAction } from "./inbox-star-ask";
+import { configLaunchShownStore, createLaunchSwitch, launchSwitchEndpointNow } from "@plannotator/shared/launch-switch";
+import { createInboxLaunchQueue } from "./inbox-launch-queue";
 import { createInboxEmbedPages, createInboxEmbeds } from "./inbox-embeds";
 import { createInboxPages } from "./inbox-pages";
 import { createInboxFeedback, INBOX_FEEDBACK_PATH } from "./inbox-feedback";
@@ -357,6 +368,7 @@ import { createCardMarks } from "./inbox-card-marks";
 import { validateFilePath } from "@plannotator/shared/review-core";
 import { createInboxPullLookups, refCardsKindReader } from "./inbox-pull-lookups";
 import { createInboxPulls, InboxPullsError, linkInboxPulls, linkUnlistedPulls, pullCards, threadAgent, type InboxPullLinkStore, type InboxPullRepo } from "./inbox-pulls";
+import { pullMissingAnswer, pullToAct, pullToActNow } from "./inbox-pull-missing";
 import { pullDiffScopeOf } from "./inbox-pull-diff-scope";
 import { parseFileLevelComments, parsePRReviewAction, submitPRReview as submitForgeReview, type PRRef, type PRReviewFileComment, type PRRuntime } from "@plannotator/shared/pr-provider";
 import { prCommandRuntime } from "./pr";
@@ -668,6 +680,11 @@ export interface InboxServerOptions {
   scheduled?: boolean;
   /** Code review, decided here instead of config.json `inboxCodeReview` (tests). Absent: config.json decides on every request. */
   codeReview?: boolean;
+  /**
+   * Tests: Code review's one-time offer shown or not, over `CODE_REVIEW_OFFER.enabled` (packages/shared/inbox/reveals.ts,
+   * `CODE_REVIEW_OFFER_SHOWN`), so either state can be tested whichever way the release has it. Absent: the entry decides.
+   */
+  codeReviewOffer?: boolean;
   /** Branch reviews, decided here instead of config.json `inboxBranchReviews` (tests). Absent: config.json decides on every request. Only with Code review on. */
   branchReviews?: boolean;
   /** System, decided here instead of config.json `inboxSystem` (tests). Absent: config.json decides on every request. Shown only while Code review is on. */
@@ -1015,25 +1032,37 @@ const ERROR_STATUS: Record<string, number> = {
  * policy allows inline code and code from this origin only. Nothing may frame
  * it (but the apps config.json `inboxFrameAncestors` lists, on this
  * computer's port: inbox-framing.ts), and it may only talk to this server.
+ *
+ * One more place for styles and fonts: Settings → Reviews → Code Font offers
+ * web fonts, and picking one loads its stylesheet and font files from Google
+ * Fonts (`fonts.googleapis.com`, `fonts.gstatic.com`) or, for Hack, from its
+ * one folder on jsDelivr (`DIFF_FONT_SOURCES`, shared/diff-fonts.ts; the menu's
+ * table, ui/utils/diffFonts.ts, is checked against it by
+ * inbox-code-fonts.test.ts). Only stylesheets and font files: no script, picture, media or
+ * request comes from there. A srcdoc frame under this policy (an agent page's
+ * small preview) inherits them, so such a page can make the browser fetch a
+ * stylesheet or font from those two places when it is drawn (Google or
+ * jsDelivr see the request), never from anywhere else.
  */
 export const WINDOW_CSP = [
   "default-src 'self'",
   // 'wasm-unsafe-eval' lets the Graphviz engine (@viz-js/viz) compile its
   // WebAssembly; it does not allow eval() or new Function().
   "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'",
-  "style-src 'self' 'unsafe-inline'",
+  `style-src 'self' 'unsafe-inline' ${DIFF_FONT_SOURCES.stylesheets.join(" ")}`,
   // Never a picture from the web: an agent's text (a markdown image, a
   // diagram's) must not make the browser call a site when the person reads it.
   // An attached HTML page shows its web pictures from a document of its own,
   // under its own policy (inbox-pages.ts), never as a srcdoc under this one.
-  // The one exception is the project's own hosted folder, for the one-time
-  // dialogs' banners (core/inbox-personal-agents.ts).
-  `img-src 'self' data: blob: ${PERSONAL_AGENTS_BANNER_BASE}`,
+  // The exceptions are two folders of the project's own site: the hosted
+  // folder, for the one-time dialogs' banners (core/inbox-personal-agents.ts),
+  // and the launch dialog's art (ui utils/launchDialogWords.ts LAUNCH_ART_BASE).
+  `img-src 'self' data: blob: ${PERSONAL_AGENTS_BANNER_BASE} https://plannotator.ai/launch/`,
   // Video and audio as the pictures: an attached HTML page drawn as a srcdoc
   // inherits this policy, so its `<video src="data:…">` (or a blob:) plays.
   // Never from the web, for the same reason.
   "media-src 'self' data: blob:",
-  "font-src 'self' data:",
+  `font-src 'self' data: ${DIFF_FONT_SOURCES.files.join(" ")}`,
   "connect-src 'self'",
   "worker-src 'self' blob:",
   "frame-ancestors 'none'",
@@ -1387,7 +1416,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   /** The reaction tray's saved emoji changed (config.json `inboxReactions`): the windows' streams say `event: reactions`. */
   const reactionsListeners = new Set<(reactions: readonly InboxReaction[], rev: number) => void>();
   /** A capability switch was saved (Settings → Capabilities): the windows' streams say `event: capabilities`. `changed`: which one, for a switch whose frame names it only then. */
-  const capabilityListeners = new Set<(changed?: "code_review" | "float_drafts" | "mark_read_warning" | "split_view" | "scheduled_threads" | "seam" | "experimental") => void>();
+  const capabilityListeners = new Set<(changed?: "code_review" | "decision_mode" | "float_drafts" | "mark_read_warning" | "split_view" | "scheduled_threads" | "seam" | "experimental") => void>();
   /** "Over your tailnet" published by itself once Tailscale came back: the windows' streams say `event: tailscale` with the new state. */
   const tailscaleListeners = new Set<() => void>();
   // The Inbox windows open now and whether any can show a notification (inbox-windows.ts).
@@ -1397,6 +1426,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const binaryPath = options.binaryPath !== undefined ? options.binaryPath : version !== "dev" ? process.execPath : null;
   // The sidebar's Update button (packages/server/inbox-updates.ts): the release
   // check, the binary on disk, Update now, Remind me tomorrow.
+  // The launch switch (packages/shared/launch-switch.ts): its reader runs in the background from the start, at most
+  // every 3 hours while no launch is on (launchRefreshMs); the window's claim answers from the kept copy only.
+  const launchSwitch = createLaunchSwitch({ dataDir: () => dataDir, endpoint: () => launchSwitchEndpointNow(), shown: configLaunchShownStore });
+  launchSwitch.start();
+  // Its place in the line of one-time dialogs: first, until a claim is answered (inbox-launch-queue.ts).
+  const launchQueue = createInboxLaunchQueue(launchSwitch, () => dataDir);
   let lastDailyPingCheck = 0;
   const updates = createInboxUpdates({
     dataDir,
@@ -1479,7 +1514,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // The project roots whose origin the Pull requests list has waited for once.
   const pullRepoRead = new Set<string>();
   const pullRepoReading = new Map<string, Promise<InboxProjectRepo | null>>();
-  const pulls = createInboxPulls(options.refRunner ? { run: options.refRunner } : {});
+  // A PR that left the list stays readable for an open page, unless the person hid it (inbox-pull-departed.ts).
+  const pulls = createInboxPulls({ ...(options.refRunner ? { run: options.refRunner } : {}), hidden: (key) => pullHidden.has(key), dir: inboxDir(dataDir) });
   // The attach line's lookups (inbox-pull-lookups.ts): a number an agent named, after its send, through the hover
   // cards' read; only while Code review is on and this computer's gh is signed in to the host.
   const pullLookups = createInboxPullLookups({
@@ -1785,6 +1821,22 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     await pulls.list(wanted, { refresh: false });
   };
 
+  // A thread's PRs and a file's text at one: the referenced-file view reads them first.
+  const linkPulls: InboxLinkPulls = {
+    threadPulls: (thread) => pullOwners.keys(thread).reverse(),
+    // An Inbox just started has no list yet: read it for a PR it does not know.
+    pullFile: async (pull, path) => {
+      const { wanted } = await pullProjects();
+      if (!pulls.find(pull)) await findPulls([pull], wanted);
+      return pulls.file(pull, path, wanted);
+    },
+  };
+  // The send's `links_not_found` asks the same PRs only what is kept in memory: a send never waits on the forge.
+  const sendLinkPulls: InboxSendLinkPulls = {
+    threadPulls: linkPulls.threadPulls,
+    cachedFile: (pull, path) => pulls.cachedFile(pull, path),
+  };
+
   // Where a path an agent named files its messages: its repository (a linked
   // worktree folds into its main repository's project) or the folder, cached
   // per folder (packages/server/inbox-project-root.ts). One cache for sends
@@ -1860,6 +1912,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     projectRootOf: (path) => projectRoots.resolve(path),
     recordAttachments: (paths, project, base) =>
       recordInboxAttachments(store.dir, paths, { base, at: new Date().toISOString() }),
+    linkPulls: sendLinkPulls,
     // A question's running-app prototypes, checked and probed before anything is written (inbox-live.ts).
     checkPrototypeApps: (apps, probing) => liveSites.checkPrototypeApps(apps, probing),
     // The agents' read-only search reads the window's own ⌘K index, and finds projects without making one.
@@ -2291,7 +2344,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         archived.add(row.thread_id);
         continue;
       }
-      if ((row.section !== "stopped" && row.section !== "holding" && row.section !== "waiting") || inboxRowSnoozed(row, now)) continue;
+      if (!inboxSectionWaitsOnPerson(row.section) || inboxRowSnoozed(row, now)) continue;
       const owner = store.threadOwner(row.thread_id);
       // A thread left out for its hidden PRs is no wait: no count, no "Waiting on you", no rank, and it lists no agent
       // that is not running (an ended one shows ended, with nothing waiting).
@@ -3215,6 +3268,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return diffOptionsState();
   };
 
+  /** Code review's "Semantic changes" switch (config.json `reviewAnalysis.semanticDiff`, inbox-review-analysis.ts). */
+  const reviewAnalysisState = () => inboxReviewAnalysisOf(loadConfig().reviewAnalysis);
+  const saveReviewAnalysis = (value: unknown, validateOnly = false) => {
+    const change = parseInboxReviewAnalysisChange(value);
+    if (!change.ok) throw new InboxError("validation_error", change.error, { field: change.field });
+    if (validateOnly) return reviewAnalysisState();
+    saveConfig({ reviewAnalysis: change.reviewAnalysis });
+    const saved = reviewAnalysisState();
+    if (saved.semantic_diff !== change.reviewAnalysis.semanticDiff) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
+    return saved;
+  };
+
   /**
    * The one-time sound dialog, claimed by the page that will show it: a
    * compare-and-set from `dialogDueFor` to `dialogShownFor`, so of several
@@ -3432,11 +3497,35 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
 
   /**
+   * Decision mode (Settings → Capabilities, the owner 2026-11-24): on unless the person turned it off (config.json
+   * `inboxDecisionMode`, or the old `experimental.decisionMode`: shared `inboxDecisionModeOn`). A window feature
+   * only: nothing an agent reads changes. Read on every request; every window follows a save through
+   * `event: capabilities`, as the Board's.
+   */
+  const decisionModeOn = () => inboxDecisionModeOn(loadConfig());
+  /** Its wire: `env` false while PLANNOTATOR_EXPERIMENTAL turns it off (Settings locks the switch then), else null. */
+  const decisionModeWire = () => ({ on: decisionModeOn(), env: inboxDecisionModeEnvOff() ? (false as const) : null });
+  const saveDecisionMode = (input: unknown, validateOnly = false) => {
+    if (!input || typeof input !== "object" || Array.isArray(input) || typeof (input as { on?: unknown }).on !== "boolean" || Object.keys(input).some((key) => key !== "on")) {
+      throw new InboxError("validation_error", "decision_mode: { on: boolean }.", { field: "decision_mode" });
+    }
+    const on = (input as { on: boolean }).on;
+    // PLANNOTATOR_EXPERIMENTAL=-decision-mode decides (as it did while experimental): saving on would change nothing.
+    if (on && inboxDecisionModeEnvOff()) {
+      throw new InboxError("experimental_env_decides", "PLANNOTATOR_EXPERIMENTAL is set in this Inbox's environment, so decision mode stays off.", { field: "decision_mode" });
+    }
+    if (validateOnly) return decisionModeWire();
+    const was = decisionModeOn();
+    saveConfig({ inboxDecisionMode: on });
+    if (decisionModeOn() !== on) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
+    if (was !== on) for (const listener of capabilityListeners) listener("decision_mode");
+    return decisionModeWire();
+  };
+  /**
    * Experimental features (config.json `experimental`, PLANNOTATOR_EXPERIMENTAL
    * wins): each switch, and whether the env var decides it. Read on every
    * request, so a switch applies at once.
    */
-  const decisionModeOn = () => resolveExperimental(loadConfig(), "decision-mode");
   /** Grid (approval "inbox-agent-grid"), off by default: its sidebar row is never saved while it is off. */
   const gridOn = () => resolveExperimental(loadConfig(), "grid");
   /**
@@ -3697,9 +3786,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const config = loadConfig();
     return INBOX_PROMPT_HOSTS.every((host) => inboxReminderRulesText(config, host) === null);
   };
+  // Code review's one-time offer shown at all (`CODE_REVIEW_OFFER_SHOWN`, off since 0.29.6; a test may decide it), and
+  // the line's queue with the offer as that says: every reveal rule below reads this queue.
+  const codeReviewOfferShown = options.codeReviewOffer ?? CODE_REVIEW_OFFER_SHOWN;
+  const revealTable = revealsWithCodeReviewOffer(codeReviewOfferShown);
   // Who Code review's offer is for, decided at the first release start that shows it, as the tab icon's is
   // (inbox-code-review-offer.ts): someone who used an earlier Inbox is marked due; a fresh install never sees it.
-  if (CODE_REVIEW_OFFER_SHOWN && normalizeStableVersion(version) !== null) {
+  if (codeReviewOfferShown && normalizeStableVersion(version) !== null) {
     const mark = codeReviewOfferAtStart(loadConfig().inboxReveals?.code_review, loadConfig().inboxCodeReview !== undefined, usedBefore, new Date().toISOString());
     if (mark) saveConfig({ inboxReveals: { ...loadConfig().inboxReveals, code_review: mark } });
   }
@@ -3708,10 +3801,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * shared/inbox/reveals.ts): only for someone who used an earlier Inbox (marked due at a release start, above), only
    * while config.json `inboxCodeReview` is unset (nobody decided; `false` is the person's own off; `true` is theirs
    * too), and only while the offer is shown at all: `CODE_REVIEW_OFFER_SHOWN` (held from 2026-11-17, shown again from
-   * the release after 2026-11-23, approval "inbox-code-review-offer": "for people who already use the Inbox").
+   * the release after 2026-11-23, approval "inbox-code-review-offer": "for people who already use the Inbox"; off again
+   * from 0.29.6, when it is never open and nothing is marked at a release start).
    */
   const codeReviewUndecided = () =>
-    CODE_REVIEW_OFFER_SHOWN && options.codeReview === undefined && loadConfig().inboxCodeReview === undefined && codeReviewOfferDue(loadConfig().inboxReveals?.code_review);
+    codeReviewOfferShown && options.codeReview === undefined && loadConfig().inboxCodeReview === undefined && codeReviewOfferDue(loadConfig().inboxReveals?.code_review);
   /**
    * The offers the line claims for itself (approval "inbox-one-time-dialogs"): each one's "undecided" (the person never
    * set its switch). The claim stamps `inboxReveals[id]` with the page's key and turns nothing on; its dialog's "Turn it
@@ -3849,17 +3943,19 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // The star ask's show (aside): the grill-me tip (`lastResort`) never goes on its day.
       // The grill-me tip's too: the gap counts from either (`revealGapFree`).
       asideShownAt: revealLastShown([reveals?.star?.shownAt, reveals?.grill_me_tip?.shownAt]),
-      // The tips outside the line (the Sidebar tip, the Launch tip): they start the gap too.
-      tipShownAt: revealLastShown([reveals?.sidebar_tip?.shownAt, reveals?.launch_tip?.shownAt]),
+      // The tips outside the line (the Sidebar tip, the Launch tip, the Search tip) and the launch dialog: they start the gap too.
+      tipShownAt: revealLastShown([reveals?.sidebar_tip?.shownAt, reveals?.launch_tip?.shownAt, reveals?.search_tip?.shownAt, ...Object.values(config.launch ?? {}).map((record) => record?.shownAt)]),
+      // The launch dialog (launch-switch.ts), due here: ahead of everything, so the line holds until it is shown.
+      launchDue: launchQueue.holdsLine(),
     };
     // The offers, each one's "undecided" while unshown. They read the state above (Routines' walk waits while the line
     // would refuse it anyway), so they come after it.
     for (const [id, undecided] of Object.entries(lineOffers)) open[id as RevealId] = !lineOfferSaved(id as RevealId)?.shownAt && undecided!(state, now);
     // Read only while an entry that asks for heavy use is still open (a walk of every thread; a release build).
-    state.heavy = snoozeIntroRelease && INBOX_REVEALS.some((entry) => entry.heavyUse && entry.enabled && open[entry.id] === true) && revealHeavyUse(seenAgentMessages(), now);
+    state.heavy = snoozeIntroRelease && revealTable.some((entry) => entry.heavyUse && entry.enabled && open[entry.id] === true) && revealHeavyUse(seenAgentMessages(), now);
     // The grill-me tip (reveals.ts `lastResort`): its gap (a walk of the store) is read only while it is unshown, in a
     // release build, and the line has nothing else for this moment; otherwise it could not be claimed anyway.
-    if (open.grill_me_tip) open.grill_me_tip = snoozeIntroRelease && revealMayClaim("grill_me_tip", state, now) && revealGrillMeGap(grillMeUse());
+    if (open.grill_me_tip) open.grill_me_tip = snoozeIntroRelease && revealMayClaim("grill_me_tip", state, now, revealTable) && revealGrillMeGap(grillMeUse());
     return state;
   };
   /** The line's stamps to save with a claim at `at` (a release build only): the day, the load and, unless `spaced` is false, the spacing clock. */
@@ -3875,12 +3971,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (!snoozeIntroRelease) return null;
     const now = read?.now ?? new Date();
     const state = read?.state ?? revealState(now, load);
-    const starts = revealWaitStarts(state, now);
+    const starts = revealWaitStarts(state, now, revealTable);
     if (starts.length > 0) {
       const reveals = loadConfig().inboxReveals;
       saveConfig({ inboxReveals: { ...reveals, waitingSince: { ...reveals?.waitingSince, ...Object.fromEntries(starts.map((id) => [id, now.toISOString()])) } } });
     }
-    return revealNext(state, now);
+    return revealNext(state, now, revealTable);
   };
   /**
    * The page about to show a reveal claims it: a compare-and-set over the whole queue (no await between the read and
@@ -3909,7 +4005,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const now = new Date();
     // A theme picked elsewhere (plan review, code review) since the last look: marked now, so the claim is refused for good.
     if (id === "theme_chooser") themeChooserLookNow();
-    if (!revealMayClaim(id, revealState(now, load), now) || !undecided()) return false;
+    if (!revealMayClaim(id, revealState(now, load), now, revealTable) || !undecided()) return false;
     const at = now.toISOString();
     // An `aside` card (the grill-me tip) stamps only its own record: no other dialog's day moves.
     const aside = INBOX_REVEALS.some((entry) => entry.id === id && entry.aside);
@@ -3932,7 +4028,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         release: snoozeIntroRelease,
         mayClaim: () => {
           const now = new Date();
-          return revealMayClaim("star", revealState(now, load), now);
+          return revealMayClaim("star", revealState(now, load), now, revealTable);
         },
       },
       key,
@@ -4032,13 +4128,38 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return loadConfig().inboxReveals?.band_tip?.shownAt === at;
   };
   /**
+   * The Search tip (packages/shared/inbox/search-tip.ts): at the search palette's box, a day or more after first use,
+   * until it was shown once, and never for someone whose recent searches already hold a quote. Outside the line's
+   * order, as the Sidebar tip: its claim stamps only `inboxReveals.search_tip`, and it keeps the gap both ways.
+   */
+  const recentSearchesQuoted = recentSearchesQuotedReader(store.dir);
+  const searchTipState = (): SearchTipState => ({
+    // Asked only while it could still be due (never once stamped, nor before the person's first day is over); the file
+    // is read again only when it changed.
+    quoted: recentSearchesQuoted,
+    firstUseAt: snoozeIntroSaved()?.firstUseAt ?? null,
+    tenure: snoozeIntroRelease,
+    saved: loadConfig().inboxReveals?.search_tip,
+  });
+  const claimSearchTip = (key: string | null): boolean => {
+    const at = new Date().toISOString();
+    const claim = searchTipClaim(searchTipState(), key, at);
+    if (!claim.save) return claim.show;
+    // Inside the gap after a dialog or another tip: not now (nothing is spent; the next open asks again).
+    if (!tipFree()) return false;
+    saveConfig({ inboxReveals: { ...loadConfig().inboxReveals, search_tip: claim.save } });
+    // Not written (a read-only data dir): showing it anyway would show it at every open.
+    return loadConfig().inboxReveals?.search_tip?.shownAt === at;
+  };
+  /**
    * What a settings read reports of the line (`reveal`), from one read of its state (one walk of the threads for heavy
    * use): the dialog this page may arm, the `ahead` offers it may also arm at their moment, and the agent note's `setup`.
    */
   const againIn = (at: number | null, now: Date): number | null => (at === null ? null : at - now.getTime());
+  const soonest = (a: number | null, b: number | null): number | null => (a === null ? b : b === null ? a : Math.min(a, b));
   /** `state` with the waits `revealNow` starts at `now` (reveals.ts `revealWaitStarts`) kept. */
   const waitingFrom = (state: RevealState, now: Date): RevealState => {
-    const starts = revealWaitStarts(state, now);
+    const starts = revealWaitStarts(state, now, revealTable);
     return starts.length === 0 ? state : { ...state, waitingSince: { ...state.waitingSince, ...Object.fromEntries(starts.map((id) => [id, now.toISOString()])) } };
   };
   const lineReport = (load: string | null) => {
@@ -4047,9 +4168,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const next = revealNow(load, { now, state });
     return {
       next,
-      ahead: snoozeIntroRelease ? revealAhead(state, now) : [],
+      ahead: snoozeIntroRelease ? revealAhead(state, now, revealTable) : [],
       // The star ask (reveals.ts `aside`): armed beside `next` while the line is free; it moves no one.
-      aside: snoozeIntroRelease ? revealAsideNow(state, now) : [],
+      aside: snoozeIntroRelease ? revealAsideNow(state, now, revealTable) : [],
       // Day 0's setup asks: this computer's, and its owner's on their other devices (owner ruling 2026-11-11).
       setup: revealLineFree("setup", state, now),
       line: snoozeIntroRelease,
@@ -4057,13 +4178,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // null when none can: a page left loaded asks again once, then, and keeps no other timer for the line.
       // With `next` and the `ahead` offers waiting from this read on (`revealNow` has just kept them), so the end of
       // their patience and their 14 days is named too.
-      again_in: snoozeIntroRelease ? againIn(revealAgainAt(waitingFrom(state, now), now), now) : null,
+      // A kept launch that starts later names its start too (inbox-launch-queue.ts `startsIn`).
+      again_in: soonest(snoozeIntroRelease ? againIn(revealAgainAt(waitingFrom(state, now), now, revealTable), now) : null, launchQueue.startsIn(now.getTime())),
       // The Launch tip (outside the line): compose may claim it at the first plain New message.
       launch_tip: launchTipDue(launchTipState()) && revealLineFree("setup", state, now),
       // The Sidebar tip (outside the line): the page may claim it at a calm moment beside the open sidebar.
       sidebar_tip: sidebarTipDue(sidebarTipState(), now.toISOString()) && revealLineFree("setup", state, now),
       // The Group tip (outside the line): the page may claim it at the first hover of a band with a menu.
       band_tip: bandTipDue(bandTipState(), now.toISOString()) && revealLineFree("setup", state, now),
+      // The Search tip (outside the line): the search palette may claim it as it opens.
+      search_tip: searchTipDue(searchTipState(), now.toISOString()) && revealLineFree("setup", state, now),
+      // The launch dialog (launch-switch.ts): due on this computer, so the page claims it now (`/api/inbox/launch-switch`).
+      launch: launchQueue.due(),
     };
   };
   /** An offer closed with Not now (Escape, a click outside): the next dialog waits three days. A release build. */
@@ -4072,19 +4198,27 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     saveConfig({ inboxReveals: revealStampNotNow(loadConfig().inboxReveals, new Date().toISOString()) });
   };
   const experimentalState = () => ({
-    decision_mode: { on: decisionModeOn(), env: parseExperimentalEnv("decision-mode") ?? null },
+    // For an Inbox window from before Decision mode left Experimental, which reads `experimental.decision_mode.on`:
+    // the real state (the new place is `decision_mode`). Remove after one release.
+    decision_mode: { on: decisionModeOn(), env: inboxDecisionModeEnvOff() ? false : null },
     // Grid (approval "inbox-agent-grid"): the window's page of work in flight, drawn from what the window already reads.
     grid: { on: gridOn(), env: parseExperimentalEnv("grid") ?? null },
   });
 
-  /** Save `experimental: { decision_mode?, grid? }` (one switch or both). `validateOnly`: check and write nothing. */
+  /**
+   * Save `experimental: { grid }`. `validateOnly`: check and write nothing. An older window's Decision mode switch
+   * (`experimental: { decision_mode }`) saves the new setting, as `decision_mode: { on }` does. Remove after one release.
+   */
   const saveExperimental = (input: unknown, validateOnly = false) => {
-    const switches = { decision_mode: ["decision-mode", "decisionMode", "decision mode"], grid: ["grid", "grid", "Grid"] } as const;
-    const named = input && typeof input === "object" && !Array.isArray(input) ? Object.entries(input as Record<string, unknown>) : [];
-    if (named.length === 0 || named.some(([key, value]) => !Object.hasOwn(switches, key) || typeof value !== "boolean")) {
-      throw new InboxError("validation_error", "experimental: { decision_mode?: boolean, grid?: boolean }.", { field: "experimental" });
+    const switches = { grid: ["grid", "grid", "Grid"] } as const;
+    const all = input && typeof input === "object" && !Array.isArray(input) ? Object.entries(input as Record<string, unknown>) : [];
+    const legacy = all.find(([key]) => key === "decision_mode");
+    const named = all.filter(([key]) => key !== "decision_mode");
+    if (all.length === 0 || (legacy && typeof legacy[1] !== "boolean") || named.some(([key, value]) => !Object.hasOwn(switches, key) || typeof value !== "boolean")) {
+      throw new InboxError("validation_error", "experimental: { grid: boolean }.", { field: "experimental" });
     }
-    const change: { decisionMode?: boolean; grid?: boolean } = {};
+    if (legacy) saveDecisionMode({ on: legacy[1] }, true);
+    const change: { grid?: boolean } = {};
     for (const [key, on] of named as [keyof typeof switches, boolean][]) {
       const [feature, configKey, words] = switches[key];
       // The env var decides (like PLANNOTATOR_INBOX_TAILSCALE): saving to config.json would change nothing.
@@ -4095,6 +4229,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       change[configKey] = on;
     }
     if (validateOnly) return experimentalState();
+    if (legacy) saveDecisionMode({ on: legacy[1] });
+    if (named.length === 0) return experimentalState();
     const gridWas = gridOn();
     saveConfig({ experimental: change });
     const saved = loadConfig().experimental as Record<string, unknown> | undefined;
@@ -4186,10 +4322,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     diff_style: diffStyleState(),
     /** How diffs are drawn (config.json `diffOptions`, inbox-diff-options.ts), shared with code review; each field null when never chosen. */
     diff_options: diffOptionsState(),
+    /** Code review's "Semantic changes" switch (config.json `reviewAnalysis.semanticDiff`): off, no semantic diff in the Inbox either; null when never chosen. */
+    review_analysis: reviewAnalysisState(),
     /** Experimental features, each off unless switched on (Settings → Capabilities → Experimental). */
     experimental: experimentalState(),
     /** The Board (config.json `inboxBoard`): off unless the person turned it on. */
     board: { on: boardOn() },
+    /** Decision mode (config.json `inboxDecisionMode`): on unless the person turned it off; `env` false while PLANNOTATOR_EXPERIMENTAL turns it off. */
+    decision_mode: decisionModeWire(),
     /** Routines (config.json `inboxScheduledThreads`): off unless the person turned them on; absent on Windows. */
     ...scheduledCap.wire(),
     /** Launch (config.json `inboxLaunch`, on unless `enabled` is false; off by default on Windows): Settings → Agents' "Start agents from New message" switch, and while on its full-permissions switch and scratch root. */
@@ -4358,10 +4498,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // Windows only: the phone's door (contract 7.9) gets hello, record, status and the heartbeat.
         const sendReach = () => send(`event: reach\ndata: ${JSON.stringify(windows.reach(notificationsState().enabled))}\n\n`);
         const stopReach = windowId ? windows.subscribe(sendReach) : () => {};
-        // A reply draft changed (any window's, or this one's): the list reads the rows' `unsent` again. Windows only.
+        // A reply draft changed (any window's, or this one's): the list reads the rows' `unsent` again. Windows, and a
+        // linked machine that asks (`drafts=1`, mark `reply-drafts`: its windows show this Inbox's threads' drafts).
         // A compose draft has no thread: `{ compose: true }` (additive; a window that predates it skips the frame).
         const onDraft = (threadId: string | null) => send(`event: drafts\ndata: ${JSON.stringify(threadId === null ? { compose: true } : { thread_id: threadId })}\n\n`);
-        if (windowId) draftListeners.add(onDraft);
+        if (windowId || url.searchParams.get("drafts") === "1") draftListeners.add(onDraft);
         // An Ask AI conversation changed: the window reads it again. Only the owner's own window hears of it.
         const onAsk = (threadId: string) => send(`event: ask\ndata: ${JSON.stringify({ thread_id: threadId })}\n\n`);
         if (windowId && ask.allowed(req, via)) askListeners.add(onAsk);
@@ -4432,10 +4573,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const onReactions = (reactions: readonly InboxReaction[], rev: number) => send(`event: reactions\ndata: ${JSON.stringify({ reactions, rev })}\n\n`);
         if (windowId || url.searchParams.get("reactions") === "1") reactionsListeners.add(onReactions);
         // The steps switch was saved (any window's): every window reads its settings and the open thread's steps again. Windows only.
-        const onCapabilities = (changed?: "code_review" | "float_drafts" | "mark_read_warning" | "split_view" | "scheduled_threads" | "seam" | "experimental") => {
+        const onCapabilities = (changed?: "code_review" | "decision_mode" | "float_drafts" | "mark_read_warning" | "split_view" | "scheduled_threads" | "seam" | "experimental") => {
           const floats = floatDraftsOn();
-          // Decision mode and Grid: only when one of them was the change (a linked computer's flip taken here, too).
-          const frame = { board: { on: boardOn() }, steps: { on: stepsOn() }, bro: { on: broOn() }, ...(floats || changed === "float_drafts" ? { float_drafts: { on: floats } } : {}), ...(changed === "mark_read_warning" ? { mark_read_warning: { on: markReadWarningOn() } } : {}), ...(changed === "split_view" ? { split_view: { on: splitViewOn() } } : {}), ...(changed === "experimental" ? { experimental: experimentalState() } : {}), code_review: { on: codeReviewOn() }, ...systemWire(), ...chapterDiagramsWire(), ...capabilitiesFrame(capabilities, changed === "seam", via === "local" && !fromDeviceDoor.has(req)) };
+          // Decision mode: while off, and to the save that changed it (on is everyone's default: a window keeps what it
+          // read), a linked computer's flip taken here too (saveDecisionMode says "decision_mode"). Grid (`experimental`,
+          // which still carries decision_mode for an older window): only when it was the change.
+          const deciding = decisionModeOn();
+          const frame = { board: { on: boardOn() }, ...(!deciding || changed === "decision_mode" ? { decision_mode: { on: deciding } } : {}), steps: { on: stepsOn() }, bro: { on: broOn() }, ...(floats || changed === "float_drafts" ? { float_drafts: { on: floats } } : {}), ...(changed === "mark_read_warning" ? { mark_read_warning: { on: markReadWarningOn() } } : {}), ...(changed === "split_view" ? { split_view: { on: splitViewOn() } } : {}), ...(changed === "experimental" ? { experimental: experimentalState() } : {}), code_review: { on: codeReviewOn() }, ...systemWire(), ...chapterDiagramsWire(), ...capabilitiesFrame(capabilities, changed === "seam", via === "local" && !fromDeviceDoor.has(req)) };
           // Routines: while on, and to the save that turned them off.
           if (scheduledCap.on() || changed === "scheduled_threads") Object.assign(frame, scheduledCap.wire());
           send(`event: capabilities\ndata: ${JSON.stringify(frame)}\n\n`);
@@ -4456,6 +4600,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // A `machines` snapshot opens every stream: a resync, never a notification.
         const sendMachine = (frame: MachineFrame) => send(`event: ${frame.event}\ndata: ${JSON.stringify(frame.data)}\n\n`);
         const stopMachines = url.searchParams.get("machines") === "1" ? machines.subscribe(sendMachine) : () => {};
+        // This Inbox's links moved (one linked, unlinked, asleep or back, or a link through it under way): a linked
+        // computer that asks (`links=1`) reads this list again for its `link_through` (inbox-link-through.ts).
+        const stopLinks = url.searchParams.get("links") === "1" && fromDeviceDoor.get(req)?.platform === MACHINE_PLATFORM ? machines.onLinks(() => send(`event: links\ndata: {}\n\n`)) : () => {};
         if (url.searchParams.get("machines") === "1") sendMachine({ event: "machines", data: { machines: machines.machinesView() } });
         // A window hears its heartbeat (a named frame, so the page sees it and can tell a dead connection from a
         // quiet Inbox); the phone's door, a linked machine and agents keep the comment line, as before.
@@ -4495,6 +4642,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           tailscaleListeners.delete(onTailscale);
           deliveryListeners.delete(sendDeliveries);
           stopMachines();
+          stopLinks();
           leave();
         };
         req.signal.addEventListener("abort", () => {
@@ -5432,8 +5580,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   if (scheduledCap.on()) void scheduledCap.syncLogin();
   // One set of Capabilities switches across linked computers (inbox-capability-set.ts): a switch an env var, the build
   // or a test decides here is not shared. Taking a flip turns it as its Settings row does. `chosen`: its own key is
-  // set (a choice from before flips were kept counts as a flip at time 0; an untouched default as none).
-  const experimentalFree = (feature: "decision-mode" | "grid") => parseExperimentalEnv(feature) === undefined;
+  // set (a choice from before flips were kept counts as a flip at time 0; an untouched default as none). Decision mode:
+  // its own key or its old place under `experimental`; shared unless PLANNOTATOR_EXPERIMENTAL turns it off here.
+  const experimentalFree = (feature: "grid") => parseExperimentalEnv(feature) === undefined;
   const chosen = (read: (config: PlannotatorConfig) => unknown) => () => typeof read(loadConfig()) === "boolean";
   const capabilitySet = createCapabilitySet({
     switches: {
@@ -5444,7 +5593,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       chapter_diagrams: { on: chapterDiagramsOn, chosen: chosen((c) => c.inboxChapterDiagrams), shared: () => options.chapterDiagrams === undefined, apply: (on) => saveChapterDiagrams({ on }) },
       bro: { on: broOn, chosen: chosen((c) => c.inboxBro), shared: () => true, apply: (on) => saveBro({ on }) },
       float_drafts: { on: floatDraftsOn, chosen: chosen((c) => c.inboxFloatDrafts), shared: () => true, apply: (on) => saveFloatDrafts({ on }) },
-      decision_mode: { on: decisionModeOn, chosen: chosen((c) => savedExperimental(c, "decision-mode")), shared: () => experimentalFree("decision-mode"), apply: (on) => saveExperimental({ decision_mode: on }) },
+      decision_mode: { on: decisionModeOn, chosen: chosen((c) => (typeof c.inboxDecisionMode === "boolean" ? c.inboxDecisionMode : (c.experimental as Record<string, unknown> | undefined)?.decisionMode)), shared: () => !inboxDecisionModeEnvOff(), apply: (on) => saveDecisionMode({ on }) },
       grid: { on: gridOn, chosen: chosen((c) => savedExperimental(c, "grid")), shared: () => experimentalFree("grid"), apply: (on) => saveExperimental({ grid: on }) },
     },
     times: () => loadConfig().inboxCapabilityFlips,
@@ -5678,6 +5827,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     onDraftsChange: () => {
       for (const listener of draftListeners) listener(null);
     },
+    farReplies: () => machines.replyDraftRows(),
     onSent: noteSend,
   });
   compose.sweep();
@@ -5696,6 +5846,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const replyDrafts = createInboxReplyDrafts({
     store,
     serverSession,
+    // A page an earlier run of this data folder served keeps saving reply drafts (a compare-and-set): typing is never lost.
+    follows,
     readBody: (req) => readBody(req),
     json,
     onChange: (threadId) => {
@@ -5944,13 +6096,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           return origin?.host && inboxPullRepoKey(origin.host, origin.display) === repo;
         })
         .map((project) => project.root),
-    threadPulls: (thread) => pullOwners.keys(thread).reverse(),
-    // An Inbox just started has no list yet: read it for a PR it does not know.
-    pullFile: async (pull, path) => {
-      const { wanted } = await pullProjects();
-      if (!pulls.find(pull)) await findPulls([pull], wanted);
-      return pulls.file(pull, path, wanted);
-    },
+    ...linkPulls,
   });
 
   // Run and Secret (`:::run`, `:::secret`; inbox-run-setup.ts): the person's press runs a command here, as them; a
@@ -6265,11 +6411,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         void noteMcpPresence(body);
         const refused = refusedToolCall(body);
         if (refused) return refused;
+        // Oh My Pi's sessions write as "Oh My Pi" (inbox-runtime-name.ts); a call carrying steps while they are off goes without them.
         const stripped = withoutOffSteps(body);
-        if (stripped) {
+        const named = withRuntimeAgentName(stripped ?? body, live.runtimeOfSession);
+        if (stripped || named) {
           const headers = new Headers(req.headers);
           headers.delete("content-length");
-          return mcp.fetch(new Request(req.url, { method: "POST", headers, body: JSON.stringify(stripped) }));
+          return mcp.fetch(new Request(req.url, { method: "POST", headers, body: JSON.stringify(named ?? stripped) }));
         }
         const client = inboxMcpInitializeClient(body);
         if (client !== undefined) return mcpForInitialize(client).fetch(req);
@@ -6407,6 +6555,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const answer = await ask.aiRoute(req, path, via);
         if (answer) return answer;
       }
+      // Power Up's second opinion and its key (inbox-power-up.ts): code review's own paths, so the page's worker and the
+      // shared settings need no fork. This computer's key, in the data dir code review reads; never a door's.
+      if (path === "/api/sem-diff/opinion" || path === "/api/sem-diff/opinion/settings") {
+        return await powerUpRoute(req, path, { dataDir, serverSession, fromDoor: fromDeviceDoor.has(req), fromCloudflare: fromCfDoor.has(req) });
+      }
       if (path === CF_ACCESS_ROUTE || path.startsWith(`${CF_ACCESS_ROUTE}/`)) {
         if (fromCfDoor.has(req)) return json({ error: "Cloudflare settings change only on this computer or over your tailnet.", code: "local_only" }, 403);
         const answer = await cfRoutes?.handle(req, path);
@@ -6445,8 +6598,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const agents = withRexPlaces(listed, phone ? null : thisComputersWindow(req, via) ? "here" : "away");
         // And the "Show archived" switch, which every linked machine keeps the same (inbox-show-archived.ts), the
         // artifacts pinned here (mark `artifact-pins`): that machine's windows show them on this Inbox's threads, and the
-        // saved reaction emoji (inbox-reactions-shared.ts), and the capability switches with their flips (inbox-capability-set.ts).
-        const model = { ...(phone ? phoneList(rows) : rows), agents, session_labels: labels, session_titles: titles, ...(fromMachine ? { show_archived: showArchived.state(), artifact_pins: artifactPinsWire(store.artifactPins()), reactions: reactionsState(), capability_set: capabilitySet.wire() } : {}) };
+        // saved reaction emoji (inbox-reactions-shared.ts), the capability switches with their flips (inbox-capability-set.ts),
+        // and the computers this one is linked to (link-through).
+        const model = { ...(phone ? phoneList(rows) : rows), agents, session_labels: labels, session_titles: titles, ...(fromMachine ? { show_archived: showArchived.state(), artifact_pins: artifactPinsWire(store.artifactPins()), reactions: reactionsState(), capability_set: capabilitySet.wire(), link_through: machines.linkThroughWire() } : {}) };
         // `since` (the window, #2593): only the rows changed since the list it holds (inbox-list-delta.ts); the rest of
         // the model, the labels too, goes as it is now. Without it, as before.
         const since = url.searchParams.get("since");
@@ -6477,8 +6631,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (answer) return thisComputersWindow(req, via) ? await inboxRaiseAfterFarShow(path, answer, rex) : answer;
       }
       if (path === "/api/inbox/threads/archived" && req.method === "GET") return json(url.searchParams.get("machines") === "1" ? await mergedArchivedModel(url) : archivedModel(url));
-      // Decision mode (experimental, approval "inbox-decision-mode"): a read-only projection of every
-      // decision waiting on the person. Off (the default), the route does not exist.
+      // Decision mode (Settings → Capabilities, on unless turned off): a read-only projection of every decision
+      // waiting on the person. Turned off, the route does not exist.
       if (path === "/api/inbox/decisions") {
         if (!decisionModeOn()) return json({ error: "Not found", code: "not_found" }, 404);
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
@@ -6632,7 +6786,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         pullHiddenChanged();
         return json({ serverSession, hidden: hiddenList(), hidden_repos: pullHidden.repos(), hid: hide.map((pull) => pull.key), rehid, threads_left: left, threads_back: back });
       }
-      if (path === "/api/inbox/pulls" || path === "/api/inbox/pulls/diff" || path === "/api/inbox/pulls/details" || path === "/api/inbox/pulls/file" || path === "/api/inbox/pulls/avatar" || path === "/api/inbox/pulls/repo-files" || path === "/api/inbox/pulls/repo-file" || path === "/api/inbox/pulls/media" || path === "/api/inbox/pulls/media/sizes" || path === "/api/inbox/pulls/review-image" || path === "/api/inbox/pulls/review-markdown-image" || path === "/api/inbox/pulls/package-changes") {
+      if (path === "/api/inbox/pulls" || path === "/api/inbox/pulls/pull" || path === "/api/inbox/pulls/diff" || path === "/api/inbox/pulls/details" || path === "/api/inbox/pulls/file" || path === "/api/inbox/pulls/avatar" || path === "/api/inbox/pulls/repo-files" || path === "/api/inbox/pulls/repo-file" || path === "/api/inbox/pulls/media" || path === "/api/inbox/pulls/media/sizes" || path === "/api/inbox/pulls/review-image" || path === "/api/inbox/pulls/review-markdown-image" || path === "/api/inbox/pulls/package-changes") {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
@@ -6664,12 +6818,22 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         // Reviewers, checks, labels and comments beside the diff, from the forge's own answer. The pictures of the people
         // it names join the avatar route's allow-list, and stay while the PR is on the list.
+        // One PR for a page open on it that the list no longer names (merged, closed, a reload since): inbox-pull-forge.ts.
+        if (path === "/api/inbox/pulls/pull") {
+          const key = url.searchParams.get("key") ?? "";
+          if (key.length === 0 || key.length > 600) throw new InboxError("validation_error", "key: a pull request's key from the list.", { field: "key" });
+          const { pull, unreadable, missing } = await pulls.pull(key, (await pullProjects()).wanted);
+          if (pull) pullAvatars.allow(pull.host, pulls.avatarUrls(pull.host));
+          // `unreadable`: the forge did not answer, which says nothing of the PR; the page keeps what it shows.
+          // `missing`: the forge has no such PR now (deleted, or no longer visible): what the page shows is its last read.
+          return json({ serverSession, pull, ...(unreadable ? { unreadable: true } : {}), ...(missing ? { missing: true } : {}) });
+        }
         if (path === "/api/inbox/pulls/details") {
           const key = url.searchParams.get("key") ?? "";
           if (key.length === 0 || key.length > 600) throw new InboxError("validation_error", "key: a pull request's key from the list.", { field: "key" });
           try {
             const answer = await pulls.details(key);
-            const host = pulls.find(key)?.host;
+            const host = (pulls.find(key) ?? pulls.held(key))?.host;
             if (host) pullAvatars.allow(host, pulls.avatarUrls(host));
             return json({ serverSession, ...answer });
           } catch (cause) {
@@ -6694,7 +6858,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           if (!scoped) throw new InboxError("validation_error", "scope: layer, stack, range with from (a layer's key) or since with from (a commit).", { field: "scope" });
           if (key.length === 0 || key.length > 600) throw new InboxError("validation_error", "key: a pull request's key from the list.", { field: "key" });
           try {
-            return json({ serverSession, ...(await pulls.diff(key, scoped.scope, scoped.from)) });
+            // A PR no list names (merged or closed elsewhere, a restart since): the projects' repositories, so a restart
+            // reads its list once first and the PR kept from before is still found (as `pull` does).
+            return json({ serverSession, ...(await pulls.diff(key, scoped.scope, scoped.from, undefined, pulls.find(key) ? undefined : (await pullProjects()).wanted)) });
           } catch (cause) {
             if (cause instanceof InboxPullsError) return json({ error: cause.message, code: cause.code }, cause.code === "pull_unknown" ? 404 : cause.code === "pull_diff_fork" ? 409 : 502);
             throw cause;
@@ -7027,9 +7193,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         await findPulls(keys as string[], wanted);
         let theirs = true;
         for (const key of keys as string[]) {
-          const pull = pulls.find(key);
+          // A kept copy that is still open is acted on as the list's (inbox-pull-missing.ts).
+          const pull = pullToAct(pulls, key);
           if (pull && pull.mine) theirs = false;
-          if (!pull) return json({ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404);
+          if (!pull) return json(...pullMissingAnswer(pulls, key));
           if (!(projectsByRepo.get(`${pull.host}/${pull.repo}`.toLowerCase()) ?? []).includes(projectId)) {
             const field = validateOnly ? "project_id" : "thread_id";
             throw new InboxError("validation_error", `${field}: ${validateOnly ? "a project" : "a thread in a project"} of that pull request's repository.`, { field });
@@ -7038,7 +7205,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // Already given to a thread (another window's Start a thread, a hand-off): which, so that window opens it, not a second.
         // Its own thread as the list links it: a hand-off's, or a thread started from the PR's page and not tied yet.
         if (validateOnly) {
-          const links = linkInboxPulls((keys as string[]).map((key) => pulls.find(key)!), pullLinkStore, projectsByRepo, pullOwnersNow());
+          const links = linkInboxPulls((keys as string[]).map((key) => pullToAct(pulls, key)!), pullLinkStore, projectsByRepo, pullOwnersNow());
           return json({ serverSession, ok: true, owner: Object.values(links).find((link) => link.via === "owner")?.thread_id ?? null });
         }
         if (body.ask !== undefined && !isInboxPullAsk(body.ask)) throw new InboxError("validation_error", `ask: ${INBOX_PULL_ASKS.join(", ")}.`, { field: "ask" });
@@ -7072,10 +7239,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (fileLevelSent !== fileLevelComments.length || fileLevelSent > PULL_REVIEW_COMMENTS_MAX) throw new InboxError("validation_error", `fileLevelComments: at most ${PULL_REVIEW_COMMENTS_MAX} comments, each { path, body }.`, { field: "fileLevelComments" });
         if (!pulls.find(key)) await findPulls([key], (await pullProjects()).wanted);
         // A PR a thread owns but no list has (reached by its link): its own read says what the list would. Any other stays unknown.
-        const unlisted = !pulls.find(key) && pullOwners.get(key) ? inboxPullRefOfKey(key) : null;
-        const pull = pulls.find(key) ?? (unlisted ? await readUnlistedPull(unlisted) : null);
+        // A kept copy (the list no longer names it) is checked with the forge first: merged elsewhere since, refused.
+        const unlisted = !pullToAct(pulls, key) && pullOwners.get(key) ? inboxPullRefOfKey(key) : null;
+        const pull = (await pullToActNow(pulls, key)) ?? (unlisted ? await readUnlistedPull(unlisted) : null);
         if (!pull && unlisted) return json({ error: "Couldn't check that link. Try again.", code: "pull_unknown" }, 404);
-        if (!pull) return json({ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404);
+        if (!pull) return json(...pullMissingAnswer(pulls, key));
         if (!inboxPullIsOpen(pull)) return json({ error: "That pull request is no longer open.", code: "pull_closed" }, 409);
         // Pinned to the commit the person read: the list's head, or the head of the patch they read (the list can be a
         // minute behind the forge). On GitHub also an older commit of this PR, as GitHub takes a review there and marks
@@ -7145,8 +7313,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.confirmed !== true) return json({ error: "Confirm the merge first.", code: "merge_unconfirmed" }, 409);
         // After a restart the list may not have been read yet: read it once, as the review route does.
         if (!pulls.find(key)) await findPulls([key], (await pullProjects()).wanted);
-        const pull = pulls.find(key);
-        if (!pull) return json({ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404);
+        const pull = pullToAct(pulls, key);
+        if (!pull) return json(...pullMissingAnswer(pulls, key));
         if (!inboxPullIsOpen(pull)) return json({ error: "That pull request is no longer open.", code: "pull_closed" }, 409);
         const result = await mergePull(options.refRunner ?? refCliRunner, pull, seen);
         if (!result.ok) return json({ error: result.message, code: result.code }, result.code === "pull_merge_failed" ? 502 : 409);
@@ -7184,8 +7352,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             return [{ error: `Only a pull request closed here in the last ${PULL_REOPEN_WINDOW_MS / 60_000} minutes can be reopened here.`, code: "reopen_not_closed_here" }, 409];
           }
           if (!reopen && !pulls.find(key)) await findPulls([key], (await pullProjects()).wanted);
-          const pull = reopen ? (pulls.find(key) ?? closedHere?.pull) : pulls.find(key);
-          if (!pull) return [{ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404];
+          const pull = reopen ? (pulls.find(key) ?? closedHere?.pull) : pullToAct(pulls, key);
+          if (!pull) return pullMissingAnswer(pulls, key);
           if (!reopen && !inboxPullIsOpen(pull)) return [{ error: pull.state === "merged" ? "It is already merged." : "It is already closed.", code: pull.state === "merged" ? "pull_merged" : "pull_closed" }, 409];
           const result = reopen ? await reopenPull(options.refRunner ?? refCliRunner, pull) : await closePull(options.refRunner ?? refCliRunner, pull);
           if (!result.ok) return [{ error: result.message, code: result.code }, result.code === "pull_close_failed" ? 502 : 409];
@@ -7485,10 +7653,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.sidebar === undefined &&
           body.diff_style === undefined &&
           body.diff_options === undefined &&
+          body.review_analysis === undefined &&
           body.experimental === undefined &&
           body.tour === undefined &&
           body.prompts === undefined &&
           body.board === undefined &&
+          body.decision_mode === undefined &&
           body.steps === undefined &&
           body.bro === undefined &&
           body.agent_status === undefined &&
@@ -7505,7 +7675,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.show_archived === undefined &&
           !updateSwitches
         ) {
-          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, favicon, reactions, reaction_change, rows, sidebar, diff_style, diff_options, experimental, tour, prompts, board, steps, bro, agent_status, float_drafts, mark_read_warning, split_view, code_review, plans, system, scheduled_threads, chapter_diagrams, voice, update_check, auto_update, show_archived or cookie_host is required.");
+          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, favicon, reactions, reaction_change, rows, sidebar, diff_style, diff_options, review_analysis, experimental, tour, prompts, board, decision_mode, steps, bro, agent_status, float_drafts, mark_read_warning, split_view, code_review, plans, system, scheduled_threads, chapter_diagrams, voice, update_check, auto_update, show_archived or cookie_host is required.");
         }
         // System: a malformed value throws here.
         system.check(body);
@@ -7545,9 +7715,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.sidebar !== undefined) saveSidebar(body.sidebar, true);
         const diffOptionsChange = body.diff_style !== undefined || body.diff_options !== undefined;
         if (diffOptionsChange) saveDiffOptions(body, true);
+        if (body.review_analysis !== undefined) saveReviewAnalysis(body.review_analysis, true);
         if (body.experimental !== undefined) saveExperimental(body.experimental, true);
         if (body.tour !== undefined) saveTour(body.tour, true);
         if (body.board !== undefined) saveBoard(body.board, true);
+        if (body.decision_mode !== undefined) saveDecisionMode(body.decision_mode, true);
         if (body.steps !== undefined) saveSteps(body.steps, true);
         if (body.bro !== undefined) saveBro(body.bro, true);
         if (body.agent_status !== undefined) agentStatus.save(body.agent_status, true);
@@ -7579,9 +7751,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const rows = { ...rowsWire(rowsUndone ?? (body.rows === undefined ? rowsState() : saveRows(body.rows, false, rowsBy))), ...(body.rows_undo === true ? { rows_undone: rowsUndone !== null } : {}) };
         const sidebar = sidebarWire(body.sidebar === undefined ? sidebarState() : saveSidebar(body.sidebar));
         const diffOptions = diffOptionsChange ? saveDiffOptions(body) : diffOptionsState();
+        const reviewAnalysis = body.review_analysis === undefined ? reviewAnalysisState() : saveReviewAnalysis(body.review_analysis);
         const experimental = body.experimental === undefined ? experimentalState() : saveExperimental(body.experimental);
         const tour = body.tour === undefined ? tourState() : saveTour(body.tour);
         const board = body.board === undefined ? { on: boardOn() } : saveBoard(body.board);
+        const decisionMode = body.decision_mode === undefined ? decisionModeWire() : saveDecisionMode(body.decision_mode);
         const steps = body.steps === undefined ? { on: stepsOn() } : saveSteps(body.steps);
         const bro = body.bro === undefined ? { on: broOn() } : saveBro(body.bro);
         const agentStatusNow = body.agent_status === undefined ? { on: agentStatus.on() } : agentStatus.save(body.agent_status);
@@ -7599,7 +7773,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.voice !== undefined) voice.save(body.voice);
         if (promptsChange) saveInboxPromptsChange(promptsChange);
         const showArchivedNow = showArchivedOn === undefined ? showArchived.state() : saveShowArchived(showArchivedOn);
-        return json({ show_archived: { on: showArchivedNow.on, rev: showArchivedNow.rev }, inbox_tool: inboxTool, notifications, sound, ...(body.sound === undefined ? {} : { sound_rev: soundRev }), tailscale: tailnet, updates: updateState, theme, text_size: textSize, favicon, ...reactions, ...rows, ...sidebar, diff_style: diffOptions.diff_style, diff_options: diffOptions, experimental, tour, board, steps, bro, agent_status: agentStatusNow, float_drafts: floatDrafts, mark_read_warning: markReadWarning, split_view: splitView, code_review: { on: codeReview.on }, ...systemAnswer, ...scheduledAnswer, ...chapterDiagrams, voice: voice.settings(via), prompts: promptsState(), cookie_host: cookieHost ?? cookieHostWire() });
+        return json({ show_archived: { on: showArchivedNow.on, rev: showArchivedNow.rev }, inbox_tool: inboxTool, notifications, sound, ...(body.sound === undefined ? {} : { sound_rev: soundRev }), tailscale: tailnet, updates: updateState, theme, text_size: textSize, favicon, ...reactions, ...rows, ...sidebar, diff_style: diffOptions.diff_style, diff_options: diffOptions, review_analysis: reviewAnalysis, experimental, tour, board, decision_mode: decisionMode, steps, bro, agent_status: agentStatusNow, float_drafts: floatDrafts, mark_read_warning: markReadWarning, split_view: splitView, code_review: { on: codeReview.on }, ...systemAnswer, ...scheduledAnswer, ...chapterDiagrams, voice: voice.settings(via), prompts: promptsState(), cookie_host: cookieHost ?? cookieHostWire() });
       }
       // Routines (inbox-scheduled-routes.ts): the window's list, editor, Run now and Stop.
       if (path === "/api/inbox/scheduled" || path.startsWith("/api/inbox/scheduled/")) {
@@ -7696,8 +7870,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // Not now keeps the usual day, approval "inbox-one-time-dialogs").
         if (body.answer === "not_now") {
           if (!revealNotNowAllowed(id)) throw new InboxError("validation_error", `id: ${INBOX_REVEALS.filter((entry) => entry.kind === "offer").map((entry) => entry.id).join(", ")}.`, { field: "id" });
-        } else if (!(id === "snooze" || id === "agent_note" || id === "launch_tip" || id === "sidebar_tip" || id === "band_tip" || (typeof id === "string" && id in lineOffers))) {
-          throw new InboxError("validation_error", `id: snooze, agent_note, launch_tip, sidebar_tip, band_tip or ${Object.keys(lineOffers).join(", ")}.`, { field: "id" });
+        } else if (!(id === "snooze" || id === "agent_note" || id === "launch_tip" || id === "sidebar_tip" || id === "band_tip" || id === "search_tip" || (typeof id === "string" && id in lineOffers))) {
+          throw new InboxError("validation_error", `id: snooze, agent_note, launch_tip, sidebar_tip, band_tip, search_tip or ${Object.keys(lineOffers).join(", ")}.`, { field: "id" });
         }
         // The agent note's agents (the ones it would ask about): it shows once for each. Optional (an older page).
         const agents = id === "agent_note" ? revealAgentNoteAgents(body.agents) : null;
@@ -7725,6 +7899,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (id === "band_tip") {
           return json({ show: claimBandTip(key ?? null, body.used === true), reveal: { next: revealNow(load) }, board: { on: boardOn() }, steps: { on: stepsOn() } });
         }
+        // The Search tip: outside the line, its own stamp only (packages/shared/inbox/search-tip.ts).
+        if (id === "search_tip") {
+          return json({ show: claimSearchTip(key ?? null), reveal: { next: revealNow(load) }, board: { on: boardOn() }, steps: { on: stepsOn() } });
+        }
         // The star ask: its claim waits on the already-starred check (gh, up to 3 s) and says how the button works.
         if (id === "star") {
           const star = await claimStarReveal(key ?? null, load);
@@ -7742,6 +7920,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         return json(await inboxStarAction(starAsk, body));
+      }
+
+      // The launch switch's one-time dialog (packages/shared/launch-switch.ts): `action` claim (the kept copy only),
+      // shown (stamps it shown on this computer, once across every surface) or answer (`opened` | `dismissed`).
+      if (path === "/api/inbox/launch-switch") {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        const action = body.action;
+        if (action !== "claim" && action !== "shown" && action !== "answer") return json({ error: "action: claim, shown or answer." }, 400);
+        const answered = launchQueue.action(action, body);
+        return json(answered.body, answered.status);
       }
 
       // The Board's first-visit dialog (approval "inbox-board", intro amendment): the first page on this
@@ -7764,13 +7954,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (capable) return capable;
       // Search: a read route (and the recent searches the window writes on opening a result).
       const searched = await search.handle(req, url, {
-        linked: () => machines.machinesView().filter((machine) => !machine.self && machine.state !== "revoked").map((machine) => ({ id: machine.id, name: machine.name, online: machine.state === "online" })),
+        linked: () => machines.machinesView().filter((machine) => !machine.self && machine.state !== "revoked").map((machine) => ({ id: machine.id, name: machine.name, online: machine.state === "online", marks: machine.marks })),
         projectOwner: (projectId) => machines.projectOwner(projectId),
         forward: (forwarded, target) => machines.route(forwarded, target, via),
       });
       if (searched) return searched;
       // The composers' skill picker and the SKILL.md a Send pastes in (inbox-skills.ts): read routes.
-      const skills = inboxSkillsRoute(req, url, { codeReview: codeReviewOn(), routines: scheduledCap.on() });
+      const skills = inboxSkillsRoute(req, url, { codeReview: codeReviewOn(), routines: scheduledCap.on(), diagrams: chapterDiagramsOn() });
       if (skills) return skills;
 
       // Launch: Stop, Open in Terminal, Delete, Try again, Trust folder and its settings (404 while `inboxLaunch.enabled` is off, but for the settings route).
@@ -8890,6 +9080,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     machines = createInboxMachines({
       dataDir,
       serverSession,
+      follows,
       computerName: devices.machineDoor.computerName,
       door: devices.machineDoor,
       readBody,

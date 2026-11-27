@@ -48,9 +48,60 @@ function clampScale(scale: number): number {
   return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, scale));
 }
 
+/** The zoom strip over the host, from its measured rect: its left and right
+ * edges from the host's left, and `height`, from its top to the host's
+ * bottom (the strip's height plus its margin). */
+export interface ControlsBand {
+  readonly left: number;
+  readonly right: number;
+  readonly height: number;
+}
+
+/** Room an inline host adds to the bottom of its box so the zoom strip never
+ * covers the drawing at rest. `px`: what the host has added (0 at first).
+ * `onChange`: asks the host for another amount. */
+export interface ControlsReserve {
+  readonly px: number;
+  readonly onChange: (px: number) => void;
+}
+
+/**
+ * Fit `content` in a host of size `host` (its box without any reserve). With
+ * `controls`, a fitted drawing that would reach the strip gets room under it:
+ * `reserve` is how much the box grows (at most the strip's band, and only as
+ * far as the drawing needs), and the drawing, at the same scale, is centred
+ * in the area above the strip. A drawing clear of the strip is placed as
+ * without `controls`, with no reserve.
+ */
+export function fitInHost(
+  host: ContentSize,
+  content: ContentSize,
+  fitMaxScale: number,
+  controls: ControlsBand | null,
+): { readonly viewport: Viewport; readonly reserve: number } {
+  const availableWidth = Math.max(1, host.width - FIT_PADDING_PX * 2);
+  const availableHeight = Math.max(1, host.height - FIT_PADDING_PX * 2);
+  const scale = clampScale(Math.min(fitMaxScale, availableWidth / content.width, availableHeight / content.height));
+  const width = content.width * scale;
+  const height = content.height * scale;
+  const x = (host.width - width) / 2;
+  const y = (host.height - height) / 2;
+  const reaches =
+    controls !== null && x < controls.right && x + width > controls.left && y + height > host.height - controls.height;
+  if (!reaches) return { viewport: { x, y, scale }, reserve: 0 };
+  // Whole pixels, so a box grown by it measures the same next time (no resize after resize).
+  const reserve = Math.ceil(Math.min(controls.height, Math.max(0, height + FIT_PADDING_PX * 2 + controls.height - host.height)));
+  const above = host.height + reserve - controls.height;
+  return { viewport: { x, y: (above - height) / 2, scale }, reserve };
+}
+
 export function useDiagramViewport(
   hostRef: RefObject<HTMLElement | null>,
   content: ContentSize | null,
+  /** The largest scale Fit may choose (zoom keeps the full range). Default: no limit below `ZOOM_MAX`. */
+  fitMaxScale: number = ZOOM_MAX,
+  /** Opt-in: keep the drawing clear of this strip at rest by growing the host's box (`fitInHost`). */
+  keepClear?: { readonly stripRef: RefObject<HTMLElement | null>; readonly reserve: ControlsReserve },
 ): {
   readonly viewport: Viewport;
   readonly fit: () => void;
@@ -62,6 +113,10 @@ export function useDiagramViewport(
   const [viewport, setViewport] = useState<Viewport>(IDENTITY);
   const contentRef = useRef(content);
   contentRef.current = content;
+  const fitMaxRef = useRef(fitMaxScale);
+  fitMaxRef.current = fitMaxScale;
+  const keepClearRef = useRef(keepClear);
+  keepClearRef.current = keepClear;
   // Whether the person zoomed or panned since the last fit. While true, a
   // new render (the draft preview) or a host resize (the Source pane
   // opening, the window) keeps their view; a fit (the key, the control, a
@@ -81,15 +136,24 @@ export function useDiagramViewport(
       setViewport(IDENTITY);
       return;
     }
-    const availableWidth = Math.max(1, rect.width - FIT_PADDING_PX * 2);
-    const availableHeight = Math.max(1, rect.height - FIT_PADDING_PX * 2);
-    const scale = clampScale(Math.min(availableWidth / size.width, availableHeight / size.height));
+    const keep = keepClearRef.current;
+    const strip = keep?.stripRef.current?.getBoundingClientRect();
+    const controls =
+      keep !== undefined && strip !== undefined && strip.width > 0 && strip.height > 0
+        ? { left: strip.left - rect.left, right: strip.right - rect.left, height: rect.bottom - strip.top }
+        : null;
+    // The box as the host sized it: the reserve it added for the strip is taken off again, so the reserve is decided
+    // the same way every time (a box grown for the strip does not then find the strip clear and shrink back).
+    const applied = keep?.reserve.px ?? 0;
+    const { viewport: next, reserve } = fitInHost(
+      { width: rect.width, height: Math.max(1, rect.height - applied) },
+      size,
+      fitMaxRef.current,
+      controls,
+    );
     adjustedRef.current = false;
-    setViewport({
-      x: (rect.width - size.width * scale) / 2,
-      y: (rect.height - size.height * scale) / 2,
-      scale,
-    });
+    setViewport(next);
+    if (keep !== undefined && reserve !== applied) keep.reserve.onChange(reserve);
   }, [hostRef]);
 
   // Fit on arrival and on every new content size (a first render, a
@@ -105,7 +169,7 @@ export function useDiagramViewport(
     });
     observer.observe(host);
     return () => observer.disconnect();
-  }, [fit, hostRef, content]);
+  }, [fit, hostRef, content, fitMaxScale]);
 
   const zoomBy = useCallback(
     (factor: number, clientX?: number, clientY?: number) => {

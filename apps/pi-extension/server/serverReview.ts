@@ -28,6 +28,7 @@ import { basename, dirname as dirnamePath, join as joinPath, resolve as resolveP
 import { SingleFlight } from "../generated/single-flight.ts";
 import { contentHash } from "../generated/draft.ts";
 import { countUnsentDraftComments, hostSessionClosedEvent } from "../generated/host-control.ts";
+import { agentRefusal, type AgentPresence } from "../generated/review-agent-gone.ts";
 import { checkServerSession, createServerSessionNonce, serverSessionMismatchBody } from "../generated/server-session.ts";
 import { handleHostControl, resolveHostControlToken, type HostControl } from "./host-control.ts";
 import { createPiRefCards, handleRefCards, type RefRunner } from "./ref-cards.ts";
@@ -169,6 +170,8 @@ import {
 	handleFavicon,
 	handleImageRequest,
 	handleStarAskRequest,
+	handleLaunchSwitchRequest,
+	piLaunchSwitch,
 	readDraftGenerationFromBody,
 	readDraftGenerationFromUrl,
 	handleUploadRequest,
@@ -446,6 +449,13 @@ export async function startReviewServer(options: {
 	onCleanup?: () => void | Promise<void>;
 	/** Called when server starts with the URL, remote status, and port */
 	onReady?: (url: string, isRemote: boolean, port: number) => void;
+	/**
+	 * Whether a Pi session can still receive this review's decision
+	 * (packages/shared/review-agent-gone.ts, mirrors packages/server/review.ts).
+	 * "gone" answers Send and Approve with `410 agent_gone` and keeps the
+	 * draft, unarchived. Absent: every decision is taken as before.
+	 */
+	agentPresence?: () => AgentPresence;
 }): Promise<ReviewServerResult> {
 	// The daily ping (server/daily-ping.ts): in the background, never awaited.
 	schedulePiDailyPing("review");
@@ -1252,7 +1262,7 @@ export async function startReviewServer(options: {
 			return { status: "stale", reason: "snapshot-mismatch", message: "The review changed before call flow could start. Refresh and try again." };
 		}
 		if (!callFlowEnabled()) {
-			return { status: "disabled", reason: "disabled", message: "Call flow is disabled in Settings → Analysis." };
+			return { status: "disabled", reason: "disabled", message: "Call flow is disabled in Settings → Reviews." };
 		}
 		if (workspace) {
 			return { status: "unsupported", reason: "workspace-unsupported", message: "Call flow does not yet support multi-repository workspace reviews." };
@@ -2205,6 +2215,8 @@ export async function startReviewServer(options: {
 
 	const app = openPackedApp(options.htmlContent, { page: (html) => customThemesPage(html) });
 	const requestHostGuard = createRequestHostGuard();
+	// The launch switch's reader (generated/launch-switch.ts): in the background, never awaited.
+	piLaunchSwitch().start();
 	const server = createServer(async (req, res) => {
 		// Host allowlist first, before any route (request-host-guard.ts).
 		if (requestHostGuard.refuse(req, res)) return;
@@ -3913,6 +3925,9 @@ export async function startReviewServer(options: {
 		} else if (url.pathname.startsWith("/api/star-ask/")) {
 			// The "Star the repo" ask on the done screen (generated/star-ask.ts).
 			if (!(await handleStarAskRequest(req, res, url, "review", isRemoteSession()))) handleApiNotFound(res, url.pathname);
+		} else if (url.pathname.startsWith("/api/launch-switch/")) {
+			// The launch switch's one-time dialog (generated/launch-switch.ts).
+			if (!(await handleLaunchSwitchRequest(req, res, url))) handleApiNotFound(res, url.pathname);
 		} else if (url.pathname === "/api/image") {
 			handleImageRequest(res, url);
 		} else if (url.pathname === "/api/upload" && req.method === "POST") {
@@ -4237,6 +4252,12 @@ export async function startReviewServer(options: {
 				// draft, or answer ok for feedback nobody will receive.
 				if (reviewDecided) {
 					reviewAlreadyDecided(res);
+					return;
+				}
+				// Nobody left to receive it: keep the draft, archive nothing.
+				const refusal = agentRefusal(body, options.agentPresence);
+				if (refusal) {
+					json(res, refusal.body, refusal.status);
 					return;
 				}
 				// Archive BEFORE the draft delete: a failed write keeps the

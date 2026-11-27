@@ -38,7 +38,7 @@ import { choiceLetters, optionOf, optionSetAddress, optionSetId, optionSetOf, pa
 import { PrototypeWindow, openingOption, type PrototypeOption } from './PrototypeWindow';
 import { prototypeNames, questionPrototypePages } from '../prototypes';
 import { artifactKey, artifactOfFile, newestViewableFile, openArtifactKey, threadArtifacts } from '../artifacts';
-import { ArtifactsView } from './ArtifactsView';
+import { ArtifactsView, HtmlArtifactOpen } from './ArtifactsView';
 import { ArtifactsBar, ThreadLinksView, ThreadViewSwitch } from './ThreadLinksView';
 import { threadLinks } from '../threadLinks';
 import { useDefaultRefHost } from '../defaultRefHost';
@@ -72,11 +72,13 @@ import { registerReloadFlush } from '../stalePage';
 import { clearLateVoiceMiss, LATE_VOICE_MISSED, useLateVoiceMiss } from '../lateVoice';
 import { replyBoxSetAside } from '../floaters/model';
 import { landInReplyDraft, replySendStarts, useReplyDraft, type ReplyBoxTook, type ReplyDraftFiles } from '../replyDraft';
+import { keepsReplyDraft, lostDraftFilesOf, replyDraftHost } from '../machineDrafts';
 import { createTypedSaves, isTypedChange } from '../typedAnswers';
-import { conflictRevision, onPickConflict } from '../pickConflict';
+import { saveOverConflicts } from '../pickConflict';
+import { usePageLeave } from '../pageLeave';
 import { useReplyHasWords, useReplyTextStore } from '../replyText';
 import { GUIDE_REQUEST_WORDS, guideRequestTarget, guideTargetCanEnd } from '../guideRequest';
-import { conflictText, DRAFT_OFFER_TEXT, DraftHead, DraftFootNote, DraftOffer, DraftStamp, unsentWords } from './DraftLabel';
+import { conflictText, DRAFT_OFFER_TEXT, DraftFootNote, DraftStamp, unsentWords } from './DraftLabel';
 import { canMarkUnread, canToggleRead } from '../markRead';
 import { NewMessageButton, NewMessageComposer, NewMessagePopover, hostName, useLiveSessions, type NewMessageMode } from './NewMessage';
 import { debugNote } from '../debugLog';
@@ -86,7 +88,7 @@ import { T3WaitLine } from './T3WaitLine';
 import { TakeBackButton, UndeliveredBand, UndeliveredText } from './Undelivered';
 import { useThreadTakeBack } from '../thread/useThreadTakeBack';
 import { useSendNow } from '../useSendNow';
-import { TakeBackLine, TakeBackNote } from '../parts/TakeBackLines';
+import { TakeBackLine } from '../parts/TakeBackLines';
 import { SendToAnotherSession } from '../compose/SendToAnotherSession';
 import { COMPOSE_CLONE_EVENT, type ComposeCloneRequest } from '../compose/model';
 import { authorWithLabel, labelOf, useSessionLabels } from '../sessionLabels';
@@ -103,7 +105,7 @@ import { useDrawSend, useSendsDrawn } from '../data/actions/sendDraw';
 import { SendingReply } from '../parts/SendingReply';
 import { pickComposerMode } from '../fullScreenComposer';
 import { ReuseContext, sourceOf, type ReuseApi } from '../reuse';
-import { AttachFilesButton, ComposeFileTiles, attachedAnnouncement, pastedSignature, useComposeFiles, useFileDrop } from '../compose/ComposeFiles';
+import { attachedAnnouncement, pastedSignature, useComposeFiles, useFileDrop } from '../compose/ComposeFiles';
 import {
   AskerEndedNote,
   CLOSED_ROUTE,
@@ -122,11 +124,9 @@ import {
 import { ReaskNote } from './ReaskNote';
 import { CombineLeftNote, ShipNote, TidyNote } from './Tidy';
 import { reaskedIn, reaskNoteAgent, reaskOffered, reaskTargets, reaskTooltip } from '../reask';
-import { ChangedNotice, StaleGuard, replacedBy, replacementOf, type JumpTarget } from './ReplacedQuestion';
+import { StaleGuard, replacedBy, replacementOf, type JumpTarget } from './ReplacedQuestion';
 import type { ComposerCommand } from './ComposerField';
-import { VoiceMicButton, VoiceStatusLine } from './VoiceMic';
-import { ReplySummary } from './ReplySummary';
-import { ReplyRow } from './ReplyRow';
+import { ReplyBox } from './reply/ReplyBox';
 import { sendFailure } from '../sendFailure';
 import { ReplyRecipientControl } from '../parts/ReplyRecipientControl';
 import { aimable, headFolder, knownRecipients, latestBy, RECIPIENTS_MAX, sessionFolder, toggleRecipient, type RecipientRow } from '../replyRecipients';
@@ -140,7 +140,7 @@ import { useReplyLaunchBlock } from '../data/replyLaunch';
 import { coverVoice, useThreadVoice } from '../thread/useThreadVoice';
 import { useLateVoice } from '../thread/useLateVoice';
 import type { FullScreenComposerValue } from './FullScreenComposer';
-import { ReplyAnswers, draftAnswerWords, ReplyActions, type ActionRow, type DraftAnswer } from './ReplyAnswers';
+import { draftAnswerWords, type ActionRow, type DraftAnswer } from './ReplyAnswers';
 import { actionSavesPending, actionSavesSettled } from '../actionSaves';
 import { failedCommentWrite, watchCommentWrites, withCommentWrites } from '../commentSaves';
 import { createPickQueue, keepSavedQuestions } from '../pickQueue';
@@ -161,12 +161,12 @@ import {
   type TagOption,
 } from '../tags';
 import type { MentionSource } from '@plannotator/ui/utils/mentions';
-import { TAG_TOKEN_CLASS } from './ComposerField';
+import { TAG_TOKEN_CLASS, ThreadSkillFilter } from './ComposerField';
 import { INBOX_REPLY_SKILL_AUDIENCE, annotationSkillTexts, inboxSkillFilter, inboxSkillsBlock, withSkillsBlock } from '../skills';
 import { fetchSkillCatalog, getCachedSkillCatalog } from '@plannotator/ui/utils/skillCatalog';
 import { type ActionMark } from './ActionChecklist';
 import { Tip } from './Tip';
-import { ReplyQuoteLine, SentQuoteLine } from './ReplyQuote';
+import { SentQuoteLine } from './ReplyQuote';
 import { arrowReply, quoteToSend, selectedWordsIn } from '../replyQuote';
 import { useReplyQuote } from '../useReplyQuote';
 import { useTileArrows } from '../useTileArrows';
@@ -200,16 +200,16 @@ import { useKeptScroll } from '../thread/keptScroll';
 import { sentActionsOf } from '../thread/sentActions';
 import { leftoverWords } from '../thread/leftover';
 import { answersItself, replyKeysToRenew, routeSendAnnotations, sendTargetAnswerIds, sendTargetsOf, tookOverReply, wordsMessage, type SendTarget, type SentContents } from '../sendTargets';
-import { FOLD_STEP, isSuperseded, NO_ANNOTATIONS, NO_QUESTIONS, NO_IDS, NO_OUTBOX, NO_SENT_ANSWERS, NO_UPLOADS, askingSessionOf, commentTags, emptyAnswerFor, isOtherAgent, newBelow, otherSendSessions, reducedMotion, replyKeyOf, reviewOutcomesOf, spanWords, stillHidden, type FoldState } from '../thread/helpers';
-import { NO_SKILLS_HINT_MS, REPLY_FILES_SUMMARY_FROM, SHOW_NEW_MESSAGE_BUTTON, SIDE_COMMAND_DESCRIPTION, SIDE_COMMAND_NAME, THREAD_GONE_TEXT, focusReplyFromBox } from '../thread/replyBox';
+import { FOLD_STEP, isSuperseded, NO_ANNOTATIONS, NO_QUESTIONS, NO_IDS, NO_OUTBOX, NO_SENT_ANSWERS, NO_UPLOADS, askingSessionOf, commentTags, emptyAnswerFor, isOtherAgent, isScriptPost, messageAuthorName, newBelow, otherSendSessions, reducedMotion, replyKeyOf, reviewOutcomesOf, SCRIPT_AUTHOR_NAME, spanWords, stillHidden, threadAskerName, type FoldState } from '../thread/helpers';
+import { NO_SKILLS_HINT_MS, SHOW_NEW_MESSAGE_BUTTON, SIDE_COMMAND_DESCRIPTION, SIDE_COMMAND_NAME, THREAD_GONE_TEXT } from '../thread/replyBox';
 import { AckPill } from '../parts/AckPill';
 import { ThreadBarTitle } from '../thread/ThreadBarTitle';
 import { SkipChip } from '../parts/SkipChip';
 import { namedTagOptions, useThreadSessions } from '../thread/useThreadSessions';
 import { measureOpenPlaces } from '../thread/openPlaces';
-import { takeMergedFiles as takeMergedFilesInto, takeTheirWords as takeTheirWordsInto } from '../thread/draftTakes';
+import { takeMergedFiles as takeMergedFilesInto, takeOffered, takeTheirWords as takeTheirWordsInto } from '../thread/draftTakes';
+import { focusReplyEnd as focusReplyEndOf } from '../thread/replyCaret';
 import { readFeedbackTexts } from '../data/queries/feedbackTexts';
-import { ReplyTextField } from '../parts/ReplyTextField';
 import { ReviewContextLine } from '../thread/ReviewContextLine';
 import { replyWordsWithMentions, useMentionBoxOpener } from '../threadMentions';
 import { labelledAuthorName } from '../parts/AuthorName';
@@ -242,7 +242,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const startedTo = root.started_by_person && root.to ? root.to : null;
   const cloudName = [...thread.messages].reverse().find((m) => m.cloud_wake)?.cloud_wake?.name ?? null;
   const addresseeName = (host: string) => (isInboxCloudHost(host) && cloudName ? cloudName : hostName(host));
-  const asker = startedTo ? addresseeName(startedTo.host) : agentName(root.author);
+  const asker = startedTo ? addresseeName(startedTo.host) : threadAskerName(thread.messages);
   // Launch: the person started this agent from New message, or a reply started a new session (packages/server/inbox-launch.ts).
   const launchedAt = [...thread.messages].reverse().find((m) => !!m.launch) ?? root;
   const launched = launchedAt.launch ?? null;
@@ -299,7 +299,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   // Whom a reply to `message` goes to, named: a second agent by its own name, the thread's first agent as `asker`
   // (so a thread with one agent reads as it always did). Handoff "multi-agent-thread-model", option A.
   const firstAgent = startedTo ?? (root.author.kind === 'agent' ? root.author : null);
-  const recipientName = (message: InboxMessageWire | null | undefined) => (isOtherAgent(message, firstAgent) ? agentName(message!.author) : asker);
+  const recipientName = (message: InboxMessageWire | null | undefined) => (isScriptPost(message) ? SCRIPT_AUTHOR_NAME : isOtherAgent(message, firstAgent) ? agentName(message!.author) : asker);
   const agentMessages = thread.messages.filter((m) => m.author.kind === 'agent');
   const lastAgent = agentMessages[agentMessages.length - 1] ?? root;
   // The foot's 👍 Looks good (design record "inbox-acknowledge"): on the agent's latest message, while no question waits.
@@ -389,12 +389,13 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const takeTheirWords = useRef<(threadId: string, draft: InboxReplyDraft, was: string) => ReplyBoxTook>(() => 'differs');
   const ownedFor = useRef<string | null>(null);
   const ownedBox = useRef<(threadId: string) => { text: string; files: ReplyDraftFiles } | null>(() => null);
-  const replyDraft = useReplyDraft(thread.thread_id, {
+  const replyDraft = useReplyDraft(thread.thread_id, { ...replyDraftHost,
     onFiles: (threadId, draft, wanted) => takeMergedFiles.current(threadId, draft, wanted),
     onWords: (threadId, draft, was) => takeTheirWords.current(threadId, draft, was),
     ownedBox: (threadId) => ownedBox.current(threadId),
+    onOffer: (threadId) => threadId === threadRef.current.thread_id && boxRef.current.open && takeOffered(offerHost(), true),
   });
-  const keptWords = (replyDraft.conflict ?? replyDraft.draft?.body)?.trim() ?? '';
+  const keptWords = (replyDraft.conflict ?? replyDraft.unsaved ?? replyDraft.draft?.body)?.trim() ?? '';
   /** Whether a Send carries words: the box's, or (the box closed) those kept as its draft. */
   const hasWords = box.open ? boxHasWords : keptWords !== '';
   /** The words a Send carries, as they are now: the box's, or (the box closed) those kept as its draft. */
@@ -422,7 +423,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       set: (text) => changeReply(text, true),
     },
     // The thread pane goes while files upload (a phone's Back): they land in the draft all the same.
-    onUnmountUploads: machine ? undefined : (uploads) => landLater(threadRef.current.thread_id, uploads),
+    onUnmountUploads: keepsReplyDraft(thread.thread_id) ? (uploads) => landLater(threadRef.current.thread_id, uploads) : undefined,
   });
   const replyUploads = replyFiles.uploaded.map((upload) => upload.upload_id);
   /**
@@ -432,7 +433,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
    */
   const filesSaved = useRef('');
   const takeDraftFiles = (files: readonly InboxDraftFile[], words: string, mode: 'replace' | 'add' = 'replace', alsoKeep: readonly string[] = []) => {
-    replyFiles.restoreDraft(files, words, mode, alsoKeep);
+    replyFiles.restoreDraft(files, words, mode, alsoKeep, lostDraftFilesOf(threadRef.current.thread_id));
     // What the draft holds is saved already; tiles the person attached before it was read (`add`) are saved with it:
     // the box's next save names what changed from the draft's files.
     const held = mode === 'add' ? files : replyFiles.draftFiles();
@@ -453,7 +454,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       return upload ? [{ ...upload, ...(file.pasted ? { pasted: file.pasted } : {}) }] : [];
     });
   const filesNow = pastedSignature(replyFiles.draftFiles());
-  /** Files that leave the box still uploading go on, and join this thread's draft once in (not another machine's thread). */
+  /** Files that leave the box still uploading go on, and join this thread's draft once in (where its draft is kept). */
   const landLater = (threadId: string, uploads: readonly Promise<InboxUpload | null>[]) => {
     for (const upload of uploads) void landInReplyDraft(threadId, upload);
   };
@@ -483,7 +484,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     ownedFor.current = null;
     setBox({ open: false, text: '' });
     setTaggedIds([]);
-    if (!discarded && !machine) landLater(thread.thread_id, replyFiles.detach());
+    if (!discarded && keepsReplyDraft(thread.thread_id)) landLater(thread.thread_id, replyFiles.detach());
     replyFiles.reset();
   };
   /** T6's down arrow or Escape: the box closes and keeps its draft, which floats in the corner (approval "inbox-reply-floaters"). */
@@ -1251,7 +1252,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const messageCommentName = (record: InboxAnnotationRecord) => {
     const message = thread.messages.find((m) => m.id === record.message_id);
     if (message?.author.kind === 'person') return `${OWN_MESSAGE_COMMENT_ROW} ${whenTime(record.message?.at ?? message.created_at)}`;
-    const who = message ? agentName(message.author) : 'Agent';
+    const who = message ? messageAuthorName(message) : 'Agent';
     return `${who}'s message, ${whenTime(record.message?.at ?? message?.created_at ?? '')}`;
   };
   const saveMessageComment = async (messageId: string, annotation: Annotation): Promise<boolean> => {
@@ -1533,12 +1534,13 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const filesFor = useRef(thread.thread_id);
   useEffect(() => {
     // Another thread: nothing of the last one carries over. Its files are in its draft already; one still
-    // uploading joins it once in (another machine's thread keeps no draft: it stops).
+    // uploading joins it once in (a thread whose draft is not kept, on an older linked machine: it stops).
     const previous = filesFor.current;
     filesFor.current = thread.thread_id;
-    if (previous !== thread.thread_id && !machineOf(previous)) landLater(previous, replyFiles.detach());
+    if (previous !== thread.thread_id && keepsReplyDraft(previous)) landLater(previous, replyFiles.detach());
     setPending(new Map());
     setBox({ open: false, text: '' });
+    ownedFor.current = null;
     replyFiles.reset();
     setError(sendErrors.get(thread.thread_id) ?? null);
     sendErrors.delete(thread.thread_id);
@@ -1813,7 +1815,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     const first = added[0]!;
     const asks = added.some((m) => (m.questions ?? []).some((q) => q.state === 'open'));
     announce(
-      added.length === 1 ? `New message from ${agentName(first.author)}${asks ? ', with a question' : ''}` : `${added.length} new messages${asks ? ', with a question' : ''}`,
+      added.length === 1 ? `New message from ${messageAuthorName(first)}${asks ? ', with a question' : ''}` : `${added.length} new messages${asks ? ', with a question' : ''}`,
     );
     // Room a fold step borrowed keeps only its part still in view under the arrival, so following it ends on the thread, not in blank.
     shrinkRoom();
@@ -2005,7 +2007,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     // From a file in full screen, back beside the thread first, even with the box open (the composer opens it behind the file).
     // A file full screen is all a narrow window shows, so this leaves it: an unsaved comment on it waits as its draft.
     if (file && shownFull) (phone || fileStacked ? () => fileToThread(writeReplyFromFile) : writeReplyFromFile)();
-    else if (box.open) textRef.current?.focus();
+    else if (box.open) focusReplyEnd();
     else openBox();
   };
   /** The file O opens: its tile shows the O keycap. */
@@ -2175,11 +2177,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   hasFilesRef.current = replyFiles.files.length > 0;
   /** Read the reply draft again: another window (or this one) saved or discarded it (`event: drafts`). */
   const draftMoved = () => {
-    // The box's words as the answer comes (a restore or typing may change them meanwhile): edits there
-    // win, and the next save is refused if the draft moved.
-    void reloadDraft(() =>
-      boxRef.current.open ? { text: boxRef.current.text, files: replyFiles.draftFiles(boxRef.current.text) } : null,
-    ).then((answer) => {
+    // The box's words as the answer comes (a restore or typing may change them meanwhile): edits there win, and the
+    // next save is refused if the draft moved. Words held for another computer, put to the person now, go in the box.
+    void reloadDraft(() => (boxRef.current.open ? { text: boxRef.current.text, files: replyFiles.draftFiles(boxRef.current.text) } : null)).then((answer) => {
+      if (answer?.offered !== undefined && boxRef.current.open) return void (setBox({ open: true, text: answer.offered }), takeDraftFiles(draftFilesWithMine(answer.draft?.files ?? []), answer.offered));
       if (!answer?.replaceBox) return;
       if (answer.draft) {
         setBox({ open: true, text: answer.draft.body });
@@ -2234,7 +2235,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     if (replyDraft.loadedFor !== thread.thread_id || restoredFor.current === thread.thread_id) return;
     restoredFor.current = thread.thread_id;
     // Words a conflict left unsaved here come back before the draft another window holds.
-    const kept = replyDraft.conflict ?? replyDraft.draft?.body ?? null;
+    const kept = replyDraft.conflict ?? replyDraft.unsaved ?? replyDraft.draft?.body ?? null;
     if (kept === null || replyDraft.offer) return;
     const current = boxRef.current;
     if (current.open && current.text.trim()) return;
@@ -2281,10 +2282,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   // unsaved, a file landing in a closed box's draft: replyDraftUnsaved, read when the guard asks), would be lost.
   const unsentSubject = thread.subject ?? 'this thread';
   // A file the reply draft holds on the server is not lost by a restart. One still uploading, waiting for its save,
-  // refused (its upload gone), or on another machine's thread (whose drafts are not saved) would be: the guard asks.
+  // refused (its upload gone), or on a thread whose drafts are not kept (an older linked machine) would be: the guard asks.
   const heldFiles = new Set((replyDraft.draft?.files ?? []).map((file) => file.upload_id));
-  const unsentFiles =
-    box.open && replyFiles.files.some((file) => !(file.state === 'done' && file.upload && !machine && heldFiles.has(file.upload.upload_id)));
+  const unsentFiles = box.open && replyFiles.files.some((file) => !(file.state === 'done' && file.upload && keepsReplyDraft(thread.thread_id) && heldFiles.has(file.upload.upload_id)));
 
   // Files dropped on the reply box attach there (a dashed "Drop to attach"; approval "inbox-reply-attach").
   const boxDrop = useFileDrop((list) => {
@@ -2300,13 +2300,13 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
 
   // The stale page notice's Reload (stalePage.ts) saves first: the reply box's words as its draft, and every answer on
   // the cards. Files in the box that the draft does not keep would be lost, so they stop the reload too, as do words in
-  // the box of another machine's thread (its drafts live on that machine, which keeps none from here).
+  // the box of a linked machine's thread whose older Plannotator keeps no draft from here.
   const reloadFlush = useRef<() => Promise<boolean>>(async () => true);
   reloadFlush.current = async () => {
     const current = boxRef.current;
     const text = current.open ? current.text : null;
     const [reply, answers] = await Promise.all([replyDraft.settle(text, text === null ? undefined : replyFiles.draftFiles(text)), pickQueue.settled()]);
-    const awayWords = !!machine && text !== null && text.trim() !== '';
+    const awayWords = !keepsReplyDraft(thread.thread_id) && text !== null && text.trim() !== '';
     return reply && answers && !unsentFiles && !awayWords;
   };
   useEffect(() => registerReloadFlush(() => reloadFlush.current()), []);
@@ -2390,29 +2390,23 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       const statesBefore = new Map((threadRef.current.messages.find((m) => m.id === messageId)?.questions ?? []).map((q) => [`${q.message_id}/${q.key}`, q.state] as const));
       try {
         // `unsentOnly`: a save that lands after its question went with a reply never reopens what the agent has.
-        let result: Awaited<ReturnType<typeof inboxApi.pick>>;
-        for (let tries = 0; ; tries += 1) {
-          try {
-            result = await pickSave.mutateAsync({ messageId, key, revision, answer, keepalive: options.keepalive && tries === 0 });
-            break;
-          } catch (cause) {
-            // Another window's answer landed first (pickConflict.ts holds the rule): this one goes again on top of it,
-            // or the Inbox's is drawn. Either way quietly: never the refusal's raw words.
-            const conflict = onPickConflict(cause, tries);
-            if (!conflict) throw cause;
-            const now = conflictRevision(cause)!;
+        // Another window's answer landing first (pickConflict.ts holds the rule): this one goes again on top of it, or
+        // the Inbox's is drawn, quietly; a newer answer of it waiting decides instead, at the revision the Inbox holds.
+        const outcome = await saveOverConflicts((at, tries) => pickSave.mutateAsync({ messageId, key, revision: at, answer, keepalive: options.keepalive && tries === 0 }), revision, {
+          landed: (now) => {
+            revision = now;
             landedRevisions.current.set(id, Math.max(landedRevisions.current.get(id) ?? 0, now));
-            // A newer answer of it is waiting: that one decides, and goes at the revision the Inbox holds now.
-            if (pickQueue.hasNewer(id) || typedSaves.has(id)) return true;
-            if (conflict.action === 'retry') {
-              revision = now;
-              continue;
-            }
+          },
+          newer: () => pickQueue.hasNewer(id) || typedSaves.has(id),
+        });
+        if ('stood' in outcome) {
+          if (outcome.stood === 'adopted') {
             lastAnswers.current.delete(id);
             await onChanged();
-            return true;
           }
+          return true;
         }
+        const result = outcome.saved;
         for (const q of result.questions) {
           revisions.current.set(`${q.message_id}/${q.key}`, q.revision);
           landedRevisions.current.set(`${q.message_id}/${q.key}`, Math.max(landedRevisions.current.get(`${q.message_id}/${q.key}`) ?? 0, q.revision));
@@ -2518,20 +2512,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       void inboxApi.pick(messageId, key, revision, answer, { unsentOnly: true, keepalive: true }).catch(() => {});
     }
   };
-  const saveTypedOnLeaveNow = useRef(saveTypedOnLeave);
-  saveTypedOnLeaveNow.current = saveTypedOnLeave;
-  useEffect(() => {
-    const onHide = () => saveTypedOnLeaveNow.current();
-    const onVisibility = () => {
-      if (document.visibilityState === 'hidden') onHide();
-    };
-    window.addEventListener('pagehide', onHide);
-    document.addEventListener('visibilitychange', onVisibility);
-    return () => {
-      window.removeEventListener('pagehide', onHide);
-      document.removeEventListener('visibilitychange', onVisibility);
-    };
-  }, []);
+  usePageLeave(saveTypedOnLeave);
   // Leaving an answer's field (a click elsewhere, Tab) saves its words now, as the reply box's draft is.
   useEffect(() => {
     const section = sectionRef.current;
@@ -2686,7 +2667,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           const id = `${m.id}/${q.key}`;
           const answer = pending.has(id) ? pending.get(id)! : q.answer;
           if (!answer || isQuestionAnswerEmpty(answer)) return [];
-          const messageName = `${agentName(m.author)}'s message, ${whenTime(m.created_at)}`;
+          const messageName = `${messageAuthorName(m)}'s message, ${whenTime(m.created_at)}`;
           // A question inside an attached file (issue #2828): its own group, named by the file.
           return [{ id, messageId: m.id, key: q.key, number: q.position + 1, prompt: q.prompt, answer: draftAnswerWords(answer), messageName: q.attachment ? fileGroupName(q.attachment.name, messageName) : messageName, ...(q.attachment ? { fileId: q.attachment.id } : {}) }];
         }),
@@ -2717,7 +2698,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     const out = new Map<string, SentAnswerGroup[]>();
     for (const m of thread.messages) {
       if (m.author.kind !== 'person') continue;
-      const groups = sentAnswersOf(m, thread.messages, (asked) => `${agentName(asked.author)}'s message, ${whenTime(asked.created_at)}`);
+      const groups = sentAnswersOf(m, thread.messages, (asked) => `${messageAuthorName(asked)}'s message, ${whenTime(asked.created_at)}`);
       if (groups.length > 0) out.set(m.id, groups);
     }
     return (heldSentAnswers.current = keepEqualByKey(heldSentAnswers.current, out));
@@ -2728,7 +2709,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     setNewMessage(null);
     setRoute((current) => ({ ...current, open: false, error: null }));
     // A draft's words come back as they were; the picks are listed beside them, never written in.
-    const kept = replyDraft.conflict ?? replyDraft.draft?.body ?? '';
+    const kept = replyDraft.conflict ?? replyDraft.unsaved ?? replyDraft.draft?.body ?? '';
     const text = kept.trim() ? kept : '';
     setBox({ open: true, text });
     // Its files come back as tiles (Cancel, another thread or a reload took them out of the box, never the draft), with
@@ -2762,18 +2743,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       else requestAnimationFrame(() => textRef.current?.focus());
     } else openBox();
   };
-  const focusReplyEnd = () =>
-    requestAnimationFrame(() => {
-      const text = textRef.current;
-      if (!text) return;
-      text.focus();
-      text.setSelectionRange(text.value.length, text.value.length);
-      text.scrollTop = text.scrollHeight;
-      // The words scroll in the box's capped region (approval "inbox-reply-box", D1), not in the field: their end, and
-      // the caret there, are brought to the region's bottom.
-      const region = text.closest<HTMLElement>('[data-reply-scroll]');
-      if (region) region.scrollTop += text.getBoundingClientRect().bottom - region.getBoundingClientRect().bottom;
-    });
+  const focusReplyEnd = () => focusReplyEndOf(textRef);
   /**
    * From full screen to the thread, on the device's own route: beside the thread where there is room (as
    * Write the reply goes), else the file closes (a phone's or a stacked window's Back to the thread). A
@@ -2807,6 +2777,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     const earlier = unconfirmed.get(thread.thread_id);
     if (earlier && text.trim() !== earlier.words) forgetUnconfirmed(earlier, text.trim() === '' ? 'emptied' : 'edited');
     if (behind && !boxRef.current.open) restoringRef.current = true;
+    // The person wrote here: from now a draft read with other words waits for their next edit (an untouched box takes it).
+    ownedFor.current = thread.thread_id;
     setBox({ open: true, text });
     // Open now, for the rest of this event: an `openBehind` after it (a paste in full screen's card) keeps these words.
     boxRef.current = liveBox(true);
@@ -2956,7 +2928,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const send = async (options: { despiteReplaced?: boolean; routed?: boolean; stayFull?: boolean; endedChecked?: ReadonlySet<string> } = {}): Promise<void> => {
     const byChord = sentByChord.current;
     sentByChord.current = false;
-    if (sending || voice.busy || checkingEnded.current) return;
+    if (sending || voice.busy || voice.others.busyNow() || checkingEnded.current) return;
     if (sendingAnywhere.current) {
       setError('Your reply in another thread is still sending. Send again in a moment.');
       return;
@@ -3151,9 +3123,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       claimed = true;
       if (box.open) {
         if (words !== '' || replyFiles.draftFiles().length > 0) draftSavedAs = savedAs;
-      } else if (replyDraft.conflict !== null) {
-        // Words another window's change left unsaved here: they go, and the newer draft stays.
-        words = replyDraft.conflict.trim();
+      } else if (replyDraft.unsavedNow() !== null) {
+        // Words left unsaved here as they are after the claim (which saves what it can): they go, and the draft stays.
+        words = (replyDraft.unsavedNow() ?? '').trim();
       } else {
         // The box is closed: the words as the draft holds them now (another window may have changed them).
         const fresh = await replyDraft.reload();
@@ -3887,14 +3859,14 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           phone,
           reply: {
             to: replyTo,
-            value: box.open ? '' : (replyDraft.conflict ?? replyDraft.draft?.body ?? ''),
+            value: box.open ? '' : (replyDraft.conflict ?? replyDraft.unsaved ?? replyDraft.draft?.body ?? ''),
             words: box.open ? replyText : undefined, hasWords,
             onChange: (text) => changeReply(text, true),
             quote: quote && quotedMessage ? { message: quotedMessage, words: quote.words, onRemove: () => setQuote(null) } : null,
             onLateVoice,
             onSend: () => void send({ stayFull: true }),
             sending,
-            canSend: hasWords || picksCount > 0 || records.length > 0 || draftActions.length > 0 || (box.open && replyUploads.length > 0) || draftPastes > 0,
+            canSend: !voice.others.busy && (hasWords || picksCount > 0 || records.length > 0 || draftActions.length > 0 || (box.open && replyUploads.length > 0) || draftPastes > 0),
             picks: picksCount,
             annotations: records.length,
             comments: {
@@ -3979,10 +3951,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     const { quote: arrowQuote, aim: session } = arrowReply(thread.messages, message, words, !!quoteRef.current);
     if (arrowQuote !== undefined) setQuote(arrowQuote);
     if (words) window.getSelection()?.removeAllRanges();
-    if (!pillActive || !session) {
-      openBox();
-      return;
-    }
+    // The box open already: focus goes to it, the caret after its words (never left on the arrow, where keys are shortcuts).
+    if (!pillActive || !session) return boxRef.current.open ? focusReplyEnd() : openBox();
     aimReply([session]);
     setRcptOpen(false);
     if (boxRef.current.open) {
@@ -4007,23 +3977,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   };
   /** The live-session choice open under the box: it stands in for the box's Send and bin. */
   const routeChoiceOpen = route.open && asking;
-  const restoreDraft = () => {
-    const offered = replyDraft.restoreOffer();
-    if (!offered) return;
-    const { draft } = offered;
-    if (offered.typed) {
-      const typed = replyText.get();
-      const text = draft.body.trim() && typed.trim() ? `${draft.body.trimEnd()}\n\n${typed.trimStart()}` : draft.body.trim() ? draft.body : typed;
-      takeDraftFiles(draftFilesWithMine(draft.files ?? []), text, 'add');
-      changeReply(text, true);
-      focusReplyEnd();
-    } else {
-      setBox({ open: true, text: draft.body });
-      takeDraftFiles(draft.files ?? [], draft.body);
-    }
-    announce('Your saved draft is in the reply.');
-  };
-  /** After a conflict, "Discard mine": only this window's words and file changes go; the other window's draft stays and comes into the box. */
+  const offerHost = () => ({ replyDraft, replyText, setBox, takeDraftFiles, draftFilesWithMine, changeReply, focusReplyEnd, announce, textRef });
+  const restoreDraft = () => takeOffered(offerHost());
+  /** After a conflict, "Discard mine": only this window's words and file changes go; the other window's draft stays and comes into the box (read again: words held for another computer that waited on this choice are offered now). */
   const discardMine = () => {
     const draft = replyDraft.takeTheirs();
     const theirs = draft?.body ?? '';
@@ -4031,6 +3987,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     takeDraftFiles(draft?.files ?? [], theirs);
     announce(theirs.trim() ? 'Your words were discarded; the other window’s are in the box.' : 'Your words were discarded.');
     requestAnimationFrame(() => textRef.current?.focus());
+    draftMoved();
   };
   const draftStamp = <DraftStamp savedAt={stampSavedAt} tooLong={stampTooLong} failed={stampFailed} onDiscard={discardReply} />;
   // The box's row (approval "inbox-reply-box", T6; ReplyRow.tsx). What goes with the reply: chips on a computer that
@@ -4288,7 +4245,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     // While a Send is on its way the box takes no words: these wait for it to end.
     if (!replyWords || sending) return;
     onReplyWordsTaken?.();
-    const kept = boxRef.current.open ? boxRef.current.text : replyDraft.conflict ?? replyDraft.draft?.body ?? '';
+    const kept = boxRef.current.open ? boxRef.current.text : replyDraft.conflict ?? replyDraft.unsaved ?? replyDraft.draft?.body ?? '';
     changeReply(kept.trim() ? `${kept.trimEnd()}\n\n${replyWords}` : replyWords);
     // changeReply reads this render's Send state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -4323,12 +4280,12 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const readAt = row?.read_at ?? null;
   const markReadOffered = !resolved && row != null && onMarkRead !== undefined;
   const markReadEnabled = markReadOffered && canToggleRead(row!, drawn);
-  // Mark unread takes Mark read's place on a thread the person read by opening it, an agent having written last
-  // (markRead.ts `canMarkUnread`), as the row's hover action does: the list still holding the row in New
-  // (`seenHeldInNew`) and the look still on its way (App.tsx `looking`) included (the owner, 2026-11-02: "If I open
-  // a thread, and it transitions to [read] because there's no questions or anything, then I need the ability to
-  // mark unread"). Mark read stays only while the thread is unread or waits on the person. A thread marked read
-  // keeps the pressed Read button, which moves it back (design record "inbox-mark-read"). `E` stays Mark read's.
+  // Mark unread is offered on a thread the person read by opening it, an agent having written last (markRead.ts
+  // `canMarkUnread`), as the row's hover action does: the list still holding the row in New (`seenHeldInNew`), the
+  // look still on its way (App.tsx `looking`) and a thread whose questions still wait included (the owner, 2026-11-02,
+  // then 2026-11-25: on an opened thread with questions too). Mark read stays beside it in the ⋯ while the thread
+  // waits on the person (`markReadEnabled`). A thread marked read keeps Move back (design record "inbox-mark-read").
+  // `E` stays Mark read's.
   const markUnreadOffered = markReadOffered && readAt === null && onMarkUnread !== undefined && canMarkUnread(row!);
   // The header's ⋯ More offers it where that button does not: a thread marked read, and a phone, whose bar has no read
   // button (approval "inbox-thread-header": its ⋯ sheet leads with the read actions).
@@ -4512,7 +4469,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const newest: MessageActs = { openFromReply, jumpTo, noteChips, openFromMessage, openOptionSet, pick, markAction, saveMessageComment, noteUnanchored, repaintHits, openListAt, onSide, toggleMessage, replyToMessage, quoteAtPress, setHeaderOpen, closeHeaderOnEscape, tryPrototype, takeBackOf, setPageStart, openFileRef };
   const acts = useRef(newest);
   acts.current = newest;
-  const reactApi = useMessageReactApi({ thread, onAck, agentOf: (m) => agentName(m.author), liveOf: liveMessage, reply: (m) => acts.current.replyToMessage(m), onToast, onChanged, announce });
+  const reactApi = useMessageReactApi({ thread, onAck, agentOf: (m) => messageAuthorName(m), liveOf: liveMessage, reply: (m) => acts.current.replyToMessage(m), onToast, onChanged, announce });
   const copyHost: CopyMenuHost = {
     thread,
     phone,
@@ -4912,7 +4869,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           // append to, so it never proves who wrote (the agent's name and mark stay, and the server refuses "You").
           // In a thread with two or more sessions the header's name for the session leads, its agent in the mark,
           // the tooltip and after it for a screen reader: "Billing refactor", heard "Billing refactor, Claude Code".
-          const kind = message.author.kind === 'agent' ? agentName(message.author) : null;
+          const kind = message.author.kind === 'agent' ? messageAuthorName(message) : null;
           const sessionName = message.author.kind === 'agent' ? (sessionNames.get(message.author.session ?? '') ?? null) : null;
           const named = sessionName && sessionName !== kind ? sessionName : null;
           const authorLabel = message.author.kind === 'agent' && !named ? labelOf(sessionLabels, message.author.session) : null;
@@ -5103,7 +5060,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 {message.author.kind === 'person' && message.quote && (
                   <SentQuoteLine message={thread.messages.find((m) => m.id === message.quote!.of)} words={message.quote.words} phone={phone} onJump={() => jumpToQuote(message.quote!)} />
                 )}
-                <MessageView
+                {voice.others.wrap(<MessageView
                   data={{
                     message,
                     answers: answersOf(message),
@@ -5133,7 +5090,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                     acts,
                   }}
                   draw={drawMessageBody}
-                />
+                />)}
                 </>
                 )}
                 {/* An agent's files, and the person's own (compose): the same tiles and viewers. */}
@@ -5304,12 +5261,12 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         <HeldWrites entries={outbox} machine={machine} onDismiss={onDismissOutbox} />
         <SendingReply sends={sendsDrawn} held={outbox} machine={machine} />
         {showNew && !phone && newPill}
-        <div className="ib-sr" aria-live="polite" data-fold-live="">
-          {announced}
-        </div>
+        <div className="ib-sr" aria-live="polite" data-fold-live="">{announced}</div>
         {/* The room a step of the middle fold borrows (roomRef, shrinkRoom). */}
         <div className="ib-fold-room" ref={roomRef} aria-hidden="true" data-fold-room="" />
       </div>
+      {/* An html block opened big from the Artifacts grid or wall (HtmlArtifactOpen.tsx), with the message's own comments. */}
+      <HtmlArtifactOpen threadId={thread.thread_id} messages={thread.messages} commentsOf={(m) => ((m.author.kind === 'agent' || !isInboxNote(m)) && liveMessage(m) ? (messageComments.get(m.id) ?? NO_ANNOTATIONS) : null)} acts={acts} />
       {artifactsOn && !phone && <ArtifactsBar onBack={() => onArtifacts?.(false)}>{viewSwitch}</ArtifactsBar>}
       {linksOn && (
         <div className="ib-pbody ib-artbody">
@@ -5389,210 +5346,103 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             }}
           />
         ) : box.open ? (
-          <>
-            {/* Above the box (approval "inbox-reply-recipient"): after a conflict its line and choice, and on a phone the
-                Draft line (below). On a computer nothing else. */}
-            {offerShown && <DraftOffer onRestore={restoreDraft} />}
-            {replyDraft.conflict !== null && (
-              <DraftHead
-                conflict={{
-                  id: conflictId,
-                  text: conflictText(conflictSentElsewhere),
-                  onKeepMine: () => {
-                    const mine = replyText.get();
-                    replyDraft.keepMine(mine, replyFiles.draftFiles(mine));
-                    announce('Your words are saved.');
-                    requestAnimationFrame(() => textRef.current?.focus());
-                  },
-                  onDiscard: discardMine,
-                }}
-              />
-            )}
-            <TakeBackNote state={takeBack.state} />
-            {staleQuestions.length > 0 && <ChangedNotice questions={staleQuestions} thread={thread} onJump={jumpTo} />}
-            {/* On a phone "Draft  Saved 4:51 PM  Discard" sits above the box, at the right, once something is saved.
-                While the live-session choice stands in for the box's Send it goes, as a computer's bin does, so
-                Discard cannot close the box under the choice. */}
-            {phone && !(route.open && asking) && (
-              <div className="ib-draft-above" data-draft-above="" ref={draftAboveRef}>
-                {draftStamp}
-              </div>
-            )}
-            <div
-              className="ib-rbox"
-              data-drop-over={boxDrop.over ? '' : undefined}
-              {...boxDrop.handlers}
-              // A press beside the text (the row of chips under it) puts the caret in the reply.
-              onMouseDown={(event) => focusReplyFromBox(event, textRef.current)}
-              onFocus={(event) => {
-                if ((event.target as EventTarget) === textRef.current) ownedFor.current = thread.thread_id;
-              }}
-              // A paste that carries files (a screenshot, a copied image) attaches them; text pastes as text.
-              onPaste={(event) => {
-                if (replyFiles.paste(event)) setError(null);
-              }}
-            >
-              {/* The one visible way to close for a pointer or a phone (Esc does the same): it keeps the words and files as
-                  the draft, as Cancel did; an empty box leaves none. */}
-              <Tip content="Close (Esc). Your words stay as a draft.">
-                <button type="button" className="ib-rclose" aria-label="Close the reply box (your draft is kept)" data-reply-close="" onClick={() => setAside()}>
-                  <Icon name="chevD" size={phone ? 20 : 16} />
-                </button>
-              </Tip>
-              {/* The message the words answer (approval "inbox-reply-quote"): one quiet line over them, × drops it. */}
-              {quote && quotedMessage && <ReplyQuoteLine message={quotedMessage} words={quote.words} phone={phone} onRemove={removeQuote} />}
-              {/* The words, files, answers and actions scroll in one region capped near half the window (decision D1), so
-                  the row with Send under it is always in view however much the reply holds. */}
-              <div className="ib-rscroll" data-reply-scroll="" ref={replyScrollRef}>
-                <ReplyTextField
-                  replyText={replyText}
-                  mentionThread={thread.thread_id}
-                  sendingWords={wordsAway === thread.thread_id}
-                  textareaRef={textRef}
-                  voice={voice}
-                  voiceNoteGlide
-                  ariaLabel={`Reply to ${replyToNames}`}
-                  ariaDescribedBy={[showAskerNote ? noteId : null, replyDraft.conflict !== null ? conflictId : null].filter(Boolean).join(' ') || undefined}
-                  placeholder="Write a reply. Type / for a skill"
-                  lead={phone ? undefined : rcptPill}
-                  destination="your reply"
-                  skillFilter={skillFilter}
-                  commands={replyCommands}
-                  tags={composerTags}
-                  onChange={(text) => changeReply(text)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
-                      event.preventDefault();
-                      // The chord is spent here: the thread's own Send key (a window listener) never sees it, whether or not
-                      // the event is cancelable (a synthetic one is not, and `defaultPrevented` would stay false).
-                      event.stopPropagation();
-                      // With the choice open, the shortcut goes to it.
-                      if (route.open) setRoute((current) => ({ ...current, focus: current.focus + 1 }));
-                      else {
-                        sentByChord.current = true;
-                        void send();
-                      }
-                    } else if (event.key === 'Escape') {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      if (route.open) routeBack();
-                      else setAside();
-                    }
-                  }}
-                />
-                {replyFiles.files.length > 0 && (
-                  <div className="ib-rfiles" data-reply-files="">
-                    <ComposeFileTiles
-                      files={replyFiles.files}
-                      onRemove={(key) => {
-                        replyFiles.remove(key);
-                        // The × goes with its tile: focus stays in the reply.
-                        textRef.current?.focus();
-                      }}
-                      onPutBack={(key) => replyFiles.putBack(key, textRef.current)}
-                    />
-                  </div>
-                )}
-                {draftAnswers.length > 0 && <ReplyAnswers answers={draftAnswers} onJump={jumpTo} />}
-                {draftActions.length > 0 && <ReplyActions actions={draftActions} onJump={jumpTo} />}
-              </div>
-              {/* A computer: a draft that did not save says so on its own line over the row, in full (a phone says it in
-                  the Draft line above the box). */}
-              {!phone && (stampTooLong || stampFailed) && (
-                <div className="ib-rnote" data-reply-note="">
-                  {draftStamp}
-                </div>
-              )}
-              {/* A phone: what goes with the reply, on one quiet line over the row (who gets it is in the row). */}
-              {phone && (
-                <div className="ib-rline" data-reply-line="" data-empty={replySummaryShown ? undefined : ''}>
-                  <ReplySummary skip={replySkip} dropped={dropped.length} comments={takesAnnotations ? { props: commentsListProps, list: commentsList, onList: setCommentsList } : null} />
-                </div>
-              )}
-              <ReplyRow
-                phone={phone}
-                keepOpen={keepOpen}
-                fold={replyFold}
-                onFold={setReplyFold}
-                fitKey={replyFitKey}
-                send={
-                  routeChoiceOpen ? null : (
-                  // No tooltip: a button that says Send needs none, and ⌘↵ is named only to assistive technology
-                  // (approval "inbox-send-no-shortcut-hint").
-                  <button type="button" className="ib-btn ib-pri ib-rsend" ref={sendRef} data-reply-send="" onClick={() => void send()} disabled={sending || voice.busy} aria-keyshortcuts={sendAria}>
-                    {/* While it sends the spinner takes the word's place and Send keeps its width, so nothing beside it moves. */}
-                    {sending && <span className="ib-spin" aria-hidden="true" />}
-                    {/* A phone: the round arrow; the word stays as the button's name. */}
-                    {phone && <Icon name="arrowUp" size={20} className="ib-rsend-i" />}
-                    <span className="ib-rsend-w">Send</span>
-                  </button>
-                  )
+          // The open box (components/reply/ReplyBox.tsx): drawn from what the thread holds; what it does comes back here.
+          <ReplyBox
+            phone={phone}
+            thread={thread}
+            offerShown={offerShown}
+            onRestoreDraft={restoreDraft}
+            conflict={
+              replyDraft.conflict === null
+                ? null
+                : {
+                    id: conflictId,
+                    text: conflictText(conflictSentElsewhere),
+                    onKeepMine: () => {
+                      const mine = replyText.get();
+                      replyDraft.keepMine(mine, replyFiles.draftFiles(mine));
+                      announce('Your words are saved.');
+                      requestAnimationFrame(() => textRef.current?.focus());
+                    },
+                    onDiscard: discardMine,
+                  }
+            }
+            takeBack={takeBack.state}
+            staleQuestions={staleQuestions}
+            onJump={jumpTo}
+            draftStamp={draftStamp}
+            draftAboveRef={draftAboveRef}
+            draftNotSaved={stampTooLong || stampFailed}
+            dropOver={boxDrop.over}
+            dropHandlers={boxDrop.handlers}
+            onPaste={(event) => {
+              if (replyFiles.paste(event)) setError(null);
+            }}
+            onClose={setAside}
+            quote={quote}
+            quotedMessage={quotedMessage}
+            onRemoveQuote={removeQuote}
+            scrollRef={replyScrollRef}
+            replyText={replyText}
+            sendingWords={wordsAway === thread.thread_id}
+            textRef={textRef}
+            voice={voice}
+            replyToNames={replyToNames}
+            askerNoteId={showAskerNote ? noteId : null}
+            recipientPill={rcptPill}
+            skillFilter={skillFilter}
+            commands={replyCommands}
+            tags={composerTags}
+            onChange={changeReply}
+            onFieldKeyDown={(event) => {
+              if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+                event.preventDefault();
+                // The chord is spent here: the thread's own Send key (a window listener) never sees it, whether or not
+                // the event is cancelable (a synthetic one is not, and `defaultPrevented` would stay false).
+                event.stopPropagation();
+                // With the choice open, the shortcut goes to it.
+                if (route.open) setRoute((current) => ({ ...current, focus: current.focus + 1 }));
+                else {
+                  sentByChord.current = true;
+                  void send();
                 }
-                clip={
-                  <AttachFilesButton
-                    className="ib-rclip"
-                    iconSize={phone ? 20 : 16}
-                    phone={phone}
-                    inputData="data-reply-attach"
-                    onFiles={(list) => {
-                      if (phone) replyFiles.attach(list);
-                      else replyFiles.add(list);
-                      setError(null);
-                    }}
-                  />
-                }
-                skills={
-                  <Tip content="Skills (or type / in the reply)">
-                    <button type="button" className="ib-ricon" aria-label="Skills" data-reply-skills="" onClick={openSkillsFromBox}>
-                      <Icon name="cube" size={phone ? 20 : 16} />
-                    </button>
-                  </Tip>
-                }
-                mic={<VoiceMicButton voice={voice} phone={phone} />}
-                status={<VoiceStatusLine voice={voice} phone={phone} />}
-                files={
-                  replyFiles.files.length >= REPLY_FILES_SUMMARY_FROM ? (
-                    <button type="button" className="ib-rchip ib-rfilesn" data-reply-files-count="" aria-label={`${replyFiles.files.length} files attached. Show them`} onClick={showReplyFiles}>
-                      <Icon name="clip" size={13} />
-                      {replyFiles.files.length} files
-                    </button>
-                  ) : null
-                }
-                chips={replyChips}
-                summary={<ReplySummary skip={replySkip} dropped={dropped.length} comments={takesAnnotations ? { props: commentsListProps, list: commentsList?.card ? null : commentsList, onList: setCommentsList } : null} />}
-                pill={phone ? rcptPill : null}
-                hint={noSkillsHint ? 'No skills are installed' : null}
-                discard={
-                  // While the live-session choice is open it stands in for Send and the bin, as it did for Send's
-                  // row, so nothing can close the box under it. After a conflict the bin is "Discard mine": the
-                  // other window's draft is never deleted from here.
-                  phone || routeChoiceOpen ? null : replyDraft.conflict !== null ? (
-                    <Tip content="Discard your words; the other window’s draft stays">
-                      <button type="button" className="ib-ricon ib-rdiscard" aria-label="Discard my words" data-reply-discard="" onClick={discardMine}>
-                        <Icon name="trash" size={16} />
-                      </button>
-                    </Tip>
-                  ) : (
-                    <Tip content="Discard this draft">
-                      <button type="button" className="ib-ricon ib-rdiscard" aria-label="Discard draft" data-reply-discard="" onClick={discardReply}>
-                        <Icon name="trash" size={16} />
-                      </button>
-                    </Tip>
-                  )
-                }
-              />
-              {boxDrop.over && (
-                <div className="ib-rdrop" aria-hidden="true" data-box-drop="">
-                  <Icon name="clip" size={18} />
-                  Drop to attach
-                </div>
-              )}
-            </div>
-            <div className="ib-sr" role="status">
-              {skipping ? `${plural(skipIds.size, 'question')} will be skipped when you send.` : ''}
-            </div>
-            {route.open && asking ? routeChoice : lineError && errorLine}
-          </>
+              } else if (event.key === 'Escape') {
+                event.preventDefault();
+                event.stopPropagation();
+                if (route.open) routeBack();
+                else setAside();
+              }
+            }}
+            files={replyFiles.files}
+            onRemoveFile={replyFiles.remove}
+            onPutBackFile={replyFiles.putBack}
+            onAttachFiles={(list) => {
+              if (phone) replyFiles.attach(list);
+              else replyFiles.add(list);
+              setError(null);
+            }}
+            onShowFiles={showReplyFiles}
+            draftAnswers={draftAnswers}
+            draftActions={draftActions}
+            replySkip={replySkip}
+            dropped={dropped.length}
+            comments={takesAnnotations ? { props: commentsListProps, list: commentsList, onList: setCommentsList } : null}
+            replySummaryShown={replySummaryShown}
+            chips={replyChips}
+            fold={replyFold}
+            onFold={setReplyFold}
+            fitKey={replyFitKey}
+            noSkillsHint={noSkillsHint}
+            routeChoiceOpen={!!routeChoiceOpen}
+            routeChoice={routeChoice}
+            sending={sending}
+            sendRef={sendRef}
+            sendAria={sendAria}
+            onSend={() => void send()}
+            onOpenSkills={openSkillsFromBox}
+            onDiscardDraft={discardReply}
+            errorLine={lineError && errorLine}
+          />
         ) : route.open && asking ? (
           routeChoice
         ) : (
@@ -5606,7 +5456,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           <div className="ib-acts ib-footrow" data-foot-row="" data-fit={rowLevel ? footRowTokens(rowLevel) : undefined} ref={footRowRef}>
             <div className="ib-footbtns" data-foot-buttons="">
               {(waiting || draftKept) && (
-                <button type="button" className="ib-btn ib-pri" ref={sendRef} onClick={() => void send()} disabled={sending} aria-describedby={footStatusIds}>
+                <button type="button" className="ib-btn ib-pri" ref={sendRef} onClick={() => void send()} disabled={sending || voice.others.busy} aria-describedby={footStatusIds}>
                   <Icon name="send" size={15} />
                   Send
                 </button>
@@ -5658,11 +5508,11 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               {ackOffered && !waiting && !draftKept && (
                 <ReactionTray
                   messageId={ackTarget!.id}
-                  agent={agentName(ackTarget!.author)}
+                  agent={messageAuthorName(ackTarget!)}
                   on={ackOn}
                   current={ackTarget!.ack?.reaction ?? null}
                   phone={phone}
-                  onAck={(next, reaction, was) => onAck!(ackTarget!.id, next, agentName(ackTarget!.author), reaction, was)}
+                  onAck={(next, reaction, was) => onAck!(ackTarget!.id, next, messageAuthorName(ackTarget!), reaction, was)}
                   onSkill={(reaction, from) => reactApi.react(ackTarget!, reaction, from)}
                   openRequest={trayRequest}
                 />
@@ -5774,6 +5624,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     </section>
     {protoWindow}
     {openAttachment && (
+      <ThreadSkillFilter.Provider value={skillFilter}>
       <AttachmentPane
         ref={paneRef}
         pageStart={pageStart}
@@ -5834,9 +5685,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         onToast={onToast}
         questions={fileQuestions}
         onOpenAt={(attachmentId, version, focus) => onOpenFile({ id: attachmentId, version, focus, view: currentView, set: setFor(attachmentId) }, { replace: true })}
-        onClose={() => {
-          onOpenFile(null);
-        }}
+        onClose={() => onOpenFile(null)}
         strip={{
           picks: picksCount,
           annotations: records.length,
@@ -5844,9 +5693,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         }}
         composer={composer}
       />
+      </ThreadSkillFilter.Provider>
     )}
     {!openAttachment && file === null && namedFile && (
-      <ReferencedFilePane threadId={thread.thread_id} fileRef={namedFile} agent={asker} phone={phone} full={phone || fileStacked} onOpen={(ref) => onOpenNamedFile?.(ref)} onClose={() => onOpenNamedFile?.(null)} onAttached={openAttachedRef} />
+      <ReferencedFilePane threadId={thread.thread_id} fileRef={namedFile} skillMessage={namedFile.skill ? thread.messages.find((m) => m.id === namedFile.messageId) : undefined} agent={asker} phone={phone} full={phone || fileStacked} onOpen={(ref) => onOpenNamedFile?.(ref)} onClose={() => onOpenNamedFile?.(null)} onAttached={openAttachedRef} />
     )}
     </>
     </ReuseContext.Provider>

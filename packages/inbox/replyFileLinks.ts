@@ -44,8 +44,8 @@ export interface ReplyFileTarget {
   version: 'current' | 'sent';
 }
 
-/** `design/hero.png (image in your 11:22 AM message)`, or with seconds, or a place: the src as written. */
-const IMAGE_IN_MESSAGE = /^(.*) \(image in (your|my) [^()]*message(?: \d+)?\)$/;
+/** `design/hero.png (image in your 11:22 AM message)` (a film "video in", a recording "sound in"), or with seconds, or a place: the src as written. */
+const IMAGE_IN_MESSAGE = /^(.*) \((?:image|video|sound) in (your|my) [^()]*message(?: \d+)?\)$/;
 
 /**
  * The file a heading of the feedback names, and the version its comments

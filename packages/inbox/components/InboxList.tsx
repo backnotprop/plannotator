@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { LetterMark, ProjectMark, showsProjects, showsThreads, useRowMarks } from '../letterMarks';
+import { RowAvatar, RowProjectMark, useAvatarRow } from './rowMarks';
 import { inboxListShortcuts } from '../shortcuts/list.shortcuts';
 import { shortcutAria, useShortcutAria, withShortcut } from '../shortcuts/hint';
 import { inboxSearchShortcuts } from '../search/searchShortcut';
@@ -8,7 +8,7 @@ import { inboxAppShortcuts } from '../shortcuts/app.shortcuts';
 import type { InboxListGroupId, InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
 import { formatCount } from '../format';
 import { RowTagName, rowTintOf, tintProps, type ListTagColours, type RowTintProps } from '../parts/RowTint';
-import { RowAgents, RowAgentTiles } from './RowAgents';
+import { RowAgents, RowAgentTiles, rowScriptOf } from './RowAgents';
 import { RowPullsMark } from '../threadPulls/ThreadPulls';
 import { isTextCut, ProjectTipText, Tip } from './Tip';
 import { RowTip } from './RowTip';
@@ -31,7 +31,7 @@ import { attachPullToRefresh } from '../pullRefresh';
 import { RowSwipeLayer, useRowSwipe } from './RowSwipeLayer';
 import { leadEmpty, leadParts } from './rowLead';
 import { TidyMenu, type TidyController } from './Tidy';
-import { ListFilterButton, useTitleFilterList, type ListFilterSource } from './ListFilter';
+import { ListFilterButton, RecentViewBar, RecentViewSaid, useTitleFilterList, type ListFilterSource } from './ListFilter';
 import { awayLine, machineTakes, type MachinesModel } from '../machines';
 import { listLookClasses, useListLook } from '../listLook';
 import { flatRows, useListView, type ListPlaces, type ListSort } from '../listView';
@@ -228,33 +228,6 @@ export interface InboxListProps {
 }
 
 
-/** Letter marks, style "Avatar": one mark per row in a column of its own, the thread's with the project's on its corner. */
-function RowAvatar({ row, size }: { row: InboxListRow; size: 24 | 30 }) {
-  const { marks } = useRowMarks();
-  if (marks.style !== 'avatar' || marks.what === 'off') return null;
-  const project = row.project?.name ?? '';
-  const threads = showsThreads(marks.what);
-  const projects = showsProjects(marks.what);
-  return (
-    <span className="ib-lm-av" data-size={size} aria-hidden="true">
-      {threads ? <LetterMark name={titleOf(row)} seed={row.thread_id} size={size} solid /> : <ProjectMark projectId={row.project_id} name={project} size={size} solid />}
-      {threads && projects && project && <ProjectMark projectId={row.project_id} name={project} size={size === 30 ? 14 : 12} solid className="ib-lm-badge" />}
-    </span>
-  );
-}
-
-/** Letter marks, style "Inline": the project's mark before its name in a row. */
-function RowProjectMark({ row }: { row: InboxListRow }) {
-  const { marks } = useRowMarks();
-  if (marks.style !== 'inline' || !showsProjects(marks.what) || !row.project?.name) return null;
-  return <ProjectMark projectId={row.project_id} name={row.project.name} size={16} className="ib-lm-rowp" />;
-}
-
-/** Whether the row leads with an avatar (style "Avatar", some marks on): three-line and phone rows make room for it. */
-function useAvatarRow(): boolean {
-  const { marks } = useRowMarks();
-  return marks.style === 'avatar' && marks.what !== 'off';
-}
 
 /**
  * The grey preview under or after the title (approval "inbox-row-latest-preview"): the thread's latest message as
@@ -286,7 +259,7 @@ function FromLine({ row, project, filtered }: { row: InboxListRow; project: stri
       <RowAvatar row={row} size={24} />
       {!filtered && <RowProjectMark row={row} />}
       {(!filtered || !!scheduledOf(row)) && <RowSlot row={row} session={slotSession(row)} project={project} />}
-      {scheduledOf(row) ? <ScheduledTile /> : <RowAgents participants={row.participants} agent={rowAgent(row)} />}
+      {scheduledOf(row) ? <ScheduledTile /> : <RowAgents participants={row.participants} agent={rowAgent(row)} script={rowScriptOf(row, rowAgent(row), project)} />}
     </span>
   );
 }
@@ -307,7 +280,7 @@ function LeadLine({ row, project, filtered, tip = true }: { row: InboxListRow; p
     <span className="ib-from ib-lead">
       {withProject && <RowProjectMark row={row} />}
       {(withProject || !!scheduledOf(row)) && <RowSlot row={row} session={slotSession(row)} project={project} tip={tip} />}
-      {scheduledOf(row) ? <ScheduledTile /> : <RowAgentTiles participants={row.participants} agent={rowAgent(row)} tip={tip} />}
+      {scheduledOf(row) ? <ScheduledTile /> : <RowAgentTiles participants={row.participants} agent={rowAgent(row)} tip={tip} script={rowScriptOf(row, rowAgent(row), project)} />}
     </span>
   );
 }
@@ -1134,7 +1107,7 @@ export function InboxList(props: InboxListProps) {
           />
         )}
       </div>
-      {titleField}
+      {props.listFilter && <RecentViewBar place={props.listFilter.place ?? ''} picking={pick.on} />}{titleField}{props.listFilter && <RecentViewSaid place={props.listFilter.place ?? ''} />}
       {starredAbove && props.starred && (
         <StarredPills
           rows={props.starred.rows}
