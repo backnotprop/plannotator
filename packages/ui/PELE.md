@@ -1,6 +1,6 @@
 # Pele: a second engine for Mermaid fences (on, where it can)
 
-[Pele](https://pele.run) (MIT, pinned 1.3.0) draws Mermaid syntax without Mermaid. It **draws every Mermaid fence it can**, and Mermaid draws the rest: a fence Pele cannot parse, or a type it does not know, falls back to Mermaid, whose error panel shows when Mermaid cannot draw it either. There is no setting. Mermaid's runtime is fetched only for a fence that falls back, so a page Pele draws whole never loads Mermaid.
+[Pele](https://pele.run) (MIT, pinned 1.13.0) draws Mermaid syntax without Mermaid. It **draws every Mermaid fence it can**, and Mermaid draws the rest: a fence Pele cannot parse, or a type it does not know, falls back to Mermaid, whose error panel shows when Mermaid cannot draw it either. There is no setting. Mermaid's runtime is fetched only for a fence that falls back, so a page Pele draws whole never loads Mermaid.
 
 One constant decides: `DIAGRAM_ENGINE_MODE` in `utils/diagram-engine.ts`.
 

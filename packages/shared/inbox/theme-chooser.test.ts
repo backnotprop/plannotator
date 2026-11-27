@@ -7,7 +7,7 @@
  * owner, 2026-11-10; the gap is the line's own, 40 minutes); the dialog behind an offer, or held back on day one; a Not now accepted for it.
  */
 import { describe, expect, test } from "bun:test";
-import { INBOX_REVEALS, REVEAL_SPACING_MS, revealAgainAt, revealMayClaim, revealNext, revealNotNowAllowed, revealQualifies, type RevealId, type RevealState } from "./reveals";
+import { INBOX_REVEALS, REVEAL_SPACING_MS, revealAgainAt, revealMayClaim, revealNext, revealNotNowAllowed, revealQualifies, revealsWithCodeReviewOffer, type RevealId, type RevealState } from "./reveals";
 import { themeChooserLook, themeChooserOnDefault, themeChooserOpen } from "./theme-chooser";
 
 const AT = "2026-11-10T09:00:00.000Z";
@@ -81,8 +81,10 @@ describe("its place in the line", () => {
     const entry = INBOX_REVEALS.find((e) => e.id === "theme_chooser")!;
     expect(revealQualifies(entry, state({ firstUseAt: null, threads: 0, open: only("theme_chooser") }), now)).toBe(true);
     expect(revealNext(state({ firstUseAt: now.toISOString(), threads: 0, open: only("theme_chooser") }), now)).toBe("theme_chooser");
-    // Code review's day-0 offer keeps its place ahead of it.
-    expect(revealNext(state({ firstUseAt: null, threads: 0, open: only("code_review", "theme_chooser") }), now)).toBe("code_review");
+    // Code review's day-0 offer keeps its place ahead of it while it is shown; switched off (as from 0.29.6), it holds nothing back.
+    const both = state({ firstUseAt: null, threads: 0, open: only("code_review", "theme_chooser") });
+    expect(revealNext(both, now, revealsWithCodeReviewOffer(true))).toBe("code_review");
+    expect(revealNext(both, now, revealsWithCodeReviewOffer(false))).toBe("theme_chooser");
     expect(revealNotNowAllowed("theme_chooser")).toBe(false);
   });
 });

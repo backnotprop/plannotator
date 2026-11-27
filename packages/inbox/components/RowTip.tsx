@@ -20,7 +20,7 @@
  * move: as before, the tip opens once the pointer moves. A trigger that arms on keyboard focus gets the focus back. A
  * touch, or a screen with no hover, never arms a trigger: a tip never opens for one.
  */
-import { cloneElement, createContext, useContext, useEffect, useMemo, useRef, useState, type ComponentProps, type FocusEvent, type MouseEvent as ReactMouseEvent, type PointerEvent, type ReactElement, type Ref } from 'react';
+import { cloneElement, createContext, useContext, useMemo, useRef, useState, type ComponentProps, type FocusEvent, type MouseEvent as ReactMouseEvent, type PointerEvent, type ReactElement, type Ref, type SyntheticEvent } from 'react';
 import { flushSync } from 'react-dom';
 import { noHover } from '@plannotator/ui/utils/textCut';
 import { Tip } from './Tip';
@@ -62,97 +62,48 @@ interface Entry {
   move: MouseEventInit | null;
 }
 
+/**
+ * What a waiting trigger keeps between its events: the entry waiting for its task; whether a press came to it before
+ * it armed (then nothing arms it, not its focus, an over event while the button is down or the compatibility
+ * mouseover a browser may send after the down, until the pointer leaves); and, once armed, its element.
+ */
+interface Waiting {
+  entry: Entry | null;
+  pressed: boolean;
+  node: HTMLElement | null;
+}
+
+/** The handlers of the child the trigger stands in, called first as before. */
+interface ChildHandlers {
+  onPointerEnter?: (e: PointerEvent<HTMLElement>) => void;
+  onPointerOver?: (e: PointerEvent<HTMLElement>) => void;
+  onMouseOver?: (e: ReactMouseEvent<HTMLElement>) => void;
+  onMouseMove?: (e: ReactMouseEvent<HTMLElement>) => void;
+  onPointerLeave?: (e: PointerEvent<HTMLElement>) => void;
+  onPointerDown?: (e: PointerEvent<HTMLElement>) => void;
+  onFocus?: (e: FocusEvent<HTMLElement>) => void;
+}
+
+/**
+ * A list draws every row of its open groups (about 2,200 on a large Inbox) and a row has about six of these, so what
+ * one holds while it waits is paid some 13,000 times: two hooks and one handler for all seven events (it was six hooks,
+ * nine closures and an effect each). Armed, it is `ArmedTip`.
+ */
 function LazyTip({ armed: armedByRow, children, ...tip }: TipProps & { armed: boolean }) {
   const [armedHere, setArmedHere] = useState(false);
-  const node = useRef<HTMLElement | null>(null);
-  const entry = useRef<Entry | null>(null);
-  // A press came to the trigger before it armed: nothing arms it (its focus, an over event while the button is down,
-  // the compatibility mouseover a browser may send after the down) until the pointer leaves.
-  const pressed = useRef(false);
-  const ownRef = (children.props as { ref?: Ref<HTMLElement> }).ref;
-  // One ref for as long as the child's own: a new one each render would have base-ui drop and register the trigger again.
-  const ref = useMemo(() => mergeRefs(ownRef, node), [ownRef]);
-  useEffect(() => () => {
-    if (entry.current) clearTimeout(entry.current.timer);
-  }, []);
-  const armed = armedByRow || armedHere;
-  if (armed) {
-    return <Tip {...tip}>{cloneElement(children as ReactElement<{ ref?: Ref<HTMLElement> }>, { ref })}</Tip>;
+  const kept = useRef<Waiting | null>(null);
+  const own = (kept.current ??= { entry: null, pressed: false, node: null });
+  if (armedByRow || armedHere) {
+    return (
+      <ArmedTip tip={tip} own={own}>
+        {children}
+      </ArmedTip>
+    );
   }
-  const props = children.props as {
-    onPointerEnter?: (e: PointerEvent<HTMLElement>) => void;
-    onPointerOver?: (e: PointerEvent<HTMLElement>) => void;
-    onMouseOver?: (e: ReactMouseEvent<HTMLElement>) => void;
-    onMouseMove?: (e: ReactMouseEvent<HTMLElement>) => void;
-    onPointerLeave?: (e: PointerEvent<HTMLElement>) => void;
-    onPointerDown?: (e: PointerEvent<HTMLElement>) => void;
-    onFocus?: (e: FocusEvent<HTMLElement>) => void;
-  };
-  const drop = () => {
-    if (entry.current) clearTimeout(entry.current.timer);
-    entry.current = null;
-  };
-  // Armed in the next task, never inside the event: a press with no hover before it (a pen's first touch) brings its
-  // own over events, and a trigger drawn again there would take the press's down and click with the old element.
-  const enter = (event: ReactMouseEvent<HTMLElement>) => {
-    if (pressed.current) return;
-    const at = { x: event.clientX, y: event.clientY };
-    if (entry.current) {
-      entry.current.at = at;
-      return;
-    }
-    const timer = setTimeout(() => {
-      const waiting = entry.current;
-      entry.current = null;
-      if (!waiting) return;
-      flushSync(() => setArmedHere(true));
-      greet(node.current, waiting);
-    }, 0);
-    entry.current = { timer, at, drawn: event.currentTarget, move: null };
-  };
-  const trigger = {
-    // base-ui's trigger marks its element so; drawn the same before the tip mounts.
-    'data-base-ui-tooltip-trigger': '',
-    // React's enter, from the pointerout of what the pointer left: the earliest event of the move.
-    onPointerEnter: (event: PointerEvent<HTMLElement>) => {
-      props.onPointerEnter?.(event);
-      if (opensTips(event)) enter(event);
-    },
-    // React derives no enter when what the pointer left was itself just drawn again (its out reached no one):
-    // the over events always come.
-    onPointerOver: (event: PointerEvent<HTMLElement>) => {
-      props.onPointerOver?.(event);
-      if (opensTips(event)) enter(event);
-    },
-    onMouseOver: (event: ReactMouseEvent<HTMLElement>) => {
-      props.onMouseOver?.(event);
-      if (!fromTouch(event.nativeEvent)) enter(event);
-    },
-    onMouseMove: (event: ReactMouseEvent<HTMLElement>) => {
-      props.onMouseMove?.(event);
-      const { clientX, clientY, movementX, movementY } = event;
-      if (entry.current) entry.current.move = { clientX, clientY, movementX, movementY };
-    },
-    onPointerLeave: (event: PointerEvent<HTMLElement>) => {
-      props.onPointerLeave?.(event);
-      pressed.current = false;
-      drop();
-    },
-    // A press before the trigger armed: `Tip` would have let it cancel the open, and its tip would wait for the
-    // pointer to leave and come back. So does this one: the press arms nothing, the next entry does.
-    onPointerDown: (event: PointerEvent<HTMLElement>) => {
-      props.onPointerDown?.(event);
-      pressed.current = true;
-      drop();
-    },
-    onFocus: (event: FocusEvent<HTMLElement>) => {
-      props.onFocus?.(event);
-      if (pressed.current) return;
-      drop();
-      flushSync(() => setArmedHere(true));
-      node.current?.focus({ preventScroll: true });
-    },
-  };
+  const props = children.props as ChildHandlers;
+  const on = (event: SyntheticEvent<HTMLElement>) => handle(own, props, setArmedHere, event);
+  // base-ui's trigger marks its element so; drawn the same before the tip mounts.
+  const trigger = { 'data-base-ui-tooltip-trigger': '', onPointerEnter: on, onPointerOver: on, onMouseOver: on, onMouseMove: on, onPointerLeave: on, onPointerDown: on, onFocus: on };
   // A control that can be disabled has its tip on a wrapper (`Tip`), so the wrapper is the trigger.
   if ('disabled' in (children.props as object)) {
     return (
@@ -162,6 +113,88 @@ function LazyTip({ armed: armedByRow, children, ...tip }: TipProps & { armed: bo
     );
   }
   return cloneElement(children as ReactElement<typeof trigger>, trigger);
+}
+
+/** The very `Tip` the trigger stands for, on the child, with one ref for as long as the child's own. */
+function ArmedTip({ tip, own, children }: { tip: Omit<TipProps, 'children'>; own: Waiting; children: TipProps['children'] }) {
+  const ownRef = (children.props as { ref?: Ref<HTMLElement> }).ref;
+  // A new ref each render would have base-ui drop and register the trigger again.
+  const ref = useMemo(() => mergeRefs(ownRef, own), [ownRef, own]);
+  return <Tip {...tip}>{cloneElement(children as ReactElement<{ ref?: Ref<HTMLElement> }>, { ref })}</Tip>;
+}
+
+/** A waiting trigger's events (React's own event types), each after the child's own handler. */
+function handle(own: Waiting, props: ChildHandlers, arm: (armed: boolean) => void, event: SyntheticEvent<HTMLElement>): void {
+  switch (event.type) {
+    // React's enter, from the pointerout of what the pointer left: the earliest event of the move.
+    case 'pointerenter':
+      props.onPointerEnter?.(event as PointerEvent<HTMLElement>);
+      if (opensTips(event as PointerEvent<HTMLElement>)) enter(own, arm, event as PointerEvent<HTMLElement>);
+      return;
+    // React derives no enter when what the pointer left was itself just drawn again (its out reached no one):
+    // the over events always come.
+    case 'pointerover':
+      props.onPointerOver?.(event as PointerEvent<HTMLElement>);
+      if (opensTips(event as PointerEvent<HTMLElement>)) enter(own, arm, event as PointerEvent<HTMLElement>);
+      return;
+    case 'mouseover':
+      props.onMouseOver?.(event as ReactMouseEvent<HTMLElement>);
+      if (!fromTouch((event as ReactMouseEvent<HTMLElement>).nativeEvent)) enter(own, arm, event as ReactMouseEvent<HTMLElement>);
+      return;
+    case 'mousemove': {
+      props.onMouseMove?.(event as ReactMouseEvent<HTMLElement>);
+      const { clientX, clientY, movementX, movementY } = event as ReactMouseEvent<HTMLElement>;
+      if (own.entry) own.entry.move = { clientX, clientY, movementX, movementY };
+      return;
+    }
+    case 'pointerleave':
+      props.onPointerLeave?.(event as PointerEvent<HTMLElement>);
+      own.pressed = false;
+      drop(own);
+      return;
+    // A press before the trigger armed: `Tip` would have let it cancel the open, and its tip would wait for the
+    // pointer to leave and come back. So does this one: the press arms nothing, the next entry does.
+    case 'pointerdown':
+      props.onPointerDown?.(event as PointerEvent<HTMLElement>);
+      own.pressed = true;
+      drop(own);
+      return;
+    case 'focus':
+      props.onFocus?.(event as FocusEvent<HTMLElement>);
+      if (own.pressed) return;
+      drop(own);
+      flushSync(() => arm(true));
+      own.node?.focus({ preventScroll: true });
+      return;
+  }
+}
+
+function drop(own: Waiting): void {
+  if (own.entry) clearTimeout(own.entry.timer);
+  own.entry = null;
+}
+
+/**
+ * Armed in the next task, never inside the event: a press with no hover before it (a pen's first touch) brings its
+ * own over events, and a trigger drawn again there would take the press's down and click with the old element. A
+ * trigger gone before its task arms nothing: React drops the state of a component no longer drawn, and its element
+ * is gone with it.
+ */
+function enter(own: Waiting, arm: (armed: boolean) => void, event: ReactMouseEvent<HTMLElement>): void {
+  if (own.pressed) return;
+  const at = { x: event.clientX, y: event.clientY };
+  if (own.entry) {
+    own.entry.at = at;
+    return;
+  }
+  const timer = setTimeout(() => {
+    const waiting = own.entry;
+    own.entry = null;
+    if (!waiting) return;
+    flushSync(() => arm(true));
+    greet(own.node, waiting);
+  }, 0);
+  own.entry = { timer, at, drawn: event.currentTarget, move: null };
 }
 
 /**
@@ -214,10 +247,10 @@ function watchLeave(trigger: HTMLElement): void {
   trigger.addEventListener('mouseleave', left);
 }
 
-function mergeRefs<T>(a: Ref<T> | undefined, b: { current: T | null }): (value: T | null) => void {
+function mergeRefs(a: Ref<HTMLElement> | undefined, b: { node: HTMLElement | null }): (value: HTMLElement | null) => void {
   return (value) => {
-    b.current = value;
+    b.node = value;
     if (typeof a === 'function') a(value);
-    else if (a) (a as { current: T | null }).current = value;
+    else if (a) (a as { current: HTMLElement | null }).current = value;
   };
 }

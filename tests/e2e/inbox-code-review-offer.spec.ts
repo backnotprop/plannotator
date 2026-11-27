@@ -13,6 +13,11 @@
  *    now stamped, and a reload shows no dialog at all.
  *  - Code review already on: no offer.
  *
+ * Off since 0.29.6 (`CODE_REVIEW_OFFER.enabled` false in packages/shared/inbox/reveals.ts; the owner: "I will eventually,
+ * just not yet"): the first two cases run only while the offer is shown, so flipping that one line brings them back.
+ * While it is off, a case proves the offer never opens for someone it would have been for, nothing is written for it,
+ * and Code review is still turned on from Settings → Capabilities, with Reviews joining the sidebar.
+ *
  * Pictures (made-up content): the offer over the Inbox in light and dark, the phone in light, and the window right
  * after Turn on. Build the apps first (bun run --cwd apps/review build && bun run build:hook), then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-code-review-offer.spec.ts`. PNGs land in
@@ -25,6 +30,7 @@ import { join, resolve } from 'node:path';
 import { E2E_GROUP_TIP_SEEN, E2E_LAUNCH_OFF, inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { savedConfig } from '../helpers/saved-config';
+import { CODE_REVIEW_OFFER_SHOWN } from '../../packages/shared/inbox/reveals';
 
 const repo = resolve(__dirname, '../..');
 const proofDir = join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo, '.local/proof')), 'code-review-offer');
@@ -171,57 +177,91 @@ test.afterAll(async () => {
   }
 });
 
-test('desktop, Code review never decided: the offer over the Inbox; Turn on code review turns it on as Settings does and Reviews joins the sidebar; never again', async ({ browser }) => {
-  test.setTimeout(300_000);
+test.describe('while the offer is shown', () => {
+  test.skip(!CODE_REVIEW_OFFER_SHOWN, 'Code review\'s offer is switched off (CODE_REVIEW_OFFER.enabled, since 0.29.6)');
+
+  test('desktop, Code review never decided: the offer over the Inbox; Turn on code review turns it on as Settings does and Reviews joins the sidebar; never again', async ({ browser }) => {
+    test.setTimeout(300_000);
+    const w = await world();
+    const page = await (await context(browser)).newPage();
+    await page.goto(w.url);
+    await expect(rowOf(page, w.ids['refund-window']!)).toBeVisible();
+    await expect(page.locator('[data-sidebar-item="reviews"]')).toHaveCount(0);
+    // On the first load, once the page settles: no thread read, no page age.
+    const offer = page.getByRole('dialog', { name: 'A new way to review' });
+    await expect(offer).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator(`${OFFER} #ib-cro-feats li`)).toHaveCount(4);
+    // Showing it turned nothing on, and only it is open.
+    expect(config(w).inboxCodeReview).toBeUndefined();
+    expect(config(w).inboxReveals.code_review.shownAt).toMatch(/^\d{4}-/);
+    await expect(page.locator('dialog[open]')).toHaveCount(1);
+    await shots(page, 'offer-desktop-{s}');
+    // The keyboard: focus starts on the dialog; Tab goes to its first button and stays inside.
+    await page.keyboard.press('Tab');
+    await expect(offer.getByRole('button', { name: 'Not now' })).toBeFocused();
+    await page.keyboard.press('Shift+Tab');
+    await expect(offer.getByRole('button', { name: 'Turn on code review' })).toBeFocused();
+    await offer.getByRole('button', { name: 'Turn on code review' }).click();
+    await expect(page.locator(OFFER)).toHaveCount(0);
+    await expect(page.locator('[data-sidebar-item="reviews"]')).toBeVisible();
+    await expect.poll(() => config(w).inboxCodeReview).toBe(true);
+    await page.mouse.move(4, 4);
+    await shots(page, 'turned-on-desktop-{s}', ['light']);
+    // A reload: Reviews stays, and no one-time dialog opens.
+    await page.reload();
+    await expect(rowOf(page, w.ids['refund-window']!)).toBeVisible();
+    await expect(page.locator('[data-sidebar-item="reviews"]')).toBeVisible();
+    await page.waitForTimeout(QUIET_MS);
+    await expect(page.locator('dialog[open]')).toHaveCount(0);
+  });
+
+  test('a 390 px phone: the offer as a sheet; Escape is Not now, Code review stays undecided, and no dialog follows', async ({ browser }) => {
+    test.setTimeout(240_000);
+    const w = await world();
+    const page = await (await context(browser, true)).newPage();
+    await page.goto(w.url);
+    const offer = page.getByRole('dialog', { name: 'A new way to review' });
+    await expect(offer).toBeVisible({ timeout: 20_000 });
+    await shots(page, 'offer-phone-{s}', ['light']);
+    await page.keyboard.press('Escape');
+    await expect(page.locator(OFFER)).toHaveCount(0);
+    await expect.poll(() => config(w).inboxReveals?.notNowAt ?? null).not.toBeNull();
+    expect(config(w).inboxCodeReview).toBeUndefined();
+    await page.reload();
+    await page.waitForTimeout(QUIET_MS);
+    await expect(page.locator('dialog[open]')).toHaveCount(0);
+    expect(config(w).inboxCodeReview).toBeUndefined();
+  });
+});
+
+test('switched off (as from 0.29.6), Code review never decided: the offer never opens and nothing is written for it; Settings → Capabilities still turns Code review on and Reviews joins the sidebar', async ({ browser }) => {
+  test.skip(CODE_REVIEW_OFFER_SHOWN, 'Code review\'s offer is shown: the cases above cover it');
+  test.setTimeout(180_000);
   const w = await world();
   const page = await (await context(browser)).newPage();
   await page.goto(w.url);
   await expect(rowOf(page, w.ids['refund-window']!)).toBeVisible();
   await expect(page.locator('[data-sidebar-item="reviews"]')).toHaveCount(0);
-  // On the first load, once the page settles: no thread read, no page age.
-  const offer = page.getByRole('dialog', { name: 'A new way to review' });
-  await expect(offer).toBeVisible({ timeout: 20_000 });
-  await expect(page.locator(`${OFFER} #ib-cro-feats li`)).toHaveCount(4);
-  // Showing it turned nothing on, and only it is open.
-  expect(config(w).inboxCodeReview).toBeUndefined();
-  expect(config(w).inboxReveals.code_review.shownAt).toMatch(/^\d{4}-/);
-  await expect(page.locator('dialog[open]')).toHaveCount(1);
-  await shots(page, 'offer-desktop-{s}');
-  // The keyboard: focus starts on the dialog; Tab goes to its first button and stays inside.
-  await page.keyboard.press('Tab');
-  await expect(offer.getByRole('button', { name: 'Not now' })).toBeFocused();
-  await page.keyboard.press('Shift+Tab');
-  await expect(offer.getByRole('button', { name: 'Turn on code review' })).toBeFocused();
-  await offer.getByRole('button', { name: 'Turn on code review' }).click();
+  await page.waitForTimeout(QUIET_MS);
   await expect(page.locator(OFFER)).toHaveCount(0);
-  await expect(page.locator('[data-sidebar-item="reviews"]')).toBeVisible();
-  await expect.poll(() => config(w).inboxCodeReview).toBe(true);
-  await page.mouse.move(4, 4);
-  await shots(page, 'turned-on-desktop-{s}', ['light']);
-  // A reload: Reviews stays, and no one-time dialog opens.
+  await expect(page.getByRole('dialog', { name: 'A new way to review' })).toHaveCount(0);
+  // No mark at the release start, so switched on again later it is still asked of this person once.
+  expect(config(w).inboxReveals?.code_review).toBeUndefined();
+  expect(config(w).inboxCodeReview).toBeUndefined();
   await page.reload();
   await expect(rowOf(page, w.ids['refund-window']!)).toBeVisible();
-  await expect(page.locator('[data-sidebar-item="reviews"]')).toBeVisible();
   await page.waitForTimeout(QUIET_MS);
-  await expect(page.locator('dialog[open]')).toHaveCount(0);
-});
-
-test('a 390 px phone: the offer as a sheet; Escape is Not now, Code review stays undecided, and no dialog follows', async ({ browser }) => {
-  test.setTimeout(240_000);
-  const w = await world();
-  const page = await (await context(browser, true)).newPage();
-  await page.goto(w.url);
-  const offer = page.getByRole('dialog', { name: 'A new way to review' });
-  await expect(offer).toBeVisible({ timeout: 20_000 });
-  await shots(page, 'offer-phone-{s}', ['light']);
-  await page.keyboard.press('Escape');
   await expect(page.locator(OFFER)).toHaveCount(0);
-  await expect.poll(() => config(w).inboxReveals?.notNowAt ?? null).not.toBeNull();
-  expect(config(w).inboxCodeReview).toBeUndefined();
-  await page.reload();
-  await page.waitForTimeout(QUIET_MS);
-  await expect(page.locator('dialog[open]')).toHaveCount(0);
-  expect(config(w).inboxCodeReview).toBeUndefined();
+  // Settings → Capabilities: the switch is there, off, and turns Code review on.
+  await page.goto(`${w.url}#settings/capabilities`);
+  const toggle = page.locator('[data-settings-code-review]').getByRole('switch');
+  await expect(toggle).toHaveAttribute('aria-checked', 'false');
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-checked', 'true');
+  await expect.poll(() => config(w).inboxCodeReview).toBe(true);
+  await page.goto(w.url);
+  await expect(page.locator('[data-sidebar-item="reviews"]')).toBeVisible();
+  await expect(page.locator(OFFER)).toHaveCount(0);
 });
 
 test('Code review already on: the offer never opens', async ({ browser }) => {
