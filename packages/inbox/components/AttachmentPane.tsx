@@ -77,7 +77,9 @@ import { HtmlPageCommentRow, useHtmlPageComment, type PageCommentParking } from 
 import { anchorKeyOf, draftHasWords, FileDraftContext, fileDraftKey, keepFileDrafts, peekFileDrafts, takeFileDrafts, type CommentDraft, type FileCommentDraft, type FileDraftSeat, type RowDraft } from '../fileCommentDrafts';
 import { releaseWindowZoom, useWindowPinched } from '../windowPinch';
 import { FilePeek, peekSheetHost } from './AttachmentStepper';
-import { CommentCount, EarlierSection, commentsLabel } from './EarlierSection';
+import { EarlierSection } from './EarlierSection';
+import { PaneCommentsButton } from '../parts/PaneCommentsButton';
+import { inHostSlot, type PaneHost } from '../parts/paneHost';
 import { earlierCommentsOn } from '../earlierComments';
 import { FullScreenMore } from './OpenIn';
 import { fileSwipeMode, prefersReducedMotion, useFileSwipe } from '../fileSwipe';
@@ -305,6 +307,8 @@ export interface AttachmentPaneProps {
    * body's. Absent or null (a file whose message recorded none, the tour): the cards stay read-only.
    */
   questions?: FileQuestions | null;
+  /** A page that draws the pane's controls in its own bars (parts/paneHost.tsx); full screen keeps its own bar. */
+  host?: PaneHost | null;
 }
 
 /**
@@ -1672,7 +1676,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     setCommentWaits(full && shownToolbar === 'tucked' && !props.readOnly && unsavedComposer(sectionRef.current, savedTextRef.current) !== null);
   }, [full, shownToolbar, props.readOnly]);
   shownToolbarRef.current = shownToolbar;
-  usePageClear(sectionRef, full && kind === 'html', phone ? 'bar' : shownToolbar === 'tucked' ? 'handle' : null);
+  usePageClear(sectionRef, full && kind === 'html' && phone);
   // Every way back to showing (the corner control, ⌘⇧X, leaving full screen, a pinch let go) forgets
   // what gathered the tools, once the corner control's press has put focus back: the next » brings focus back to ».
   useEffect(() => {
@@ -2007,7 +2011,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     }
     trackReopen(draft, () => popoverShown() || (annotation.diagramAnchor != null && sectionRef.current?.querySelector('[data-diagram-composer] textarea') != null) || htmlComment.open);
     if (phoneHtml && hasComposer) htmlComment.expect(draft);
-    if (!viewer.reopenComment?.(annotation, missing)) missing();
+    if (!viewer.reopenComment?.(annotation, missing, (full ? null : props.host?.globalAnchor?.()))) missing();
   };
   const reopenInViewerRef = useRef(reopenInViewer);
   reopenInViewerRef.current = reopenInViewer;
@@ -2180,6 +2184,15 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     leave(`the ${next} version`, go);
   };
   const close = () => leave(null, props.onClose);
+  // A page's own bars (paneHost.tsx), out of full screen: its menu reaches the Viewer's actions through `handle`.
+  const hosted = props.host && !full ? props.host : null;
+  const hostOr = (slot: HTMLElement | null | undefined, node: React.ReactNode) => (hosted ? inHostSlot(slot ?? null, node) : node);
+  useEffect(() => {
+    if (!hosted) return;
+    hosted.handle.current = { globalComment: (at) => viewerRef.current?.openGlobalComment?.(at) ?? false, copy: () => viewerRef.current?.copyDocument?.() ?? Promise.resolve(false) };
+    return () => void (hosted.handle.current = null);
+  });
+  const commentsButton = <PaneCommentsButton buttonRef={sheetButtonRef} open={sheet} count={annotations.length} earlier={earlierCount} controls={sheetId} onToggle={togglePanel} onEscape={closeSheet} />;
   closeRef.current = close;
   /** Where × and Escape's last rung go: the thread (the file closes), or back beside it. */
   const exitCloses = props.exitCloses ?? props.fullLocked === true;
@@ -2299,6 +2312,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
       data-attachment-pane={attachment.id}
       data-version={effectiveVersion}
       data-full-view={full ? '' : undefined}
+      data-host-chrome={hosted ? '' : undefined}
       // Hide (») or the composer's ⌄ gathers what floats over the file into the corner control (inbox.css).
       data-tools={full ? shownToolbar : undefined}
       // A comment popover draws in a portal outside the section; its events still come through here (React's tree),
@@ -2406,6 +2420,9 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
           exitCloses={exitCloses}
           chord={isHtml ? TOOLS_CHORD : null}
         />
+      ) : hosted ? (
+        // The page names the file in its own bars (paneHost.tsx): the row is kept, closed (the grid's first row).
+        <div aria-hidden="true" data-host-head="">{folded && hasPanel && inHostSlot(hosted.comments, commentsButton)}</div>
       ) : (
         <div className="ib-vhead">
           {/* With more than one file the bar under the file names it. */}
@@ -2436,27 +2453,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               </a>
             </Tip>
           )}
-          {folded && hasPanel && (
-            <button
-              type="button"
-              ref={sheetButtonRef}
-              className={`ib-btn ib-sm ib-vcomments${sheet ? ' ib-on' : ''}`}
-              onClick={togglePanel}
-              onKeyDown={(event) => {
-                if (event.key === 'Escape' && sheet && !event.defaultPrevented) {
-                  event.preventDefault();
-                  closeSheet();
-                }
-              }}
-              aria-expanded={sheet}
-              aria-controls={sheetId}
-              aria-label={commentsLabel(annotations.length, earlierCount)}
-              data-annotations-sheet=""
-            >
-              <Icon name="comment" size={15} />
-              <CommentCount count={annotations.length} earlier={earlierCount} />
-            </button>
-          )}
+          {folded && hasPanel && commentsButton}
           {!props.fullLocked && (
             // The view's two parts (fileView.ts), the one shown pressed. This header shows only while the file is side by side.
             <div className="ib-seg ib-viewseg" role="group" aria-label="View" data-view-switch="">
@@ -2657,7 +2654,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
             </div>
           )}
           {view && isText && !linkedTop && !props.readOnly && (
-            <PaneToolstrip inputMethod={inputMethod} onInputMethodChange={setInputMethod} mode={mode} onModeChange={setMode} phone={phone} contents={contentsButton !== null} />
+            hostOr(hosted?.tools, <PaneToolstrip inputMethod={inputMethod} onInputMethodChange={setInputMethod} mode={mode} onModeChange={setMode} phone={phone} contents={contentsButton !== null} marks={hosted ? hosted.marks === true : undefined} />)
           )}
           {view && contentsButton && !linkedTop && (
             <ContentsPanel
@@ -2668,6 +2665,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               scrollViewport={scrollViewport}
               onShow={showContents}
               phone={phone}
+              opener={hosted && phone && contentsButton === 'sheet' ? hosted.onContents : undefined}
             />
           )}
           {isImage && (

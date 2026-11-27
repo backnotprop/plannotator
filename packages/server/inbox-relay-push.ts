@@ -13,7 +13,7 @@
 import { encryptWithKey } from "@plannotator/core/crypto";
 import { inboxPushFallbacks, inboxPushKind, inboxPushPlaintext, inboxPushSealText, type InboxPushInput, type InboxPushKind, type InboxPushPlaintext } from "@plannotator/core/inbox-push";
 import { isInboxPermissionSession } from "@plannotator/core/inbox-permission";
-import { displayInboxSubject, inboxAgentName, inboxRowArchived, inboxRowWaitsOnPerson, type InboxListRow } from "@plannotator/core/inbox-types";
+import { displayInboxSubject, INBOX_SCRIPT_AUTHOR_NAME, inboxAgentName, inboxRowArchived, inboxScriptAuthor, inboxRowWaitsOnPerson, type InboxListRow } from "@plannotator/core/inbox-types";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 
 export { APNS_BODY_LIMIT, apnsBody, type InboxPushAction, type InboxPushKind, type InboxPushPlaintext, type InboxPushQuestion } from "@plannotator/core/inbox-push";
@@ -61,7 +61,8 @@ export function inboxPushSummary(
     ...facts,
     subject: store.threadSubject(message.thread_id) ?? displayInboxSubject(message.subject) ?? "",
     project: store.project(message.project_id)?.name ?? "",
-    agent: inboxAgentName(message.author),
+    // A person reads it on the phone's lock screen: "Script" for a script's post, as the window's notification says.
+    agent: inboxScriptAuthor(message.author) ? INBOX_SCRIPT_AUTHOR_NAME : inboxAgentName(message.author),
     badge: listed.filter((row) => !snoozed.has(row.thread_id) && !inboxRowArchived(row) && inboxRowWaitsOnPerson(row)).length,
     holds_up: own !== undefined && HOLDS_UP.has(own.section),
   });

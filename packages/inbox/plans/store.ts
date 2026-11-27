@@ -108,7 +108,7 @@ export function readPlans(retry = false, poll = false): Promise<void> {
 
 export function setPlansOn(next: boolean): void {
   // Off, its sidebar row is never saved in the layout (sidebarLayout.ts): nothing of an off Plans is written.
-  setSidebarUnsaved(next ? [] : ['plans']);
+  setSidebarUnsaved('plans', !next);
   if (on === next) return;
   on = next;
   if (!on) {

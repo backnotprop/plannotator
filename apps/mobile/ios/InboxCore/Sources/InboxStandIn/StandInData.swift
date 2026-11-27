@@ -40,11 +40,11 @@ public enum StandInData {
 
   public static func threads(now: Date) -> [InboxThread] {
     var seq: Int64 = 0
-    func message(_ id: String, _ thread: ThreadID, _ project: String, _ author: InboxAuthor, minutesAgo: Double, _ body: String, questions: [InboxQuestion]? = nil, delivery: InboxDelivery? = nil) -> InboxMessageWire {
+    func message(_ id: String, _ thread: ThreadID, _ project: String, _ author: InboxAuthor, minutesAgo: Double, _ body: String, questions: [InboxQuestion]? = nil, replyTo: String? = nil) -> InboxMessageWire {
       seq += 1
       return InboxMessageWire(
-        questions: questions, seq: seq, id: MessageID(id), projectId: ProjectID("prj_\(project)"), threadId: thread, author: author, body: body, createdAt: iso(now.addingTimeInterval(-minutesAgo * 60)),
-        delivery: delivery)
+        questions: questions, seq: seq, id: MessageID(id), projectId: ProjectID("prj_\(project)"), threadId: thread, replyTo: replyTo, author: author, body: body,
+        createdAt: iso(now.addingTimeInterval(-minutesAgo * 60)))
     }
     let claude = agent("claude-code", "ses_api")
     let codex = agent("codex", "ses_store")
@@ -156,7 +156,7 @@ public enum StandInData {
         message(upload.rawValue, upload, "storefront", codex, minutesAgo: 1500, "The upload test fails about one run in twenty. It waits on a fixed 200 ms sleep."),
         message(
           "msg_STANDIN0000000000000052", upload, "storefront", person, minutesAgo: 1490, "Wait for the progress event instead of sleeping.",
-          delivery: InboxDelivery(state: "queued", host: "codex", session: "ses_store", at: iso(now.addingTimeInterval(-1490 * 60)))),
+          replyTo: upload.rawValue),
       ])
 
     let bumpsThread = InboxThread(

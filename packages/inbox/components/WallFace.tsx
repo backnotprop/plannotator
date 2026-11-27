@@ -186,6 +186,17 @@ export function WallFace({ row, near, guide, pages }: { row: InboxArtifactRow; n
   const wantsText = kind === 'markdown' || kind === 'text' || kind === 'code' || kind === 'html' || kind === 'mermaid' || kind === 'graphviz';
   const preview = useText(attachment, near, wantsText);
   const [failed, setFailed] = useState(false);
+  if (row.html && !attachment) {
+    // An html block (not a file): a quiet HTML card, as an attached page's before its preview; its page never runs here.
+    return (
+      <span className="ib-wf-file" data-face="html-block">
+        <span className="ib-wf-file-ic">
+          <Icon name={typedIcon('html')} size={22} />
+        </span>
+        <span className="ib-wf-file-ext">HTML</span>
+      </span>
+    );
+  }
   if (!attachment || !kind) {
     return (
       <span className="ib-wf-sheet ib-wf-guide" data-face="guide">

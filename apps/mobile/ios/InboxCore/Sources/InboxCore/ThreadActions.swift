@@ -279,10 +279,10 @@ public enum RowOffers {
     case archive, unarchive
   }
 
-  /// `inboxRowWaitsOnPerson`.
+  /// `inboxRowWaitsOnPerson` (`inboxSectionWaitsOnPerson`: Tagged you counts like Waiting on you).
   public static func waitsOnPerson(_ row: InboxListRow) -> Bool {
     switch row.section {
-    case .stopped, .holding, .waiting: return true
+    case .stopped, .holding, .waiting, .tagged: return true
     case .new: return row.unseen > 0 || row.answeredNotSent
     default: return false
     }
@@ -304,10 +304,10 @@ public enum RowOffers {
     return row.readAt != nil || waitsOnPerson(row) || seenHeldInNew(row, drawn: drawn)
   }
 
-  /// `canMarkUnread`: read, not archived, nothing waits on the person, and an agent wrote after the person's reply.
+  /// `canMarkUnread`: read (not bold, its latest agent message seen), not archived, and an agent wrote after the
+  /// person's reply. A row whose questions still wait takes it too once opened; its Mark read stays in the menu.
   public static func canMarkUnread(_ row: InboxListRow) -> Bool {
-    if row.resolvedAt != nil || row.unread { return false }
-    if waitsOnPerson(row) { return false }
+    if row.resolvedAt != nil || row.unread || row.unseen > 0 { return false }
     return row.sent == nil
   }
 

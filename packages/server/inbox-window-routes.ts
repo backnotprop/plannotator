@@ -14,7 +14,7 @@
  *  - a route pattern (`/^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/seen$/`),
  *    an exact route with its parameters as `:id`, and each alternative of a
  *    group of plain words its own route;
- *  - a prefix a module takes whole (`path.startsWith("/api/shapes/")`), a
+ *  - a prefix a module takes whole (`path.startsWith("/api/inbox/scheduled/")`), a
  *    family `<prefix>/*`, listed only when no exact route is read under it:
  *    the module splits the rest itself, and those routes are not read.
  * Methods are not read: the chain decides them in many ways (an early 405, a
@@ -67,6 +67,7 @@ export const ROUTE_FILES = [
   'packages/server/inbox-open-in.ts',
   'packages/server/inbox-pages.ts',
   'packages/server/inbox-pins.ts',
+  'packages/server/inbox-power-up.ts',
   'packages/server/inbox-priority.ts',
   'packages/server/inbox-project-tags.ts',
   'packages/server/inbox-reply-drafts.ts',
@@ -74,6 +75,7 @@ export const ROUTE_FILES = [
   'packages/server/inbox-scheduled-routes.ts',
   'packages/server/inbox-search.ts',
   'packages/server/inbox-sessions.ts',
+  'packages/server/inbox-ship-routes.ts',
   'packages/server/inbox-skills.ts',
   'packages/server/inbox-snooze.ts',
   'packages/server/inbox-steps.ts',
@@ -92,7 +94,6 @@ export const ROUTE_FILES = [
   'packages/shared/inbox/debug-log.ts',
   'packages/shared/plans/routes.ts',
   'packages/shared/sem-diff-assets.ts',
-  'packages/shared/shape/routes.ts',
 ] as const;
 
 /** A path is a route of the Inbox when it starts with one of these. */

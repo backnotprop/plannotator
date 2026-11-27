@@ -5,7 +5,9 @@
  * messages (the messages never change: it is a second view of the same
  * thread, not a filter). A tile opens exactly what its tile in the message
  * opens: the same viewer and view rule; PDFs and other files download; a
- * guided review opens its reader. With a file open beside the thread, the
+ * guided review opens its reader; a live html block of a message's text opens
+ * its own page, big, with its own tools (htmlArtifactOpen.ts; it is not a
+ * file). With a file open beside the thread, the
  * grid stays in the thread's column with that file's tile ringed.
  *
  * Previews load only once a tile is near the screen: an image's thumbnail,
@@ -29,7 +31,10 @@ import {
   type InboxAttachmentKind,
   type InboxAttachmentState,
 } from '@plannotator/core/inbox-types';
-import { artifactKey, artifactsNewestFirst, type Artifact, type FileArtifact, type GuideArtifact } from '../artifacts';
+import { artifactKey, artifactsNewestFirst, htmlArtifactName, type Artifact, type FileArtifact, type GuideArtifact, type HtmlArtifact } from '../artifacts';
+import { openHtmlArtifact } from '../htmlArtifactOpen';
+// What an html block's tile opens, drawn by its thread (Thread.tsx reads it from here).
+export { HtmlArtifactOpen } from './HtmlArtifactOpen';
 import { readableVersion } from '../attachments';
 import { drawnImageUrl, GALLERY_IMAGE_WIDTH } from '../images';
 import { useInboxFileSource, type InboxFileSource } from '../fileSource';
@@ -49,6 +54,8 @@ import { isComposingKey, keyTarget, modalOpen } from '../shortcuts/guards';
 
 /** The words under a tile's name: "PNG image, 1280 × 800, 38.4 KB", "Code (.sql), 331 B", "WebM video · 0:03 · 48.2 KB". */
 export function artifactDetail(artifact: Artifact): string {
+  // An html block: an attached page's words ("HTML, 1.2 KB").
+  if (artifact.type === 'html') return `HTML, ${formatBytes(artifact.size)}`;
   if (artifact.type === 'guide') {
     const { guide } = artifact;
     return `${guide.walkthrough ? 'Walkthrough' : 'Guided review'}, ${plural(guide.sections, 'section')}, ${plural(guide.files, 'file')}`;
@@ -84,6 +91,7 @@ export function artifactChanged(attachment: InboxAttachmentState): { short: stri
  */
 export function artifactLabel(artifact: Artifact, comments: number): string {
   const from = `from ${artifact.fromPerson ? 'you' : artifact.sender} at ${artifact.sentAt}`;
+  if (artifact.type === 'html') return [htmlArtifactName(artifact), artifactDetail(artifact), from, 'shown in the message text'].join(', ');
   if (artifact.type === 'guide') {
     const { guide } = artifact;
     if (guide.walkthrough) return `Walkthrough: ${guide.title}, ${plural(guide.sections, 'section')}, ${plural(guide.files, 'file')}, ${from}`;
@@ -324,6 +332,28 @@ function FileFace({ artifact, near }: { artifact: FileArtifact; near: boolean })
   );
 }
 
+/**
+ * An html block's face: its page drawn small as an attached page's is (`PageFrame`: no script, nothing from the web),
+ * only once the tile is near; until then, and on the Wall (no source there), the typed face of an HTML file. A
+ * dns-prefetch hint is not covered by the policy, so the page is told first not to prefetch (as plans/planContent.tsx).
+ */
+const NO_PREFETCH = '<meta http-equiv="x-dns-prefetch-control" content="off">';
+export function HtmlBlockFace({ source, near }: { source: string | null; near: boolean }) {
+  return (
+    <span className="ib-art-prev ib-art-f-page" data-face="html-block">
+      {near && source !== null ? (
+        <PageFrame html={`${NO_PREFETCH}${source}`} />
+      ) : (
+        <span className="ib-art-typed">
+          <Icon name={typedIcon('html')} size={26} />
+          <span>HTML</span>
+        </span>
+      )}
+      <span className="ib-art-ext">HTML</span>
+    </span>
+  );
+}
+
 export function GuideFace({ artifact }: { artifact: GuideArtifact }) {
   const { guide } = artifact;
   return (
@@ -354,6 +384,7 @@ function Tile({
   openIn,
   onOpen,
   onOpenGuide,
+  onOpenHtml,
   onOpenAs,
 }: {
   artifact: Artifact;
@@ -364,6 +395,7 @@ function Tile({
   openIn?: OpenInSurface;
   onOpen: (artifact: FileArtifact) => void;
   onOpenGuide: (artifact: GuideArtifact) => void;
+  onOpenHtml: (artifact: HtmlArtifact) => void;
   onOpenAs?: (artifact: FileArtifact, view: 'full' | 'side') => void;
 }) {
   const [ref, near] = useNear<HTMLLIElement>();
@@ -372,11 +404,12 @@ function Tile({
   const label = artifactLabel(artifact, comments);
   const changed = artifact.type === 'file' ? artifactChanged(artifact.attachment) : null;
   const downloads = artifact.type === 'file' && !opensInWindow(artifact.attachment);
-  const name = artifact.type === 'file' ? artifact.attachment.name : artifact.guide.title;
+  const name = artifact.type === 'file' ? artifact.attachment.name : artifact.type === 'html' ? htmlArtifactName(artifact) : artifact.guide.title;
+  const inText = (artifact.type === 'file' && artifact.inline) || artifact.type === 'html';
   const body = (
     <>
       <span className="ib-art-stage" data-video={artifact.type === 'file' && isInboxTimedKind(artifact.attachment.kind) ? '' : undefined}>
-        {artifact.type === 'file' ? <FileFace artifact={artifact} near={near} /> : <GuideFace artifact={artifact} />}
+        {artifact.type === 'file' ? <FileFace artifact={artifact} near={near} /> : artifact.type === 'html' ? <HtmlBlockFace source={artifact.source} near={near} /> : <GuideFace artifact={artifact} />}
         {changed && <span className="ib-art-chg">{changed.short}</span>}
         {comments > 0 && (
           <span className="ib-art-cmt">
@@ -410,7 +443,7 @@ function Tile({
             <span className="ib-art-when">
               <span className="ib-art-who">{artifact.sender} · </span>
               {artifact.sentAt}
-              {artifact.type === 'file' && artifact.inline ? ' · in text' : ''}
+              {inText ? ' · in text' : ''}
             </span>
           </Tip>
           {downloads && (
@@ -435,6 +468,13 @@ function Tile({
         {body}
       </button>
     );
+  } else if (artifact.type === 'html') {
+    // Not a file: the block's own page, big, with its own tools (htmlArtifactOpen.ts).
+    tile = (
+      <button type="button" {...common} onClick={() => onOpenHtml(artifact)} data-artifact-kind="html-block">
+        {body}
+      </button>
+    );
   } else if (downloads) {
     tile = (
       <a {...common} href={source.downloadUrl(artifact.attachment, readableVersion(artifact.attachment))} download={artifact.attachment.name} data-artifact-kind={readInboxAttachmentKind(artifact.attachment.kind)}>
@@ -448,7 +488,7 @@ function Tile({
       </button>
     );
   }
-  if (artifact.type === 'guide') {
+  if (artifact.type !== 'file') {
     return (
       <li className="ib-art-cell" ref={ref}>
         <div className="ib-art-w">
@@ -491,6 +531,8 @@ export interface ArtifactsViewProps {
   openId: string | null;
   onOpen: (artifact: FileArtifact) => void;
   onOpenGuide: (artifact: GuideArtifact) => void;
+  /** An html block's tile. Absent: its thread draws the block big (htmlArtifactOpen.ts). */
+  onOpenHtml?: (artifact: HtmlArtifact) => void;
   /** A tile's ⋯ "Open side by side" / "Open full screen" (absent on a phone or a stacked window). */
   onOpenAs?: (artifact: FileArtifact, view: 'full' | 'side') => void;
   openIn?: OpenInSurface;
@@ -500,9 +542,10 @@ export interface ArtifactsViewProps {
 
 /** The grid itself, with its heading ("Artifacts") as the region's name and the focus target when it opens. */
 export const ArtifactsView = forwardRef<HTMLHeadingElement, ArtifactsViewProps>(function ArtifactsView(
-  { threadId, artifacts, annotationCounts, openId, onOpen, onOpenGuide, onOpenAs, openIn, phone = false },
+  { threadId, artifacts, annotationCounts, openId, onOpen, onOpenGuide, onOpenHtml, onOpenAs, openIn, phone = false },
   headingRef,
 ) {
+  const openHtml = onOpenHtml ?? ((artifact: HtmlArtifact) => threadId !== undefined && openHtmlArtifact(threadId, artifact.key));
   const ordered = artifacts ? artifactsNewestFirst(artifacts) : [];
   const count = ordered.length;
   // The thread's pinned artifacts first, the newest pin first; the rest in the grid's own order.
@@ -554,6 +597,7 @@ export const ArtifactsView = forwardRef<HTMLHeadingElement, ArtifactsViewProps>(
         openIn={phone ? undefined : openIn}
         onOpen={onOpen}
         onOpenGuide={onOpenGuide}
+        onOpenHtml={openHtml}
         onOpenAs={onOpenAs}
       />
     );

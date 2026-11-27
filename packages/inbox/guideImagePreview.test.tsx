@@ -24,10 +24,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { resolve } from 'node:path';
 import { buildGuideSnapshot } from '@plannotator/core/guide-format';
 import type { InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
-import type { ShapeHost } from '@plannotator/ui/components/shape';
-import type { InboxShapes } from './shape/useInboxShapes';
 
-const NO_BOARDS: InboxShapes = { shapes: null, byThread: new Map(), changed: 0, rowShown: false, subscribe: () => () => {}, refresh: () => {} };
 
 // The window's tsconfig points `#guide-reader` at the reader's type shape; the real reader is package.json's `imports` entry.
 plugin({
@@ -146,7 +143,7 @@ const everywhere = <T extends Element>(selector: string): T[] => [
 const previewOf = (path: string) => host!.querySelector(`[data-guide-file-shell="${path}"] [data-image-diff-preview]`);
 
 test.skipIf(!hasDom)("a thread's guided review: each changed image is code review's preview, its sides read from the message's own route", async () => {
-  await draw(<ReviewPane thread={thread} message={message} codeReview={false} onBack={() => {}} onClose={() => {}} onSent={() => {}} shapeHost={{} as ShapeHost} shapes={NO_BOARDS} board={null} onBoard={() => {}} />);
+  await draw(<ReviewPane thread={thread} message={message} codeReview={false} onBack={() => {}} onClose={() => {}} onSent={() => {}} />);
   for (const path of FILES) expect(previewOf(path)).not.toBeNull();
   const route = `/api/inbox/messages/${MESSAGE}/guide/review-image?`;
   const sides = asked.map((url) => {
@@ -203,7 +200,7 @@ test.skipIf(!hasDom)("Highlight differences: each side read again through the me
   // The first test's sides (one picture for both) are cached under this message: read them again.
   reviewImage.resetReviewImageCache();
   try {
-    await draw(<ReviewPane thread={thread} message={message} codeReview={false} onBack={() => {}} onClose={() => {}} onSent={() => {}} shapeHost={{} as ShapeHost} shapes={NO_BOARDS} board={null} onBoard={() => {}} />);
+    await draw(<ReviewPane thread={thread} message={message} codeReview={false} onBack={() => {}} onClose={() => {}} onSent={() => {}} />);
     // Every request is a path on the window's own origin: no blob: URL (or any other origin) the page policy refuses.
     expect(requests.filter((url) => !/^\/(?!\/)/.test(url))).toEqual([]);
     const route = `/api/inbox/messages/${MESSAGE}/guide/review-image?`;

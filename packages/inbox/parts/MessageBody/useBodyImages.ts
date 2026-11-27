@@ -11,6 +11,7 @@ import type { RefObject } from 'react';
 import type { MessageBodyProps } from './types';
 import { inboxEmbedUrl } from '../../data/actions/embed';
 import type { OpenFileRefRef } from './useFileRefs';
+import { mediaOpenTarget, syncMediaOpen } from './mediaOpen';
 
 /** The body's pictures: where they load from, their boxes, and what opens one (the viewer, or the lightbox). */
 export function useBodyImages({
@@ -21,8 +22,9 @@ export function useBodyImages({
   inlineRefOf,
   onImage,
   onOpenOptionSet,
+  onOpenUncapturedImage,
   openFileRefRef,
-}: Pick<MessageBodyProps, 'message' | 'imageBase' | 'onOpenInlineImage' | 'inlineRefOf' | 'onImage' | 'onOpenOptionSet'> & { bodyRef: RefObject<HTMLDivElement | null>; openFileRefRef: OpenFileRefRef }) {
+}: Pick<MessageBodyProps, 'message' | 'imageBase' | 'onOpenInlineImage' | 'inlineRefOf' | 'onImage' | 'onOpenOptionSet' | 'onOpenUncapturedImage'> & { bodyRef: RefObject<HTMLDivElement | null>; openFileRefRef: OpenFileRefRef }) {
   // The body's images go through a host resolver that names the same URL ui's
   // default would (the window's resolver, `inboxImageSrcResolver`), only so ui
   // draws an image the Inbox refuses (403 image_hidden, 404) as its alt text in
@@ -60,6 +62,8 @@ export function useBodyImages({
   const openImageRef = useRef(onOpenInlineImage);
   openImageRef.current = onOpenInlineImage;
   const [fallback, setFallback] = useState<{ src: string; alt: string } | null>(null);
+  const uncapturedRef = useRef(onOpenUncapturedImage);
+  uncapturedRef.current = onOpenUncapturedImage;
   const refOfRef = useRef(inlineRefOf);
   refOfRef.current = inlineRefOf;
   const refOf = useCallback((src: string) => (refOfRef.current ? refOfRef.current(src) : inlineImageRefFromSrc(src, message.id)), [message.id]);
@@ -83,6 +87,8 @@ export function useBodyImages({
       }
       const image = imageOf(src);
       if (image && openImageRef.current) openImageRef.current(image);
+      // Not captured: the host's own viewer where it has one (a modal dialog's, which the page's lightbox would sit behind).
+      else if (uncapturedRef.current) uncapturedRef.current(src, alt);
       else setFallback({ src, alt });
       return true;
     },
@@ -122,6 +128,11 @@ export function useBodyImages({
     if (body) syncMessageImages(body, (img) => imageOf(img.getAttribute('src')), openPictures.current);
   }, [imageOf]);
   useLayoutEffect(fitImages);
+  // A sound or video the text plays: "Open" under it, into the viewer, once the Inbox keeps its file (mediaOpen.ts).
+  useLayoutEffect(() => {
+    const body = bodyRef.current;
+    if (body) syncMediaOpen(body, (src) => (openImageRef.current ? imageOf(src) : null));
+  });
   useEffect(() => {
     const body = bodyRef.current;
     if (!body) return;
@@ -137,6 +148,14 @@ export function useBodyImages({
     // Load does not bubble: a capture listener on the body hears every image in it.
     body.addEventListener('load', onLoad, true);
     const onMore = (event: MouseEvent) => {
+      const media = mediaOpenTarget(event.target);
+      if (media) {
+        event.preventDefault();
+        event.stopPropagation();
+        const image = imageOf(media.getAttribute('src'));
+        if (image) openImageRef.current?.(image);
+        return;
+      }
       const img = toggleMessageImage(event.target, openPictures.current);
       if (!img) return;
       event.preventDefault();
@@ -156,7 +175,7 @@ export function useBodyImages({
       window.removeEventListener('resize', fitImages);
       observer?.disconnect();
     };
-  }, [fitImages, markButton]);
+  }, [fitImages, markButton, imageOf]);
   const onImageRef = useRef(onImage);
   onImageRef.current = onImage;
   const onImageClick = useCallback((src: string, alt: string) => (onImageRef.current ? onImageRef.current(src, alt) : void openImage(src, alt)), [openImage]);

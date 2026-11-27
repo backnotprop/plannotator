@@ -9,7 +9,7 @@ import { describe, expect, test } from 'bun:test';
 import { dispatchInboxFrame, type InboxEventHandlers, type SettingsModel } from './api';
 import { namesCapability, withCapabilities } from './capabilities';
 
-type Held = Pick<SettingsModel, 'serverSession' | 'board' | 'steps' | 'bro' | 'float_drafts' | 'code_review' | 'shape' | 'system'>;
+type Held = Pick<SettingsModel, 'serverSession' | 'board' | 'steps' | 'bro' | 'float_drafts' | 'code_review' | 'system'>;
 
 /** What App's onCapabilities does with a frame: apply what it names, else read the settings again. */
 function hear(data: string, settings: Held): { settings: Held; reread: boolean } {
@@ -78,5 +78,30 @@ describe('event: capabilities', () => {
     const { settings } = hear(JSON.stringify({ board: { on: false }, steps: { on: true }, code_review: { on: true }, system: { on: true } }), { ...OFF, system: { on: false } });
     expect(settings.system).toEqual({ on: true });
     expect(hear(JSON.stringify({ board: { on: false }, system: { on: 'yes' } }), { ...OFF, system: { on: false } }).settings.system).toEqual({ on: false });
+  });
+
+  test('decision mode turned off, then on, in another window: this window follows; a frame without it leaves it', () => {
+    const off = hear(JSON.stringify({ board: { on: false }, decision_mode: { on: false }, steps: { on: true } }), { ...OFF, decision_mode: { on: true } } as Held);
+    expect(off.reread).toBe(false);
+    expect((off.settings as { decision_mode?: unknown }).decision_mode).toEqual({ on: false });
+    expect((hear(JSON.stringify({ decision_mode: { on: true } }), off.settings).settings as { decision_mode?: unknown }).decision_mode).toEqual({ on: true });
+    // The server leaves it out while it is on and was not the change: the window keeps what it has.
+    expect((hear(JSON.stringify({ board: { on: true }, steps: { on: true } }), off.settings).settings as { decision_mode?: unknown }).decision_mode).toEqual({ on: false });
+    // A malformed value is not applied.
+    expect((hear(JSON.stringify({ board: { on: false }, decision_mode: { on: 'no' } }), off.settings).settings as { decision_mode?: unknown }).decision_mode).toEqual({ on: false });
+    // The frame carries only `on`: the environment's lock the settings read gave stays (Settings keeps the switch locked).
+    const locked = { ...OFF, decision_mode: { on: false, env: false } } as Held;
+    expect((hear(JSON.stringify({ board: { on: false }, decision_mode: { on: false } }), locked).settings as { decision_mode?: unknown }).decision_mode).toEqual({ on: false, env: false });
+  });
+
+  test('Grid (with Decision mode in its old place) turned in another window, or taken from a linked computer: this window follows; a frame without them leaves them', () => {
+    const before = { ...OFF, experimental: { decision_mode: { on: false, env: null }, grid: { on: false, env: null } } } as Held;
+    // The server names `experimental` only in the frame of its own change (inbox.ts onCapabilities).
+    const on = hear(JSON.stringify({ board: { on: false }, steps: { on: true }, experimental: { decision_mode: { on: false, env: null }, grid: { on: true, env: null } } }), before);
+    expect(on.reread).toBe(false);
+    expect((on.settings as { experimental?: unknown }).experimental).toEqual({ decision_mode: { on: false, env: null }, grid: { on: true, env: null } });
+    expect((hear(JSON.stringify({ board: { on: true }, steps: { on: true } }), on.settings).settings as { experimental?: unknown }).experimental).toEqual({ decision_mode: { on: false, env: null }, grid: { on: true, env: null } });
+    // A malformed one is not applied.
+    expect((hear(JSON.stringify({ board: { on: false }, experimental: { grid: { on: true } } }), before).settings as { experimental?: unknown }).experimental).toEqual((before as { experimental?: unknown }).experimental);
   });
 });

@@ -1,5 +1,4 @@
 import { cloneElement, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactElement } from 'react';
-import { ContextMenu } from '@base-ui/react/context-menu';
 import { Menu } from '@base-ui/react/menu';
 import type { InboxMessageWire, InboxThread } from '@plannotator/core/inbox-types';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
@@ -22,6 +21,11 @@ import { useMessageArm } from '../messageArming';
 import type { InboxToastModel } from './Toast';
 import { TAKE_BACK_LABEL } from '../takeBack';
 import { PaneMenuItems } from '../panes/PaneMenu';
+import { askNewThreadFromMessage, NEW_THREAD_FROM_MESSAGE_LABEL, newThreadFromMessageOffered, newThreadFromMessageSending } from '../thread/newThreadFromMessage';
+import { useThreadShipMenu } from '../pulls/ThreadShip';
+import type { MessageReactApi } from '../thread/messageReact';
+import { MenuEmojiRow, offeredCells } from '../thread/ReactStrip';
+import { useSavedReactions } from '../reactions';
 
 /**
  * Copy a message, copy a thread (design record "inbox-copy-message", option
@@ -42,6 +46,10 @@ export interface CopyMenuHost {
   onToast?: (toast: Omit<InboxToastModel, 'id'>) => void;
   /** A phone: ⋯ always shown, the menu a sheet from the bottom edge, no right-click. */
   phone: boolean;
+  /** Read the thread again (after New thread from this message's reply). */
+  onChanged?: () => Promise<void> | void;
+  /** Reactions on any agent message (approval "inbox-reactions-every-message"): the menu's emoji row and Reply. */
+  react?: MessageReactApi;
 }
 
 /** The message as the toast and the menu's name say it: "Claude Code, 7:34 PM" (`short`: a long agent name cut, for the toast). */
@@ -68,6 +76,75 @@ function useCopies(host: () => CopyMenuHost) {
 }
 
 /**
+ * One message's menu items, the same in its ⋯ menu, a phone's sheet and the thread's shared right-click menu
+ * (approval "inbox-reactions-every-message", item 5): an agent's message leads with the person's emoji ending in the
+ * face (the full tray), then Reply and New thread from this message; then Copy message, Copy link to message, and
+ * Copy thread.
+ */
+export function MessageMenuItems({ message, newest, takeBack, live, phone }: { message: InboxMessageWire; newest: { readonly current: CopyMenuHost }; takeBack: (() => void) | null; live: boolean; phone: boolean }) {
+  const copies = useCopies(() => newest.current);
+  const react = newest.current.react;
+  const saved = useSavedReactions();
+  const reacts = !!react && live && react.offered(message) && offeredCells(saved, react.plain()).length > 0;
+  const replies = !!react && live && message.author.kind === 'agent';
+  const newThread = live && newThreadFromMessageOffered(message);
+  return (
+    <>
+      {/* The popup is named already (aria-label): the title is for the eye only, on a phone's sheet. */}
+      <div className="ib-pm-title" aria-hidden="true">
+        {copyAuthor(message)} · {whenTime(message.created_at)}
+      </div>
+      {reacts && (
+        <>
+          <MenuEmojiRow message={message} api={react!} phone={phone} />
+          <Menu.Separator className="ib-pm-sep" />
+        </>
+      )}
+      {takeBack && (
+        <>
+          <Menu.Item className="ib-pmi" label={TAKE_BACK_LABEL} onClick={takeBack} data-take-back-item="">
+            <Icon name="reply" size={15} />
+            {TAKE_BACK_LABEL}
+          </Menu.Item>
+          <Menu.Separator className="ib-pm-sep" />
+        </>
+      )}
+      {/* Take back's place: an act on this message leads (Take back is the person's, these an agent's). */}
+      {(replies || newThread) && (
+        <>
+          {replies && (
+            <Menu.Item className="ib-pmi" label="Reply" onClick={() => react!.reply(message)} data-reply-item="">
+              <Icon name="reply" size={15} />
+              Reply
+            </Menu.Item>
+          )}
+          {newThread && (
+            <Menu.Item className="ib-pmi" label={NEW_THREAD_FROM_MESSAGE_LABEL} disabled={newThreadFromMessageSending(message.id)} onClick={() => void askNewThreadFromMessage(message, newest.current)} data-new-thread-item="">
+              <Icon name="moveOut" size={15} />
+              {NEW_THREAD_FROM_MESSAGE_LABEL}
+            </Menu.Item>
+          )}
+          <Menu.Separator className="ib-pm-sep" />
+        </>
+      )}
+      <Menu.Item className="ib-pmi" label="Copy message" onClick={() => copies.message(message)} data-copy-item="message">
+        <Icon name="copy" size={15} />
+        Copy message
+      </Menu.Item>
+      <Menu.Item className="ib-pmi" label="Copy link to message" onClick={() => copies.messageLink(message)} data-copy-item="message-link">
+        <Icon name="link" size={15} />
+        Copy link to message
+      </Menu.Item>
+      <Menu.Separator className="ib-pm-sep" />
+      <Menu.Item className="ib-pmi" label="Copy thread" onClick={() => copies.thread()} data-copy-item="thread">
+        <Icon name="stack" size={15} />
+        Copy thread
+      </Menu.Item>
+    </>
+  );
+}
+
+/**
  * The menus are drawn inside the window's root, so its styles (and theme) reach them. Found again after each render:
  * the element `ref` names can come later than the first one (a far message draws its ⋯ plain until it is armed), and
  * a menu drawn outside the root loses the root's styles (its icons come out as filled black shapes).
@@ -83,16 +160,22 @@ function usePortal<T extends HTMLElement>() {
 }
 
 /**
- * One open message's menu: its ⋯ (handed to `head` to place after Reply) and,
- * off a phone, a right-click on the head line `head` draws.
+ * One open message's ⋯ (handed to `head` to place after Reply) and its menu, a sheet on a phone. A right-click
+ * anywhere on the message, or a hold on a phone, opens the thread's one shared menu with the same items.
  */
-export function MessageMenu(props: { phone: boolean; newest: { readonly current: CopyMenuHost }; message: InboxMessageWire; head: (more: ReactElement) => ReactElement; takeBackOf?: () => (() => void) | null }) {
+export function MessageMenu(props: {
+  phone: boolean;
+  newest: { readonly current: CopyMenuHost };
+  message: InboxMessageWire;
+  head: (more: ReactElement) => ReactElement;
+  takeBackOf?: () => (() => void) | null;
+  /** The message can be replied to (Reply's own rule): an agent's message then offers New thread from this message. */
+  live?: boolean;
+}) {
   const { message, phone, newest } = props;
-  const copies = useCopies(() => newest.current);
   const { ref: more, portal } = usePortal<HTMLButtonElement>();
   const [open, setOpen] = useState(false);
-  const [contextOpen, setContextOpen] = useState(false);
-  const onTakeBack = open || contextOpen ? (props.takeBackOf?.() ?? null) : null;
+  const onTakeBack = open ? (props.takeBackOf?.() ?? null) : null;
   const arm = useMessageArm();
   const named = who(message);
   // Shift+F10 or the context-menu key on the message's head (approval "inbox-keyboard-keys-2026-11-07", item 6): its
@@ -107,7 +190,7 @@ export function MessageMenu(props: { phone: boolean; newest: { readonly current:
   }, [open]);
   const onHeadKey = (event: ReactKeyboardEvent) => {
     // A text field in the head keeps its keys (Shift+F10 there is the field's own menu).
-    if (event.nativeEvent.isComposing || open || contextOpen || isEditableTarget(keyTarget(event.nativeEvent))) return;
+    if (event.nativeEvent.isComposing || open || isEditableTarget(keyTarget(event.nativeEvent))) return;
     const menuKey = event.key === 'ContextMenu' || inboxThreadShortcuts.shortcuts.messageMenu.bindings.some((binding) => matchesShortcutBinding(event.nativeEvent, binding));
     if (!menuKey) return;
     event.preventDefault();
@@ -129,36 +212,7 @@ export function MessageMenu(props: { phone: boolean; newest: { readonly current:
     window.addEventListener('contextmenu', swallow, true);
     window.addEventListener('pointerdown', done, true);
   };
-  const items = (
-    <>
-      {/* The popup is named already (aria-label): the title is for the eye only, on a phone's sheet. */}
-      <div className="ib-pm-title" aria-hidden="true">
-        {copyAuthor(message)} · {whenTime(message.created_at)}
-      </div>
-      {onTakeBack && (
-        <>
-          <Menu.Item className="ib-pmi" label={TAKE_BACK_LABEL} onClick={onTakeBack} data-take-back-item="">
-            <Icon name="reply" size={15} />
-            {TAKE_BACK_LABEL}
-          </Menu.Item>
-          <Menu.Separator className="ib-pm-sep" />
-        </>
-      )}
-      <Menu.Item className="ib-pmi" label="Copy message" onClick={() => copies.message(message)} data-copy-item="message">
-        <Icon name="copy" size={15} />
-        Copy message
-      </Menu.Item>
-      <Menu.Item className="ib-pmi" label="Copy link to message" onClick={() => copies.messageLink(message)} data-copy-item="message-link">
-        <Icon name="link" size={15} />
-        Copy link to message
-      </Menu.Item>
-      <Menu.Separator className="ib-pm-sep" />
-      <Menu.Item className="ib-pmi" label="Copy thread" onClick={() => copies.thread()} data-copy-item="thread">
-        <Icon name="stack" size={15} />
-        Copy thread
-      </Menu.Item>
-    </>
-  );
+  const items = <MessageMenuItems message={message} newest={newest} takeBack={onTakeBack} live={!!props.live} phone={phone} />;
   if (!arm.armed) {
     // Far from the view (messageArming.tsx): the same ⋯ and head line, with no menus behind them yet. A press (or the
     // menu key on the head) arms the message and opens its menu.
@@ -196,7 +250,7 @@ export function MessageMenu(props: { phone: boolean; newest: { readonly current:
           ref={more}
           className="ib-mut ib-mmore"
           aria-label={`More: ${named}`}
-          data-open={open || contextOpen ? '' : undefined}
+          data-open={open ? '' : undefined}
           data-phone={phone ? '' : undefined}
           data-message-more={message.id}
         >
@@ -215,19 +269,8 @@ export function MessageMenu(props: { phone: boolean; newest: { readonly current:
   );
   const head = props.head(trigger);
   if (phone) return head;
-  return (
-    <ContextMenu.Root onOpenChange={setContextOpen}>
-      <ContextMenu.Trigger render={head} onKeyDown={onHeadKey} />
-      <ContextMenu.Portal container={portal ?? undefined}>
-        <ContextMenu.Positioner className="ib-pm-pos">
-          {/* Focus goes back to the message's ⋯, never the page. */}
-          <ContextMenu.Popup className="ib-pm" aria-label={`Message from ${named}`} data-message-menu={message.id} data-context="" finalFocus={more}>
-            {items}
-          </ContextMenu.Popup>
-        </ContextMenu.Positioner>
-      </ContextMenu.Portal>
-    </ContextMenu.Root>
-  );
+  // A right-click anywhere on the message is the thread's one shared menu (thread/MessageReactHost.tsx).
+  return cloneElement(head as ReactElement<{ onKeyDown?: (event: ReactKeyboardEvent) => void }>, { onKeyDown: onHeadKey });
 }
 
 
@@ -299,6 +342,8 @@ export function ThreadMore(
   const { ref, portal } = usePortal<HTMLButtonElement>();
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<SnoozeView | null>(null);
+  // Ship (approval "inbox-ship-mode", item 7): while the thread's pull request ships, Ship log and Stop shipping lead.
+  const ship = useThreadShipMenu(thread, phone, ref.current, props.onToast);
   // Add tag's list, swapped in as Snooze's times are (approval "inbox-thread-tags").
   const [tagView, setTagView] = useState(false);
   const tags = useThreadTags();
@@ -593,6 +638,7 @@ export function ThreadMore(
                 <div className="ib-pm-title" dir="auto" aria-hidden="true">
                   {thread.subject ?? '(no subject)'}
                 </div>
+                {ship.items}
                 {launch && (launch.copyAttach || launch.stop || launch.remove) && (
                   <>
                     {launch.copyAttach && (
@@ -672,6 +718,7 @@ export function ThreadMore(
           </Menu.Popup>
         </Menu.Positioner>
       </Menu.Portal>
+      {ship.log}
     </Menu.Root>
   );
 }

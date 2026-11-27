@@ -587,10 +587,14 @@ export function createInboxScheduled(deps: {
       return { message, told };
     },
 
-    async stopRun(id: string): Promise<InboxScheduledThread> {
+    /**
+     * Stop. `run`: the run it was pressed for (its divider's id), so a Stop that waited for this computer (asleep at
+     * 8:55) never ends a later run (9:00's); that run already over, it does nothing. Without it: the run going now.
+     */
+    async stopRun(id: string, run?: string): Promise<InboxScheduledThread> {
       const record = found(id);
       const running = runningOf(record);
-      if (running) await stopRunning(running.message_id);
+      if (running && (run === undefined || running.message_id === run)) await stopRunning(running.message_id);
       return record;
     },
 

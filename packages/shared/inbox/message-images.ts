@@ -223,6 +223,11 @@ export function inboxMessageMediaRefsInOrder(body: string): string[] {
   return imageSourcesInOrder(body).filter((src) => !NOT_LOCAL_SRC_RE.test(src) && inboxInlineMediaKind(src) !== null);
 }
 
+/** The pictures, sounds and videos the body shows, each once, in text order: what a later read of the thread captures. */
+export function inboxMessageShownFileRefsInOrder(body: string): string[] {
+  return imageSourcesInOrder(body).filter((src) => !NOT_LOCAL_SRC_RE.test(src));
+}
+
 /**
  * The remote images the body shows (`http:`, `https:`, protocol-relative
  * `//host/…`), each once, in text order, outside code. The window never loads

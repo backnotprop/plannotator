@@ -1,7 +1,7 @@
 import type { GuideOverviewDiagram } from '@plannotator/core/guide';
 import type { GuideSnapshot } from '@plannotator/core/guide-format';
 import type { InboxFileContents } from '@plannotator/core/inbox-types';
-import type { ReactNode } from 'react';
+import type { ComponentType, ReactNode, RefObject } from 'react';
 import type { CodeAnnotation } from '@plannotator/ui/types';
 
 /**
@@ -46,6 +46,11 @@ export interface GuideReaderImages {
 
 export interface GuideReaderProps {
   snapshot: GuideSnapshot;
+  /**
+   * Drawn with each line comment's field (the Inbox's mic, FieldVoice): review-editor's `LineFeedbackToolsProvider`,
+   * set inside the reader so the window never imports review-editor itself. Absent or null: none.
+   */
+  lineFeedbackTools?: ComponentType<{ textareaRef: RefObject<HTMLTextAreaElement | null>; onBusyChange: (busy: boolean) => void }> | null;
   /** The reviewed ticks as the person left them (kept with the thread by the pane). */
   reviewed: readonly boolean[];
   onReviewedChange: (reviewed: boolean[]) => void;
@@ -65,7 +70,7 @@ export interface GuideReaderProps {
   viewed?: { files: ReadonlySet<string>; onToggle: (path: string) => void };
   /**
    * Choices for selected lines before the comment box (code review in the
-   * Inbox: Comment · Ask · Show me; review-editor's `DiffSelectionActions`).
+   * Inbox: Comment · Ask; review-editor's `DiffSelectionActions`).
    * Absent: a selection opens the comment box at once, as before.
    */
   selectionActions?: GuideSelectionActions;
@@ -83,6 +88,8 @@ export interface GuideReaderProps {
   bare?: boolean;
   /** Bare: Global comment and Split | Unified in this element of the host's (the PR review's strip), not above the files. */
   controlsHost?: HTMLElement | null;
+  /** Power Up's mark in this element of the host's (the PR page's row on a phone) instead of beside Global comment. */
+  powerUpHost?: HTMLElement | null;
   /** Reads one changed file's whole text, for the "N unmodified lines" arrows. Absent: the diffs show as they came. */
   fileContents?: (path: string, signal: AbortSignal, patch: string) => Promise<InboxFileContents>;
   /**
@@ -190,7 +197,6 @@ export interface GuideSelection {
 /** review-editor's `DiffSelectionActions`, as the window's strict typecheck sees it. */
 export interface GuideSelectionActions {
   onAsk?: (selection: GuideSelection) => void;
-  onShowMe?: (selection: GuideSelection) => void;
 }
 
 /** The surface's guide reader (SurfaceGuideReader.tsx): the sections (6.1), then one section per screen (6.2). */

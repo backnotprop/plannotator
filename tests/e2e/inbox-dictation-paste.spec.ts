@@ -252,6 +252,10 @@ test('a word double-clicked in the message (selected, nothing to comment on) doe
 
 test('a range selected in the reply box before a pick is not replaced: the dictation goes after it', async () => {
   await page.goto(`${url}#thread=${threadId}`);
+  // The two tests before saved this thread's draft from other pages. This page's box, typed in by the first test and
+  // never reloaded, offers that draft and its next edit takes it in, the edit's words after it (replyDraft.ts: never
+  // lost). A reload reads it into the box as opening the thread does, so the box holds only what is written next.
+  await page.reload();
   const box = page.locator('section.ib-pane .ib-rbox textarea');
   await openReply(page);
   await box.fill('Keep these words.');

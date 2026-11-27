@@ -47,20 +47,18 @@ const PANES = [
 ].join(', ');
 
 /**
- * Something else's in the corner pane's bottom-right corner, which the cut would clip and the circle cover: a Shape
- * board open in the thread (its side panel and its More run to the pane's corner), or a narrow file view's annotations
- * panel (open down its right edge to its foot). The circle and the cut keep off; they come back when it goes. The
+ * Something else's in the corner pane's bottom-right corner, which the cut would clip and the circle cover: a narrow
+ * file view's annotations panel (open down its right edge to its foot). The circle and the cut keep off; they come back when it goes. The
  * floating drafts' pile never takes the corner: resting there, it sits just above the circle (useReplyFloaters).
  */
 function cornerOwned(pane: HTMLElement): boolean {
-  if (pane.querySelector('.ib-shape-inthread:not([hidden])')) return true;
   return pane.matches(FOLDED_PANEL) || pane.querySelector(FOLDED_PANEL) !== null;
 }
 const FOLDED_PANEL = '.ib-view.ib-fold.ib-panel-open';
 /** Classes on a pane that hand its corner to something else, or the whole window to a layer. */
 const OWNER_CLASSES = ['ib-fold', 'ib-panel-open', 'ib-wlayer'];
 /**
- * A whole-window layer (`ib-wlayer`: a file's full view, a guided review, a PR review, a Shape board, the tour's
+ * A whole-window layer (`ib-wlayer`: a file's full view, a guided review, a PR review, the tour's
  * viewer) over the corner: that corner is the layer's, and the circle is not shown over it.
  */
 function cornerLayer(corner: { right: number; bottom: number }): boolean {
@@ -111,17 +109,16 @@ export function cornerMoves(record: MutationRecord): boolean {
   if (target.closest(MOVES_NOTHING)) return false;
   const nodes = [...record.addedNodes, ...record.removedNodes];
   if (nodes.length === 0) return false;
-  // Inside a pane (not the pane's own container): nothing that moves it, only a board opening or closing in it.
-  if (target.closest(PANES)) return nodes.some((node) => node.nodeType === 1 && (node as Element).matches('.ib-shape-inthread'));
+  // Inside a pane (not the pane's own container): nothing that moves it.
+  if (target.closest(PANES)) return false;
   return nodes.some((node) => node.nodeType === 1 && !(node as Element).matches(MOVES_NOTHING));
 }
 
 /**
- * An attribute change that gives the corner to something else or takes it back (cornerOwned): a board in a thread
- * shown or hidden, a pane folding, opening its panel or going full.
+ * An attribute change that gives the corner to something else or takes it back (cornerOwned): a pane folding, opening
+ * its panel or going full.
  */
 function ownerChanged(record: MutationRecord, target: Element): boolean {
-  if (record.attributeName === 'hidden') return target.matches('.ib-shape-inthread');
   if (record.attributeName !== 'class' || !target.matches(PANES)) return false;
   const was = new Set((record.oldValue ?? '').split(/\s+/));
   return OWNER_CLASSES.some((name) => was.has(name) !== target.classList.contains(name));

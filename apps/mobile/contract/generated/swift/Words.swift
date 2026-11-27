@@ -9,6 +9,8 @@ public enum Words {
   public static let sectionHolding = "Holding up work"
   /// section.waiting: packages/core/inbox-types.ts INBOX_SECTIONS waiting
   public static let sectionWaiting = "Waiting on you"
+  /// section.tagged: packages/core/inbox-types.ts INBOX_SECTIONS tagged
+  public static let sectionTagged = "Tagged you"
   /// section.new: packages/core/inbox-types.ts INBOX_SECTIONS new
   public static let sectionNew = "New since you looked"
   /// section.sent: packages/core/inbox-types.ts INBOX_SECTIONS sent
@@ -93,6 +95,8 @@ public enum Words {
   public static let hostClaude = "Claude Code"
   /// host.pi: packages/core/inbox-types.ts INBOX_HOST_NAMES pi
   public static let hostPi = "Pi"
+  /// host.oh-my-pi: packages/core/inbox-types.ts INBOX_HOST_NAMES oh-my-pi
+  public static let hostOhMyPi = "Oh My Pi"
   /// host.opencode: packages/core/inbox-types.ts INBOX_HOST_NAMES opencode
   public static let hostOpencode = "OpenCode"
   /// host.codex: packages/core/inbox-types.ts INBOX_HOST_NAMES codex
@@ -117,6 +121,8 @@ public enum Words {
   public static let hostOpenclaw = "OpenClaw"
   /// host.hermes: packages/core/inbox-types.ts INBOX_HOST_NAMES hermes
   public static let hostHermes = "Hermes Agent"
+  /// host.orca: packages/core/inbox-types.ts INBOX_HOST_NAMES orca
+  public static let hostOrca = "Orca"
   /// host.cloud: packages/core/inbox-types.ts INBOX_HOST_NAMES cloud
   public static let hostCloud = "Cloud agent"
   /// host.cloud-claude: packages/core/inbox-types.ts INBOX_HOST_NAMES cloud-claude
@@ -135,6 +141,7 @@ public enum Words {
     "stopped": sectionStopped,
     "holding": sectionHolding,
     "waiting": sectionWaiting,
+    "tagged": sectionTagged,
     "new": sectionNew,
     "sent": sectionSent,
     "quiet": sectionQuiet,
@@ -166,6 +173,7 @@ public enum Words {
     "claude-code": hostClaudeCode,
     "claude": hostClaude,
     "pi": hostPi,
+    "oh-my-pi": hostOhMyPi,
     "opencode": hostOpencode,
     "codex": hostCodex,
     "cursor": hostCursor,
@@ -178,6 +186,7 @@ public enum Words {
     "muse": hostMuse,
     "openclaw": hostOpenclaw,
     "hermes": hostHermes,
+    "orca": hostOrca,
     "cloud": hostCloud,
     "cloud-claude": hostCloudClaude,
     "cloud-grok": hostCloudGrok,
@@ -185,4 +194,1125 @@ public enum Words {
     "cloud-hermes": hostCloudHermes,
     "cloud-openclaw": hostCloudOpenclaw,
   ]
+
+  /// packages/inbox/components/emojiData.ts EMOJI, as `emojiRow` reads it: one `<emoji>\t<name>` line per emoji, the
+  /// first row of each. An emoji with no line is named "emoji".
+  public static let emojiNameLines = """
+    😀\tgrinning face
+    😃\tsmiling face with open mouth
+    😄\tsmiling face with open mouth and smiling eyes
+    😁\tgrinning face with smiling eyes
+    😆\tsmiling face with open mouth and tightly-closed eyes
+    😅\tsmiling face with open mouth and cold sweat
+    🤣\trolling on the floor laughing
+    😂\tface with tears of joy
+    🙂\tslightly smiling face
+    🙃\tupside-down face
+    🫠\tmelting face
+    😉\twinking face
+    😊\tsmiling face with smiling eyes
+    😇\tsmiling face with halo
+    🥰\tsmiling face with smiling eyes and three hearts
+    😍\tsmiling face with heart-shaped eyes
+    🤩\tgrinning face with star eyes
+    😘\tface throwing a kiss
+    😋\tface savouring delicious food
+    😛\tface with stuck-out tongue
+    😜\tface with stuck-out tongue and winking eye
+    🤪\tgrinning face with one large and one small eye
+    😝\tface with stuck-out tongue and tightly-closed eyes
+    🤑\tmoney-mouth face
+    🤗\thugging face
+    🤭\tsmiling face with smiling eyes and hand covering mouth
+    🫢\tface with open eyes and hand over mouth
+    🤫\tface with finger covering closed lips
+    🤔\tthinking face
+    🫡\tsaluting face
+    🤐\tzipper-mouth face
+    🤨\tface with one eyebrow raised
+    😐\tneutral face
+    😑\texpressionless face
+    😶\tface without mouth
+    🫥\tdotted line face
+    😏\tsmirking face
+    😒\tunamused face
+    🙄\tface with rolling eyes
+    😬\tgrimacing face
+    😮‍💨\tface exhaling
+    🤥\tlying face
+    😌\trelieved face
+    😔\tpensive face
+    😪\tsleepy face
+    🤤\tdrooling face
+    😴\tsleeping face
+    😷\tface with medical mask
+    🤒\tface with thermometer
+    🤕\tface with head-bandage
+    🤢\tnauseated face
+    🤮\tface with open mouth vomiting
+    🥵\toverheated face
+    🥶\tfreezing face
+    🥴\tface with uneven eyes and wavy mouth
+    😵\tdizzy face
+    🤯\tshocked face with exploding head
+    🤠\tface with cowboy hat
+    🥳\tface with party horn and party hat
+    🥸\tdisguised face
+    😎\tsmiling face with sunglasses
+    🤓\tnerd face
+    🧐\tface with monocle
+    😕\tconfused face
+    🫤\tface with diagonal mouth
+    😟\tworried face
+    🙁\tslightly frowning face
+    😮\tface with open mouth
+    😯\thushed face
+    😲\tastonished face
+    😳\tflushed face
+    🥺\tface with pleading eyes
+    🥹\tface holding back tears
+    😦\tfrowning face with open mouth
+    😧\tanguished face
+    😨\tfearful face
+    😰\tface with open mouth and cold sweat
+    😥\tdisappointed but relieved face
+    😢\tcrying face
+    😭\tloudly crying face
+    😱\tface screaming in fear
+    😖\tconfounded face
+    😣\tpersevering face
+    😞\tdisappointed face
+    😓\tface with cold sweat
+    😩\tweary face
+    😫\ttired face
+    🥱\tyawning face
+    😤\tface with look of triumph
+    😡\tpouting face
+    😠\tangry face
+    🤬\tserious face with symbols covering mouth
+    😈\tsmiling face with horns
+    👿\timp
+    💀\tskull
+    ☠️\tskull and crossbones
+    💩\tpile of poo
+    🤡\tclown face
+    👹\tjapanese ogre
+    👺\tjapanese goblin
+    👻\tghost
+    👽\textraterrestrial alien
+    👾\talien monster
+    🤖\trobot face
+    😺\tsmiling cat face with open mouth
+    😸\tgrinning cat face with smiling eyes
+    😹\tcat face with tears of joy
+    😻\tsmiling cat face with heart-shaped eyes
+    😼\tcat face with wry smile
+    😽\tkissing cat face with closed eyes
+    🙀\tweary cat face
+    😿\tcrying cat face
+    😾\tpouting cat face
+    🙈\tsee-no-evil monkey
+    🙉\thear-no-evil monkey
+    🙊\tspeak-no-evil monkey
+    👋\twaving hand
+    🤚\traised back of hand
+    🖐️\traised hand with fingers splayed
+    ✋\traised hand
+    🖖\traised hand with part between middle and ring fingers
+    🫱\trightwards hand
+    🫲\tleftwards hand
+    👌\tok hand
+    🤌\tpinched fingers
+    🤏\tpinching hand
+    ✌️\tvictory hand
+    🤞\thand with index and middle fingers crossed
+    🫰\thand with index finger and thumb crossed
+    🤟\ti love you hand
+    🤘\tsign of the horns
+    🤙\tcall me hand
+    👈\twhite left pointing backhand index
+    👉\twhite right pointing backhand index
+    👆\twhite up pointing backhand index
+    👇\twhite down pointing backhand index
+    ☝️\twhite up pointing index
+    🫵\tindex pointing at the viewer
+    👍\tthumbs up
+    👎\tthumbs down
+    ✊\traised fist
+    👊\tfisted hand
+    🤛\tleft-facing fist
+    🤜\tright-facing fist
+    👏\tclapping hands
+    🙌\tperson raising both hands in celebration
+    🫶\theart hands
+    👐\topen hands
+    🤲\tpalms up together
+    🤝\thandshake
+    🙏\tperson with folded hands
+    ✍️\twriting hand
+    💅\tnail polish
+    💪\tflexed biceps
+    🦾\tmechanical arm
+    🧠\tbrain
+    🫀\tanatomical heart
+    👀\teyes
+    👁️\teye
+    👅\ttongue
+    👄\tmouth
+    🫦\tbiting lip
+    👶\tbaby
+    🧒\tchild
+    👦\tboy
+    👧\tgirl
+    🧑\tadult
+    👱\tperson with blond hair
+    👨\tman
+    🧔\tbearded person
+    👩\twoman
+    🧓\tolder adult
+    👴\tolder man
+    👵\tolder woman
+    🙍\tperson frowning
+    🙎\tperson with pouting face
+    🙅\tface with no good gesture
+    🙆\tface with ok gesture
+    💁\tinformation desk person
+    🙋\thappy person raising one hand
+    🧏\tdeaf person
+    🙇\tperson bowing deeply
+    🤦\tface palm
+    🤷\tshrug
+    🧑‍💻\ttechnologist
+    🧑‍🔬\tscientist
+    🧑‍🚀\tastronaut
+    🧑‍🍳\tcook
+    🥷\tninja
+    🦸\tsuperhero
+    🦹\tsupervillain
+    🧙\tmage
+    🧚\tfairy
+    🧛\tvampire
+    🧜\tmerperson
+    🧝\telf
+    🧞\tgenie
+    🧟\tzombie
+    💃\tdancer
+    🕺\tman dancing
+    🏃\trunner
+    🚶\tpedestrian
+    🧘\tperson in lotus position
+    🐶\tdog face
+    🐱\tcat face
+    🐭\tmouse face
+    🐹\thamster face
+    🐰\trabbit face
+    🦊\tfox face
+    🐻\tbear face
+    🐼\tpanda face
+    🐻‍❄️\tpolar bear
+    🐨\tkoala
+    🐯\ttiger face
+    🦁\tlion face
+    🐮\tcow face
+    🐷\tpig face
+    🐸\tfrog face
+    🐵\tmonkey face
+    🐔\tchicken
+    🐧\tpenguin
+    🐦\tbird
+    🐤\tbaby chick
+    🦆\tduck
+    🦅\teagle
+    🦉\towl
+    🦇\tbat
+    🐺\twolf face
+    🐗\tboar
+    🐴\thorse face
+    🦄\tunicorn face
+    🐝\thoneybee
+    🪱\tworm
+    🐛\tbug
+    🦋\tbutterfly
+    🐌\tsnail
+    🐞\tlady beetle
+    🐜\tant
+    🪲\tbeetle
+    🦗\tcricket
+    🕷️\tspider
+    🦂\tscorpion
+    🐢\tturtle
+    🐍\tsnake
+    🦎\tlizard
+    🦖\tt-rex
+    🦕\tsauropod
+    🐙\toctopus
+    🦑\tsquid
+    🦐\tshrimp
+    🦞\tlobster
+    🦀\tcrab
+    🐡\tblowfish
+    🐠\ttropical fish
+    🐟\tfish
+    🐬\tdolphin
+    🐳\tspouting whale
+    🐋\twhale
+    🦈\tshark
+    🐊\tcrocodile
+    🐅\ttiger
+    🐆\tleopard
+    🦓\tzebra face
+    🦍\tgorilla
+    🐘\telephant
+    🦛\thippopotamus
+    🦏\trhinoceros
+    🐪\tdromedary camel
+    🦒\tgiraffe face
+    🦘\tkangaroo
+    🐃\twater buffalo
+    🐄\tcow
+    🐎\thorse
+    🐖\tpig
+    🐑\tsheep
+    🦙\tllama
+    🐐\tgoat
+    🦌\tdeer
+    🐕\tdog
+    🐩\tpoodle
+    🐈\tcat
+    🐓\trooster
+    🦃\tturkey
+    🦚\tpeacock
+    🦜\tparrot
+    🦢\tswan
+    🦩\tflamingo
+    🕊️\tdove of peace
+    🐇\trabbit
+    🦝\traccoon
+    🦨\tskunk
+    🦡\tbadger
+    🦫\tbeaver
+    🦦\totter
+    🦥\tsloth
+    🐁\tmouse
+    🐿️\tchipmunk
+    🦔\thedgehog
+    🌵\tcactus
+    🎄\tchristmas tree
+    🌲\tevergreen tree
+    🌳\tdeciduous tree
+    🌴\tpalm tree
+    🪵\twood
+    🌱\tseedling
+    🌿\therb
+    ☘️\tshamrock
+    🍀\tfour leaf clover
+    🎍\tpine decoration
+    🪴\tpotted plant
+    🍃\tleaf fluttering in wind
+    🍂\tfallen leaf
+    🍁\tmaple leaf
+    🍄\tmushroom
+    🐚\tspiral shell
+    🪨\trock
+    🌾\tear of rice
+    💐\tbouquet
+    🌷\ttulip
+    🌹\trose
+    🥀\twilted flower
+    🌺\thibiscus
+    🌸\tcherry blossom
+    🌼\tblossom
+    🌻\tsunflower
+    🌞\tsun with face
+    🌝\tfull moon with face
+    🌚\tnew moon with face
+    🌙\tcrescent moon
+    🌎\tearth globe americas
+    🪐\tringed planet
+    💫\tdizzy symbol
+    ⭐\twhite medium star
+    🌟\tglowing star
+    ✨\tsparkles
+    ⚡\thigh voltage
+    ☄️\tcomet
+    💥\tcollision symbol
+    🔥\tfire
+    🌪️\tcloud with tornado
+    🌈\trainbow
+    ☀️\tsun with rays
+    ⛅\tsun behind cloud
+    ☁️\tcloud
+    🌧️\tcloud with rain
+    ⛈️\tthunder cloud and rain
+    ❄️\tsnowflake
+    ☃️\tsnowman
+    ⛄\tsnowman without snow
+    🌬️\twind blowing face
+    💨\tdash symbol
+    💧\tdroplet
+    💦\tsplashing sweat symbol
+    🌊\twater wave
+    🍏\tgreen apple
+    🍎\tred apple
+    🍐\tpear
+    🍊\ttangerine
+    🍋\tlemon
+    🍌\tbanana
+    🍉\twatermelon
+    🍇\tgrapes
+    🍓\tstrawberry
+    🫐\tblueberries
+    🍈\tmelon
+    🍒\tcherries
+    🍑\tpeach
+    🥭\tmango
+    🍍\tpineapple
+    🥥\tcoconut
+    🥝\tkiwifruit
+    🍅\ttomato
+    🍆\taubergine
+    🥑\tavocado
+    🥦\tbroccoli
+    🥬\tleafy green
+    🥒\tcucumber
+    🌶️\thot pepper
+    🫑\tbell pepper
+    🌽\tear of maize
+    🥕\tcarrot
+    🧄\tgarlic
+    🧅\tonion
+    🥔\tpotato
+    🍠\troasted sweet potato
+    🥐\tcroissant
+    🥯\tbagel
+    🍞\tbread
+    🥖\tbaguette bread
+    🥨\tpretzel
+    🧀\tcheese wedge
+    🥚\tegg
+    🍳\tcooking
+    🧈\tbutter
+    🥞\tpancakes
+    🧇\twaffle
+    🥓\tbacon
+    🥩\tcut of meat
+    🍗\tpoultry leg
+    🍖\tmeat on bone
+    🌭\thot dog
+    🍔\thamburger
+    🍟\tfrench fries
+    🍕\tslice of pizza
+    🫓\tflatbread
+    🥪\tsandwich
+    🥙\tstuffed flatbread
+    🧆\tfalafel
+    🌮\ttaco
+    🌯\tburrito
+    🫔\ttamale
+    🥗\tgreen salad
+    🥘\tshallow pan of food
+    🫕\tfondue
+    🍝\tspaghetti
+    🍜\tsteaming bowl
+    🍲\tpot of food
+    🍛\tcurry and rice
+    🍣\tsushi
+    🍱\tbento box
+    🥟\tdumpling
+    🦪\toyster
+    🍤\tfried shrimp
+    🍙\trice ball
+    🍚\tcooked rice
+    🍘\trice cracker
+    🍥\tfish cake with swirl design
+    🥠\tfortune cookie
+    🥮\tmoon cake
+    🍢\toden
+    🍡\tdango
+    🍧\tshaved ice
+    🍨\tice cream
+    🍦\tsoft ice cream
+    🥧\tpie
+    🧁\tcupcake
+    🍰\tshortcake
+    🎂\tbirthday cake
+    🍮\tcustard
+    🍭\tlollipop
+    🍬\tcandy
+    🍫\tchocolate bar
+    🍿\tpopcorn
+    🍩\tdoughnut
+    🍪\tcookie
+    🌰\tchestnut
+    🥜\tpeanuts
+    🍯\thoney pot
+    🥛\tglass of milk
+    🍼\tbaby bottle
+    🫖\tteapot
+    ☕\thot beverage
+    🍵\tteacup without handle
+    🧃\tbeverage box
+    🥤\tcup with straw
+    🧋\tbubble tea
+    🍶\tsake bottle and cup
+    🍺\tbeer mug
+    🍻\tclinking beer mugs
+    🥂\tclinking glasses
+    🍷\twine glass
+    🥃\ttumbler glass
+    🍸\tcocktail glass
+    🍹\ttropical drink
+    🧉\tmate drink
+    🍾\tbottle with popping cork
+    🧊\tice cube
+    ⚽\tsoccer ball
+    🏀\tbasketball and hoop
+    🏈\tamerican football
+    ⚾\tbaseball
+    🥎\tsoftball
+    🎾\ttennis racquet and ball
+    🏐\tvolleyball
+    🏉\trugby football
+    🥏\tflying disc
+    🎱\tbilliards
+    🪀\tyo-yo
+    🏓\ttable tennis paddle and ball
+    🏸\tbadminton racquet and shuttlecock
+    🏒\tice hockey stick and puck
+    🏑\tfield hockey stick and ball
+    🥍\tlacrosse stick and ball
+    🏏\tcricket bat and ball
+    🪃\tboomerang
+    🥅\tgoal net
+    ⛳\tflag in hole
+    🪁\tkite
+    🏹\tbow and arrow
+    🎣\tfishing pole and fish
+    🤿\tdiving mask
+    🥊\tboxing glove
+    🥋\tmartial arts uniform
+    🎽\trunning shirt with sash
+    🛹\tskateboard
+    🛼\troller skate
+    🛷\tsled
+    ⛸️\tice skate
+    🥌\tcurling stone
+    🎿\tski and ski boot
+    ⛷️\tskier
+    🏂\tsnowboarder
+    🪂\tparachute
+    🏋️\tweight lifter
+    🤸\tperson doing cartwheel
+    ⛹️\tperson with ball
+    🤺\tfencer
+    🤾\thandball
+    🏌️\tgolfer
+    🏇\thorse racing
+    🧗\tperson climbing
+    🚴\tbicyclist
+    🏆\ttrophy
+    🥇\tfirst place medal
+    🥈\tsecond place medal
+    🥉\tthird place medal
+    🏅\tsports medal
+    🎖️\tmilitary medal
+    🏵️\trosette
+    🎗️\treminder ribbon
+    🎫\tticket
+    🎟️\tadmission tickets
+    🎪\tcircus tent
+    🤹\tjuggling
+    🎭\tperforming arts
+    🩰\tballet shoes
+    🎨\tartist palette
+    🎬\tclapper board
+    🎤\tmicrophone
+    🎧\theadphone
+    🎼\tmusical score
+    🎹\tmusical keyboard
+    🥁\tdrum with drumsticks
+    🪘\tlong drum
+    🎷\tsaxophone
+    🎺\ttrumpet
+    🪗\taccordion
+    🎸\tguitar
+    🪕\tbanjo
+    🎻\tviolin
+    🎲\tgame die
+    ♟️\tchess pawn
+    🎯\tdirect hit
+    🎳\tbowling
+    🎮\tvideo game
+    🎰\tslot machine
+    🧩\tjigsaw puzzle piece
+    🎉\tparty popper
+    🎊\tconfetti ball
+    🎈\tballoon
+    🎁\twrapped present
+    🎀\tribbon
+    🪅\tpinata
+    🪩\tmirror ball
+    🚗\tautomobile
+    🚕\ttaxi
+    🚙\trecreational vehicle
+    🚌\tbus
+    🚎\ttrolleybus
+    🏎️\tracing car
+    🚓\tpolice car
+    🚑\tambulance
+    🚒\tfire engine
+    🚐\tminibus
+    🛻\tpickup truck
+    🚚\tdelivery truck
+    🚛\tarticulated lorry
+    🚜\ttractor
+    🛵\tmotor scooter
+    🏍️\tracing motorcycle
+    🛺\tauto rickshaw
+    🚲\tbicycle
+    🛴\tscooter
+    🚨\tpolice cars revolving light
+    🚔\toncoming police car
+    🚍\toncoming bus
+    🚘\toncoming automobile
+    🚖\toncoming taxi
+    🚡\taerial tramway
+    🚠\tmountain cableway
+    🚟\tsuspension railway
+    🚃\trailway car
+    🚋\ttram car
+    🚞\tmountain railway
+    🚝\tmonorail
+    🚄\thigh-speed train
+    🚅\thigh-speed train with bullet nose
+    🚈\tlight rail
+    🚂\tsteam locomotive
+    🚆\ttrain
+    🚇\tmetro
+    🚊\ttram
+    🚉\tstation
+    ✈️\tairplane
+    🛫\tairplane departure
+    🛬\tairplane arriving
+    🛩️\tsmall airplane
+    💺\tseat
+    🛰️\tsatellite
+    🚀\trocket
+    🛸\tflying saucer
+    🚁\thelicopter
+    🛶\tcanoe
+    ⛵\tsailboat
+    🚤\tspeedboat
+    🛥️\tmotor boat
+    🛳️\tpassenger ship
+    ⛴️\tferry
+    🚢\tship
+    ⚓\tanchor
+    🪝\thook
+    ⛽\tfuel pump
+    🚧\tconstruction
+    🚦\tvertical traffic light
+    🚥\thorizontal traffic light
+    🗺️\tworld map
+    🗿\tmoyai
+    🗽\tstatue of liberty
+    🗼\ttokyo tower
+    🏰\teuropean castle
+    🏯\tjapanese castle
+    🏟️\tstadium
+    🎡\tferris wheel
+    🎢\troller coaster
+    🎠\tcarousel horse
+    ⛲\tfountain
+    ⛱️\tumbrella on ground
+    🏖️\tbeach with umbrella
+    🏝️\tdesert island
+    🏜️\tdesert
+    🌋\tvolcano
+    ⛰️\tmountain
+    🏔️\tsnow capped mountain
+    🗻\tmount fuji
+    🏕️\tcamping
+    ⛺\ttent
+    🏠\thouse building
+    🏡\thouse with garden
+    🏘️\thouse buildings
+    🏗️\tbuilding construction
+    🏭\tfactory
+    🏢\toffice building
+    🏬\tdepartment store
+    🏣\tjapanese post office
+    🏥\thospital
+    🏦\tbank
+    🏨\thotel
+    🏪\tconvenience store
+    🏫\tschool
+    🏩\tlove hotel
+    💒\twedding
+    🏛️\tclassical building
+    ⛪\tchurch
+    🕌\tmosque
+    🕍\tsynagogue
+    🛕\thindu temple
+    🌅\tsunrise
+    🌄\tsunrise over mountains
+    🌠\tshooting star
+    🎇\tfirework sparkler
+    🎆\tfireworks
+    🌇\tsunset over buildings
+    🌆\tcityscape at dusk
+    🏙️\tcityscape
+    🌃\tnight with stars
+    🌌\tmilky way
+    🌉\tbridge at night
+    🌁\tfoggy
+    ⌚\twatch
+    📱\tmobile phone
+    💻\tpersonal computer
+    ⌨️\tkeyboard
+    🖥️\tdesktop computer
+    🖨️\tprinter
+    🖱️\tthree button mouse
+    🕹️\tjoystick
+    💽\tminidisc
+    💾\tfloppy disk
+    💿\toptical disc
+    📀\tdvd
+    📼\tvideocassette
+    📷\tcamera
+    📸\tcamera with flash
+    📹\tvideo camera
+    🎥\tmovie camera
+    📞\ttelephone receiver
+    ☎️\ttelephone
+    📟\tpager
+    📠\tfax machine
+    📺\ttelevision
+    📻\tradio
+    🎙️\tstudio microphone
+    ⏱️\tstopwatch
+    ⏲️\ttimer clock
+    ⏰\talarm clock
+    🕰️\tmantelpiece clock
+    ⌛\thourglass
+    ⏳\thourglass with flowing sand
+    📡\tsatellite antenna
+    🔋\tbattery
+    🪫\tlow battery
+    🔌\telectric plug
+    💡\telectric light bulb
+    🔦\telectric torch
+    🕯️\tcandle
+    🧯\tfire extinguisher
+    🛢️\toil drum
+    💸\tmoney with wings
+    💵\tbanknote with dollar
+    💰\tmoney bag
+    💳\tcredit card
+    💎\tgem stone
+    ⚖️\tscales
+    🪜\tladder
+    🧰\ttoolbox
+    🪛\tscrewdriver
+    🔧\twrench
+    🔨\thammer
+    ⚒️\thammer and pick
+    🛠️\thammer and wrench
+    ⛏️\tpick
+    🪚\tcarpentry saw
+    🔩\tnut and bolt
+    ⚙️\tgear
+    🪤\tmouse trap
+    🧱\tbrick
+    ⛓️\tchains
+    🧲\tmagnet
+    🔫\tpistol
+    💣\tbomb
+    🧨\tfirecracker
+    🪓\taxe
+    🔪\thocho
+    🗡️\tdagger knife
+    ⚔️\tcrossed swords
+    🛡️\tshield
+    🚬\tsmoking symbol
+    ⚰️\tcoffin
+    🔮\tcrystal ball
+    📿\tprayer beads
+    🧿\tnazar amulet
+    💈\tbarber pole
+    ⚗️\talembic
+    🔭\ttelescope
+    🔬\tmicroscope
+    🕳️\thole
+    🩹\tadhesive bandage
+    🩺\tstethoscope
+    💊\tpill
+    💉\tsyringe
+    🩸\tdrop of blood
+    🧬\tdna double helix
+    🦠\tmicrobe
+    🧫\tpetri dish
+    🧪\ttest tube
+    🌡️\tthermometer
+    🧹\tbroom
+    🧺\tbasket
+    🧻\troll of paper
+    🚽\ttoilet
+    🚰\tpotable water symbol
+    🚿\tshower
+    🛁\tbathtub
+    🧼\tbar of soap
+    🪥\ttoothbrush
+    🪒\trazor
+    🧽\tsponge
+    🪣\tbucket
+    🧴\tlotion bottle
+    🛎️\tbellhop bell
+    🔑\tkey
+    🗝️\told key
+    🚪\tdoor
+    🪑\tchair
+    🛋️\tcouch and lamp
+    🛏️\tbed
+    🧸\tteddy bear
+    🪆\tnesting dolls
+    🖼️\tframe with picture
+    🪞\tmirror
+    🪟\twindow
+    🛍️\tshopping bags
+    🛒\tshopping trolley
+    🎏\tcarp streamer
+    🪄\tmagic wand
+    🎎\tjapanese dolls
+    🏮\tizakaya lantern
+    🎐\twind chime
+    🧧\tred gift envelope
+    ✉️\tenvelope
+    📩\tenvelope with downwards arrow above
+    📨\tincoming envelope
+    📧\te-mail symbol
+    💌\tlove letter
+    📥\tinbox tray
+    📤\toutbox tray
+    📦\tpackage
+    🏷️\tlabel
+    📪\tclosed mailbox with lowered flag
+    📫\tclosed mailbox with raised flag
+    📬\topen mailbox with raised flag
+    📭\topen mailbox with lowered flag
+    📮\tpostbox
+    📯\tpostal horn
+    📜\tscroll
+    📃\tpage with curl
+    📄\tpage facing up
+    📑\tbookmark tabs
+    🧾\treceipt
+    📊\tbar chart
+    📈\tchart with upwards trend
+    📉\tchart with downwards trend
+    🗒️\tspiral note pad
+    🗓️\tspiral calendar pad
+    📆\ttear-off calendar
+    📅\tcalendar
+    🗑️\twastebasket
+    📇\tcard index
+    🗃️\tcard file box
+    🗳️\tballot box with ballot
+    🗄️\tfile cabinet
+    📋\tclipboard
+    📁\tfile folder
+    📂\topen file folder
+    🗂️\tcard index dividers
+    🗞️\trolled-up newspaper
+    📰\tnewspaper
+    📓\tnotebook
+    📔\tnotebook with decorative cover
+    📒\tledger
+    📕\tclosed book
+    📗\tgreen book
+    📘\tblue book
+    📙\torange book
+    📚\tbooks
+    📖\topen book
+    🔖\tbookmark
+    🧷\tsafety pin
+    🔗\tlink symbol
+    📎\tpaperclip
+    🖇️\tlinked paperclips
+    📐\ttriangular ruler
+    📏\tstraight ruler
+    🧮\tabacus
+    📌\tpushpin
+    📍\tround pushpin
+    ✂️\tscissors
+    🖊️\tlower left ballpoint pen
+    🖋️\tlower left fountain pen
+    ✒️\tnib
+    🖌️\tlower left paintbrush
+    🖍️\tlower left crayon
+    📝\tmemo
+    ✏️\tpencil
+    🔍\tleft-pointing magnifying glass
+    🔎\tright-pointing magnifying glass
+    🔏\tlock with ink pen
+    🔐\tclosed lock with key
+    🔒\tlock
+    🔓\topen lock
+    ❤️\theavy heart
+    🧡\torange heart
+    💛\tyellow heart
+    💚\tgreen heart
+    💙\tblue heart
+    💜\tpurple heart
+    🖤\theart
+    🤍\twhite heart
+    🤎\tbrown heart
+    💔\tbroken heart
+    ❤️‍🔥\theart on fire
+    ❣️\theavy heart exclamation mark ornament
+    💕\ttwo hearts
+    💞\trevolving hearts
+    💓\tbeating heart
+    💗\tgrowing heart
+    💖\tsparkling heart
+    💘\theart with arrow
+    💝\theart with ribbon
+    💟\theart decoration
+    ☮️\tpeace symbol
+    ✝️\tlatin cross
+    ☯️\tyin yang
+    🕉️\tom symbol
+    ☸️\twheel of dharma
+    ✡️\tstar of david
+    🔯\tsix pointed star with middle dot
+    ♈\taries
+    ⛎\tophiuchus
+    🆔\tsquared id
+    ⚛️\tatom symbol
+    🉑\tcircled ideograph accept
+    ☢️\tradioactive
+    ☣️\tbiohazard
+    📴\tmobile phone off
+    📳\tvibration mode
+    🈶\tsquared cjk unified ideograph-6709
+    🈚\tsquared cjk unified ideograph-7121
+    🆚\tsquared vs
+    💮\twhite flower
+    🉐\tcircled ideograph advantage
+    ㊙️\tcircled ideograph secret
+    ㊗️\tcircled ideograph congratulation
+    🈴\tsquared cjk unified ideograph-5408
+    🈵\tsquared cjk unified ideograph-6e80
+    🈹\tsquared cjk unified ideograph-5272
+    🈲\tsquared cjk unified ideograph-7981
+    🅰️\tnegative squared latin capital letter a
+    🅱️\tnegative squared latin capital letter b
+    🆎\tnegative squared ab
+    🆑\tsquared cl
+    🅾️\tnegative squared latin capital letter o
+    🆘\tsquared sos
+    ❌\tcross mark
+    ⭕\theavy large circle
+    🛑\toctagonal
+    ⛔\tno entry
+    📛\tname badge
+    🚫\tno entry
+    💯\thundred points symbol
+    💢\tanger symbol
+    ♨️\thot springs
+    🚷\tno pedestrians
+    🚯\tdo not litter symbol
+    🚳\tno bicycles
+    🚱\tnon-potable water symbol
+    🔞\tno one under eighteen symbol
+    📵\tno mobile phones
+    🚭\tno smoking symbol
+    ❗\theavy exclamation mark symbol
+    ❕\twhite exclamation mark ornament
+    ❓\tquestion mark ornament
+    ❔\twhite question mark ornament
+    ‼️\tdouble exclamation mark
+    ⁉️\texclamation question mark
+    🔅\tlow brightness symbol
+    🔆\thigh brightness symbol
+    〽️\tpart alternation mark
+    ⚠️\twarning
+    🚸\tchildren crossing
+    🔱\ttrident emblem
+    ⚜️\tfleur-de-lis
+    🔰\tjapanese symbol for beginner
+    ♻️\tuniversal recycling symbol
+    ✅\twhite heavy check mark
+    🈯\tsquared cjk unified ideograph-6307
+    💹\tchart with upwards trend and yen
+    ❇️\tsparkle
+    ✳️\teight spoked asterisk
+    ❎\tnegative squared cross mark
+    🌐\tglobe with meridians
+    💠\tdiamond shape with a dot inside
+    Ⓜ️\tcircled latin capital letter m
+    🌀\tcyclone
+    💤\tsleeping symbol
+    🏧\tautomated teller machine
+    🚾\twater closet
+    ♿\twheelchair symbol
+    🅿️\tnegative squared latin capital letter p
+    🛗\televator
+    🈳\tsquared cjk unified ideograph-7a7a
+    🈂️\tsquared katakana sa
+    🛂\tpassport control
+    🛃\tcustoms
+    🛄\tbaggage claim
+    🛅\tleft luggage
+    🚹\tmens symbol
+    🚺\twomens symbol
+    🚼\tbaby symbol
+    ⚧️\tmale with stroke and male and female
+    🚻\trestroom
+    🚮\tput litter in its place symbol
+    🎦\tcinema
+    📶\tantenna with bars
+    🈁\tsquared katakana koko
+    🔣\tinput symbol for symbols
+    ℹ️\tinformation source
+    🔤\tinput symbol for latin letters
+    🔡\tinput symbol for latin small letters
+    🔠\tinput symbol for latin capital letters
+    🆖\tsquared ng
+    🆗\tsquared ok
+    🆙\tsquared up with exclamation mark
+    🆒\tsquared cool
+    🆕\tsquared new
+    🆓\tsquared free
+    0️⃣\tkeycap 0
+    1️⃣\tkeycap 1
+    2️⃣\tkeycap 2
+    3️⃣\tkeycap 3
+    4️⃣\tkeycap 4
+    5️⃣\tkeycap 5
+    6️⃣\tkeycap 6
+    7️⃣\tkeycap 7
+    8️⃣\tkeycap 8
+    9️⃣\tkeycap 9
+    🔟\tkeycap ten
+    🔢\tinput symbol for numbers
+    #️⃣\tkeycap #
+    *️⃣\tkeycap *
+    ⏏️\teject symbol
+    ▶️\tright-pointing triangle
+    ⏸️\tdouble vertical bar
+    ⏯️\tright-pointing triangle with double vertical bar
+    ⏹️\tsquare for stop
+    ⏺️\tcircle for record
+    ⏭️\tright-pointing double triangle with vertical bar
+    ⏮️\tleft-pointing double triangle with vertical bar
+    ⏩\tright-pointing double triangle
+    ⏪\tleft-pointing double triangle
+    ⏫\tup-pointing double triangle
+    ⏬\tdown-pointing double triangle
+    ◀️\tleft-pointing triangle
+    🔼\tup-pointing small red triangle
+    🔽\tdown-pointing small red triangle
+    ➡️\trightwards arrow
+    ⬅️\tleftwards arrow
+    ⬆️\tupwards arrow
+    ⬇️\tdownwards arrow
+    ↗️\tnorth east arrow
+    ↘️\tsouth east arrow
+    ↙️\tsouth west arrow
+    ↖️\tnorth west arrow
+    ↕️\tup down arrow
+    ↔️\tleft right arrow
+    ↪️\trightwards arrow with hook
+    ↩️\tleftwards arrow with hook
+    ⤴️\tarrow pointing rightwards then curving upwards
+    ⤵️\tarrow pointing rightwards then curving downwards
+    🔀\ttwisted rightwards arrows
+    🔁\tclockwise rightwards and leftwards open circle arrows
+    🔂\tclockwise rightwards and leftwards open circle arrows with circled one overlay
+    🔄\tanticlockwise downwards and upwards open circle arrows
+    🔃\tclockwise downwards and upwards open circle arrows
+    🎵\tmusical note
+    🎶\tmultiple musical notes
+    ➕\theavy plus
+    ➖\theavy minus
+    ➗\theavy division
+    ✖️\theavy multiplication x
+    🟰\theavy equals
+    ♾️\tpermanent paper
+    💲\theavy dollar
+    💱\tcurrency exchange
+    ™️\ttrade mark
+    ©️\tcopyright
+    ®️\tregistered
+    👁️‍🗨️\teye in speech bubble
+    🔚\tend with leftwards arrow above
+    🔙\tback with leftwards arrow above
+    🔛\ton with exclamation mark with left right arrow above
+    🔝\ttop with upwards arrow above
+    🔜\tsoon with rightwards arrow above
+    〰️\twavy dash
+    ➰\tcurly loop
+    ➿\tdouble curly loop
+    ✔️\theavy check mark
+    ☑️\tballot box with check
+    🔘\tradio button
+    🔴\tlarge red circle
+    🟠\tlarge orange circle
+    🟡\tlarge yellow circle
+    🟢\tlarge green circle
+    🔵\tlarge blue circle
+    🟣\tlarge purple circle
+    ⚫\tmedium circle
+    ⚪\tmedium white circle
+    🟤\tlarge brown circle
+    🔺\tup-pointing red triangle
+    🔻\tdown-pointing red triangle
+    🔸\tsmall orange diamond
+    🔹\tsmall blue diamond
+    🔶\tlarge orange diamond
+    🔷\tlarge blue diamond
+    🔳\twhite square button
+    🔲\tsquare button
+    ▪️\tsmall square
+    ▫️\twhite small square
+    ◾\tmedium small square
+    ◽\twhite medium small square
+    ◼️\tmedium square
+    ◻️\twhite medium square
+    🟥\tlarge red square
+    🟧\tlarge orange square
+    🟨\tlarge yellow square
+    🟩\tlarge green square
+    🟦\tlarge blue square
+    🟪\tlarge purple square
+    ⬛\tlarge square
+    ⬜\twhite large square
+    🟫\tlarge brown square
+    🔈\tspeaker
+    🔇\tspeaker with cancellation stroke
+    🔉\tspeaker with one sound wave
+    🔊\tspeaker with three sound waves
+    🔔\tbell
+    🔕\tbell with cancellation stroke
+    📣\tcheering megaphone
+    📢\tpublic address loudspeaker
+    💬\tspeech balloon
+    💭\tthought balloon
+    🗯️\tright anger bubble
+    ♠️\tspade suit
+    ♣️\tclub suit
+    ♥️\theart suit
+    ♦️\tdiamond suit
+    🃏\tplaying card joker
+    🎴\tflower playing cards
+    🀄\tmahjong tile red dragon
+    🕐\tclock face one oclock
+    🏁\tchequered flag
+    🚩\ttriangular flag on post
+    🎌\tcrossed flags
+    🏴\twaving flag
+    🏳️\twaving white flag
+    🏳️‍🌈\trainbow flag
+    """
 }

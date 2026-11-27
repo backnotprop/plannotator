@@ -10,17 +10,11 @@ import {
   AFTER_SEND_WORDS,
   answerWords,
   choiceAnswer,
+  batchTouches,
   emptyQueue,
+  failedWords,
   groupHalfAnswered,
   freshPicks,
-  holdSeconds,
-  nextGroupSend,
-  pauseHold,
-  restartHold,
-  startHold,
-  DECISION_HOLD_MS,
-  type GroupSend,
-  type GroupSendFacts,
   groupKeyOf,
   groupReady,
   groupSendTargets,
@@ -30,10 +24,6 @@ import {
   previousId,
   putOff,
   skipAnswer,
-  swipeChoices,
-  swipeHint,
-  answerNeedsConfirm,
-  confirmLabel,
   sessionChips,
 } from './decisions/model';
 
@@ -133,66 +123,47 @@ describe('the queue', () => {
     expect(sessionChips(mergeDecisions(emptyQueue(), [A1, A2])).map((c) => c.name)).toEqual(['Claude Code']);
   });
 
-  test('a group of action items alone sends nothing (the actions route sends those)', () => {
+  test('a batch of records reads the decisions only when it touched a thread whose decisions are drawn', () => {
+    const batch = (threads: string[], any = false) => ({ any, threads: new Set(threads), applied: new Set<string>(), own: new Set<string>() });
+    const watched = new Set(['msg_t1']);
+    expect(batchTouches(batch(['msg_t9']), watched)).toBe(false);
+    expect(batchTouches(batch(['msg_t9', 'msg_t1']), watched)).toBe(true);
+    expect(batchTouches({ ...batch([]), own: new Set(['msg_t1']) }, watched)).toBe(true);
+    // A record naming no thread could be anyone's: read.
+    expect(batchTouches(batch([], true), watched)).toBe(true);
+  });
+
+  test('a Send that went in part says how much went, never "Not sent"', () => {
+    expect(failedWords({ sent: 1, of: 2 })).toBe('1 of 2 replies sent');
+    expect(failedWords({})).toBe('Not sent');
+  });
+
+  test('a project whose own name holds " · " is named once per chip, however many decisions it has', () => {
+    // Two projects named "billing" read apart as "billing · api" and "billing · web" (a disambiguated name).
+    const inProject = (d: InboxDecision, name: string): InboxDecision => ({ ...d, thread: { ...d.thread, project: { ...d.thread.project, name } } });
+    const q = mergeDecisions(emptyQueue(), [inProject(A1, 'billing · api'), inProject(A2, 'billing · api'), inProject(decision('msg_a2/q-5', 'ses_a', 'msg_t9'), 'billing · web')]);
+    expect(sessionChips(q).map((c) => c.label)).toEqual(['billing · api · billing · web']);
+    expect(sessionChips(mergeDecisions(emptyQueue(), [inProject(A1, 'billing · api'), inProject(A2, 'billing · api')])).map((c) => c.label)).toEqual(['billing · api']);
+  });
+
+  test("an action item's Done waiting in the draft is an answer the Send carries, as a pick is", () => {
     const act = decision('msg_c/a-1', 'ses_c', 'msg_t3', { kind: 'action', state: 'picked' });
     const q = mergeDecisions(emptyQueue(), [act]);
-    expect(groupReady(q, groupKeyOf(act))).toBe(false);
+    expect(freshPicks(q, groupKeyOf(act))).toEqual([act.id]);
   });
 });
 
-describe("a group's send state", () => {
-  const facts = (over: Partial<GroupSendFacts> = {}): GroupSendFacts => ({ ready: true, touched: true, draft: false, open: true, now: 1000, ...over });
-
-  test('a group the person answered in this sitting starts a 5 s Hold; its first value is 5', () => {
-    const next = nextGroupSend({ kind: 'waiting' }, facts());
-    expect(next).toEqual({ kind: 'hold', until: 1000 + DECISION_HOLD_MS, paused: null });
-    // Whatever clock the first render read (an old one, before the Hold began), it shows 5, never more.
-    expect(holdSeconds(next as Extract<GroupSend, { kind: 'hold' }>, 1000)).toBe(5);
-    expect(holdSeconds(next as Extract<GroupSend, { kind: 'hold' }>, 1000 - 5000)).toBe(5);
-    expect(holdSeconds(next as Extract<GroupSend, { kind: 'hold' }>, 1000 + 4200)).toBe(1);
+describe("what the person's Send carries (nothing sends by itself)", () => {
+  test('only the answered ones: an open question of the same agent stays out, and the group is half answered', () => {
+    const q = mergeDecisions(emptyQueue(), [{ ...A1, question: { ...A1.question, state: 'picked' as const, revision: 1 } }, A2]);
+    expect(freshPicks(q, groupKeyOf(A1))).toEqual([A1.id]);
+    expect(groupReady(q, groupKeyOf(A1))).toBe(false);
+    expect(groupHalfAnswered(q, groupKeyOf(A1))).toBe(true);
   });
 
-  test('a group ready before this sitting (Keep as a draft) never sends by itself: Held · Send', () => {
-    expect(nextGroupSend({ kind: 'waiting' }, facts({ touched: false }))).toEqual({ kind: 'held', by: 'untouched' });
-    // Touched later, it starts its Hold; held by the person, it stays held.
-    expect(nextGroupSend({ kind: 'held', by: 'untouched' }, facts()).kind).toBe('hold');
-    expect(nextGroupSend({ kind: 'held', by: 'person' }, facts())).toEqual({ kind: 'held', by: 'person' });
-    // Undo took back the only answer given in this sitting: the Hold gives way to Held · Send.
-    expect(nextGroupSend({ kind: 'hold', until: 9, paused: null }, facts({ touched: false }))).toEqual({ kind: 'held', by: 'untouched' });
-  });
-
-  test('a thread with a reply draft never sends from here, touched or not', () => {
-    expect(nextGroupSend({ kind: 'waiting' }, facts({ draft: true }))).toEqual({ kind: 'draft', held: false });
-    expect(nextGroupSend({ kind: 'hold', until: 9, paused: null }, facts({ draft: true }))).toEqual({ kind: 'draft', held: false });
-    // The draft goes: a Hold the person pressed before it is kept; otherwise a touched group starts its Hold.
-    const held = nextGroupSend({ kind: 'held', by: 'person' }, facts({ draft: true }));
-    expect(held).toEqual({ kind: 'draft', held: true });
-    expect(nextGroupSend(held, facts())).toEqual({ kind: 'held', by: 'person' });
-    expect(nextGroupSend({ kind: 'draft', held: false }, facts()).kind).toBe('hold');
-    expect(nextGroupSend({ kind: 'draft', held: false }, facts({ touched: false }))).toEqual({ kind: 'held', by: 'untouched' });
-  });
-
-  test('a failed reply with nothing left to send is just waiting', () => {
-    expect(nextGroupSend({ kind: 'failed', error: 'x' }, facts({ ready: false }))).toEqual({ kind: 'waiting' });
-  });
-
-  test('a sent group whose follow-up the person answered goes round again', () => {
-    const sent: GroupSend = { kind: 'sent', at: '2026-10-24T10:00:00.000Z' };
-    expect(nextGroupSend(sent, facts({ ready: false }))).toBe(sent);
-    expect(nextGroupSend(sent, facts()).kind).toBe('hold');
-    // A failed send waits for Try again.
-    expect(nextGroupSend({ kind: 'failed', error: 'x' }, facts()).kind).toBe('failed');
-  });
-
-  test('a Hold pauses while tucked and runs on from where it was; a pick restarts it', () => {
-    const hold = startHold(1000, true);
-    const paused = pauseHold(hold, false, 3000);
-    expect(paused).toEqual({ kind: 'hold', until: hold.kind === 'hold' ? hold.until : 0, paused: 3000 });
-    // Tucked for a minute: still 3 s left once back.
-    expect(pauseHold(paused, true, 63_000)).toEqual({ kind: 'hold', until: 66_000, paused: null });
-    expect(restartHold(hold, 4000, true)).toEqual({ kind: 'hold', until: 9000, paused: null });
-    // A Hold that starts while tucked starts paused.
-    expect(startHold(1000, false)).toEqual({ kind: 'hold', until: 6000, paused: 5000 });
+  test('nothing answered: nothing for the Send', () => {
+    const q = mergeDecisions(emptyQueue(), [A1, A2]);
+    expect(freshPicks(q, groupKeyOf(A1))).toEqual([]);
   });
 
   test('the answers a reply already carried do not make a group ready again', () => {
@@ -249,12 +220,10 @@ describe('the Send', () => {
 });
 
 describe('answers', () => {
-  test('in the person\'s words, and a swipe only for a two-way choice', () => {
+  test("in the person's words", () => {
     expect(answerWords(choiceAnswer(A1.question, ['Yes'], 'soon'))).toBe('Yes');
     expect(answerWords(skipAnswer(A1.question, ''))).toBe('Skipped');
     expect(skipAnswer(A1.question, 'later').note).toBe('later');
-    expect(swipeChoices(A1.question)).toEqual(['Yes', 'No']);
-    expect(swipeChoices({ ...A1.question, kind: 'multi' })).toBeNull();
   });
 
   test("a picked label's markdown reads as its words on the stamp; the answer keeps the label as written", () => {
@@ -263,65 +232,5 @@ describe('answers', () => {
     expect(answer.selected).toEqual(['[15% off](forecast-15.html)']);
     expect(answerWords(answer)).toBe('15% off');
     expect(answerWords({ ...answer, selected: ['**20%** for members', '`FLAT10` code'] })).toBe('20% for members, FLAT10 code');
-  });
-
-  test("the swipe hint says the labels' words; the swipe commits the label as written", () => {
-    const linked = { ...A1.question, choices: [{ label: '[Yes](a.html)' }, { label: '`No`' }] } as InboxQuestion;
-    const choices = swipeChoices(linked)!;
-    expect(choices).toEqual(['[Yes](a.html)', '`No`']);
-    expect(swipeHint(choices)).toBe('Swipe right for Yes, left for No.');
-  });
-});
-
-describe('the contract lines (approval "inbox-decision-mode", agent contract lines)', () => {
-  const oneWay = (extra: Partial<InboxQuestion> = {}) =>
-    question('q-del', {
-      prompt: 'Delete the 3 duplicate invoices now?',
-      choices: [
-        { label: 'Delete now', description: 'The report is right today', recommended: false, settled: false },
-        { label: 'Wait for month-end close', description: null, recommended: true, settled: false },
-      ],
-      recommendation: 'Wait for month-end close',
-      reversible: { value: false, why: 'Deleted invoices cannot be restored.' },
-      ...extra,
-    });
-
-  test('a one-way question never swipes, nor does a picture choice; a plain two-way one still does', () => {
-    expect(swipeChoices(question('q-1'))).toEqual(['Yes', 'No']);
-    expect(swipeChoices(oneWay())).toBeNull();
-    const pictures = question('q-2', {
-      choices: [
-        { label: 'A', description: null, recommended: false, settled: false, image: { alt: 'A', src: 'a.png' } },
-        { label: 'B', description: null, recommended: false, settled: false, image: { alt: 'B', src: 'b.png' } },
-      ],
-    });
-    expect(swipeChoices(pictures)).toBeNull();
-  });
-
-  test('on a one-way question every answer asks once more, whichever choice the agent recommends; a Skip never does', () => {
-    // The safe choice recommended: both choices confirm.
-    const safe = oneWay();
-    expect(answerNeedsConfirm(safe, choiceAnswer(safe, ['Delete now'], ''))).toBe(true);
-    expect(answerNeedsConfirm(safe, choiceAnswer(safe, ['Wait for month-end close'], ''))).toBe(true);
-    // The destructive choice recommended (the grammar does not say which one is one-way): it still confirms.
-    const risky = oneWay({ choices: safe.choices.map((c) => ({ ...c, recommended: c.label === 'Delete now' })), recommendation: 'Delete now' });
-    expect(answerNeedsConfirm(risky, choiceAnswer(risky, ['Delete now'], ''))).toBe(true);
-    expect(answerNeedsConfirm(risky, choiceAnswer(risky, ['Wait for month-end close'], ''))).toBe(true);
-    // Other and text confirm; a Skip and a note alone do not; a reversible question never does.
-    expect(answerNeedsConfirm(safe, { ...choiceAnswer(safe, [], ''), other: 'Delete only the oldest one' })).toBe(true);
-    const text = oneWay({ kind: 'text', choices: [], recommendation: null, suggested_text: 'Drop the table' });
-    expect(answerNeedsConfirm(text, { ...choiceAnswer(text, [], ''), kind: 'text', text: 'Drop the table' })).toBe(true);
-    expect(answerNeedsConfirm(safe, skipAnswer(safe, ''))).toBe(false);
-    expect(answerNeedsConfirm(safe, { ...choiceAnswer(safe, [], ''), note: 'Ask finance' })).toBe(false);
-    const plain = question('q-1');
-    expect(answerNeedsConfirm(plain, choiceAnswer(plain, ['Yes'], ''))).toBe(false);
-  });
-
-  test("the confirm button's words are the answer, cut at about 40 characters", () => {
-    expect(confirmLabel('Delete now')).toBe('Delete now');
-    const long = 'Delete every duplicate invoice in the legacy billing system today';
-    expect(confirmLabel(long).length).toBeLessThanOrEqual(40);
-    expect(confirmLabel(long).endsWith('…')).toBe(true);
-    expect(long.startsWith(confirmLabel(long).slice(0, -1))).toBe(true);
   });
 });

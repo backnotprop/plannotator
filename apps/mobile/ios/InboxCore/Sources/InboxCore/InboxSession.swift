@@ -68,6 +68,8 @@ public final class InboxSession {
   private var refusedFields: [String: String] = [:]
   /// The words of a refused Send, to go back into the composer.
   public internal(set) var returned: [ThreadID: String] = [:]
+  /// Words Take back put in a thread's reply box (TakeBack.swift): the box shows them in place of its own.
+  public internal(set) var refilled: [ThreadID: String] = [:]
   /// Writes with no definite answer yet, oldest first.
   @ObservationIgnored public internal(set) var held: [HeldWrite] {
     _read {
@@ -1229,6 +1231,13 @@ public final class InboxSession {
       // The files and the quote ride the reply that carries the words (the last one).
       let carries = target.message == targets.last?.message
       if carries, !uploads.isEmpty { body.uploads = uploads }
+      // The agents the words tag with `@` ride the reply that carries the words, in the order picked, never the session
+      // it goes to (the window's `tagsToSend`; all of a Send's tags ride its last request).
+      if carries, !words.isEmpty {
+        let owner = model.thread.messages.first { $0.id == target.message }?.author.session
+        let tags = TagRules.toSend(standingTags(id, words: words), owner: owner)
+        if !tags.isEmpty { body.tags = tags }
+      }
       // A quote rides the person's words only (the store keeps none on a reply without them): with none, it stays
       // in the draft for the words that come.
       if carries, !words.isEmpty, let quote, let quoted = model.thread.messages.first(where: { $0.id == quote.of }) {

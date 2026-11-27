@@ -86,6 +86,8 @@ enum PhoneWords {
   // MARK: A thread (FLOWS 4, mock 4)
   /// packages/core/inbox-types.ts:490 `inboxAgentName`'s fallback.
   static let anAgent = "An agent"
+  /// packages/inbox/scriptAuthor.ts `SCRIPT_AUTHOR_NAME`: a script's post (no session, host or name).
+  static let script = "Script"
   /// The window's own word for the person in a row's preview (packages/core/inbox-row-preview.ts:61, "You: …").
   static let you = "You"
   /// Brief S1: a block this slice does not draw yet.
@@ -510,4 +512,31 @@ extension PhoneWords {
   static func replyingTo(_ who: String, time: String, words: Bool) -> String {
     "Replying to \(words ? "words in " : "")\(who == you ? "your message" : "\(who)'s message")\(time.isEmpty ? "" : " from \(time)")"
   }
+
+  // MARK: Writing, part 2: @ tags, 👍 Looks good, Take back (the window's own words)
+
+  /// packages/inbox/components/TagPicker.tsx:149, the list's name.
+  static let tagAnAgent = "Tag an agent"
+  /// packages/inbox/components/ComposerField.tsx:210, a bare `@` with nobody to offer.
+  static let noAgentToTag = "No agent to tag: none is live, and none reads the Inbox yet."
+  /// TagPicker.tsx:187-189, the row badges.
+  static let ownsThisThread = "Owns this thread"
+  static let notWoken = "Not woken"
+  static let tagUpdate = "Update"
+  /// ComposerField.tsx onPickBlocked: a session on an older Plannotator is not tagged.
+  static func tagBlocked(_ label: String) -> String { "\(label): \(TagRules.updateWords)." }
+  /// packages/inbox/parts/MessageHead.tsx:94, after "to <owner>".
+  static func toTagged(_ to: String?, _ names: String) -> String { "\(to.map { "to \($0) · " } ?? "")tagged \(names)" }
+  /// packages/inbox/components/ReactionTray.tsx:128, :198-199 and :104, the tray's cells and its trigger.
+  static let thumbsLooksGood = "👍 Looks good"
+  static let anyEmoji = "Any emoji"
+  static let anyEmojiSpeech = "React with any emoji, once"
+  static func moreReactions(_ agent: String) -> String { "More reactions for \(agent)'s message" }
+  /// ReactionTray.tsx:455-457, the button's tooltip, said as its hint.
+  static func looksGoodHint(_ agent: String) -> String { "Sends \(agent) 👍 Looks good. Moves to Quiet until it writes again. Hold for more reactions." }
+  static func takeBackReaction(_ current: InboxReaction?) -> String {
+    "Take back \(current.map { ($0.label ?? "").isEmpty ? "your \($0.emoji)" : $0.label ?? "" } ?? Reactions.looksGood)"
+  }
+  /// packages/inbox/components/Undelivered.tsx:112, Take back's tooltip, said as its hint.
+  static let takeBackHint = "Take it out of the queue and back into your reply box. Nothing goes out until you send it again."
 }

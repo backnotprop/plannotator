@@ -203,7 +203,7 @@ plannotator t3 login --url <T3 MCP URL>
 plannotator t3 logout --url <T3 MCP URL>
 ```
 
-If the person uses T3 Code, set it up once so their Inbox replies reach Claude threads in T3 as new turns: run `plannotator t3 --help` and follow its two steps. The person approves T3's sign-in page themselves.
+If the person uses T3 Code, set it up once so their Inbox replies reach Claude threads in T3 as new turns: run `plannotator t3 --help` and follow its two steps. The person approves T3's sign-in page themselves. Codex threads in T3 need no setup: their replies arrive when T3 runs on the same computer as the Inbox.
 
 ## plannotator card
 

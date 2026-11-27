@@ -133,7 +133,7 @@ extension StandInDoor {
     let now = StandInData.iso(Date())
     let message = InboxMessageWire(
       seq: seq, id: id, projectId: ProjectID(project.id), threadId: thread, author: InboxAuthor(kind: .person), body: words, createdAt: now,
-      delivery: InboxDelivery(state: "queued", host: live.host, session: live.session, at: now), to: InboxAddressee(host: live.host, session: live.session))
+      to: InboxAddressee(host: live.host, session: live.session))
     let first = words.split(separator: "\n").first.map(String.init) ?? taken.uploads.first?.record.name ?? ""
     threads.insert(InboxThread(threadId: thread, project: project, subject: String(first.prefix(60)), messages: [message]), at: 0)
     state.started.append(thread)

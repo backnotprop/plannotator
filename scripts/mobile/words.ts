@@ -20,6 +20,7 @@ import { INBOX_SNOOZED_BAND } from '../../packages/core/inbox-snooze';
 import { INBOX_ACK_LABEL, INBOX_AGENT_LABELS, INBOX_HOST_NAMES, INBOX_PRIORITY_GROUP, INBOX_SECTIONS, INBOX_UPLOAD_MAX_BYTES } from '../../packages/core/inbox-types';
 import { ATTACHMENT_FEEDBACK_HEADING, SENT_VERSION_SUFFIX } from '../../packages/inbox/attachments';
 import { MARKUP_ONLY_TEXT } from '../../packages/inbox/markup';
+import { EMOJI } from '../../packages/inbox/components/emojiData';
 import { OUT, cli, jsonText, type Output } from './lib';
 import { readFileSync } from 'node:fs';
 
@@ -81,6 +82,26 @@ function uploadNotReceived(): string {
   return found[1]!;
 }
 
+/**
+ * Each emoji's name as the window says it (`emojiRow` in packages/inbox/components/EmojiPicker.tsx: the first row of
+ * the reaction tray's list that has the emoji; an emoji the list does not have is "emoji"), one `<emoji>\t<name>`
+ * line each, in the list's order. VoiceOver reads a reaction by it, as the window's screen reader words do
+ * (`reactionSpeech`).
+ */
+export function emojiNameLines(): string[] {
+  const seen = new Set<string>();
+  const lines: string[] = [];
+  for (const category of EMOJI) {
+    for (const [emoji, name] of category.emoji) {
+      if (seen.has(emoji)) continue;
+      seen.add(emoji);
+      if (/[\t\n\r\\"]/.test(emoji + name) || !emoji || !name) throw new Error(`words.ts: the emoji row ${JSON.stringify([emoji, name])} cannot be one line of the table`);
+      lines.push(`${emoji}\t${name}`);
+    }
+  }
+  return lines;
+}
+
 /** `section.stopped` → `sectionStopped`, `agent.claude-code` → `agentClaudeCode`. */
 export function swiftName(key: string): string {
   const [first, ...rest] = key.split(/[^A-Za-z0-9]+/).filter(Boolean);
@@ -119,6 +140,14 @@ export function swiftWords(words: Record<string, Word>): string {
   table('section.', 'sections', 'A section\'s name by its id (InboxSectionId\'s raw value).');
   table('agent.', 'agents', 'An agent\'s name by its id.');
   table('host.', 'hosts', 'A host\'s name by its id, as a quoting reply\'s lead names it (INBOX_HOST_NAMES).');
+  lines.push(
+    '',
+    '  /// packages/inbox/components/emojiData.ts EMOJI, as `emojiRow` reads it: one `<emoji>\\t<name>` line per emoji, the',
+    '  /// first row of each. An emoji with no line is named "emoji".',
+    '  public static let emojiNameLines = """',
+    ...emojiNameLines().map((line) => `    ${line.replace('\t', '\\t')}`),
+    '    """',
+  );
   lines.push('}', '');
   return lines.join('\n');
 }

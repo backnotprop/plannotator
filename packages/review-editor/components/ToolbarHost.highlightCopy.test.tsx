@@ -7,7 +7,7 @@
  * wrong side's lines or loses a range's line breaks; it fires with no line
  * range open; text the person selected in the textarea is overwritten; a
  * field elsewhere on the page loses its own copy; or the Inbox's chooser
- * (Comment · Ask · Show me, before the composer) stops copying the lines.
+ * (Comment · Ask, before the composer) stops copying the lines.
  */
 import { afterEach, expect, test } from 'bun:test';
 import React, { act, createRef } from 'react';

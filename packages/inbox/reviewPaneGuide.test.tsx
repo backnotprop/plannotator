@@ -6,7 +6,7 @@
  *  - a guide (no `review: true`) or a review with Code review off offering
  *    Approve or Send feedback: there is no verdict the agent waits for, and
  *    the server refuses `review_verdict` while Code review is off;
- *  - Code review's own parts (Viewed ticks, Show me and Ask on selected lines,
+ *  - Code review's own parts (Viewed ticks, Ask on selected lines,
  *    Open in, the live-session reads behind a verdict) showing, or asking the
  *    server, with Code review off;
  *  - a guide's comments sent, dropped or marked sent by the review itself:
@@ -21,10 +21,7 @@ import { act, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { buildGuideSnapshot } from '@plannotator/core/guide-format';
 import type { InboxAnnotationRecord, InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
-import type { ShapeHost } from '@plannotator/ui/components/shape';
-import type { InboxShapes } from './shape/useInboxShapes';
 
-const NO_BOARDS: InboxShapes = { shapes: null, byThread: new Map(), changed: 0, rowShown: false, subscribe: () => () => {}, refresh: () => {} };
 
 const hasDom = typeof document !== 'undefined';
 /** The props the review handed the reader on its last draw. */
@@ -141,14 +138,12 @@ async function render(review: boolean, codeReview: boolean, threadPatch: Partial
           onSent={() => {}}
           onAsk={() => {}}
           onWriteReply={() => (writeReplies += 1)}
-          shapeHost={{} as ShapeHost}
-          shapes={NO_BOARDS}
-          board={null}
-          onBoard={() => {}}
         />
       </div>,
     );
   });
+  // Until the reader draws: the first open in a file waits for its chunk (a cold import), then a few turns more.
+  for (let i = 0; i < 200 && readerProps === null; i += 1) await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
   for (let i = 0; i < 6; i += 1) await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
 }
 
@@ -169,14 +164,14 @@ test.skipIf(!hasDom)('a guide (no review flag) opens the full review: Walkthroug
   expect(pane()!.textContent).not.toContain('Approve');
   // The way out with the comments: back to the thread's reply box.
   expect(document.querySelector('[data-review-write-reply]')?.textContent).toContain('Write the reply');
-  // Not Code review's review, even with it on: no Viewed ticks, no Show me (the server keeps both for reviews only).
+  // Not Code review's review, even with it on: no Viewed ticks, no Ask on selected lines (the server keeps both for reviews only).
   expect(readerProps!.viewed).toBeUndefined();
   expect(readerProps!.selectionActions).toBeUndefined();
   // Open in follows the switch alone, as it did on a guide.
   expect(typeof readerProps!.fileOpenIn).toBe('function');
 });
 
-test.skipIf(!hasDom)('Code review off: a review opens the full review with none of Code review: no verdict, Viewed, Show me, Ask or Open in, and nothing asked of its routes', async () => {
+test.skipIf(!hasDom)('Code review off: a review opens the full review with none of Code review: no verdict, Viewed, Ask or Open in, and nothing asked of its routes', async () => {
   await render(true, false);
   expect(pane() !== null).toBe(true);
   expect(has('[data-review-mode-choice="files"]')).toBe(true);
@@ -186,7 +181,7 @@ test.skipIf(!hasDom)('Code review off: a review opens the full review with none 
   expect(readerProps!.viewed).toBeUndefined();
   expect(readerProps!.selectionActions).toBeUndefined();
   expect(readerProps!.fileOpenIn).toBeUndefined();
-  // The heading's Show me (the host's head actions) draws nothing.
+  // The heading's own actions (the host's head actions) draw nothing on a desktop.
   expect((readerProps!.renderHeadActions as () => unknown)()).toBeNull();
   // Only the guide and its comments were read: no Ask, drawings, live sessions or pull requests.
   expect(asked.filter((line) => !/\/guide$|\/guide\?|\/attachments/.test(line))).toEqual([]);
@@ -258,7 +253,7 @@ test.skipIf(!hasDom)('one comment rides (the singular), and a resolved thread re
     root = createRoot(host!);
     root.render(
       <div className="pn-inbox">
-        <ReviewPane thread={{ ...threadOf(message), resolved_at: '2026-10-11T11:00:00.000Z' }} message={message} codeReview={false} onBack={() => {}} onClose={() => {}} onSent={() => {}} onWriteReply={() => (writeReplies += 1)} shapeHost={{} as ShapeHost} shapes={NO_BOARDS} board={null} onBoard={() => {}} />
+        <ReviewPane thread={{ ...threadOf(message), resolved_at: '2026-10-11T11:00:00.000Z' }} message={message} codeReview={false} onBack={() => {}} onClose={() => {}} onSent={() => {}} onWriteReply={() => (writeReplies += 1)} />
       </div>,
     );
   });

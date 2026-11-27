@@ -401,24 +401,6 @@ describe.skipIf(!hasDom)('the review’s keys in the Inbox', () => {
     expect(inbox).toEqual([]);
   });
 
-  test('a Shape board open over the review keeps its keys: the review’s stand down, and act again once it is hidden', async () => {
-    await mount();
-    const layer = document.createElement('section');
-    layer.setAttribute('data-shape-layer', 'board-1');
-    const card = document.createElement('button');
-    layer.append(card);
-    host.append(layer);
-    for (const key of ['j', 'n', 'x', 'ArrowDown']) press(key);
-    press('z', {}, card);
-    expect(reached).toEqual([]);
-    expect(clicks).toEqual([]);
-    // Landed on code from the board: the layer is hidden and the review is on screen again.
-    layer.hidden = true;
-    expect(press('j').defaultPrevented).toBe(true);
-    expect(reached).toEqual(['src/b.ts']);
-    layer.remove();
-  });
-
   test('once the review leaves the screen every key has its Inbox meaning again', async () => {
     await mount();
     expect(openReviewKeys()?.claimed.has('J')).toBe(true);

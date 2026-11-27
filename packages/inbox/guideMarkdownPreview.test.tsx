@@ -23,10 +23,6 @@ import { createRoot, type Root } from 'react-dom/client';
 import { resolve } from 'node:path';
 import { buildGuideSnapshot } from '@plannotator/core/guide-format';
 import type { InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
-import type { ShapeHost } from '@plannotator/ui/components/shape';
-import type { InboxShapes } from './shape/useInboxShapes';
-
-const NO_BOARDS: InboxShapes = { shapes: null, byThread: new Map(), changed: 0, rowShown: false, subscribe: () => () => {}, refresh: () => {} };
 
 // The window's tsconfig points `#guide-reader` at the reader's type shape; the real reader is package.json's `imports` entry.
 plugin({
@@ -164,7 +160,7 @@ const inShell = <T extends Element>(path: string, selector: string): T[] => {
   if (!shell) return [];
   return [...shell.querySelectorAll<T>(selector), ...[...shell.querySelectorAll('diffs-container')].flatMap((view) => [...(view.shadowRoot?.querySelectorAll<T>(selector) ?? [])])];
 };
-const pane = () => <ReviewPane thread={thread} message={message} codeReview={false} onBack={() => {}} onClose={() => {}} onSent={() => {}} shapeHost={{} as ShapeHost} shapes={NO_BOARDS} board={null} onBoard={() => {}} />;
+const pane = () => <ReviewPane thread={thread} message={message} codeReview={false} onBack={() => {}} onClose={() => {}} onSent={() => {}} />;
 
 test.skipIf(!hasDom)("a thread's guided review, starting in Source: code review's menu on each Markdown file, the source diff under it", async () => {
   await draw(pane());

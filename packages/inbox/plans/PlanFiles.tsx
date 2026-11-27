@@ -115,6 +115,18 @@ export function PlanRailHead({ name, project, decision }: { name: string; projec
   );
 }
 
+/**
+ * The rail head's back arrow, in the top bar before the crumbs on a computer (approval P2: the panel has no head, Pages
+ * comes first). It goes to Spaces, so it is named for where it goes: "Back to Spaces", the plan rail's own words.
+ */
+export function PlanBackLink() {
+  return (
+    <a className="ib-plan-crumb-back" href={hashOf(plansRoute)} onClick={routeClick(() => writeRoute(plansRoute))} aria-label={PLAN_FILES_WORDS.back} data-plan-crumb-back="">
+      <Icon name="back" />
+    </a>
+  );
+}
+
 export interface PlanFilesProps {
   plan: string;
   primary: string;

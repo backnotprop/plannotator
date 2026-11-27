@@ -9,7 +9,8 @@
 .pn-inbox .ib-iconbtn.ib-lp-plus:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 
 /* The picker: one line a row (mark, name, quiet name or commit, then what it holds and its age at the end). */
-.ib-cp-picker.ib-lp-picker { z-index: 45; }
+/* A phone's sheet keeps its own z-index (inbox.css), over the list's sticky heading and the bars. */
+.ib-cp-picker.ib-lp-picker:not([data-phone]) { z-index: 45; }
 .ib-lp-picker .ib-cp-list.ib-lp-list { display: flex; flex-direction: column; }
 .ib-lp-picker .ib-cp-opt.ib-lp-opt { display: flex; align-items: center; gap: 10px; min-height: 34px; }
 .ib-lp-opt > svg.ib-ic { flex: none; color: var(--muted-foreground); }

@@ -79,7 +79,7 @@ export interface RefreshView {
 
 /**
  * What Shift+R refreshes (approval "inbox-refresh-key"): the refresh of the page on screen, as its own control does; null
- * where the page has none (Drafts, Settings, What's new, Shapes, a pull request's review, a page off or still loading).
+ * where the page has none (Drafts, Settings, What's new, a pull request's review, a page off or still loading).
  */
 export function refreshKind(view: RefreshView): RefreshKind | null {
   if (view.tourOn) return null;

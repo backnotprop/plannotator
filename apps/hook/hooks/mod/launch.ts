@@ -410,6 +410,16 @@ export function debugAppendArgv(path: string): string[] {
   return shellArgv('debug-append', DEBUG_APPEND_SCRIPT, 'plannotator-debug', [path])
 }
 
+/**
+ * Prints the pid of the process that started the script: the Claude Code
+ * process running the mod. The review CLI reads it from the launch's lease
+ * (`watcher.json`) to tell a quit session from a live one whose timer stalled.
+ * Git Bash prints nothing: MSYS numbers processes its own way.
+ */
+export function hostPidArgv(): string[] {
+  return shellArgv('host-pid', 'printf \'%s\\n\' "$PPID"', 'plannotator-host-pid', [])
+}
+
 /** Liveness probe through the shell's own `kill` (no /bin/kill on every system). */
 export function aliveArgv(pid: string): string[] {
   return shellArgv('alive', 'kill -0 "$1" 2>/dev/null', 'plannotator-alive', [pid])

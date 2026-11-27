@@ -30,6 +30,7 @@ import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionM
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { INBOX_CROSS_SITE_BODY, isCrossSiteRequest } from "./inbox-cross-site";
 import { INBOX_SEARCH_MACHINE_WAIT_MS, searchAcrossMachines, type InboxSearchMachines } from "./inbox-search-machines";
+import { searchShownToPerson } from "./inbox-search-shown";
 import {
   INBOX_SEARCH_GROUPS,
   INBOX_SEARCH_LIMIT_MAX,
@@ -144,7 +145,8 @@ export function createInboxSearchRoutes(input: { store: InboxStore; serverSessio
         return { serverSession, q, terms: [], took_ms: 0, indexing: true, threads: index.threadCount(), totals: null, groups: null, recent: null };
       }
     }
-    const answer = index.search({ q, project, status, from, tags, group, offset, limit, current, sort });
+    // A skill emoji's reply reads as its words "🦃 /bro", as the thread draws it (inbox-search-shown.ts).
+    const answer = searchShownToPerson(index.search({ q, project, status, from, tags, group, offset, limit, current, sort }), store);
     return { serverSession, ...answer, ...recentSearches(answer) };
   };
 

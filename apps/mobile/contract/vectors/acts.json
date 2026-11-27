@@ -636,6 +636,123 @@
         "body": "Mark read closes them unanswered and tells the agent not to wait on them.",
         "go": "Mark read"
       }
+    },
+    {
+      "thread_id": "msg_R0000000000000000000000018",
+      "mark_read": {
+        "open": {
+          "lead": "Marked read",
+          "phoneLead": "Read",
+          "detail": "Moves to Quiet",
+          "warn": false
+        },
+        "held": {
+          "lead": "Marked read",
+          "phoneLead": "Read",
+          "detail": "“Which changelog tone for the release?”",
+          "warn": false
+        },
+        "list": {
+          "lead": "Moved to Quiet",
+          "detail": "“Which changelog tone for the release?”",
+          "warn": false
+        }
+      },
+      "mark_unread": {
+        "stays": {
+          "lead": "Marked unread",
+          "detail": "“Which changelog tone for the release?”"
+        },
+        "moved": {
+          "lead": "Marked unread",
+          "detail": "“Which changelog tone for the release?” · back in New"
+        }
+      },
+      "set_aside": {
+        "title": "Set aside 2 open questions?",
+        "body": "Mark read closes them unanswered and tells the agent not to wait on them.",
+        "go": "Mark read"
+      }
+    },
+    {
+      "thread_id": "msg_R0000000000000000000000090",
+      "mark_read": {
+        "open": {
+          "lead": "Marked read",
+          "phoneLead": "Read",
+          "detail": "Script was stopped",
+          "phoneDetail": "Stopped · Script",
+          "warn": true
+        },
+        "held": {
+          "lead": "Marked read",
+          "phoneLead": "Read",
+          "detail": "“Disk at 91% on node 3”",
+          "warn": true
+        },
+        "list": {
+          "lead": "Marked read",
+          "phoneLead": "Read",
+          "detail": "Script was stopped",
+          "phoneDetail": "Stopped · Script",
+          "warn": true
+        }
+      },
+      "mark_unread": {
+        "stays": {
+          "lead": "Marked unread",
+          "detail": "“Disk at 91% on node 3”"
+        },
+        "moved": {
+          "lead": "Marked unread",
+          "detail": "“Disk at 91% on node 3” · back in New"
+        }
+      },
+      "set_aside": {
+        "title": "Set aside 1 open question?",
+        "body": "Mark read closes it unanswered and tells the agent not to wait on it.",
+        "go": "Mark read"
+      }
+    },
+    {
+      "thread_id": "msg_R0000000000000000000000091",
+      "mark_read": {
+        "open": {
+          "lead": "Marked read",
+          "phoneLead": "Read",
+          "detail": "Claude Code was stopped",
+          "phoneDetail": "Stopped · Claude Code",
+          "warn": true
+        },
+        "held": {
+          "lead": "Marked read",
+          "phoneLead": "Read",
+          "detail": "“Disk at 92% on node 4”",
+          "warn": true
+        },
+        "list": {
+          "lead": "Marked read",
+          "phoneLead": "Read",
+          "detail": "Claude Code was stopped",
+          "phoneDetail": "Stopped · Claude Code",
+          "warn": true
+        }
+      },
+      "mark_unread": {
+        "stays": {
+          "lead": "Marked unread",
+          "detail": "“Disk at 92% on node 4”"
+        },
+        "moved": {
+          "lead": "Marked unread",
+          "detail": "“Disk at 92% on node 4” · back in New"
+        }
+      },
+      "set_aside": {
+        "title": "Set aside 1 open question?",
+        "body": "Mark read closes it unanswered and tells the agent not to wait on it.",
+        "go": "Mark read"
+      }
     }
   ],
   "set_aside": [

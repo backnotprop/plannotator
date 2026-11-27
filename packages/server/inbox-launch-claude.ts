@@ -66,6 +66,12 @@ const CLAUDE_FILES_ENV = ["CLAUDE_CONFIG_DIR", "CLAUDE_CODE_CUSTOM_OAUTH_URL"] a
 
 const START_TIMEOUT_MS = 30_000;
 const COMMAND_TIMEOUT_MS = 15_000;
+/**
+ * What is kept of `claude agents --json --all`'s output. `--all` lists every session Claude ever ran in the background
+ * that was not removed, about 260 bytes each: 274 of them made 72 KB on one machine, past the 64 Ki every
+ * other call keeps, and the cut JSON read as no host at all. 32 Mi is about 120 000 sessions.
+ */
+export const CLAUDE_AGENTS_OUTPUT_CAP = 32 * 1024 * 1024;
 /** How long a signed-in (or unreadable) `claude auth status` answer is kept. */
 export const CLAUDE_AUTH_TTL_MS = 30_000;
 /** A signed-out one, briefly: compose's reads don't run the CLI each time, and signing in shows within seconds. */
@@ -453,19 +459,37 @@ export function createClaudeHost(options: {
   environment: () => Promise<AgentEnvironment>;
   /** Where the person's own Claude files are (their HOME and CLAUDE_CONFIG_DIR): the trust read. */
   files: () => AgentEnvironment;
+  /** Where a host read that could not be used is told (default: stderr): never silently "no host". */
+  log?: (line: string) => void;
 }) {
-  const run = async (argv: string[], cwd: string | undefined, timeoutMs = COMMAND_TIMEOUT_MS, environment?: AgentEnvironment) => {
+  const log = options.log ?? ((line: string) => console.error(line));
+  const run = async (argv: string[], cwd: string | undefined, timeoutMs = COMMAND_TIMEOUT_MS, environment?: AgentEnvironment, outputCap?: number) => {
     const e = environment ?? (await options.environment());
     // A start's own env may not reach `claude` (its shell read failed): the plain env also searches Claude's install folders.
     const claude = e.which("claude") ?? (environment ? (await options.environment()).which("claude") : null);
     if (!claude) return { result: { exitCode: 127, timedOut: false, stdout: "", stderr: "claude is not on PATH" } as AgentRunResult, missing: true };
-    return { result: await e.run([claude, ...argv], { timeoutMs, killGroup: false, ...(cwd ? { cwd } : {}) }), missing: false };
+    return { result: await e.run([claude, ...argv], { timeoutMs, killGroup: false, ...(cwd ? { cwd } : {}), ...(outputCap ? { outputCap } : {}) }), missing: false };
   };
 
-  /** Every session Claude's supervisor knows (`--all`), or null when it could not be read. */
+  /**
+   * Every session Claude's supervisor knows (`--all`), or null when it could not be read (logged, with what came back).
+   * `--all` stays: a stopped or finished session must read as such, not as removed ("absent"). Its output grows with
+   * every session not removed, so it keeps far more than other calls (`CLAUDE_AGENTS_OUTPUT_CAP`).
+   */
   const agents = async (cwd?: string): Promise<ClaudeAgent[] | null> => {
-    const { result } = await run(["agents", "--json", "--all", ...(cwd ? ["--cwd", cwd] : [])], cwd);
-    return result.exitCode === 0 ? parseAgentsJson(result.stdout) : null;
+    const { result, missing } = await run(["agents", "--json", "--all", ...(cwd ? ["--cwd", cwd] : [])], cwd, COMMAND_TIMEOUT_MS, undefined, CLAUDE_AGENTS_OUTPUT_CAP);
+    const where = cwd ? ` --cwd ${cwd}` : "";
+    const bytes = Buffer.byteLength(result.stdout, "utf8");
+    if (result.exitCode !== 0) {
+      if (!missing) log(`claude agents --json --all${where}: exit ${result.exitCode}${result.timedOut ? " (timed out)" : ""}, ${bytes} bytes of stdout; no host read (${result.stderr.trim().split("\n")[0] ?? ""})`);
+      return null;
+    }
+    const parsed = parseAgentsJson(result.stdout);
+    if (!parsed) {
+      const cut = result.stdout.length >= CLAUDE_AGENTS_OUTPUT_CAP ? `, cut at the ${CLAUDE_AGENTS_OUTPUT_CAP}-character cap` : "";
+      log(`claude agents --json --all${where}: ${bytes} bytes of stdout that are not a JSON list${cut}; no host read`);
+    }
+    return parsed;
   };
 
   return {
@@ -580,7 +604,7 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
     }
     return createAgentEnvironmentFor({ platform: ctx.platform, homeDir: ctx.homeDir, env });
   };
-  const cli = createClaudeHost({ environment: ctx.environment, files: claudeFiles });
+  const cli = createClaudeHost({ environment: ctx.environment, files: claudeFiles, log: ctx.log });
   /** Launch folders' real paths, for the turn-error read (`claudeFolderReals`). */
   const folderReal = claudeFolderReals();
   /**

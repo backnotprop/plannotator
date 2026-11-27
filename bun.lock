@@ -17,7 +17,7 @@
       "devDependencies": {
         "@agentclientprotocol/sdk": "1.9.0",
         "@modelcontextprotocol/client": "2.3.1",
-        "@pierre/diffs-sem": "file:vendor/pierre-diffs/pierre-diffs-1.7.0-beta.3-sem.6.tgz",
+        "@pierre/diffs-sem": "file:vendor/pierre-diffs/pierre-diffs-1.7.0-beta.3-sem.9.tgz",
         "@playwright/test": "1.64.1",
         "@types/node": "^26.6.5",
         "@types/turndown": "^5.0.6",
@@ -27,11 +27,11 @@
     },
     "apps/cline-plugin": {
       "name": "@plannotator/cline",
-      "version": "0.29.2",
+      "version": "0.29.5",
     },
     "apps/dsh-plugin": {
       "name": "@plannotator/dsh",
-      "version": "0.29.2",
+      "version": "0.29.5",
     },
     "apps/feedback-service": {
       "name": "@plannotator/feedback-service",
@@ -134,11 +134,11 @@
     },
     "apps/openclaw-plugin": {
       "name": "@plannotator/openclaw",
-      "version": "0.29.2",
+      "version": "0.29.5",
     },
     "apps/opencode-plugin": {
       "name": "@plannotator/opencode",
-      "version": "0.29.2",
+      "version": "0.29.5",
       "devDependencies": {
         "@opencode-ai/plugin": "1.19.3",
         "@opencode/plugin": "2.0.32",
@@ -157,7 +157,7 @@
     },
     "apps/pi-extension": {
       "name": "@plannotator/pi-extension",
-      "version": "0.29.2",
+      "version": "0.29.5",
       "dependencies": {
         "@joplin/turndown-plugin-gfm": "^1.0.68",
         "@pierre/diffs": "1.7.0-beta.3",
@@ -297,12 +297,22 @@
     },
     "packages/core": {
       "name": "@plannotator/core",
-      "version": "0.25.32",
+      "version": "0.25.34",
       "dependencies": {
         "croner": "11.0.0",
       },
       "devDependencies": {
         "typescript": "~5.8.2",
+      },
+    },
+    "packages/diagrams": {
+      "name": "@plannotator/diagrams",
+      "version": "0.1.0",
+      "bin": {
+        "plannotator-diagrams": "./bin/plannotator-diagrams.js",
+      },
+      "devDependencies": {
+        "typescript": "7.0.2",
       },
     },
     "packages/editor": {
@@ -406,7 +416,7 @@
     },
     "packages/server": {
       "name": "@plannotator/server",
-      "version": "0.29.2",
+      "version": "0.29.5",
       "dependencies": {
         "@modelcontextprotocol/server": "2.3.1",
         "@pierre/diffs": "1.7.0-beta.3",
@@ -482,7 +492,7 @@
     },
     "packages/ui": {
       "name": "@plannotator/ui",
-      "version": "0.63.0",
+      "version": "0.66.0",
       "dependencies": {
         "@base-ui/react": "^1.9.0",
         "@codemirror/autocomplete": "^6.20.3",
@@ -1179,7 +1189,7 @@
 
     "@pierre/diffs": ["@pierre/diffs@1.7.0-beta.3", "", { "dependencies": { "@pierre/highlights": "0.5.0", "@pierre/patches": "0.0.1", "@pierre/theme": "2.0.0", "@pierre/theming": "1.0.2", "diff": "9.0.0", "hast-util-to-html": "9.0.5", "lru_map": "0.4.1", "shiki": "^3.0.0 || ^4.0.0" }, "peerDependencies": { "react": "^18.3.1 || ^19.0.0", "react-dom": "^18.3.1 || ^19.0.0" }, "optionalPeers": ["react", "react-dom"] }, "sha512-eAoAoL9aoO7vR9VV5NCLIuIAEr4yu5LsBnhTbyoy8wDFjT0y7bDrlhX8doO7FUb/MCd0Ldcd15Ga/yTOq2mjBA=="],
 
-    "@pierre/diffs-sem": ["@pierre/diffs@vendor/pierre-diffs/pierre-diffs-1.7.0-beta.3-sem.6.tgz", { "dependencies": { "@pierre/highlights": "0.5.1", "@pierre/patches": "0.0.1", "@pierre/theme": "2.0.0", "@pierre/theming": "1.0.2", "diff": "9.0.0", "hast-util-to-html": "9.0.5", "lru_map": "0.4.1", "shiki": "^3.0.0 || ^4.0.0" }, "peerDependencies": { "react": "^18.3.1 || ^19.0.0", "react-dom": "^18.3.1 || ^19.0.0" }, "optionalPeers": ["react", "react-dom"] }, "sha512-VfCgZJn1cS3qJ1jVORSxsdSC43Wb9DMxXqNJRrWW1iMV5uQhhG9+YRvug4Cmrboys6OC/xq/+/Gp9VBDNHJxcQ=="],
+    "@pierre/diffs-sem": ["@pierre/diffs@vendor/pierre-diffs/pierre-diffs-1.7.0-beta.3-sem.9.tgz", { "dependencies": { "@pierre/highlights": "0.5.1", "@pierre/patches": "0.0.1", "@pierre/theme": "2.0.0", "@pierre/theming": "1.0.2", "diff": "9.0.0", "hast-util-to-html": "9.0.5", "lru_map": "0.4.1", "shiki": "^3.0.0 || ^4.0.0" }, "peerDependencies": { "react": "^18.3.1 || ^19.0.0", "react-dom": "^18.3.1 || ^19.0.0" }, "optionalPeers": ["react", "react-dom"] }, "sha512-dYR6mF3bXsZkPe9AiXwEFWyyTelVukfIekKvQACGjyq8cAEAesTpmx+uC7Hfj6pQ2OwzkibOJ3RD3yuGv5cDIw=="],
 
     "@pierre/highlights": ["@pierre/highlights@0.5.1", "", {}, "sha512-c2WF6sgwgKdxXU6FpWDLWUYHRca/cJy+3QJkWAqYqEAFxqlPf8eSH0ehHcFFjKBmT+9KBl9H7q6z7HMRU7+m6g=="],
 
@@ -1202,6 +1212,8 @@
     "@plannotator/cline": ["@plannotator/cline@workspace:apps/cline-plugin"],
 
     "@plannotator/core": ["@plannotator/core@workspace:packages/core"],
+
+    "@plannotator/diagrams": ["@plannotator/diagrams@workspace:packages/diagrams"],
 
     "@plannotator/dsh": ["@plannotator/dsh@workspace:apps/dsh-plugin"],
 

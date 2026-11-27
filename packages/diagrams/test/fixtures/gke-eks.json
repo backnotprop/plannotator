@@ -1,0 +1,197 @@
+{
+  "title": "A private request from GKE to Amazon EKS",
+  "subtitle": "A checkout pod in Google Cloud calls an inventory API in AWS.",
+  "legend": false,
+  "theme": {
+    "tones": {
+      "gcp": "#2455A4",
+      "aws": "#243449"
+    },
+    "paper": "#FFFFFF",
+    "group_fill": "#F6F8FB",
+    "group_stroke": "#AAB7C8",
+    "panel_fill": "#FFFFFF",
+    "lid": 3,
+    "depth": 0,
+    "margin": 28,
+    "pad": 13,
+    "section_gap": 14,
+    "title": 28,
+    "subtitle": 15,
+    "body": 14,
+    "panel_title": 17,
+    "panel_sub": 13,
+    "small": 13,
+    "line_h": 20,
+    "header_h_sub": 56
+  },
+  "panels": [
+    {
+      "id": "gke",
+      "title": "Google Kubernetes Engine",
+      "sub": "GKE cluster in the application VPC",
+      "tone": "gcp",
+      "x": 0,
+      "y": 0,
+      "width": 340,
+      "sections": [
+        {
+          "row": [
+            {
+              "image": {
+                "src": "data:image/png;base64,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",
+                "alt": "Google Cloud logo",
+                "width": 74,
+                "height": 90
+              }
+            },
+            {
+              "card": {
+                "title": "Checkout workload",
+                "rows": [
+                  [
+                    "Namespace",
+                    "storefront"
+                  ],
+                  [
+                    "Client",
+                    "Checkout pods"
+                  ]
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ha-vpn",
+      "title": "HA VPN gateway",
+      "sub": "Google Cloud network edge",
+      "tone": "gcp",
+      "x": 0,
+      "y": 269,
+      "width": 340,
+      "sections": [
+        {
+          "card": {
+            "title": "Hybrid connectivity",
+            "rows": [
+              [
+                "VPN",
+                "Two gateway interfaces"
+              ],
+              [
+                "Routing",
+                "Cloud Router uses BGP"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "aws-vpn",
+      "title": "AWS Site-to-Site VPN",
+      "sub": "AWS regional network edge",
+      "tone": "aws",
+      "x": 526,
+      "y": 269,
+      "width": 340,
+      "sections": [
+        {
+          "card": {
+            "title": "Transit Gateway",
+            "rows": [
+              [
+                "VPN",
+                "Two VPN connections"
+              ],
+              [
+                "VPC attachment",
+                "Application VPC"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "eks",
+      "title": "Amazon EKS",
+      "sub": "Internal Network Load Balancer fronts the pods",
+      "tone": "aws",
+      "x": 526,
+      "y": 0,
+      "width": 340,
+      "sections": [
+        {
+          "row": [
+            {
+              "image": {
+                "src": "data:image/png;base64,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",
+                "alt": "Amazon Web Services logo",
+                "width": 74,
+                "height": 90
+              }
+            },
+            {
+              "card": {
+                "title": "Inventory API",
+                "rows": [
+                  [
+                    "Namespace",
+                    "inventory"
+                  ],
+                  [
+                    "Targets",
+                    "Inventory pods"
+                  ]
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "groups": [
+    {
+      "label": "Google Cloud",
+      "members": [
+        "gke",
+        "ha-vpn"
+      ]
+    },
+    {
+      "label": "Amazon Web Services",
+      "members": [
+        "eks",
+        "aws-vpn"
+      ]
+    }
+  ],
+  "links": [
+    {
+      "from": "gke",
+      "to": "ha-vpn",
+      "label": "HTTPS request",
+      "start": "bottom",
+      "end": "top"
+    },
+    {
+      "from": "ha-vpn",
+      "to": "aws-vpn",
+      "label": "4 IPsec tunnels",
+      "start": "right",
+      "end": "left"
+    },
+    {
+      "from": "aws-vpn",
+      "to": "eks",
+      "label": "via internal load balancer",
+      "start": "top",
+      "end": "bottom"
+    }
+  ]
+}

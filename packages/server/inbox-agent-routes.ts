@@ -23,20 +23,27 @@ const ROUTES: readonly { method: "GET" | "POST"; path: RegExp }[] = [
   { method: "POST", path: /^\/api\/inbox\/icon-animate$/ },
   { method: "GET", path: new RegExp(`^/api/inbox/threads/${ID}/decisions\\?[A-Za-z0-9_=&%.+/-]*$`) },
   { method: "POST", path: new RegExp(`^/api/inbox/threads/${ID}/decisions/post$`) },
+  // `plannotator inbox capability` (inbox-capability-agent.ts): a list, and a turn.
+  { method: "GET", path: /^\/api\/inbox\/capability$/ },
+  { method: "POST", path: /^\/api\/inbox\/capability$/ },
 ];
 
 /** The settings a rows command sends: the look, and its undo. Who made it is the door's to say. */
 const ROWS_FIELDS = ["rows", "rows_undo"];
 
+/** What a capability turn sends: who turns it and where its line goes are the door's to say. */
+const CAPABILITY_FIELDS = ["capability", "on", "thread_id"];
+
 const refuse = (message: string) => new InboxError("validation_error", message);
 
 /**
  * `route` at the agent door, or null for any other action: the Inbox's answer to one of the commands' requests, as
- * `{ status, content_type, body }` (the body as text). `by`: the agent, named on a rows change.
+ * `{ status, content_type, body }` (the body as text). `by`: the agent, named on a rows change and a capability turn
+ * (with `project`, its own project's id, where a turn's line goes when it names no thread).
  */
 export async function inboxAgentRouteAction(
   handle: ((req: Request) => Promise<Response>) | undefined,
-  by: { host: string; session: string },
+  by: { host: string; session: string; name?: string; project?: () => string | null },
   tool: string,
   args: Record<string, unknown>,
 ): Promise<ToolResult | null> {
@@ -45,7 +52,7 @@ export async function inboxAgentRouteAction(
   if (extra) throw refuse(`${extra}: not taken. ${tool} takes: ${FIELDS.join(", ")}.`);
   const { method, path } = args;
   if (typeof method !== "string" || typeof path !== "string" || !ROUTES.some((route) => route.method === method && route.path.test(path))) {
-    throw refuse("method, path: one of the requests plannotator inbox rows, projects, icon and export-decisions make.");
+    throw refuse("method, path: one of the requests plannotator inbox rows, projects, icon, capability and export-decisions make.");
   }
   if (!handle) throw new InboxError("internal_error", "This Inbox cannot answer that here.");
   let body: Record<string, unknown> | undefined;
@@ -55,7 +62,14 @@ export async function inboxAgentRouteAction(
     if (path === "/api/inbox/settings") {
       const other = Object.keys(body).find((field) => !ROWS_FIELDS.includes(field));
       if (other) throw refuse(`body: ${other}: only the rows of the list are changed this way.`);
-      body.rows_by = by;
+      body.rows_by = { host: by.host, session: by.session };
+    }
+    if (path === "/api/inbox/capability") {
+      const other = Object.keys(body).find((field) => !CAPABILITY_FIELDS.includes(field));
+      if (other) throw refuse(`body: ${other}: not taken here; only ${CAPABILITY_FIELDS.join(", ")}.`);
+      body.by = { host: by.host, session: by.session, ...(by.name ? { name: by.name } : {}) };
+      const project = by.project?.() ?? null;
+      if (project) body.project_id = project;
     }
   }
   // As the command's own request on this computer: loopback, no browser origin.

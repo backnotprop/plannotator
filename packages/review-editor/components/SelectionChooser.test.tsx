@@ -1,10 +1,10 @@
 /**
- * A host's choices for selected lines (the Inbox's code review: Comment · Ask
- * · Show me, approval "shape-in-code-review"). What regresses if these fail:
+ * A host's choices for selected lines (the Inbox's code review: Comment ·
+ * Ask). What regresses if these fail:
  * - the review app (no `selectionActions`) stops opening the comment box at
  *   once on a selection;
- * - Show me or Ask reaches the host with the wrong file, lines or side, or
- *   leaves the chooser (or a comment box) open over the picture;
+ * - Ask reaches the host with the wrong file, lines or side, or leaves the
+ *   chooser (or a comment box) open;
  * - Comment no longer opens the comment box for the same lines;
  * - the bar stops reading the lines the diff painted (the side the selection
  *   ends on, this selection's diff when another has lines painted too), or stops
@@ -101,37 +101,31 @@ describe.skipIf(!hasDom)('the selection chooser', () => {
     expect(commentBox()).not.toBeNull();
   });
 
-  test('Show me and Ask hand the host the lines, and close the chooser', () => {
-    const shown: DiffSelection[] = [];
+  test('Ask hands the host the lines, and closes the chooser', () => {
     const asked: DiffSelection[] = [];
-    const ref = mount({ onShowMe: (s) => shown.push(s), onAsk: (s) => asked.push(s) });
-    expect([...chooser()!.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Comment', 'Ask', 'Show me']);
+    const ref = mount({ onAsk: (s) => asked.push(s) });
+    expect([...chooser()!.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Comment', 'Ask']);
     expect(commentBox()).toBeNull();
-    act(() => document.querySelector<HTMLButtonElement>('[data-selection-action="show-me"]')!.click());
-    expect(shown).toEqual([{ filePath: 'src/retry-worker.ts', lineStart: 16, lineEnd: 18, side: 'new' }]);
+    act(() => document.querySelector<HTMLButtonElement>('[data-selection-action="ask"]')!.click());
+    expect(asked).toEqual([{ filePath: 'src/retry-worker.ts', lineStart: 16, lineEnd: 18, side: 'new' }]);
     expect(chooser()).toBeNull();
     expect(commentBox()).toBeNull();
 
     act(() => ref.current!.handleLineSelectionEnd({ start: 15, end: 15, side: 'additions' }));
     act(() => document.querySelector<HTMLButtonElement>('[data-selection-action="ask"]')!.click());
-    expect(asked).toEqual([{ filePath: 'src/retry-worker.ts', lineStart: 15, lineEnd: 15, side: 'new' }]);
+    expect(asked[1]).toEqual({ filePath: 'src/retry-worker.ts', lineStart: 15, lineEnd: 15, side: 'new' });
   });
 
-  test('deleted (old-side) lines offer no Show me: a picture is of the code as it is now; Ask stays', () => {
-    const shown: DiffSelection[] = [];
-    const ref = mount({ onShowMe: (s) => shown.push(s), onAsk: () => {} });
+  test('deleted (old-side) lines offer Comment and Ask too', () => {
+    const ref = mount({ onAsk: () => {} });
     act(() => ref.current!.handleLineSelectionEnd({ start: 14, end: 14, side: 'deletions' }));
     expect([...chooser()!.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Comment', 'Ask']);
-    // A drag from a new-side line onto a deleted one: one end is old, so no Show me either.
     act(() => ref.current!.handleLineSelectionEnd({ start: 16, end: 14, side: 'additions', endSide: 'deletions' }));
     expect([...chooser()!.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Comment', 'Ask']);
-    act(() => ref.current!.handleLineSelectionEnd({ start: 15, end: 17, side: 'additions', endSide: 'additions' }));
-    expect([...chooser()!.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Comment', 'Ask', 'Show me']);
-    expect(shown).toEqual([]);
   });
 
   test('Comment opens the comment box for the same lines', () => {
-    mount({ onShowMe: () => {} });
+    mount({ onAsk: () => {} });
     act(() => document.querySelector<HTMLButtonElement>('[data-selection-action="comment"]')!.click());
     expect(chooser()).toBeNull();
     expect(commentBox()).not.toBeNull();
@@ -141,7 +135,7 @@ describe.skipIf(!hasDom)('the selection chooser', () => {
     const placed = () => ({ top: chooser()!.style.top, left: chooser()!.style.left, transform: chooser()!.style.transform, hidden: chooser()!.style.visibility });
 
     test('under the painted lines, at the start of their code, and not until it has read them', async () => {
-      const ref = mount({ onShowMe: () => {} });
+      const ref = mount({ onAsk: () => {} });
       // Nothing painted yet: unseen, not flashed at the pointer.
       expect(placed().hidden).toBe('hidden');
       paintedDiff([{ line: 16, top: 300, left: 803 }, { line: 18, top: 340, left: 803 }]);
@@ -155,7 +149,7 @@ describe.skipIf(!hasDom)('the selection chooser', () => {
         { column: 'deletions', line: 18, top: 340, left: 100 },
         { column: 'additions', line: 18, top: 340, left: 803 },
       ]);
-      const ref = mount({ onShowMe: () => {} });
+      const ref = mount({ onAsk: () => {} });
       await frames();
       expect(placed().left).toBe('803px');
       act(() => ref.current!.handleLineSelectionEnd({ start: 16, end: 18, side: 'deletions' }));
@@ -177,7 +171,7 @@ describe.skipIf(!hasDom)('the selection chooser', () => {
         code.style.display = 'contents';
         code.style.overflowY = 'hidden';
       });
-      mount({ onShowMe: () => {} });
+      mount({ onAsk: () => {} });
       await frames();
       expect(chooser(), 'the bar shows').not.toBeNull();
       expect(placed()).toEqual({ top: '366px', left: '803px', transform: '', hidden: '' });
@@ -186,7 +180,7 @@ describe.skipIf(!hasDom)('the selection chooser', () => {
     test("another diff's painted lines don't take it: this selection's last line does", async () => {
       paintedDiff([{ line: 5, top: 100, left: 300 }]);
       paintedDiff([{ line: 18, top: 500, left: 803 }]);
-      mount({ onShowMe: () => {} });
+      mount({ onAsk: () => {} });
       await frames();
       expect(placed()).toMatchObject({ top: '526px', left: '803px' });
     });
@@ -200,7 +194,7 @@ describe.skipIf(!hasDom)('the selection chooser', () => {
     test("a diff nearer the pointer with other lines painted waits behind this selection's own", async () => {
       paintedDiff([{ line: 5, top: 120, left: 300 }]);
       paintedDiff([{ line: 18, top: 500, left: 803 }]);
-      pickedAt(mount({ onShowMe: () => {} }), 120);
+      pickedAt(mount({ onAsk: () => {} }), 120);
       await frames();
       expect(placed()).toMatchObject({ top: '526px', left: '803px' });
     });
@@ -208,7 +202,7 @@ describe.skipIf(!hasDom)('the selection chooser', () => {
     test('the same line painted in two diffs: the one by the pointer', async () => {
       paintedDiff([{ line: 18, top: 100, left: 300 }]);
       paintedDiff([{ line: 18, top: 500, left: 803 }]);
-      pickedAt(mount({ onShowMe: () => {} }), 480);
+      pickedAt(mount({ onAsk: () => {} }), 480);
       await frames();
       expect(placed()).toMatchObject({ top: '526px', left: '803px' });
       pickedAt({ current: lastRef }, 90);
@@ -218,13 +212,13 @@ describe.skipIf(!hasDom)('the selection chooser', () => {
 
     test("only another selection's lines to read, once it has waited: those, not the pointer", async () => {
       paintedDiff([{ line: 5, top: 200, left: 300 }]);
-      mount({ onShowMe: () => {} });
+      mount({ onAsk: () => {} });
       await frames();
       expect(placed()).toMatchObject({ top: '226px', left: '300px', transform: '' });
     });
 
     test('nothing on the diff to read: the pointer, centred, on screen', async () => {
-      mount({ onShowMe: () => {} });
+      mount({ onAsk: () => {} });
       await frames();
       expect(placed().hidden).toBe('');
       expect(placed().transform).toBe('translateX(-50%)');
@@ -232,7 +226,7 @@ describe.skipIf(!hasDom)('the selection chooser', () => {
 
     test('it follows its lines when they move, with nothing to announce it', async () => {
       paintedDiff([{ line: 18, top: 340, left: 803 }]);
-      mount({ onShowMe: () => {} });
+      mount({ onAsk: () => {} });
       await frames();
       expect(placed().top).toBe('366px');
       const rows = [...document.querySelector('diffs-container')!.shadowRoot!.querySelectorAll<HTMLElement>('[data-selected-line]')];
@@ -246,7 +240,7 @@ describe.skipIf(!hasDom)('the selection chooser', () => {
 
     test('two files sharing line numbers: it stays on the diff it found, and hides rather than go to the other', async () => {
       const a = paintedDiff([{ line: 18, top: 340, left: 803 }]);
-      mount({ onShowMe: () => {} });
+      mount({ onAsk: () => {} });
       await frames();
       expect(placed().top).toBe('366px');
       // The other file now has a line of that number painted, nearer the pointer, and this one has none.
@@ -259,7 +253,7 @@ describe.skipIf(!hasDom)('the selection chooser', () => {
 
     test('painted in both files: it stays on the one it found', async () => {
       paintedDiff([{ line: 18, top: 340, left: 803 }]);
-      mount({ onShowMe: () => {} });
+      mount({ onAsk: () => {} });
       await frames();
       paintedDiff([{ line: 18, top: 500, left: 40 }]);
       await frames(3);
@@ -268,7 +262,7 @@ describe.skipIf(!hasDom)('the selection chooser', () => {
 
     test('its lines dropped by the diff: hidden, the + back, and shown again when they return', async () => {
       const diff = paintedDiff([{ line: 18, top: 340, left: 803 }]);
-      mount({ onShowMe: () => {} });
+      mount({ onAsk: () => {} });
       await frames();
       expect(chooser()).not.toBeNull();
       const rows = [...diff.shadowRoot!.querySelectorAll<HTMLElement>('[data-selected-line]')];
@@ -283,7 +277,7 @@ describe.skipIf(!hasDom)('the selection chooser', () => {
 
     test('its lines off the top or the bottom of the viewport: hidden', async () => {
       const diff = paintedDiff([{ line: 18, top: 340, left: 803 }]);
-      mount({ onShowMe: () => {} });
+      mount({ onAsk: () => {} });
       await frames();
       const rows = [...diff.shadowRoot!.querySelectorAll<HTMLElement>('[data-selected-line]')];
       const moveTo = (top: number) => {
@@ -310,7 +304,7 @@ describe.skipIf(!hasDom)('the selection chooser', () => {
       scroller.getBoundingClientRect = () => ({ top: 400, bottom: 700, left: 0, right: 900, width: 900, height: 300, x: 0, y: 400, toJSON: () => ({}) }) as DOMRect;
       document.body.appendChild(scroller);
       paintedDiff([{ line: 18, top: 340, left: 803 }], scroller);
-      mount({ onShowMe: () => {} });
+      mount({ onAsk: () => {} });
       await frames();
       expect(barEl()!.style.visibility).toBe('hidden');
     });
@@ -324,7 +318,7 @@ describe.skipIf(!hasDom)('the selection chooser', () => {
       document.body.appendChild(scroller);
       // The lines fill the screen from just under the header to its bottom.
       paintedDiff([{ line: 16, top: 50, left: 803 }, { line: 18, top: window.innerHeight - 10, left: 803 }], scroller);
-      mount({ onShowMe: () => {} });
+      mount({ onAsk: () => {} });
       await frames();
       expect(Number.parseFloat(placed().top)).toBeGreaterThanOrEqual(46 + 8);
     });
@@ -337,7 +331,7 @@ describe.skipIf(!hasDom)('the selection chooser', () => {
     test('<html> is marked exactly while the bar carries [data-selection-chooser]', async () => {
       setPageMarks(true);
       const diff = paintedDiff([{ line: 18, top: 340, left: 803 }]);
-      mount({ onShowMe: () => {} });
+      mount({ onAsk: () => {} });
       await frames();
       expect(chooser()).not.toBeNull();
       expect(marked()).toBe(true);
@@ -356,7 +350,7 @@ describe.skipIf(!hasDom)('the selection chooser', () => {
 
     test('off (every other host): nothing is marked', async () => {
       paintedDiff([{ line: 18, top: 340, left: 803 }]);
-      mount({ onShowMe: () => {} });
+      mount({ onAsk: () => {} });
       await frames();
       expect(chooser()).not.toBeNull();
       expect(marked()).toBe(false);

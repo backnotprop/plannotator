@@ -76,7 +76,8 @@ function serve() {
     const url = String(input);
     if (url.includes(NOTES.id) && url.includes('/view')) return Response.json({ attachment: NOTES, version: 'current', text: FILE_TEXT, html: null });
     if (url.includes('/attachments')) return Response.json({ serverSession: 's', attachments: [NOTES], annotations: [] });
-    if (url.endsWith('/artifact-pins')) return Response.json({ pins: [] });
+    // The file's pin reads every machine's pins (`/artifact-pins?machines=1`): none.
+    if (url.includes('/artifact-pins')) return Response.json({ pins: [] });
     return Response.json({});
   }) as typeof fetch;
 }

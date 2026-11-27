@@ -862,6 +862,9 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
         diffActive: !!diffActive,
         bridgeScriptUrl: bridgeUrl,
         linkKey,
+        // The page starts in the mode showing now (read, not a dependency: a
+        // mode switch posts set-annotate-mode and never rebuilds the page).
+        startInteract: !annotateModeActiveRef.current,
       });
       // In the host's text the pinned element's box is a ring around it, a little off its edge, so it shows
       // on an element of the accent's own colour (a chart's bar) in either theme.

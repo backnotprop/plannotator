@@ -8,7 +8,7 @@ import { isImeCompositionKey } from '@plannotator/ui/utils/commentSubmitKey';
 import { generateId } from '@plannotator/ui/utils/generateId';
 import { ReplyRow } from '../components/ReplyRow';
 import { Tip } from '../components/Tip';
-import { inboxApi, type InboxAskChat, type InboxAskConversationWire, type InboxAskModel, type InboxAskPosted, type InboxAskTurnWire, type InboxShowMeAsk } from '../api';
+import { inboxApi, type InboxAskChat, type InboxAskConversationWire, type InboxAskModel, type InboxAskPosted, type InboxAskTurnWire } from '../api';
 import { isTouchPhone } from '../phone';
 import { errorText } from '../toastError';
 import { AskChatMenu } from './AskChatMenu';
@@ -145,8 +145,8 @@ export function AskChat({ threadId, store, model, picked, phone, focusRequest, s
     void chat.ask({ prompt: question, ...(source ? { contextPreamble: source } : {}), ...(policy ? { busyPolicy: policy } : {}) }, { providerId });
   };
 
-  const post = async (turnId: string, question: string, showMe?: InboxShowMeAsk, source?: string): Promise<InboxAskPosted> => {
-    const posted = await inboxApi.askSend(threadId, turnId, question, showMe, source);
+  const post = async (turnId: string, question: string, source?: string): Promise<InboxAskPosted> => {
+    const posted = await inboxApi.askSend(threadId, turnId, question, source);
     onConversation(posted.conversation);
     return posted;
   };
@@ -162,7 +162,7 @@ export function AskChat({ threadId, store, model, picked, phone, focusRequest, s
     const turnId = generateId('ask');
     const source = askSourceFor(question, sources.current);
     try {
-      const posted = await post(turnId, question, undefined, source);
+      const posted = await post(turnId, question, source);
       // Only now: a refused question keeps its words, and words added meanwhile stay.
       setWords((box) => (box.trim() === question ? '' : box));
       sources.current = sources.current.filter((s) => !question.includes(s.quote));
@@ -188,15 +188,7 @@ export function AskChat({ threadId, store, model, picked, phone, focusRequest, s
     keepFocusHere();
     const shownFor = live?.session;
     try {
-      // A Show me asks again as a Show me: the agent's request for a Shape, the same lines.
-      const posted = await post(
-        turn.id,
-        turn.question,
-        turn.kind === 'show_me' && turn.show_me
-          ? { kind: 'show_me', show_me: turn.show_me, ...(turn.again_shape !== undefined ? { again_shape: turn.again_shape } : {}) }
-          : undefined,
-        turn.source,
-      );
+      const posted = await post(turn.id, turn.question, turn.source);
       // A busy choice holds for the session the person saw busy. A retry goes to the thread's owner now, and
       // after a hand-off that one gets its own note: it is never interrupted on a choice made about another.
       if (posted.provider_id) answer(posted, turn.question, posted.provider_id, posted.turn.session === shownFor ? policy : undefined, turn.source);
@@ -260,7 +252,8 @@ export function AskChat({ threadId, store, model, picked, phone, focusRequest, s
       <div className="ib-ask-note" data-ask-note="unanswered">
         <p>{note ?? 'No answer arrived.'}</p>
         <span className="ib-ask-noteacts">
-          {turn.answer === undefined && (
+          {/* An older Inbox's Show me (`kind: "show_me"`) is not asked again: nothing here makes one any more. */}
+          {turn.answer === undefined && turn.kind !== 'show_me' && (
             <button type="button" className="ib-ask-notebtn" disabled={busy || posting} onClick={() => void askAgain(turn)}>
               Ask again
             </button>

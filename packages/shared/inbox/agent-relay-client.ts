@@ -37,7 +37,7 @@ export function isInboxAgentWrite(tool: string, args: Record<string, unknown>): 
   if (tool === "routine") return !ROUTINE_READ_OPS.includes(args.op);
   // A command's window route (inbox-agent-routes.ts): a GET reads, a POST changes something.
   if (tool === "route") return args.method !== "GET";
-  if (tool === "thread_pulls") return listed(args.add) || listed(args.remove);
+  if (tool === "thread_pulls") return listed(args.add) || listed(args.remove) || listed(args.ship);
   return true;
 }
 

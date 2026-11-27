@@ -10,6 +10,8 @@ import type { SentAnswerGroup } from '../../sentReply';
 import type { FileRef } from '../../fileRefs';
 
 export interface MessageBodyProps {
+  /** Draw only this question's card (decision mode, one question at a time); absent: the whole message. */
+  onlyQuestion?: string;
   /** A question with a prototype (an option's, or one for all) was asked to open it (its key). Absent: no "Try prototype" tab. */
   onTryPrototype?: (key: string) => void;
   /**
@@ -41,6 +43,11 @@ export interface MessageBodyProps {
    * that is a path, a bare path, a picture that did not load) opens beside the thread. Absent: as before.
    */
   onOpenFileRef?: (ref: FileRef) => void;
+  /**
+   * A skill the person's sent message used (its chip in the words, its name on the skills line) opens its file
+   * beside the thread (SkillFilePane). Absent: the chips and names are plain, as before.
+   */
+  onOpenSkill?: (name: string) => void;
   /** An image the body shows was clicked (or pressed): its captured file (`inline_images`) opens in the viewer. */
   onOpenInlineImage?: (image: InboxInlineImage) => void;
   /**
@@ -50,6 +57,12 @@ export interface MessageBodyProps {
    * like any image of the body.
    */
   onOpenOptionSet?: (key: string, image: InboxInlineImage, choice: number) => void;
+  /**
+   * An image the body shows whose file the store has not captured yet (no `inline_images` record) was opened: the
+   * host shows it (decision mode: its own viewer, inside its modal dialog, so the picture is never behind it).
+   * Absent: the plain lightbox over the page.
+   */
+  onOpenUncapturedImage?: (src: string, alt: string) => void;
   readOnly: boolean;
   /** The thread's questions moved to another thread (its root's `moved_to`): a card the archive closed reads "Closed". */
   movedThread?: boolean;

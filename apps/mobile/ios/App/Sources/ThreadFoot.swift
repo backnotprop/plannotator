@@ -17,11 +17,22 @@ struct Composer: View {
   var inCard = false
   /// The computer's draft the words came from: sending them clears it there too.
   var clearDraft: String?
+  /// What Take back is doing in this thread: its note stands over the box until the next Send.
+  var takeBack: TakeBackState?
+  /// The window's error toast (a 👍 the Inbox refused, in its own words).
+  var tell: (String) -> Void = { _ in }
   /// Go to a card.
   let go: (String) -> Void
   let jump: () -> Void
   /// Open the list of comments on files that wait for this Send.
   var comments: () -> Void = {}
+  /// Where the caret is in the words: `@` opens the list of agents to tag right before it.
+  @State private var selection: TextSelection?
+  /// The list of agents is open: it opens when the person types an `@`, never when they delete back to one.
+  @State private var tagging = false
+  /// Any emoji's sheet, from 👍's tray, and the emoji picked in it.
+  @State private var anyEmoji = false
+  @State private var emoji: String?
 
   /// The fade over the reply field, at the top of the foot: what scrolls under it fades into it. It grows with the
   /// text (14 points at the default size, up to 24), so a line cut at the foot fades out rather than being sliced.
@@ -62,6 +73,12 @@ struct Composer: View {
     // What scrolls under the reply field fades into it: no card or line is cut through by a hard edge. The fade
     // is part of the foot, so the page's room ends where it begins and nothing rests under it.
     .padding(.top, fade)
+    .sheet(isPresented: $anyEmoji) {
+      AnyEmojiSheet { picked in
+        anyEmoji = false
+        emoji = picked
+      }
+    }
     .background {
       VStack(spacing: 0) {
         LinearGradient(colors: [Token.background.opacity(0), Token.background], startPoint: .top, endPoint: .bottom)
@@ -99,6 +116,15 @@ struct Composer: View {
         .font(TextRole.meta)
         .foregroundStyle(Token.destructive)
         .padding(.horizontal, Space.close)
+    }
+    if let note = takeBack?.note {
+      Label(note, systemImage: "arrow.uturn.backward")
+        .font(TextRole.meta)
+        .foregroundStyle(Token.mutedForeground)
+        .padding(.horizontal, Space.close)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(note)
+        .accessibilityIdentifier("take-back-note")
     }
     if guarded, let stale = session.stale[id] {
       // As wide as the cards above it.
@@ -194,12 +220,63 @@ struct Composer: View {
     .accessibilityIdentifier("thread-comments")
   }
 
+  /// 👍 Looks good stands beside the field only while the box is empty, as beside the window's Reply.
+  private var ackTarget: InboxMessageWire? {
+    guard words.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, files.isEmpty, quote == nil, !guarded else { return nil }
+    return session.ackTarget(id)
+  }
+
+  /// Where the caret is, in UTF-16 units as the window counts; at the end when the field has no caret.
+  private var caret: Int {
+    if case .selection(let range)? = selection?.indices, range.upperBound <= words.endIndex { return words.utf16.distance(from: words.utf16.startIndex, to: range.upperBound) }
+    return words.utf16.count
+  }
+
+  private var trigger: MentionTrigger? { session.tagsOffered(id) ? TagRules.trigger(words, caret: caret) : nil }
+
+  /// The rows `@` offers for what was typed after it, or nil while the list is closed. A query nobody matches
+  /// closes it (prose after a tag); a bare `@` with nobody at all says so.
+  private var tagShown: (rows: [TagOption], empty: Bool)? {
+    guard tagging, !inCard, let trigger else { return nil }
+    let options = session.tagOptions(id) { TimeWords().when($0) }
+    if options.isEmpty { return trigger.query.isEmpty ? ([], true) : nil }
+    let tagged = Set(session.standingTags(id, words: words).map(\.session))
+    let rows = TagRules.matches(options, trigger: trigger, tagged: tagged)
+    return rows.isEmpty ? nil : (rows, false)
+  }
+
+  /// The words changed: an `@` typed (or a name after it) opens the list, a deletion never does; one already open
+  /// stays while its `@` does.
+  private func typed(_ before: String, _ now: String) {
+    let grew = now.utf16.count > before.utf16.count
+    guard let found = TagRules.trigger(now, caret: grew && now.hasPrefix(before) ? now.utf16.count : caret) else { return tagging = false }
+    if grew { tagging = true }
+    // Who can be tagged is read when an `@` is typed (it stands ten seconds).
+    if found.query.isEmpty { Task { await session.readTaggable(id) } }
+  }
+
+  private func pickTag(_ option: TagOption) {
+    guard let trigger else { return }
+    // A session on an older Plannotator: nothing goes in, and it says why.
+    guard option.taggable else { return AccessibilityNotification.Announcement(PhoneWords.tagBlocked(option.label)).post() }
+    let made = TagRules.pick(words, trigger, label: option.label)
+    session.pickTag(id, words: made.text, option: option)
+    tagging = false
+    words = made.text
+    selection = TextSelection(insertionPoint: String.Index(utf16Offset: min(made.caret, made.text.utf16.count), in: made.text))
+    AccessibilityNotification.Announcement(TagRules.picked(option)).post()
+  }
+
   private func box(jumps: Bool) -> some View {
     // What the Send carries and what waits for the computer's network; the strip stays while any comment waits, so
     // the list says why one does not go.
     let riding = session.commentsCounted(id).count
     let waiting = !session.comments(id).isEmpty
     return VStack(spacing: 0) {
+      if let shown = tagShown {
+        TagList(options: shown.rows, empty: shown.empty, pick: pickTag)
+        Hairline().padding(.horizontal, Space.card)
+      }
       if jumps, waits != nil {
         jumpStrip
         Hairline().padding(.horizontal, Space.card)
@@ -222,7 +299,7 @@ struct Composer: View {
       HStack(alignment: .bottom, spacing: 0) {
         if jumps, waits == nil { jumpMark.frame(minHeight: oneLine) }
         AttachButton(session: session, place: .thread(id)).frame(minHeight: oneLine).padding(.leading, jumps && waits == nil ? 0 : Space.tight)
-        TextField("", text: $words, axis: .vertical)
+        TextField("", text: $words, selection: $selection, axis: .vertical)
           .lineLimit(1...6)
           .font(TextRole.body)
           .focused(focused)
@@ -245,9 +322,19 @@ struct Composer: View {
           }
           .frame(minHeight: Size.replyRow)
           .accessibilityLabel(hint)
+          .onChange(of: words) { before, now in typed(before, now) }
+          // Taken back: the caret at the end of the words that came back.
+          .onChange(of: takeBack?.note) { _, now in if now != nil { selection = TextSelection(insertionPoint: words.endIndex) } }
+        if let target = ackTarget {
+          LooksGoodButton(session: session, id: id, message: target, tell: tell, anyEmoji: $anyEmoji, picked: $emoji).frame(minHeight: oneLine)
+            // The bar's limit, without the Large Content Viewer: a hold on it opens the tray.
+            .dynamicTypeSize(...Size.barText)
+        }
         Button {
           guard !pressed else { return }
           pressed = true
+          takeBack?.note = nil
+          tagging = false
           // Words typed on a card and not saved yet are saved first: what is on screen is what is sent.
           drafts.saveAll()
           let text = words

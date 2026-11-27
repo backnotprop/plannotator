@@ -1,7 +1,7 @@
 /**
  * A ULID (48-bit millisecond time + 80 random bits, Crockford base32), so ids
  * sort by creation time and a later sync can keep them as they are. The
- * Inbox's ids (`msg_…`) and Shape's (`shp_…`) use it. No imports: Pi vendors it.
+ * Inbox's ids (`msg_…`) use it. No imports.
  */
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 

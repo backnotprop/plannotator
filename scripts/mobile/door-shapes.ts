@@ -11,7 +11,7 @@
 import type { InboxDevicePublic } from '../../packages/shared/inbox/devices';
 import type { InboxAnnotationRecord, InboxAttachmentState } from '../../packages/core/inbox-attachments';
 import type { InboxRowSnooze } from '../../packages/core/inbox-snooze';
-import type { InboxComposeProject, InboxListRow, InboxMessageWire, InboxQuestion, InboxRecordKind, InboxReplyDraft, InboxUpload } from '../../packages/core/inbox-types';
+import type { InboxComposeProject, InboxDraft, InboxListRow, InboxMessageWire, InboxQuestion, InboxRecordKind, InboxReplyDraft, InboxUpload } from '../../packages/core/inbox-types';
 import type { QuestionAnswer } from '../../packages/core/question-block';
 import type { inboxPickBody } from '../../packages/core/inbox-answers';
 
@@ -262,6 +262,60 @@ export interface DoorComposeAnswer {
    * record of it) answers without it. */
   project?: { id: string; name: string; root: string };
   replayed: boolean;
+}
+
+/** `GET threads/:id/taggable` (packages/server/inbox-tags.ts `InboxTaggableSession`, a server type the schema does
+ * not read): who the person can tag with `@` in this thread's reply box. */
+export interface DoorTaggableSession {
+  session: string;
+  host: string | null;
+  /** `live`: its connection polls (woken); `mcp`: it reads the Inbox only (not woken). */
+  kind: 'live' | 'mcp';
+  /** The name an MCP agent gave itself; null otherwise. */
+  name: string | null;
+  /** A live session's own title, when it has one. */
+  label?: string;
+  project: { id: string | null; name: string; root: string | null } | null;
+  started_at: string | null;
+  last_at: string;
+  busy: boolean | null;
+  idle_since: string | null;
+  /** False: a live session on an older Plannotator (update it to tag it). */
+  taggable: boolean;
+  /** The session the reply goes to anyway. */
+  owner: boolean;
+  /** It wrote in this thread. */
+  wrote_thread: boolean;
+}
+
+/** `GET threads/:id/taggable` answers. */
+export interface DoorTaggableAnswer {
+  serverSession: string;
+  owner: { host: string | null; session: string } | null;
+  sessions: DoorTaggableSession[];
+}
+
+/** `POST messages/:id/ack` (packages/server/inbox.ts, the 👍 Looks good route): `ack: false` takes it back; `reaction`
+ * is the tray's emoji (null: 👍 Looks good again; absent: the ack's emoji as it is). */
+export interface DoorAckBody {
+  idempotency_key: string;
+  ack?: boolean;
+  reaction?: { emoji: string; label?: string } | null;
+}
+
+/** `POST messages/:id/ack` answers (`InboxStore.ackMessage`): the message with its ack, and its thread's row. */
+export interface DoorAckAnswer {
+  message: InboxMessageWire;
+  thread: InboxListRow;
+}
+
+/** `POST messages/:id/take-back` answers (packages/server/inbox-take-back.ts): the message, and the draft its words went
+ * back to on the computer: the thread's reply draft, or, for a thread's lone first message, a New message draft. Both
+ * null when it was taken back already. */
+export interface DoorTakeBackAnswer {
+  message: InboxMessageWire;
+  draft: InboxReplyDraft | null;
+  compose: InboxDraft | null;
 }
 
 /** `POST uploads?name=&idempotency_key=` (the file's own bytes) answers the pending upload a Send names. */

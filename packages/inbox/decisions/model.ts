@@ -1,10 +1,11 @@
 /**
- * Decision mode's queue (approval "inbox-decision-mode", direction A "Queue";
- * experimental). Pure: the queue's state lives in the window only (brief §10:
- * no new storage), built from `GET /api/inbox/decisions` and kept as the
- * person walks it. Picks go through the existing picks route; a session's
- * reply goes through the existing reply route, one per agent session per
- * thread (`sendTargetsOf`), once its last decision there is handled.
+ * Decision mode's queue (approval "inbox-decision-mode", direction A "Queue").
+ * Pure: the queue's state lives in the window only (brief §10: no new
+ * storage), built from `GET /api/inbox/decisions` and kept as the person walks
+ * it. Picks go through the existing picks route and wait as drafts; nothing
+ * sends by itself (the owner, 2026-11-24). The person's Send sends what is
+ * answered through the existing reply route, one reply per agent session per
+ * thread (`sendTargetsOf`); what is not answered stays open.
  */
 import type { InboxDecision, InboxListRow, InboxMessageWire, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
 import { readInboxQuestionKind, inboxAgentName } from '@plannotator/core/inbox-types';
@@ -185,15 +186,12 @@ export function groupIds(state: QueueState, key: string): string[] {
 
 /**
  * The answers of a group no reply of this sitting carried yet: picked
- * questions still in the queue (a group of action items alone sends nothing:
- * the actions route sends those by itself after its own Undo window).
- * `carried`: the decisions this sitting's replies already took.
+ * questions, and action items whose Done or Can't do it waits in the thread's
+ * draft, still in the queue. `carried`: the decisions this sitting's replies
+ * already took.
  */
 export function freshPicks(state: QueueState, key: string, carried: ReadonlySet<string> = new Set()): string[] {
-  return groupIds(state, key).filter((id) => {
-    const decision = state.cache.get(id)!;
-    return !state.gone.has(id) && !carried.has(id) && !isActionDecision(decision) && decision.question.state === 'picked';
-  });
+  return groupIds(state, key).filter((id) => !state.gone.has(id) && !carried.has(id) && state.cache.get(id)!.question.state === 'picked');
 }
 
 /**
@@ -214,75 +212,6 @@ export function groupHalfAnswered(state: QueueState, key: string, carried: Reado
   return freshPicks(state, key, carried).length > 0 && !groupReady(state, key, carried);
 }
 
-/** How long a session's reply waits before it goes, so the person can hold it (brief §9). */
-export const DECISION_HOLD_MS = 5000;
-
-/** The Hold a group starts: 5 s, or paused at 5 s while decision mode is tucked behind a thread. */
-export function startHold(now: number, open: boolean): GroupSend {
-  return { kind: 'hold', until: now + DECISION_HOLD_MS, paused: open ? null : DECISION_HOLD_MS };
-}
-
-/** The facts a group's send state moves on. */
-export interface GroupSendFacts {
-  /** `groupReady`: everything handled, and an answer no reply carried yet. */
-  ready: boolean;
-  /** An answer no reply carried yet is one the person gave in this sitting (`freshPicks` holds a touched id). */
-  touched: boolean;
-  /** The thread holds a reply draft (the row's `unsent.reply_at`): its reply goes from the thread. */
-  draft: boolean;
-  /** The dialog is on screen (not tucked behind a thread). */
-  open: boolean;
-  now: number;
-}
-
-/**
- * The send state machine of one group (one reply per agent session per thread):
- *
- *   waiting → hold (5 s) → sending → sent, or failed (Try again).
- *
- * Only a group the person touched in this sitting starts a Hold by itself.
- * One that was ready before the sitting opened (its picks saved with "Keep as
- * a draft") waits as "Held · Send" for the person's Send. A thread with a
- * reply draft never sends from here: its reply goes from the thread, with the
- * words. A sent group whose follow-up question the person answered goes round
- * again (waiting, then a Hold).
- */
-export function nextGroupSend(state: GroupSend, facts: GroupSendFacts): GroupSend {
-  if (state.kind === 'sending') return state;
-  // A failed reply waits for Try again while there is something to send; once there is not (undone, sent
-  // from the thread), it is just waiting.
-  if (state.kind === 'failed') return facts.ready ? state : { kind: 'waiting' };
-  if (state.kind === 'sent') return facts.ready ? nextGroupSend({ kind: 'waiting' }, facts) : state;
-  if (!facts.ready) return state.kind === 'waiting' ? state : { kind: 'waiting' };
-  if (facts.draft) return state.kind === 'draft' ? state : { kind: 'draft', held: state.kind === 'held' && state.by === 'person' };
-  // The draft went: a Hold the person pressed before it is kept.
-  if (state.kind === 'draft' && state.held) return { kind: 'held', by: 'person' };
-  // An Undo took back the answer the person gave in this sitting: what is left was ready before it, so it waits.
-  if (state.kind === 'hold') return facts.touched ? state : { kind: 'held', by: 'untouched' };
-  if (state.kind === 'held' && state.by === 'person') return state;
-  if (!facts.touched) return state.kind === 'held' ? state : { kind: 'held', by: 'untouched' };
-  return startHold(facts.now, facts.open);
-}
-
-/** A Hold paused (tucked) or running again (back on screen); every other state as it is. */
-export function pauseHold(state: GroupSend, open: boolean, now: number): GroupSend {
-  if (state.kind !== 'hold') return state;
-  if (!open && state.paused === null) return { ...state, paused: Math.max(0, state.until - now) };
-  if (open && state.paused !== null) return { kind: 'hold', until: now + state.paused, paused: null };
-  return state;
-}
-
-/** A pick in a group whose Hold runs gives the person the whole 5 s again. */
-export function restartHold(state: GroupSend, now: number, open: boolean): GroupSend {
-  return state.kind === 'hold' ? startHold(now, open) : state;
-}
-
-/** The seconds a Hold shows: never more than the Hold itself, whatever clock the render read. */
-export function holdSeconds(state: Extract<GroupSend, { kind: 'hold' }>, now: number): number {
-  const left = state.paused ?? state.until - now;
-  return Math.min(DECISION_HOLD_MS / 1000, Math.max(1, Math.ceil(left / 1000)));
-}
-
 /** Every send group the queue has met, in queue order. */
 export function groupKeys(state: QueueState): string[] {
   const out: string[] = [];
@@ -300,11 +229,12 @@ export function groupKeys(state: QueueState): string[] {
  * (`sendTargetsOf`, one per session; approval "inbox-explicit-skip"), kept to
  * this group's session and to the ones that carry an answer. The session's
  * action items whose Done or Can't do it waits in the thread's draft ride
- * along (`actions`), as picks do; alone they make no reply here. Words, files
- * and comments wait for the thread's own Send.
+ * along (`actions`), as picks do, and alone make a reply too (decision mode
+ * stages them as the thread does). Words, files and comments wait for the
+ * thread's own Send.
  */
 export function groupSendTargets(thread: InboxThread, sessionKey: string): SendTarget[] {
-  return sendTargetsOf(thread).filter((t) => sessionKeyOfMessage(t.message) === sessionKey && (t.questions.length > 0 || t.skip.length > 0));
+  return sendTargetsOf(thread).filter((t) => sessionKeyOfMessage(t.message) === sessionKey && (t.questions.length > 0 || t.skip.length > 0 || t.actions.length > 0));
 }
 
 // ─────────────────────────────── Chips ───────────────────────────────
@@ -312,18 +242,26 @@ export function groupSendTargets(thread: InboxThread, sessionKey: string): SendT
 /** Where a group's reply is. */
 export type GroupSend =
   | { kind: 'waiting' }
-  /** `paused`: the ms left while decision mode is tucked behind a thread (the Hold waits); null while it runs. */
-  | { kind: 'hold'; until: number; paused: number | null }
-  /** `person`: the person pressed Hold. `untouched`: ready before this sitting; it waits for a Send. */
-  | { kind: 'held'; by: 'person' | 'untouched' }
-  /**
-   * The thread holds a reply draft (or comments waiting for its Send): the reply goes from the thread, never
-   * from here. `held`: the person had pressed Hold before, kept when the draft goes.
-   */
-  | { kind: 'draft'; held: boolean }
+  /** The thread holds a reply draft (or comments waiting for its Send): the reply goes from the thread, never from here. */
+  | { kind: 'draft' }
   | { kind: 'sending' }
   | { kind: 'sent'; at: string }
-  | { kind: 'failed'; error: string };
+  /** `sent` of `of`: a group whose replies (one per message) went in part, the rest not. */
+  | { kind: 'failed'; error: string; sent?: number; of?: number };
+
+/**
+ * Whether a batch of records can have changed the decisions a window draws: it touched a thread whose decisions are
+ * drawn (`watched`), or a record named no thread. Any other batch leaves `GET /api/inbox/decisions` unread.
+ */
+export function batchTouches(records: { any: boolean; threads: ReadonlySet<string>; applied: ReadonlySet<string>; own: ReadonlySet<string> }, watched: ReadonlySet<string>): boolean {
+  if (records.any) return true;
+  return [records.threads, records.applied, records.own].some((ids) => [...ids].some((id) => watched.has(id)));
+}
+
+/** What a failed Send's chip says: "Not sent", or how much went when part of it did. */
+export function failedWords(send: { sent?: number; of?: number }): string {
+  return send.sent && send.of ? `${send.sent} of ${send.of} replies sent` : 'Not sent';
+}
 
 /** After a Send: Delivered, then working, then Replied (brief §4), from the list row and the connection. */
 export type AfterSend = 'sending' | 'stopped' | 'queued' | 'saved' | 'undelivered' | 'delivered' | 'working' | 'replied';
@@ -376,6 +314,8 @@ export interface SessionChip {
 
 export function sessionChips(state: QueueState): SessionChip[] {
   const chips = new Map<string, SessionChip>();
+  /** Each chip's projects, by whole name. */
+  const projectNames = new Map<string, string[]>();
   for (const id of state.order) {
     const decision = state.cache.get(id);
     if (!decision) continue;
@@ -392,7 +332,13 @@ export function sessionChips(state: QueueState): SessionChip[] {
         dots: [],
         groups: [],
       } satisfies SessionChip);
-    if (!chip.label.split(' · ').includes(decision.thread.project.name)) chip.label = `${chip.label} · ${decision.thread.project.name}`;
+    // Each project once, compared whole: a project's own name may hold " · " (a disambiguated name).
+    const names = projectNames.get(key) ?? [];
+    if (!names.includes(decision.thread.project.name)) {
+      names.push(decision.thread.project.name);
+      projectNames.set(key, names);
+      chip.label = names.join(' · ');
+    }
     const group = groupKeyOf(decision);
     if (!chip.groups.includes(group)) chip.groups.push(group);
     chip.dots.push({ id, state: id === state.current ? 'current' : isHandled(state, id) ? 'done' : state.later.has(id) ? 'later' : 'open' });
@@ -424,39 +370,6 @@ export function answerWords(answer: QuestionAnswer | null): string {
   if (answer.text?.trim()) parts.push(answer.text.trim());
   const words = parts.join(', ') || (answer.note ? 'A note' : 'No answer');
   return words.length > 120 ? `${words.slice(0, 119)}…` : words;
-}
-
-/**
- * The two-way choice a swipe answers: a single question with exactly two choices (brief §3: touch only,
- * two-way only), never a picture choice and never one marked `Reversible: no` (brief §11 question 4).
- */
-export function swipeChoices(question: InboxQuestion): [string, string] | null {
-  if (readInboxQuestionKind(question.kind) !== 'single' || question.choices.length !== 2) return null;
-  if (question.reversible || question.choices.some((choice) => choice.image)) return null;
-  return [question.choices[0]!.label, question.choices[1]!.label];
-}
-
-/** The swipe's hint under the card, the labels as their words; a swipe still commits the label as written. */
-export function swipeHint(choices: readonly [string, string]): string {
-  return `Swipe right for ${plainLabel(choices[0])}, left for ${plainLabel(choices[1])}.`;
-}
-
-/**
- * Whether an answer to a `Reversible: no` question asks once more before it counts (approval
- * "inbox-decision-mode", agent contract lines; contract-compare.html, pair 2): every answer that chooses
- * something (a pick, Other, text), the recommended one included, since the grammar does not say which
- * choice is the one that cannot be undone and an agent may recommend it. Never a Skip (nothing is chosen),
- * nor a note alone. False on a reversible question.
- */
-export function answerNeedsConfirm(question: InboxQuestion, answer: QuestionAnswer): boolean {
-  if (!question.reversible || answer.skipped) return false;
-  return answer.selected.length > 0 || !!answer.other?.trim() || !!answer.text?.trim();
-}
-
-/** The confirm button's words: the answer, cut at about 40 characters (its accessible name keeps it whole). */
-export const CONFIRM_LABEL_CHARS = 40;
-export function confirmLabel(words: string): string {
-  return words.length > CONFIRM_LABEL_CHARS ? `${words.slice(0, CONFIRM_LABEL_CHARS - 1).trimEnd()}…` : words;
 }
 
 /** The head's line: "5 of 16 · 6 agents waiting". */

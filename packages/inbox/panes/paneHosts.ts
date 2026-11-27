@@ -49,9 +49,9 @@ export function quietDigest(host: ThreadSlotHost, paneId: PaneId, thread: string
   return [
     thread, route.project, route.machine, route.agent, route.tag, host.openThreadRow, host.rowPatches.get(thread ?? ''), host.paired, host.full, host.stack.thread,
     host.phone, host.covered, host.rowsPending, host.settings, host.machines, host.outbox, host.pinnedIds, host.pinsOn, host.snoozeOn, host.soundOn,
-    host.boardEnabled, host.boardsOn, host.cards, host.pullsShown, host.reviewView, host.threadAgentContext, host.listTitle, host.fullSidebar,
+    host.boardEnabled, host.cards, host.pullsShown, host.reviewView, host.threadAgentContext, host.listTitle, host.fullSidebar,
     host.paneReads.view(paneId), thread ? drawnSection(host.shown, thread) : null, host.replyFor === thread, host.notifyAgainIn === thread,
-    host.askReply?.threadId === thread ? host.askReply : null, host.shapeReply?.threadId === thread ? host.shapeReply : null,
+    host.askReply?.threadId === thread ? host.askReply : null,
   ];
 }
 

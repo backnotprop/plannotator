@@ -159,6 +159,7 @@ import {
 import { readHostMessages, takeHostMessagesPath } from "./host-messages";
 import { exitOnPortInUse } from "./port-in-use";
 import { exitWhenParentGone } from "./orphan-plan-review";
+import { cliReviewAgentWatch, endReviewWhenAgentGone, noTabMsFromEnv } from "./review-agent-watch";
 import { parseModPlanInput, readModPlanRevision, writeModPlanRevisionAck } from "./claude-mod-plan";
 import { INBOX_SESSION_HOST_NAMES, inboxHostSessionFromEnv } from "./inbox-mcp-shim";
 import { isInboxSessionId } from "@plannotator/core/inbox-types";
@@ -264,20 +265,12 @@ import { completeAnnotateCommand } from "./annotate-command";
 import { ensureInboxRunning, inboxRemoteOpenHint, runInboxCommand, selfCommand as inboxSelfCommand } from "./inbox-command";
 import { runPlansCommand } from "./plans-command";
 import { runCardCommand } from "./card-command";
-import { runShapeCommand, runShapeSwitch, SHAPE_OFF_TEXT, shapeCommandFolder } from "./shape-command";
-// @ts-expect-error a text import of the optional helper file
-import SHAPE_KIT from "@plannotator/core/shape-kit.mjs" with { type: "text" };
-import { shapeBoardsOn } from "@plannotator/shared/shape/switch";
-import { isReviewDrawCommand } from "./review-draw-command";
-import { INBOX_REVIEW_DRAW_GONE } from "@plannotator/core/inbox-review";
-import { runShapeOpen, runShapeServe } from "./shape-open";
-import { runShapeFrame } from "./shape-frame";
-import { isShapeAnimateHelp, SHAPE_ANIMATE_HELP } from "@plannotator/core/shape-animate";
 import { inboxHelpTopic } from "./inbox-help-before-after";
 import { inboxPairedRouteFetch, runInboxCallCommand } from "./inbox-call-command";
 import { isInboxTurnedOn } from "@plannotator/shared/inbox/turned-on";
 import { runRoutineCommand } from "./routine-command";
 import { runInboxStepsCommand } from "./inbox-steps-command";
+import { runInboxCapabilityCommand } from "./inbox-capability-command";
 import { runInboxPullsCommand } from "./inbox-pulls-command";
 import { runInboxExportDecisionsCommand } from "./inbox-export-decisions-command";
 import { runFeedbackCommand } from "./feedback-command";
@@ -317,10 +310,6 @@ import planHtmlPath from "../dist/index.html" with { type: "file" };
 import reviewHtmlPath from "../dist/review.html" with { type: "file" };
 // @ts-ignore - Bun import attribute for file
 import inboxHtmlPath from "../dist/inbox.html" with { type: "file" };
-// The Shape page is embedded gzipped (about 3 MB instead of 13 MB; scripts/gzip-page.ts at build): the Shapes
-// server sends these bytes as they are to a browser that takes gzip, and unzips them once for one that does not.
-// @ts-ignore - Bun import attribute for file
-import shapeHtmlGzPath from "../dist/shape.html.gz" with { type: "file" };
 
 function embeddedPage(path: unknown): () => string {
   let html: string | undefined;
@@ -329,8 +318,6 @@ function embeddedPage(path: unknown): () => string {
 const planHtmlContent = embeddedPage(planHtmlPath);
 const reviewHtmlContent = embeddedPage(reviewHtmlPath);
 const inboxHtmlContent = embeddedPage(inboxHtmlPath);
-let shapeHtmlGz: Buffer | undefined;
-const shapeHtmlGzip = () => (shapeHtmlGz ??= readFileSync(shapeHtmlGzPath as unknown as string));
 
 // Code review's diagram engine: embedded too, read on first need.
 import { loadEmbeddedDiagramEngine } from "./diagram-engine";
@@ -377,81 +364,6 @@ const rawArgs = process.argv.slice(2);
         cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
         env: process.env,
         ensureRunning: () => ensureInboxRunning(cardDataDir),
-      }),
-    );
-  }
-}
-// `plannotator review draw …` / `plannotator review drawings <msg_id>`: Show me makes a Shape now, so an older
-// agent that still calls them is told where to go. Before the review parse, which would take `draw` for a ref. Only
-// while the person has Code review on, and only arguments of the old command's own shape: otherwise (off included)
-// the review parse takes them. Read quietly: a broken config.json is Code review off, and the parse warns once.
-// Shape off too (approval "code-review-029-shape-off"): the refusal points at Shape, so it is given only with both on;
-// otherwise the review parse takes the words, as with Code review off.
-if (isReviewDrawCommand(rawArgs, () => {
-  const config = loadConfig({ quiet: true });
-  return config.inboxCodeReview === true && config.inboxShape === true;
-})) {
-  process.stderr.write(`${INBOX_REVIEW_DRAW_GONE}\n`);
-  process.exit(1);
-}
-// `plannotator shape …`: an agent's side of Shape (shape-command.ts; unreleased,
-// HIDDEN_SUBCOMMANDS). It reads and writes the Shape store directly. Before the
-// strict-annotate parse, which takes `--file`-style flags for itself.
-{
-  const args = rawArgs;
-  // Off unless the person turned Shape on (Settings → Capabilities; Code review alone brings none of it, approval
-  // "code-review-029-shape-off"): no command and no help, so an agent learns nothing of it (the same switch hides the
-  // Pebble and the routes).
-  // `shape on|off` is the switch itself, so it runs either way (`on --help` still gets the off line).
-  if (args[0] === "shape" && (args[1] === "on" || args[1] === "off") && !hasHelpFlag(args.slice(2))) {
-    process.exit(runShapeSwitch(args.slice(1)));
-  }
-  if (args[0] === "shape" && !shapeBoardsOn({ quiet: false })) {
-    process.stderr.write(`${SHAPE_OFF_TEXT}\n`);
-    process.exit(1);
-  }
-  if (args[0] === "shape" && args[1] === "kit") {
-    await writeWholeToStdout(SHAPE_KIT);
-    process.exit(0);
-  }
-  // `shape open`: the Shape page without the Inbox (shape-open.ts); `shape serve` is its detached server.
-  // Bare `plannotator shape` is `shape open` with no id (every board), as bare `plannotator inbox` opens the Inbox.
-  if (args[0] === "shape" && (args.length === 1 || (args[1] === "open" && !hasHelpFlag(args.slice(2))))) {
-    process.exit(
-      await runShapeOpen(args.slice(2), {
-        dataDir: getPlannotatorDataDir(),
-        openUrl: (url) => openBrowserDetached(url, { isRemote: isRemoteSession() }),
-        // Bare: the page already open, if there is one; `shape open` always opens a tab.
-        reuseOpenPage: args.length === 1,
-      }),
-    );
-  }
-  // `shape --help animate` (or `shape animate [--help]`): the animation guide, read once the agent decides to animate.
-  if (args[0] === "shape" && isShapeAnimateHelp(args.slice(1))) {
-    await writeWholeToStdout(`${SHAPE_ANIMATE_HELP}\n`);
-    process.exit(0);
-  }
-  // `shape frame`: a picture of a board at one moment, through the Chrome on this computer (shape-frame.ts).
-  if (args[0] === "shape" && args[1] === "frame" && !hasHelpFlag(args.slice(2))) {
-    process.exit(
-      await runShapeFrame(args.slice(2), {
-        dataDir: getPlannotatorDataDir(),
-        cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
-        env: process.env,
-        pageGzip: shapeHtmlGzip,
-        version: getCliVersion() ?? "dev",
-      }),
-    );
-  }
-  if (args[0] === "shape" && args[1] === "serve" && args.length === 2) {
-    process.exit(await runShapeServe({ dataDir: getPlannotatorDataDir(), pageGzip: shapeHtmlGzip, version: getCliVersion() ?? "dev" }));
-  }
-  if (args[0] === "shape" && !hasHelpFlag(args.slice(1))) {
-    process.exit(
-      await runShapeCommand(args.slice(1), {
-        dataDir: getPlannotatorDataDir(),
-        cwd: shapeCommandFolder(process.env),
-        env: process.env,
       }),
     );
   }
@@ -561,6 +473,21 @@ if (isReviewDrawCommand(rawArgs, () => {
         cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
         ensureRunning: () => ensureInboxRunning(exportDataDir),
         ...(pairedRoute ? { fetchRoute: pairedRoute } : {}),
+      }),
+    );
+  }
+}
+// `plannotator inbox capability [<capability> on|off]`: the capability switches, a thin client over the Inbox's `/api/inbox/capability` (inbox-capability-command.ts).
+{
+  const args = rawArgs;
+  if (args[0] === "inbox" && args[1] === "capability") {
+    const capabilityDataDir = getPlannotatorDataDir();
+    process.exit(
+      await runInboxCapabilityCommand(args.slice(2), {
+        cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
+        env: process.env,
+        askAiChild: isAskAiChild(process.env),
+        ensureRunning: () => ensureInboxRunning(capabilityDataDir),
       }),
     );
   }
@@ -1858,7 +1785,12 @@ if (args[0] === "sessions") {
 
   // Start review server (even if empty - user can switch diff types in local mode)
   const liveSession = reviewLiveSessionOf(process.env);
+  // Who reads the decision, and whether they are gone (review-agent-watch.ts).
+  // A review the Inbox opened from a live thread answers into that thread:
+  // no agent to lose.
+  const agentWatch = liveSession ? null : cliReviewAgentWatch();
   const server = await startReviewServer({
+    agentPresence: agentWatch ? () => agentWatch.presence() : undefined,
     liveReviewAgent: reviewLiveTargetOf(process.env.PLANNOTATOR_SESSION_TAG),
     liveReviewKey: liveSession ? { key: liveSession.key, title: liveSession.title } : null,
     rawPatch,
@@ -1922,8 +1854,17 @@ if (args[0] === "sessions") {
     ...(reviewTarget ? { target: reviewTarget } : {}),
   });
 
+  // Once its agent is gone the page says so and keeps every comment; a local
+  // review ends when no tab has had it open for a while, keeping its draft.
+  // A PR review never ends that way: it can still post to GitHub/GitLab.
+  const stopAgentWatch = agentWatch
+    ? endReviewWhenAgentGone(agentWatch, server, { noTabMs: isPRMode ? Infinity : noTabMsFromEnv(process.env) })
+    : () => {};
+
   // Wait for user feedback
   const result = await server.waitForDecision();
+  // A decision was taken: it is delivered below, whatever the agent does now.
+  stopAgentWatch();
 
   // Give browser time to receive response and update UI
   await Bun.sleep(1500);
@@ -2936,7 +2877,10 @@ if (args[0] === "sessions") {
   });
   setServerReadyTarget(reviewTarget);
 
+  // The OpenCode plugin reads the decision off this process's stdout.
+  const agentWatch = cliReviewAgentWatch();
   const server = await startReviewServer({
+    agentPresence: agentWatch ? () => agentWatch.presence() : undefined,
     rawPatch,
     gitRef,
     error: diffError,
@@ -2991,7 +2935,12 @@ if (args[0] === "sessions") {
     ...(reviewTarget ? { target: reviewTarget } : {}),
   });
 
+  const stopAgentWatch = agentWatch
+    ? endReviewWhenAgentGone(agentWatch, server, { noTabMs: isPRMode ? Infinity : noTabMsFromEnv(process.env) })
+    : () => {};
+
   const result = await server.waitForDecision();
+  stopAgentWatch();
   await Bun.sleep(1500);
   server.stop();
 

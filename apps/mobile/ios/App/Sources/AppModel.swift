@@ -286,6 +286,13 @@ struct LaunchOptions {
           }
         case "sent":
           await session.send(thread: StandInData.retry, words: "Go ahead, and tell me when the first 10% looks healthy.")
+        case "readretry":
+          // The retry thread read once, so the phone has its copy when the computer goes away.
+          await session.open(StandInData.retry)
+        case "reacted":
+          // The docs thread's message marked with 🎉 from 👍's tray.
+          await session.open(StandInData.docs)
+          if let message = session.thread(StandInData.docs)?.thread.messages.last { _ = await session.react(StandInData.docs, message: message.id, on: true, reaction: DoorAckBodyReaction(emoji: "🎉")) }
         case "heldsend":
           await session.send(thread: StandInData.retry, words: "Go ahead when it is back.")
         case "away":

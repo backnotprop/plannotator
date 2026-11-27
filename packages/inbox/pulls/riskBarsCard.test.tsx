@@ -196,6 +196,56 @@ describe.skipIf(!hasDom)('the risk bars card', () => {
     expect(card()).toBeNull();
   });
 
+  test('with a menu open, Escape closes the menu first and the next one the card', async () => {
+    await mount(HIGH);
+    const b = bars('src/retry.ts');
+    // A popup menu (role="menu") and ui's anchored menus (ActionMenu): each closes on an Escape the document hears.
+    for (const mark of [['role', 'menu'], ['data-pn-dismissable-popover', 'true']] as const) {
+      await act(async () => b.click());
+      const menu = document.createElement('div');
+      menu.setAttribute(mark[0], mark[1]);
+      document.body.appendChild(menu);
+      const shut = (e: KeyboardEvent) => {
+        if (e.key !== 'Escape' || e.defaultPrevented) return;
+        e.preventDefault();
+        menu.remove();
+        document.removeEventListener('keydown', shut);
+      };
+      document.addEventListener('keydown', shut);
+      await act(async () => b.focus());
+      await act(async () => void b.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, composed: true })));
+      expect(menu.isConnected).toBe(false);
+      expect(card()).not.toBeNull();
+      await act(async () => void b.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, composed: true })));
+      expect(card()).toBeNull();
+    }
+  });
+
+  test('a menu kept mounted while shut (hidden by CSS, closed) does not keep Escape from the card', async () => {
+    await mount(HIGH);
+    const b = bars('src/retry.ts');
+    const sheet = document.createElement('style');
+    sheet.textContent = '.shut-menu { display: none; }';
+    document.head.appendChild(sheet);
+    const shut = [document.createElement('div'), document.createElement('div'), document.createElement('div')];
+    shut[0]!.className = 'shut-menu';
+    shut[0]!.setAttribute('role', 'menu');
+    shut[1]!.setAttribute('data-pn-dismissable-popover', 'true');
+    shut[1]!.style.visibility = 'hidden';
+    shut[2]!.setAttribute('role', 'menu');
+    shut[2]!.setAttribute('data-closed', '');
+    for (const menu of shut) document.body.appendChild(menu);
+    try {
+      await act(async () => b.click());
+      await act(async () => b.focus());
+      await act(async () => void b.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, composed: true })));
+      expect(card()).toBeNull();
+    } finally {
+      for (const menu of shut) menu.remove();
+      sheet.remove();
+    }
+  });
+
   test('the bars say they open a dialog, and whether it is open', async () => {
     await mount(HIGH);
     const b = bars('src/retry.ts');

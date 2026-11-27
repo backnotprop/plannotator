@@ -36,7 +36,7 @@
 
 import { homedir } from "node:os";
 import { basename } from "node:path";
-import { INBOX_AUTO_SEND_AFTER_MS, type InboxHostSessions, type InboxMessage, type InboxOpenSession, type InboxProject, type InboxRestartAgents, type InboxSentFrom, type InboxSessionOutdated, type InboxTag, type InboxToolHostId } from "@plannotator/core/inbox-types";
+import { INBOX_AUTO_SEND_AFTER_MS, inboxAgentRuntimeOf, type InboxAgentRuntime, type InboxHostSessions, type InboxMessage, type InboxOpenSession, type InboxProject, type InboxRestartAgents, type InboxSentFrom, type InboxSessionOutdated, type InboxTag, type InboxToolHostId } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { INBOX_BLOCKED_AT_FIELD, INBOX_BLOCKED_FIELD, INBOX_BLOCKED_STALE_MS, parseInboxBlocked, type InboxBlockedKind } from "@plannotator/shared/inbox/connection";
 import { INBOX_ASK_POLL_FIELD, INBOX_AUTO_RELOAD_POLL_FIELD, INBOX_CONTEXT_POLL_FIELD, INBOX_CONTINUES_POLL_FIELD, INBOX_EFFORT_LEVELS, INBOX_EFFORT_POLL_FIELD, INBOX_MODEL_POLL_FIELD, INBOX_PLACE_POLL_FIELD, parseInboxPlace, type InboxPlace, INBOX_FIRST_STARTED_POLL_FIELD, INBOX_HELD_POLL_FIELD, INBOX_RELOAD_FIELD, INBOX_SEND_NOW_POLL_FIELD, INBOX_SESSION_LABEL_INPUT_MAX, INBOX_SESSION_LIVE_MS, INBOX_TAGS_POLL_FIELD, INBOX_TITLE_POLL_FIELD } from "@plannotator/shared/inbox/connection";
@@ -48,6 +48,12 @@ import { createInboxContinuations, parseInboxContinues } from "./inbox-continuat
 import { createInboxFirstSeen, type InboxFirstSeen } from "./inbox-first-seen";
 import { inboxClaimAbandoned } from "./inbox-stuck-delivery";
 import { parseEngine, parseLoadedPlugin, parseSessionFolder, runtimeOf, tagUpdateFix, type LoadedPlugin } from "./inbox-restart";
+
+/** `{ runtime }` for a session that runs in another app than its host's own (Oh My Pi), else nothing. */
+const runtimeField = (entry: { host: string; plugin: LoadedPlugin | null }): { runtime?: InboxAgentRuntime } => {
+  const runtime = inboxAgentRuntimeOf(entry.host, entry.plugin?.host);
+  return runtime ? { runtime } : {};
+};
 
 export function modelIdOf(value: unknown): string | null {
   return typeof value === "string" && /^[\w.:/@\[\]-]{1,120}$/.test(value) ? value : null;
@@ -104,6 +110,8 @@ export interface InboxAgentSession {
   context: number | null;
   /** The title its host generated (INBOX_TITLE_POLL_FIELD); null when it sent none. */
   title: string | null;
+  /** The app it runs in when not its host's own (Oh My Pi); absent otherwise. */
+  runtime?: InboxAgentRuntime;
 }
 
 /**
@@ -402,6 +410,10 @@ export function createInboxLiveSessions(options: {
    * session never "ends" for want of a poll: only `dead` ends it.
    */
   wakeOnlyStatus?: (session: string) => "alive" | "dead" | null;
+  /** A session on another linked computer, live there as that computer last said (inbox-far-tags.ts). */
+  farLive?: (session: string) => boolean;
+  /** A session on another linked computer, as its computer last said (inbox-far-tags.ts): Send now reaches it there. */
+  farConnection?: (session: string) => { busy: boolean | null; send_now: boolean } | null;
   pollsItself?: (session: string) => boolean;
   /** The items of a session the Inbox wakes itself that may not have reached it (a `codex queue` that ran out of time). */
   uncertainItemsOf?: (session: string) => string[];
@@ -840,6 +852,8 @@ export function createInboxLiveSessions(options: {
    * (`InboxMessage.wakes`).
    */
   const askerLive = (session: string): boolean => {
+    // A session tagged in from another computer is there while that computer lists it (its wake waits there).
+    if (!sessions.has(session) && options.farLive?.(session)) return true;
     // A session the Inbox wakes itself (Codex) is there until its thread is known to be gone.
     const wakeOnly = options.wakeOnlyStatus?.(session) ?? null;
     if (wakeOnly !== null) return wakeOnly === "alive";
@@ -953,12 +967,17 @@ export function createInboxLiveSessions(options: {
     tags: boolean;
     sendNow: boolean;
     label: string | null;
+    /** Its connection polls this Inbox (false: a session the Inbox wakes itself, Codex, Qwen, T3, Antigravity). */
+    polls: boolean;
+    /** The app it runs in when not its host's own (Oh My Pi). */
+    runtime?: InboxAgentRuntime;
   }[] => {
     const out = [];
     for (const [session, entry] of sessions) {
       if (!isLive(entry)) continue;
       out.push({
         session,
+        polls: entry.wakeOnly === undefined,
         host: entry.host,
         root: entry.root,
         startedAt: entry.startedAt,
@@ -969,9 +988,16 @@ export function createInboxLiveSessions(options: {
         sendNow: entry.sendNow,
         // Its name where it has one: the name given in its host, else the title its host generated.
         label: entry.label ?? entry.title ?? null,
+        ...runtimeField(entry),
       });
     }
     return out;
+  };
+
+  /** The app a session runs in when not its host's own (Oh My Pi), as its latest poll said; undefined for any other or an unknown one. */
+  const runtimeOfSession = (session: string): InboxAgentRuntime | undefined => {
+    const entry = sessions.get(session);
+    return entry ? inboxAgentRuntimeOf(entry.host, entry.plugin?.host) : undefined;
   };
 
   /**
@@ -1001,6 +1027,7 @@ export function createInboxLiveSessions(options: {
         effort: live ? entry.effort : null,
         context: live ? entry.context : null,
         title: entry.title ?? null,
+        ...runtimeField(entry),
       });
     }
     return out;
@@ -1144,7 +1171,12 @@ export function createInboxLiveSessions(options: {
     // A session whose conversation goes on under another id is connected as that one is.
     const stand = standInOf(asked);
     const polls = options.pollsItself?.(asked) ? { polls: true as const } : {};
-    if (!stand) return options.wakeOnlyStatus?.(asked) === "alive" ? { ...wakeOnlyConnection(), ...uncertainOf(asked), ...polls } : null;
+    if (!stand) {
+      if (options.wakeOnlyStatus?.(asked) === "alive") return { ...wakeOnlyConnection(), ...uncertainOf(asked), ...polls };
+      // A session on another linked computer: as its computer last said it (busy, Send now), woken there.
+      const far = options.farConnection?.(asked) ?? null;
+      return far ? { ...wakeOnlyConnection(), busy: far.busy, send_now: far.send_now } : null;
+    }
     const { session, entry } = stand;
     return {
       ...polls,
@@ -1183,7 +1215,10 @@ export function createInboxLiveSessions(options: {
   const deliveryConnectionOf = (session: string): { busy: boolean | null; send_now: boolean; held?: true; polls?: true } | null => {
     const entry = standInOf(session)?.entry;
     const polls = options.pollsItself?.(session) ? { polls: true as const } : {};
-    if (!entry) return options.wakeOnlyStatus?.(session) === "alive" ? { busy: null, send_now: false, ...polls } : null;
+    if (!entry) {
+      if (options.wakeOnlyStatus?.(session) === "alive") return { busy: null, send_now: false, ...polls };
+      return options.farConnection?.(session) ?? null;
+    }
     return { busy: entry.busy, send_now: entry.sendNow, ...(entry.held === true ? { held: true as const } : {}), ...polls };
   };
 
@@ -1536,6 +1571,7 @@ export function createInboxLiveSessions(options: {
     seenOverMcp,
     route,
     allLive,
+    runtimeOfSession,
     agentSessions,
     agentsSignature,
     /** The sessions' clock (ms): "today" for the Agents section is by it. */

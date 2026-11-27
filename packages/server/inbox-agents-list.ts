@@ -162,6 +162,7 @@ export function inboxAgentsGroup(evidence: InboxAgentsEvidence, cap = INBOX_AGEN
       session: entry.session,
       ...(continues.length > 0 ? { continues } : {}),
       host: entry.host,
+      ...(entry.runtime ? { runtime: entry.runtime } : {}),
       ...(evidence.labels && entry.label ? { label: entry.label } : {}),
       ...(evidence.labels && entry.title ? { title: entry.title } : {}),
       project: evidence.projectOf(entry.root, entry.session),

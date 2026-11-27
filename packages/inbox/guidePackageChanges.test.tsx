@@ -19,12 +19,8 @@ import { createRoot, type Root } from 'react-dom/client';
 import { resolve } from 'node:path';
 import { buildGuideSnapshot } from '@plannotator/core/guide-format';
 import type { InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
-import type { ShapeHost } from '@plannotator/ui/components/shape';
 import { resetPackageChangesSetting } from '@plannotator/ui/hooks/usePackageChangesSetting';
 import { resetPackageChangesCache } from '@plannotator/review-editor/hooks/usePackageChanges';
-import type { InboxShapes } from './shape/useInboxShapes';
-
-const NO_BOARDS: InboxShapes = { shapes: null, byThread: new Map(), changed: 0, rowShown: false, subscribe: () => () => {}, refresh: () => {} };
 
 // The window's tsconfig points `#guide-reader` at the reader's type shape; the real reader is package.json's `imports` entry.
 plugin({
@@ -157,7 +153,7 @@ const within = <T extends Element>(path: string, selector: string): T[] => [
 ];
 
 test.skipIf(!hasDom)("a thread's guided review: code review's package cards, read from the message's own route; the folded lockfile says why and keeps its card", async () => {
-  await draw(<ReviewPane thread={thread} message={message} codeReview={false} onBack={() => {}} onClose={() => {}} onSent={() => {}} shapeHost={{} as ShapeHost} shapes={NO_BOARDS} board={null} onBoard={() => {}} />);
+  await draw(<ReviewPane thread={thread} message={message} codeReview={false} onBack={() => {}} onClose={() => {}} onSent={() => {}} />);
   expect(within(MANIFEST, '[data-package-changes="ready"]').length).toBe(1);
   expect(within(MANIFEST, '[data-package-row="upgraded"]').length).toBeGreaterThan(0);
   // The lockfile is folded as generated: the strip says so, and its card stays readable.

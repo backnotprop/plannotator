@@ -252,7 +252,7 @@ for (const route of ['tap', 'keyboard'] as const) {
   test(`a phone, a guided review: a selection bar on the page goes when Comments opens by ${route === 'tap' ? 'a tap' : 'a key'}, and nothing floats over the sheet`, async ({ browser }) => {
     const { context, page } = await windowAt(browser, 390, 844, true);
     try {
-      // An agent that can answer, as Show me's spec has a live one: only then does a selection open on the bar.
+      // An agent that can answer: only then does a selection open on the bar.
       await page.route(/\/threads\/[^/]+\/ask(\?.*)?$/, (ask) => ask.fulfill({ json: { conversation: null, running: null, can_ask: true } }));
       await openReview(world, page);
       const line = page.locator(`[data-guide-file-shell="${SHORT_FILE}"] [data-line-type="change-addition"][data-column-number="4"]`).first();
@@ -412,7 +412,7 @@ for (const [name, open] of Object.entries(opens)) {
           await expect(place).toHaveText('Overview');
           const cut = await place.evaluate((el) => `${el.scrollWidth} in ${el.clientWidth}`);
           expect(await place.evaluate((el) => el.scrollWidth <= el.clientWidth), `Overview reads ${cut} at ${width} px`).toBe(true);
-          // The gear: in the heading's row (Show me, Global comment), under the bar, at its right end.
+          // The gear: in the heading's row (Global comment), under the bar, at its right end.
           const row = page.locator('[data-review-message] [data-guide-heading] .gv-tools');
           await expect(row.locator('[data-diff-display-options]')).toHaveCount(1);
           await expectRowFits(row, width, `the heading's row at ${width}`);

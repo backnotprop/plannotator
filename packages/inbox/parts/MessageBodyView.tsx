@@ -11,6 +11,7 @@ import { MessageBody } from './MessageBody/MessageBody';
 import { ReviewAnchorLine } from '../components/ReviewAnchorLine';
 import type { MessageActsRef } from './messageActs';
 import { farChangeMessage } from '../scheduled/farLinks';
+import { skillReactionShownBody } from '@plannotator/core/inbox-folding';
 
 export type MessageBodyData = {
   message: InboxMessageWire;
@@ -44,7 +45,9 @@ export type MessageBodyData = {
 
 export function drawMessageBody(d: MessageBodyData) {
   const { acts } = d;
-  const message = farChangeMessage(d.message, d.farMachine);
+  // A skill emoji's reply is a reply like any other whose words read "🦃 /bro" (core inbox-skill-reaction.ts).
+  const far = farChangeMessage(d.message, d.farMachine);
+  const message = far.skill_reaction ? { ...far, body: skillReactionShownBody(far) } : far;
   const id = message.id;
   const isAgent = message.author.kind === 'agent';
   const questions = message.questions ?? [];
@@ -64,6 +67,8 @@ export function drawMessageBody(d: MessageBodyData) {
         repo={d.repo}
         onOpenAttachment={(attachment, start) => acts.current.openFromMessage(attachment, null, start ? () => acts.current.setPageStart({ id: attachment.id, start }) : undefined)}
         onOpenFileRef={d.fileRefs ? (ref) => acts.current.openFileRef(id, ref) : undefined}
+        // A skill the person's message used: read where it was typed when the message says, else here, else on a linked computer.
+        onOpenSkill={isAgent ? undefined : (name) => acts.current.openFileRef(id, { path: name, skill: true })}
         onOpenInlineImage={(image) => acts.current.openFromMessage(image)}
         onOpenOptionSet={(key, image, choice) => acts.current.openOptionSet(id, key, image, choice)}
         onTryPrototype={isAgent ? (key) => acts.current.tryPrototype(id, key) : undefined}

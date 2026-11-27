@@ -20,6 +20,16 @@
       "id",
       "name"
     ],
+    "DoorAckAnswer": [
+      "message",
+      "thread"
+    ],
+    "DoorAckBody": [
+      "idempotency_key"
+    ],
+    "DoorAckBodyReaction": [
+      "emoji"
+    ],
     "DoorAnnotationAnswer": [
       "annotation"
     ],
@@ -177,6 +187,39 @@
     "DoorSnoozeBody": [
       "idempotency_key",
       "until"
+    ],
+    "DoorTaggableAnswer": [
+      "owner",
+      "serverSession",
+      "sessions"
+    ],
+    "DoorTaggableAnswerOwner": [
+      "host",
+      "session"
+    ],
+    "DoorTaggableSession": [
+      "busy",
+      "host",
+      "idle_since",
+      "kind",
+      "last_at",
+      "name",
+      "owner",
+      "project",
+      "session",
+      "started_at",
+      "taggable",
+      "wrote_thread"
+    ],
+    "DoorTaggableSessionProject": [
+      "id",
+      "name",
+      "root"
+    ],
+    "DoorTakeBackAnswer": [
+      "compose",
+      "draft",
+      "message"
     ],
     "DoorThreadAttachmentsAnswer": [
       "attachments",
@@ -509,6 +552,10 @@
       "at",
       "label"
     ],
+    "InboxListRowGridSeen": [
+      "at",
+      "through"
+    ],
     "InboxListRowLastAgent": [
       "host"
     ],
@@ -519,6 +566,12 @@
     "InboxListRowSent": [
       "at",
       "checked_at"
+    ],
+    "InboxListRowStepsProgress": [
+      "at",
+      "doing",
+      "done",
+      "total"
     ],
     "InboxListSection": [
       "id",
@@ -565,6 +618,10 @@
     ],
     "InboxMessageWireSentFrom": [
       "kind"
+    ],
+    "InboxMessageWireShipNote": [
+      "kind",
+      "ship"
     ],
     "InboxMessageWireThreadNaming": [
       "status"
@@ -683,6 +740,12 @@
     ],
     "InboxReaction": [
       "emoji"
+    ],
+    "InboxRemoval": [
+      "after",
+      "at",
+      "host",
+      "session"
     ],
     "InboxReplyDraft": [
       "body",
@@ -831,6 +894,10 @@
       "session",
       "wakes"
     ],
+    "InboxSkillReaction": [
+      "emoji",
+      "skill"
+    ],
     "InboxSupersededBy": [
       "key",
       "message_id"
@@ -877,6 +944,14 @@
       "key",
       "state"
     ],
+    "InboxThreadPullsSummaryItem": [
+      "added_at",
+      "checks",
+      "key",
+      "read_at",
+      "review",
+      "state"
+    ],
     "InboxTidyMark": [
       "id",
       "wake"
@@ -896,6 +971,37 @@
       "sha256",
       "size",
       "upload_id"
+    ],
+    "LinkThroughPairView": [
+      "a",
+      "c",
+      "status",
+      "waiting_for",
+      "why"
+    ],
+    "LinkThroughPairViewA": [
+      "id",
+      "name"
+    ],
+    "LinkThroughPairViewC": [
+      "id",
+      "name"
+    ],
+    "LinkThroughRowView": [
+      "id",
+      "name",
+      "status",
+      "via",
+      "waiting_for",
+      "why"
+    ],
+    "LinkThroughRowViewVia": [
+      "id",
+      "name"
+    ],
+    "LinkThroughView": [
+      "pairs",
+      "through"
     ],
     "ListModel": [
       "cursor",
@@ -954,6 +1060,10 @@
     "OutboxViewNotice": [
       "at",
       "kind"
+    ],
+    "OutboxViewViewed": [
+      "path",
+      "viewed"
     ],
     "ProjectFolder": [
       "created_at",

@@ -84,7 +84,7 @@ const CROSS_REPO_REF_GLOBAL = new RegExp(CROSS_REPO_REF_PATTERN.source, 'g');
  * The task, on its row's toggle line (a click on it opens the row): inline
  * markdown as a question's prompt draws it (bold, `code`), but never a link,
  * which would fight that click: `[label](url)` keeps its label, and a bare or `<…>` URL reads as
- * code. An `owner/repo#123` ref stays plain text (its `#` escaped). The row's
+ * code. An `owner/repo#123` or `group/project!45` ref stays plain text (its `#` or `!` escaped). The row's
  * Open button carries a `Where:` link.
  */
 export function taskMarkdown(prompt: string): string {
@@ -94,7 +94,7 @@ export function taskMarkdown(prompt: string): string {
     .replace(/(^|[^`\w])(https?:\/\/[^\s`]+)/g, '$1`$2`')
     // Outside code spans only (an escape inside one would show).
     .split(/(`[^`]*`)/)
-    .map((part, i) => (i % 2 ? part : part.replace(CROSS_REPO_REF_GLOBAL, (ref) => ref.replace('#', '\\#'))))
+    .map((part, i) => (i % 2 ? part : part.replace(CROSS_REPO_REF_GLOBAL, (ref) => ref.replace(/[#!](?=\d+$)/, '\\$&'))))
     .join('');
 }
 

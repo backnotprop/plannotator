@@ -94,6 +94,18 @@ const openOnIpad = async (browser: import('@playwright/test').Browser) => {
   return { context, page: await context.newPage() };
 };
 
+/**
+ * The page can still be asking for chunks after the last check passes.
+ * `withoutPele` reads each one with
+ * `route.fetch()`; closing the context while one is read disposes the response
+ * under it and fails a test whose checks all passed. Let those reads finish
+ * first: they are local assets, so the wait is short.
+ */
+const closeIpad = async ({ context, page }: { context: import('@playwright/test').BrowserContext; page: Page }) => {
+  await page.unrouteAll({ behavior: 'wait' });
+  await context.close();
+};
+
 test('a diagram that does not parse shows its source in the message, and nothing lands outside it, through re-renders', async ({ browser }) => {
   const sent = await claude.send({ project_path: project, subject: 'Intake', thread: 'intake', body: BODY });
   const { context, page } = await openOnIpad(browser);
@@ -142,7 +154,7 @@ test('a diagram chunk whose download breaks off once draws on the automatic re-a
     expect(tries).toBe(2);
     expect(await outside(page)).toEqual({ stray: [], overflows: false });
   } finally {
-    await context.close();
+    await closeIpad({ context, page });
   }
 });
 
@@ -162,6 +174,6 @@ test('a diagram type whose chunk does not arrive shows the source under Reload, 
     expect(await outside(page)).toEqual({ stray: [], overflows: false });
     await page.screenshot({ path: join(proofDir, '02-ipad-chunk-missing.png') });
   } finally {
-    await context.close();
+    await closeIpad({ context, page });
   }
 });

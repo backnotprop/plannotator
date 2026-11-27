@@ -308,7 +308,7 @@ export function createInboxAgentDoor(context: InboxAgentDoorContext) {
     if (far) return far;
     const fetched = await inboxAgentFetchAction(store, agent.session, tool, args);
     if (fetched) return fetched;
-    const routed = await inboxAgentRouteAction(context.route, { host: inboxCloudHostOf(agent.preset), session: agent.session }, tool, args);
+    const routed = await inboxAgentRouteAction(context.route, { host: inboxCloudHostOf(agent.preset), session: agent.session, name: agent.name, project: () => agents.home(agent).id }, tool, args);
     if (routed) return routed;
 
     const tools = await servedTools(contextFor(agent, []));

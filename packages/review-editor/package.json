@@ -11,6 +11,7 @@
     "./components/*": "./components/*.tsx",
     "./utils/*": "./utils/*.ts",
     "./hooks/*": "./hooks/*.ts",
+    "./semDiff/PowerUpStatusSlot": "./semDiff/PowerUpStatusSlot.tsx",
     "./semDiff/*": "./semDiff/*.ts"
   },
   "dependencies": {

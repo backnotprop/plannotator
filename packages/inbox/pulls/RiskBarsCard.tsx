@@ -77,6 +77,28 @@ export function escapeIsOthers(from: Element | null, anchor: Element): boolean {
   return inOverlay(from) && !from.closest('dialog, [role="dialog"], [role="alertdialog"], [data-popover-layer]')?.contains(host);
 }
 
+/**
+ * A menu open on the page besides the card (a `role="menu"` popup, or ui's anchored menus: ActionMenu, the approve and
+ * decision dropdowns, `data-pn-dismissable-popover`). Its Escape comes first, wherever focus is: the card hears keys
+ * before the page does, so taking that Escape would leave the menu open.
+ */
+export function menuOpenBesides(card: Element | null): boolean {
+  for (const menu of document.querySelectorAll('[role="menu"], [data-pn-dismissable-popover]')) {
+    if (!card?.contains(menu) && shows(menu)) return true;
+  }
+  return false;
+}
+
+/** A menu kept mounted while shut (hidden, closed, or not drawn by CSS) is not open. */
+function shows(menu: Element): boolean {
+  if (menu.closest('[hidden], [inert], [aria-hidden="true"], [data-closed], [data-state="closed"]')) return false;
+  for (let el: Element | null = menu; el; el = el.parentElement) {
+    const style = getComputedStyle(el);
+    if (style.display === 'none' || style.visibility === 'hidden') return false;
+  }
+  return true;
+}
+
 /** What the card says: the old row's head and words, for each place on the line. */
 export function RiskBarsCardBody({ level, notes }: { level: RiskBarsLevel; notes: readonly RiskBarsNote[] }) {
   const said = notes.filter((note) => note.why || note.rule);
@@ -265,14 +287,16 @@ export function useRiskBarsCard(bars: RiskBars | null): { onMark: OnGuideLineMar
   }, [anchor]);
 
   // While open: Escape and a press outside close it (the window's own Escape does not also run). Escape is the card's
-  // only while it shows and the key comes from the bars or the card, or from nowhere that has its own Escape: a field
-  // being typed in (a comment box), a dialog or another popover layer, or a modal keeps it.
+  // only while it shows, no menu is open (the menu closes first, then the next Escape closes the card), and the key
+  // comes from the bars or the card, or from nowhere that has its own Escape: a field being typed in (a comment box),
+  // a dialog or another popover layer, or a modal keeps it.
   useEffect(() => {
     if (!card) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.defaultPrevented || isComposingKey(e)) return;
       const shown = cardRef.current;
       if (!shown?.isConnected || !card.anchor.isConnected) return;
+      if (menuOpenBesides(shown)) return;
       const from = keyTarget(e);
       const ours = !!from && (from === card.anchor || shown.contains(from));
       if (!ours && escapeIsOthers(from, card.anchor)) return;

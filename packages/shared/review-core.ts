@@ -67,6 +67,8 @@ export interface WorktreeInfo {
   path: string;
   branch: string | null;
   head: string;
+  /** git's `bare` line: the bare repository a worktree hangs off, no working folder of its own. */
+  bare?: boolean;
 }
 
 export interface AvailableBranches {
@@ -756,6 +758,7 @@ export async function getWorktrees(
           path: current.path,
           head: current.head || "",
           branch: current.branch ?? null,
+          ...(current.bare ? { bare: true } : {}),
         });
       }
       current = { path: line.slice("worktree ".length) };
@@ -767,6 +770,8 @@ export async function getWorktrees(
         .replace("refs/heads/", "");
     } else if (line === "detached") {
       current.branch = null;
+    } else if (line === "bare") {
+      current.bare = true;
     }
   }
 
@@ -775,6 +780,7 @@ export async function getWorktrees(
       path: current.path,
       head: current.head || "",
       branch: current.branch ?? null,
+      ...(current.bare ? { bare: true } : {}),
     });
   }
 

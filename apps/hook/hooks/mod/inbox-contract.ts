@@ -488,8 +488,11 @@ function wakeSteps(value: unknown): { done: number; total: number; doing: string
  * Actions with no line in the agent tool's description: the name in `action`
  * and its field's description say what they do, and a field description does
  * not count toward the 2,048 (the owner: do not grow the main description).
+ * `routine` too (the owner, 2026-11-24): with the Board, the Checklist and
+ * Routines on, its line would pass Claude Code's 2,048 and cut off the
+ * `--help` line; `plannotator routine --help` says the rest.
  */
-export const INBOX_AGENT_ACTIONS_NO_LINE: readonly string[] = ['snooze_thread', 'thread_pulls']
+export const INBOX_AGENT_ACTIONS_NO_LINE: readonly string[] = ['snooze_thread', 'thread_pulls', 'routine']
 
 /**
  * Before saying something was never discussed (approved 2026-11-15): the MCP search tool's description and --help's
@@ -1385,6 +1388,13 @@ export interface InboxReplyCommand {
    */
   moved?: true
   /**
+   * With `moved`, the notice's own first line in place of
+   * INBOX_MOVED_WAKE_INSTRUCTION: Ship's note to the shipping agent says it
+   * is about the pull request it ships and is to be acted on. One line; a
+   * connection that does not know it words the notice the moved way.
+   */
+  notice?: string
+  /**
    * On a reply handed to a session the person tagged with `@` that does not
    * own the thread (approval "inbox-tag-agents"): the owning session's agent,
    * named from its host (`Claude Code`). The wake takes
@@ -1405,7 +1415,7 @@ export interface InboxReplyCommand {
   /**
    * With `tagged`, on a reply that tags a session the person ADDED to the
    * thread ("Add instead", approval "inbox-tag-handoff"): it works alongside
-   * the owner and gets the person's later replies there too. The wake takes
+   * the owner and gets a later reply there when it is addressed to it. The wake takes
    * INBOX_ADDED_INSTRUCTION and `inboxAddedLine`. An older connection words
    * it as a tag, which stays true for this one reply. Absent otherwise.
    */
@@ -1559,7 +1569,7 @@ export function inboxAlsoTaggedLine(names: readonly string[]): string {
  * thread another session owns ("Add instead", approval "inbox-tag-handoff").
  */
 export const INBOX_ADDED_INSTRUCTION =
-  "The person added you to a Plannotator Inbox thread that another session owns: you work on it alongside that session, and their later replies in it come to you too. Their reply follows as they wrote it; parts of it may be meant for the other session."
+  "The person added you to a Plannotator Inbox thread that another session owns: you work on it alongside that session. Their reply follows as they wrote it; parts of it may be meant for the other session. Their later replies in it come to you only when they are addressed to you."
 
 /** The line under INBOX_ADDED_INSTRUCTION: whose thread it is, read it first, answer in it. */
 export function inboxAddedLine(owner: string, id: string): string {
@@ -1592,7 +1602,7 @@ export function inboxHandedAwayLine(to: string): string {
  * Every name in core's INBOX_HOST_NAMES must be here (this contract may not
  * import it); `connection-tags.test.ts` fails when one is missing.
  */
-export const INBOX_WAKE_AGENT_NAMES: readonly string[] = ['Claude Code', 'Pi', 'OpenCode', 'Codex', 'Cursor', 'Grok Build', 'Qwen Code', 'DeepSeek Harness', 'T3 Code', 'Antigravity', 'Cline', 'Muse Code', 'OpenClaw', 'Hermes Agent', 'Cloud agent', 'Claude Code routine', 'Grok Bot', 'Muse by Meta', 'Hermes Agent server', 'OpenClaw server']
+export const INBOX_WAKE_AGENT_NAMES: readonly string[] = ['Claude Code', 'Pi', 'Oh My Pi', 'OpenCode', 'Codex', 'Cursor', 'Grok Build', 'Qwen Code', 'DeepSeek Harness', 'T3 Code', 'Antigravity', 'Cline', 'Muse Code', 'OpenClaw', 'Hermes Agent', 'Orca', 'Cloud agent', 'Claude Code routine', 'Grok Bot', 'Muse by Meta', 'Hermes Agent server', 'OpenClaw server']
 
 /** An agent name a wake line carries: one of INBOX_WAKE_AGENT_NAMES (spacing folded), else '' (the caller says "another agent"). */
 function wakeName(value: unknown): string {
@@ -2107,6 +2117,7 @@ export function inboxWakeText(
     ack_of?: string
     ack_reaction?: unknown
     moved?: unknown
+    notice?: unknown
     tagged?: { owner?: unknown } | null
     also_tagged?: unknown
     added?: unknown
@@ -2133,11 +2144,13 @@ export function inboxWakeText(
     const thread = wakeThreadId(command.thread_id)
     return `Plannotator Inbox: ${ackSubject} (${command.id})\n${inboxAckLine(command.ack_of, command.ack_reaction)}${thread ? `\n\n[thread ${thread}]` : ''}`
   }
-  // The note that this session's questions moved: a notice, never a reply to answer in the archived thread.
+  // The note that this session's questions moved: a notice, never a reply to answer in the archived thread. Ship's
+  // note carries its own first line (`notice`).
   if (command.moved === true) {
     const movedSubject = (command.subject ?? '').replace(/\s+/g, ' ').trim() || 'a message'
     const thread = wakeThreadId(command.thread_id)
-    return `Plannotator Inbox: ${movedSubject} (${command.id})\n${INBOX_MOVED_WAKE_INSTRUCTION}\n\n${command.body}${thread ? `\n\n[thread ${thread}]` : ''}`
+    const notice = typeof command.notice === 'string' && command.notice.trim() !== '' && command.notice.length <= 300 && !/[\r\n]/.test(command.notice) ? command.notice.trim() : INBOX_MOVED_WAKE_INSTRUCTION
+    return `Plannotator Inbox: ${movedSubject} (${command.id})\n${notice}\n\n${command.body}${thread ? `\n\n[thread ${thread}]` : ''}`
   }
   // The session's steps in this thread (approval "inbox-thread-steps"), its own paragraph before the closing line;
   // with none there yet and the person's answers in this reply, the line that says when to start one.

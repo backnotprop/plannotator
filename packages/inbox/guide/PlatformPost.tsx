@@ -71,7 +71,7 @@ const TOO_MANY_FILE_COMMENTS = 'This review has too many file comments to post a
 /** Between a PR's URL and a commit, in a target of that commit. */
 const AT = '#plannotator-at-';
 
-export default function PlatformPost({ pull, open, comments, readComments, anchor, post, onClose, onPosted, onWent, hostReadsAgain }: PlatformPostProps) {
+export default function PlatformPost({ pull, open, comments, readComments, anchor, post, onClose, onPosted, onWent, hostReadsAgain, onLeft }: PlatformPostProps) {
   const rules = platformRules(pull);
   const [action, setAction] = useState<PlatformAction>('comment');
   const [chooseEvent, setChooseEvent] = useState(false);
@@ -85,6 +85,17 @@ export default function PlatformPost({ pull, open, comments, readComments, ancho
       return false;
     }
   });
+  // A summary written and not posted, in a dialog the host takes away open (the PR merged under it): handed to the
+  // host, never dropped. One that went is cleared before (`setGeneral('')`), so it is never handed back.
+  const leaving = useRef({ open, general, onLeft });
+  leaving.current = { open, general, onLeft };
+  useEffect(
+    () => () => {
+      const { open: wasOpen, general: words, onLeft: keep } = leaving.current;
+      if (wasOpen && words.trim()) keep?.(words);
+    },
+    [],
+  );
   const gone = useRef(new Set<string>());
   const opened = useRef(false);
   // The head this plan's lines are on: it posts there, whatever the PR has moved to. A commit that cannot take it

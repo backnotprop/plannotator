@@ -68,7 +68,7 @@ export const SLICE_HELPER_FANOUT = 25;
 export const SLICE_QUARANTINE: { spec: string; issue: number; why: string }[] = [];
 
 const REVIEW_SPECS = ['review-*.spec.ts', 'ref-cards-review.spec.ts', 'packed-page-load.spec.ts'];
-const INBOX_REVIEW_SPECS = ['inbox-code-review.spec.ts', 'inbox-pull-requests.spec.ts', 'inbox-show-me.spec.ts'];
+const INBOX_REVIEW_SPECS = ['inbox-code-review.spec.ts', 'inbox-pull-requests.spec.ts'];
 
 export const SLICE_RULES: SliceRule[] = [
   // --- Code review (the code review session's rows on #3455) ---
@@ -232,7 +232,6 @@ export const SLICE_RULES: SliceRule[] = [
     specs: ['inbox-launch-*.spec.ts', 'inbox-remote-launch-picker.spec.ts'],
   },
   { name: 'Inbox: board', stopgap: true, paths: ['packages/inbox/board/**'], specs: ['inbox-board*.spec.ts'] },
-  { name: 'Inbox: Shape', stopgap: true, paths: ['packages/inbox/shape/**', 'packages/server/inbox-shape*'], specs: ['inbox-shape*.spec.ts'] },
   {
     name: 'Inbox: machines, phones and accounts',
     stopgap: true,
@@ -245,13 +244,21 @@ export const SLICE_RULES: SliceRule[] = [
       'packages/server/inbox-far-read*',
       'packages/server/inbox-machine-agent-read*',
       'packages/server/inbox-mcp-far-read*',
+      'packages/server/inbox-machine-drafts*',
+      'packages/server/inbox-reply-drafts-linked*',
+      'packages/inbox/machineDrafts*',
       'packages/server/inbox-machine-fetch-file*',
       'apps/hook/server/inbox-call-far-fetch*',
       'packages/shared/inbox/saved-file*',
       'packages/inbox/data/machineViews*',
       'packages/inbox/cloud/**',
+      'packages/server/inbox-scheduled-machines*',
+      'packages/server/inbox-capability-set*',
+      'packages/server/inbox-artifacts-merged*',
+      'packages/server/inbox-machine-files*',
+      'packages/inbox/linkedReads*',
     ],
-    specs: ['inbox-machines.spec.ts', 'inbox-machine-update.spec.ts', 'inbox-phones.spec.ts', 'inbox-accounts*.spec.ts', 'inbox-snooze-machines.spec.ts', 'inbox-machines-agent-read.spec.ts', 'inbox-cloud-*.spec.ts'],
+    specs: ['inbox-machines.spec.ts', 'inbox-machine-update.spec.ts', 'inbox-phones.spec.ts', 'inbox-accounts*.spec.ts', 'inbox-snooze-machines.spec.ts', 'inbox-reply-drafts-machines.spec.ts', 'inbox-machines-agent-read.spec.ts', 'inbox-cloud-*.spec.ts', 'inbox-routines-machines.spec.ts', 'inbox-artifact-pins-machines.spec.ts', 'inbox-linked-reads-machines.spec.ts'],
   },
   { name: 'Inbox: guided reviews', stopgap: true, paths: ['packages/inbox/guide/**', 'packages/server/inbox-guides*'], specs: ['inbox-guides.spec.ts', 'inbox-request-guide.spec.ts'] },
   { name: 'Inbox: Ask window', stopgap: true, paths: ['packages/inbox/ask/**', 'packages/server/inbox-ask*'], specs: ['inbox-ask-window.spec.ts', 'inbox-reask.spec.ts'] },

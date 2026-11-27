@@ -395,7 +395,7 @@ describe("risk ranking", () => {
       answer = (await (await fetch(`${w.base}/api/inbox/pulls/risk`)).json()) as InboxPullRiskAnswer;
     } while (answer.pending > 0 && Date.now() - started < 5_000);
     expect(answer.rules).toBe("Anything in billing.");
-    expect(answer.judgments["github.com/northwind/billing-svc#412"]).toEqual({ level: "high", why: "It changes the retry schedule." });
+    expect(answer.judgments["github.com/northwind/billing-svc#412"]).toEqual({ level: "high", why: "It changes the retry schedule.", head: "412".padStart(40, "a") });
     expect(runs.length).toBe(3);
   });
 
