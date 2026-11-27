@@ -433,6 +433,45 @@ describe("parseRgJsonOutput", () => {
     const result = parseRgJsonOutput(line, "x");
     expect(result[0].snippet.length).toBeLessThanOrEqual(201);
   });
+
+  test("a match on a line that is not valid UTF-8 does not throw away the other matches", () => {
+    // rg reports such a line (a Latin-1 `// café`) as base64 `bytes`, not `text`.
+    const stdout = [
+      JSON.stringify({
+        type: "match",
+        data: {
+          path: { text: "legacy.js" },
+          lines: { bytes: "ZnVuY3Rpb24gc3RhcnRTZXJ2ZXIoKSB7fSAvLyBjYWbpCg==" },
+          line_number: 1,
+          submatches: [{ match: { text: "startServer" }, start: 9, end: 20 }],
+        },
+      }),
+      JSON.stringify({
+        type: "match",
+        data: {
+          path: { text: "src/server.ts" },
+          lines: { text: "export function startServer() {\n" },
+          line_number: 42,
+          submatches: [{ match: { text: "startServer" }, start: 16, end: 27 }],
+        },
+      }),
+      // A non-UTF-8 file name has `bytes` and no `text`: skipped, not thrown on.
+      JSON.stringify({
+        type: "match",
+        data: {
+          path: { bytes: "Zm9v6S5qcw==" },
+          lines: { text: "function startServer() {}\n" },
+          line_number: 3,
+          submatches: [{ match: { text: "startServer" }, start: 9, end: 20 }],
+        },
+      }),
+    ].join("\n");
+    const result = parseRgJsonOutput(stdout, "startServer", "typescript");
+    expect(result.map((loc) => loc.filePath).sort()).toEqual([
+      "legacy.js",
+      "src/server.ts",
+    ]);
+  });
 });
 
 // ---------------------------------------------------------------------------
