@@ -46,6 +46,7 @@ export const ROUTE_FILES = [
   'packages/server/inbox-artifact-pins.ts',
   'packages/server/inbox-ask.ts',
   'packages/server/inbox-attachments.ts',
+  'packages/server/inbox-bg-tasks.ts',
   'packages/server/inbox-cf-access-routes.ts',
   'packages/server/inbox-combine.ts',
   'packages/server/inbox-comment-drafts.ts',

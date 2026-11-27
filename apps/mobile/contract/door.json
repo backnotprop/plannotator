@@ -885,6 +885,24 @@
       "relay": true
     },
     {
+      "name": "GET threads/:id/tasks",
+      "method": "GET",
+      "path": "threads/{thread}/tasks",
+      "params": [
+        "thread"
+      ],
+      "call": "getThreadTasks",
+      "window": "/api/inbox/threads/{thread}/tasks",
+      "grant": "machine",
+      "auth": "token",
+      "kind": "read",
+      "write": null,
+      "key": null,
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
       "name": "POST artifact-pins",
       "method": "POST",
       "path": "artifact-pins",

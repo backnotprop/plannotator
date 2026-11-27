@@ -1576,6 +1576,17 @@ export function register(on: On) {
     return step.value
   })
 
+  // What the session still runs in the background, for its Inbox thread (background-tasks.ts): Claude Code lists it
+  // only for the Stop and SubagentStop hooks (`background_tasks`). Read and passed on, never answered.
+  on('classic.Stop', ($: Engine, e: any, next: Next) => {
+    if (allowed && mod && !mod.isDisposed) mod.onBackgroundTasks(e?.background_tasks, null)
+    return next(e)
+  })
+  on('classic.SubagentStop', ($: Engine, e: any, next: Next) => {
+    if (allowed && mod && !mod.isDisposed) mod.onBackgroundTasks(e?.background_tasks, typeof e?.agent_id === 'string' ? e.agent_id : null)
+    return next(e)
+  })
+
   on('turn.complete', async ($: Engine, e: any, next: Next) => {
     if (allowed && mod && !mod.isDisposed && !e.agentId && typeof e.turnId === 'string') {
       mod.onTurnComplete(e.turnId, typeof e.answer === 'string' ? e.answer : '', e.isAborted === true)

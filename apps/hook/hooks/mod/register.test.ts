@@ -38,10 +38,11 @@ describe('command.run registration', () => {
 // skipped" line every session on a guarded account. The session name must never
 // bring these two back (owner's decision on #2450).
 describe('no classic hook for the session name', () => {
-  test('classic.PermissionRequest is the only classic event the mod hooks', () => {
+  test('the mod hooks classic.PermissionRequest, and Stop and SubagentStop for background tasks, nothing else classic', () => {
     const events = registrations().map((hook) => hook.event)
 
-    expect(new Set(events.filter((event) => event.startsWith('classic.')))).toEqual(new Set(['classic.PermissionRequest']))
+    // Stop and SubagentStop are the only hooks Claude Code hands `background_tasks` (background-tasks.ts).
+    expect(new Set(events.filter((event) => event.startsWith('classic.')))).toEqual(new Set(['classic.PermissionRequest', 'classic.Stop', 'classic.SubagentStop']))
   })
 })
 

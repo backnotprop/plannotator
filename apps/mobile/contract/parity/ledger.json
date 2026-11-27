@@ -23841,6 +23841,34 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-door-get-threads-id-tasks",
+      "title": "door:GET threads/:id/tasks",
+      "surface": [
+        "door:GET threads/:id/tasks"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-27",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-threads-id-tasks",
+      "title": "window:/api/inbox/threads/:id/tasks",
+      "surface": [
+        "window:/api/inbox/threads/:id/tasks"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-27",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }

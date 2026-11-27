@@ -306,6 +306,8 @@ const ALLOWLIST: readonly DoorRoute[] = [
   // A thread's PRs (approval "inbox-pr-binding"): read, added and removed on the thread's own machine.
   { method: "GET", route: /^threads\/([^/]+)\/pulls$/, window: (m) => `/api/inbox/threads/${m[1]}/pulls`, machineOnly: true },
   { method: "POST", route: /^threads\/([^/]+)\/pulls$/, window: (m) => `/api/inbox/threads/${m[1]}/pulls`, machineOnly: true },
+  // A thread's background tasks (inbox-bg-tasks.ts): read from the machine whose agent runs them.
+  { method: "GET", route: /^threads\/([^/]+)\/tasks$/, window: (m) => `/api/inbox/threads/${m[1]}/tasks`, machineOnly: true },
   // Pinned artifacts (mark `artifact-pins`, approval "inbox-artifact-stars"): a linked machine's window pins and unpins
   // this Inbox's threads' artifacts here, and reads this Inbox's Artifacts wall. A phone never sees artifact pins.
   { method: "POST", route: /^artifact-pins$/, window: () => "/api/inbox/artifact-pins", machineOnly: true },
