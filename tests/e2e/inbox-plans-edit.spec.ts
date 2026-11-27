@@ -52,7 +52,8 @@ test('Edit, then Done: a new newest version of the person’s words, the agent n
     page.on('pageerror', (error) => errors.push(error.message));
     await page.goto(`${url}#plans=${plan.id}`);
     const reading = page.locator('[data-plan-reading]');
-    await expect(reading.locator('[data-plan-approval="approved"]')).toHaveText('Approved by you');
+    // The decision is the bar's mark, named by its line (PlanDecision.tsx).
+    await expect(reading.locator('[data-plan-decision-mark]')).toHaveAccessibleName('Approved by you');
 
     // Escape is not a way back to the Plans list.
     await page.locator('[data-plan-annotate] .ib-docscroll').click();
@@ -74,7 +75,9 @@ test('Edit, then Done: a new newest version of the person’s words, the agent n
     await expect(page.locator('[data-plan-banner="saved"] p')).toHaveText('Saved as v2. No agent is running in ledger, so the agent was not told.');
     await expect(reading.locator('[data-reading-versions]')).toHaveAccessibleName('Versions · v2, newest');
     await expect(page.locator('[data-plan-document]')).toContainText('Refill every second.');
-    await expect(reading.locator('[data-plan-approval="moved"]')).toHaveText('Your approval moved to v2.');
+    // The approval moved notice is in the mark's card.
+    await reading.locator('[data-plan-decision-mark]').click();
+    await expect(page.locator('[data-plan-decision-card] [data-plan-approval="moved"]')).toHaveText('Your approval moved to v2.');
     for (const scheme of ['light', 'dark'] as const) {
       await page.emulateMedia({ colorScheme: scheme });
       await page.screenshot({ path: join(proofDir, `done-${scheme}.png`) });
