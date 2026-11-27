@@ -4692,7 +4692,8 @@ dialog.ib-sp:not([data-phone]) .ib-sp-filters > .ib-sp-end { padding-left: 10px;
 .ib-sp-mi:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 
 .ib-sp-frame { position: relative; min-height: 0; }
-.ib-sp-list { max-height: min(560px, calc(88vh - 160px)); overflow-y: auto; overscroll-behavior: contain; padding: 6px 8px 8px; }
+/* Less the Search tip's card when it stands under the box (search/SearchTipCard.tsx, measured): the palette still ends in the window. */
+.ib-sp-list { max-height: min(560px, calc(88vh - 160px - var(--ib-sp-tip-h, 0px))); overflow-y: auto; overscroll-behavior: contain; padding: 6px 8px 8px; }
 .ib-sp-list[data-dim] .ib-sp-group { opacity: 0.6; transition: opacity 120ms; }
 .ib-sp-fade { position: absolute; left: 0; right: 0; height: 32px; pointer-events: none; opacity: 0; transition: opacity 150ms; z-index: 2; }
 .ib-sp-fade.ib-sp-top { top: 0; background: linear-gradient(var(--popover), transparent); }
@@ -4898,6 +4899,16 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
  * edge. Under every menu and dialog (they are what a person opens over it).
  */
 .ib-tour-coach.ib-ctip.ib-st { position: fixed; z-index: 60; }
+/*
+ * The Search tip (search/searchTip.ts): the Launch tip's card inside the search palette. Beside the palette level with
+ * the box when the window has room; else under the box in the palette's flow (in the palette's first paint, so it
+ * covers neither the box nor a result and never moves one), its arrow at the search icon.
+ */
+.ib-tour-coach.ib-ctip[data-search-tip][data-side="below"] { position: relative; inset: auto; flex: none; width: auto; margin: 10px 12px 6px; }
+.ib-tour-coach.ib-ctip[data-search-tip] .ib-tc-acts { justify-content: flex-end; }
+/* A phone keeps the coach card's 44 px tap target, as the Launch tip's does. */
+.pn-inbox dialog.ib-sp[data-phone] .ib-tour-coach.ib-ctip[data-search-tip] .ib-tc-next { height: 44px; padding: 0 16px; }
+.ib-ctip[data-search-tip] .ib-ctip-arrow[data-side="up"] { left: 7px; }
 /* Create thread from a Board card: which card the new thread is for. */
 .ib-cp-card { display: flex; align-items: center; gap: 8px; margin: 0; padding: 8px 16px; border-bottom: 1px solid var(--ib-line); font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); flex: none; }
 .ib-cp-card b { color: var(--foreground); font-weight: 600; }

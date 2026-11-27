@@ -8,12 +8,13 @@ import { diagramShadowAmount } from '../utils/diagramShadow';
 import { getIdentity } from '../utils/identity';
 import { createRuntimeRetryEpoch } from '../utils/runtimeRetry';
 import { copyTextToClipboard } from '../utils/clipboard';
+import { DiagramSourceVerdictContext, useDiagramSourceVerdict } from './diagramSourceAccept';
 import { DiagramAnchorClaims, DiagramAnchorClaimsContext } from './diagram/anchorClaims';
 import { DiagramPending, DiagramInlineSource } from './diagram/DiagramPending';
 import { DiagramViewer, type DiagramAskAI } from './diagram/DiagramViewer';
 import type { CommentAskAIHandler } from './CommentPopover';
 import { diagramAskAIContext } from '../utils/diagramAskAI';
-import { svgContentSize } from './diagram/svgContentSize';
+import { inlineFitMaxScale, svgContentSize } from './diagram/svgContentSize';
 import type { DiagramComment, DiagramCreateComment } from './diagram/useDiagramComments';
 import type { DiagramRenderState } from './diagram/useDiagramRender';
 import type { DiagramReopenRequest } from './diagram/reopen';
@@ -60,8 +61,9 @@ const MAX_HEIGHT_PX = 36 * 16;
 
 function inlineHeight(state: DiagramRenderState | null): string {
   const size = state?.svgNode ? svgContentSize(state.svgNode) : null;
-  if (size === null) return 'min(65vh, 24rem)';
-  const px = Math.round(size.height * (NOMINAL_WIDTH_PX / size.width)) + 48;
+  if (size === null || !state?.svgNode) return 'min(65vh, 24rem)';
+  // At the scale Fit will use, so a diagram held at its own size is not centred in a box sized for a blown-up one.
+  const px = Math.round(size.height * Math.min(inlineFitMaxScale(state.svgNode), NOMINAL_WIDTH_PX / size.width)) + 48;
   return `min(65vh, ${Math.min(MAX_HEIGHT_PX, Math.max(MIN_HEIGHT_PX, px))}px)`;
 }
 
@@ -163,6 +165,9 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
   const [isExpanded, setIsExpanded] = useState(false);
   const [retryToken, setRetryToken] = useState(0);
   const [renderState, setRenderState] = useState<DiagramRenderState | null>(null);
+  // Room under the drawing for the zoom strip, which the canvas asks for when the fitted drawing would reach the strip.
+  const [controlsReservePx, setControlsReservePx] = useState(0);
+  const controlsReserve = useMemo(() => ({ px: controlsReservePx, onChange: setControlsReservePx }), [controlsReservePx]);
 
   // The (palette, mode) the diagram must follow: the same resolution the
   // code fences use (see useFenceTheme). Outside a ThemeProvider the default
@@ -201,6 +206,18 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
   useEffect(() => {
     setIsExpanded(false);
   }, [block.content]);
+
+  // A fence the host's source check refuses shows what a fresh refusal shows, whatever was there before: no
+  // controls, no "Show source" view, no pop-out (it closes, as when the fence's content changes). Read here, in the
+  // same render as the viewers' answer (they get this one through DiagramSourceVerdictContext, so the host is asked
+  // once per mounted block), so no frame keeps the old controls.
+  const sourceVerdict = useDiagramSourceVerdict(kind, block.content);
+  const sourceAccepted = sourceVerdict.accepted;
+  useEffect(() => {
+    if (sourceAccepted) return;
+    setIsExpanded(false);
+    setShowSource(false);
+  }, [sourceAccepted]);
 
   // Comments that name no diagram block of the document (an external POST
   // carries `blockId: "external"`; a deleted fence leaves a dead id) belong
@@ -306,7 +323,7 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
   }, [handleAskAI]);
 
   const [resolution, setResolution] = useState<ReadonlyMap<string, boolean> | null>(null);
-  const svgReady = renderState?.svgNode != null;
+  const svgReady = sourceAccepted && renderState?.svgNode != null;
   const renderFailed = renderState !== null && renderState.error !== null && !svgReady;
 
   // This block's verdicts for the unowned comments. A diagram that failed
@@ -409,7 +426,7 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
   };
 
   return (
-    <>
+    <DiagramSourceVerdictContext.Provider value={sourceVerdict}>
       {/* `annotation-exclude`: the text highlighter never enters a diagram,
           so a text restore (a reply that lost its anchor, a quote that also
           appears in a node label) can never wrap a <mark> inside the svg. */}
@@ -442,7 +459,7 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
             </button>
           </div>
         )}
-        {showSource ? (
+        {showSource && sourceAccepted ? (
           <div className="relative">
             <div data-print-hide="" className="absolute top-2 right-2 z-10 flex items-center gap-1">
               <CopySourceButton source={block.content} />
@@ -464,7 +481,11 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
           <div
             data-diagram-inline=""
             className={svgReady ? 'rounded-xl bg-muted/30 border border-border/30 overflow-hidden' : undefined}
-            style={svgReady ? { height: inlineHeight(renderState) } : undefined}
+            style={
+              svgReady
+                ? { height: controlsReservePx > 0 ? `calc(${inlineHeight(renderState)} + ${controlsReservePx}px)` : inlineHeight(renderState) }
+                : undefined
+            }
           >
             <DiagramViewer
               {...viewerProps}
@@ -473,6 +494,8 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
               // diagram; Ctrl/Cmd+wheel and a pinch zoom it. The popout
               // (below) zooms on a plain wheel.
               wheelZoom="modifier"
+              fitAtMostNaturalSize
+              controlsReserve={controlsReserve}
               onAskAI={handleAskAI}
               onResolutionChange={setResolution}
               onRenderState={setRenderState}
@@ -501,6 +524,6 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
           </Suspense>
         </LazyBlockBoundary>
       )}
-    </>
+    </DiagramSourceVerdictContext.Provider>
   );
 };

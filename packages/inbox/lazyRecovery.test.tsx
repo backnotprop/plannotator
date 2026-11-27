@@ -123,6 +123,7 @@ test.skipIf(!hasDom)('a palette whose chunk cannot arrive closes the search stat
         <SearchHost
           mounted={mounted}
           open={open}
+          searchTip={false}
           phone={false}
           currentProject={null}
           projects={[]}

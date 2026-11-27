@@ -69,8 +69,10 @@ packages/ui/components/DiagramBlock.engine.test.tsx
 packages/ui/utils/pele-labels.test.ts
 packages/ui/utils/pele-render.test.ts
 packages/ui/utils/pele-hostile.test.ts
+packages/ui/utils/hostDiagramSafety.test.ts
 packages/ui/utils/diagramAnchorPele.test.ts
 packages/ui/utils/peleRowSpaces.test.ts
+packages/ui/utils/peleSankeyHeader.test.ts
 packages/ui/components/DiagramBlock.copySource.test.tsx
 packages/ui/components/Viewer.askAISelectionLine.test.tsx
 packages/ui/components/Viewer.codeDocumentRepeatedLine.test.tsx
@@ -118,6 +120,7 @@ packages/inbox/panePollsPause.test.tsx
 packages/inbox/decisionMode.test.tsx
 packages/inbox/decisionCardContract.test.tsx
 packages/inbox/decisionModeSettings.test.tsx
+packages/inbox/decisionSittingWait.test.tsx
 packages/inbox/threadFolding.test.tsx
 packages/inbox/threadNameMeta.test.tsx
 packages/inbox/components/stalePageNotice.test.tsx
@@ -254,6 +257,8 @@ packages/inbox/keyboardKeys.test.tsx
 packages/inbox/keyGuardsPageQueries.test.tsx
 packages/ui/shortcuts/runtime.guardCalls.test.tsx
 packages/inbox/rowSlotRenders.test.tsx
+packages/inbox/rowSlotWatchers.test.tsx
+packages/inbox/rowWatchers.test.tsx
 packages/inbox/actionDraftSend.test.tsx
 packages/inbox/actionNoteRefusal.test.tsx
 packages/inbox/actionSkip.test.tsx
@@ -349,6 +354,8 @@ packages/inbox/settingsSections.test.tsx
 packages/inbox/searchPalette.test.tsx
 packages/inbox/searchPaletteMachines.test.tsx
 packages/inbox/searchShortcut.test.tsx
+packages/inbox/searchTip.test.tsx
+packages/inbox/searchTipApp.test.tsx
 packages/inbox/openIn.test.tsx
 packages/inbox/openInCheck.test.tsx
 packages/inbox/openInFile.test.tsx
@@ -915,6 +922,8 @@ packages/inbox/scheduled/routineTabs.test.tsx
 packages/inbox/createRoutineWindow.test.tsx
 packages/inbox/plans/plansSidebar.test.tsx
 packages/inbox/plans/plansPage.test.tsx
+packages/inbox/plans/planDecision.test.tsx
+packages/inbox/plans/planHeader.test.tsx
 packages/inbox/plans/spacesHome.test.tsx
 packages/inbox/plans/spaceFaceDiagram.test.tsx
 packages/inbox/plans/planShare.test.tsx
@@ -971,3 +980,5 @@ packages/inbox/guide/usePowerUp.test.tsx
 packages/inbox/guide/useViewedTicks.test.tsx
 packages/inbox/components/reply/replyBoxParity.test.tsx
 packages/inbox/guide/diffFontLoad.test.tsx
+packages/ui/components/diagram/DiagramCanvas.controlsReserve.test.tsx
+packages/ui/components/diagram/diagramSourceAccept.test.tsx
