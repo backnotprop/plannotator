@@ -34,7 +34,8 @@
  *   `useDiagramRender` as the document draws a fence): refusing, every source
  *   above makes no request and loads no engine, with no CSP, whether Mermaid
  *   draws every fence or the switch is as shipped; accepting, the sources load
- *   exactly as with no check.
+ *   exactly as with no check; a fence drawn under an accepting check loses its
+ *   drawing when a refusing check is swapped in, and nothing more loads.
  *
  * Runs in Chromium and WebKit (playwright.config.ts).
  */
@@ -460,4 +461,21 @@ test("a host's source check that accepts: the sources draw and load exactly as w
     expect((await engines(page)).pele).toBeGreaterThan(0);
     await page.close();
   }
+});
+
+test("a fence drawn under an accepting check, then a refusing check swapped in: the drawing goes at once and nothing more loads from another host", async ({ page }) => {
+  const seen = await open(page, undefined, checkedMermaid);
+  await remoteLoads(page, false);
+  // Mermaid draws it and, with no CSP, what it applies itself loads: the drawing is live.
+  const drawn = await page.evaluate((s) => (window as any).__d.drawAccepted(s) as Promise<{ ok: boolean }>, BEFORE_ANY_SANITIZER['state classDef']!.source);
+  expect(drawn).toEqual({ ok: true });
+  await settle(page);
+  expect(seen.length).toBeGreaterThan(0);
+  expect(await page.locator('#host svg').count()).toBe(1);
+  seen.length = 0;
+  const after = await page.evaluate(() => (window as any).__d.refuseNow() as Promise<{ refused: boolean; svg: boolean }>);
+  expect(after).toEqual({ refused: true, svg: false });
+  expect(await page.locator('#host *').count()).toBe(0);
+  await settle(page);
+  expect(seen).toEqual([]);
 });

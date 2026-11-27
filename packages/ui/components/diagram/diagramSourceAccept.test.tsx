@@ -12,7 +12,12 @@
  *   page;
  * - the check is asked again on every re-render (a theme change), or is handed
  *   a rewritten source instead of the fence as written;
- * - with no check, or one that accepts, anything changes.
+ * - with no check, or one that accepts, anything changes;
+ * - a fence already drawn, then refused (its source edited in place, or a
+ *   stricter check swapped in), keeps its old drawing, its Expand or an open
+ *   pop-out, instead of showing exactly what a fresh refusal shows; or a
+ *   parse error stops keeping the last good render;
+ * - a caller can change the shared refused result for everyone.
  *
  * The engines are stand-ins behind their loader seams, so a load is counted
  * and the real libraries never load. The switch is as shipped
@@ -26,7 +31,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import type { DiagramKind } from '@plannotator/core/diagram-anchor';
 import type { Block } from '../../types';
 import { installInertDiagramSvgParser } from '../../test-setup/diagramSvg';
-import { __setPeleInBuildForTests, type DiagramTheme } from '../../utils/diagram-render';
+import { __setPeleInBuildForTests, DIAGRAM_REFUSED_RESULT, renderDiagram, type DiagramTheme } from '../../utils/diagram-render';
 import { __setGraphvizRuntimeLoaderForTests } from '../../utils/graphviz';
 import { __setMermaidRuntimeLoaderForTests } from '../../utils/mermaid';
 import { __setPeleRuntimeLoaderForTests, type PeleRuntime } from '../../utils/pele';
@@ -53,10 +58,15 @@ const peleGivesUp: PeleRuntime = {
   },
   render: async () => Promise.reject(new Error('not drawn')),
 };
+/** Renders held until released (`holdRenders`), and a source naming BROKEN does not parse. */
+const held: Array<() => void> = [];
+let holdRenders = false;
 const fakeMermaid = {
   initialize() {},
   render: async (_id: string, source: string) => {
     calls.mermaidRenders.push(source);
+    if (holdRenders) await new Promise<void>((resolve) => held.push(resolve));
+    if (source.includes('BROKEN')) throw new Error('Parse error on line 2');
     return { svg: SVG };
   },
 } as never;
@@ -113,9 +123,11 @@ beforeEach(() => {
   calls.mermaidRenders = [];
   calls.vizLoads = 0;
   calls.vizRenders = 0;
+  holdRenders = false;
   installCountingEngines();
 });
 afterEach(async () => {
+  for (const release of held.splice(0)) release();
   if (root) {
     const r = root;
     await act(async () => r.unmount());
@@ -189,7 +201,7 @@ describe.if(hasDom)('a host source check (DiagramSourceAcceptContext)', () => {
     );
     expect(engineUntouched()).toEqual(NOTHING);
     expect(Array.from(el.querySelectorAll('pre code')).map((c) => c.textContent)).toEqual([mermaidBlock.content, dotBlock.content]);
-    expect(el.querySelector('svg')).toBeNull();
+    expect(has(el, 'svg')).toBe(false);
     // No error panel, no pending line, no Expand (so no popout), as with an `accept` refusal.
     expect(el.querySelector('[data-diagram-pending]')).toBeNull();
     expect(el.querySelector('[data-diagram-expand]')).toBeNull();
@@ -314,5 +326,145 @@ describe.if(hasDom)('a host source check (DiagramSourceAcceptContext)', () => {
     await mount(withCheck((_kind, source) => (asked.push(source), false), <MermaidBlock block={{ ...mermaidBlock, content: sankey }} />));
     expect(asked).toEqual([sankey]);
     expect(engineUntouched()).toEqual(NOTHING);
+  });
+});
+
+const acceptAll: DiagramSourceAccept = () => true;
+const refuseAll: DiagramSourceAccept = () => false;
+const REFUSED_SOURCE = 'flowchart LR\n  X --> Y';
+/** Refuses REFUSED_SOURCE only. */
+const refuseX: DiagramSourceAccept = (_kind, source) => source !== REFUSED_SOURCE;
+const PARSE_ERROR_WORDS = ['does not parse', 'last good render'];
+const has = (root: ParentNode, selector: string) => root.querySelector(selector) !== null;
+
+async function waitFor(assertion: () => void, timeoutMs = 2000): Promise<void> {
+  const start = Date.now();
+  for (;;) {
+    try {
+      assertion();
+      return;
+    } catch (error) {
+      if (Date.now() - start > timeoutMs) throw error;
+      await settle(10);
+    }
+  }
+}
+
+/** What a block a check refused from the start shows, for comparison. */
+async function freshRefusal(block: Block): Promise<string> {
+  const probeHost = document.createElement('div');
+  document.body.appendChild(probeHost);
+  const probeRoot = createRoot(probeHost);
+  await act(async () => probeRoot.render(withCheck(refuseAll, <MermaidBlock block={block} />)));
+  await settle();
+  const html = visible(probeHost);
+  await act(async () => probeRoot.unmount());
+  probeHost.remove();
+  return html;
+}
+
+function expectRefusedLikeFresh(el: HTMLElement, source: string): void {
+  // Booleans, not nodes: a failing match on a node prints the whole svg.
+  expect(has(el, 'svg')).toBe(false);
+  expect(has(el, '[data-diagram-expand]')).toBe(false);
+  expect(has(el, '[data-diagram-parse-error]')).toBe(false);
+  expect(Array.from(el.querySelectorAll('pre code')).map((c) => c.textContent)).toEqual([source]);
+  for (const words of PARSE_ERROR_WORDS) expect(el.textContent).not.toContain(words);
+}
+
+describe.if(hasDom)('a fence already drawn, then refused by its source', () => {
+  test('its source edited in place to a refused one: exactly a fresh refusal, the old drawing gone', async () => {
+    const el = await mount(withCheck(refuseX, <MermaidBlock block={mermaidBlock} />));
+    expect(el.querySelector('svg[data-sentinel="diagram"]')).not.toBeNull();
+    expect(el.querySelector('[data-diagram-expand]')).not.toBeNull();
+    const refusedBlock = { ...mermaidBlock, content: REFUSED_SOURCE };
+    await rerender(withCheck(refuseX, <MermaidBlock block={refusedBlock} />));
+    expectRefusedLikeFresh(el, REFUSED_SOURCE);
+    expect(visible(el)).toBe(await freshRefusal(refusedBlock));
+    expect(calls.mermaidRenders).toEqual([FLOW]);
+  });
+
+  test('a stricter check swapped in: exactly a fresh refusal, the old drawing gone', async () => {
+    const el = await mount(withCheck(acceptAll, <MermaidBlock block={mermaidBlock} />));
+    expect(el.querySelector('svg[data-sentinel="diagram"]')).not.toBeNull();
+    await rerender(withCheck(refuseAll, <MermaidBlock block={mermaidBlock} />));
+    expectRefusedLikeFresh(el, FLOW);
+    expect(visible(el)).toBe(await freshRefusal(mermaidBlock));
+  });
+
+  test('after "Show source", a refusal still shows only what a fresh refusal shows', async () => {
+    const el = await mount(withCheck(acceptAll, <MermaidBlock block={mermaidBlock} />));
+    await act(async () => el.querySelector<HTMLButtonElement>('button[aria-label="Show source"]')!.click());
+    await rerender(withCheck(refuseAll, <MermaidBlock block={mermaidBlock} />));
+    expectRefusedLikeFresh(el, FLOW);
+    expect(visible(el)).toBe(await freshRefusal(mermaidBlock));
+  });
+
+  test('refused, then accepted again: drawn afresh, never the drawing from before the refusal', async () => {
+    const el = await mount(withCheck(acceptAll, <MermaidBlock block={mermaidBlock} />));
+    expect(el.querySelector('svg[data-sentinel="diagram"]')).not.toBeNull();
+    await rerender(withCheck(refuseAll, <MermaidBlock block={mermaidBlock} />));
+    expect(has(el, 'svg')).toBe(false);
+    holdRenders = true;
+    const accepting: DiagramSourceAccept = () => true;
+    await rerender(withCheck(accepting, <MermaidBlock block={mermaidBlock} />));
+    // While the new render is in flight: the pending source, not the old drawing.
+    expect(has(el, 'svg')).toBe(false);
+    expect(el.querySelector('[data-diagram-pending]')).not.toBeNull();
+    for (const release of held.splice(0)) release();
+    await waitFor(() => expect(el.querySelector('svg[data-sentinel="diagram"]')).not.toBeNull());
+    expect(el.querySelector('[data-diagram-expand]')).not.toBeNull();
+    for (const words of PARSE_ERROR_WORDS) expect(el.textContent).not.toContain(words);
+  });
+
+  test('a parse error after a good render still keeps the last good render (unchanged)', async () => {
+    const el = await mount(withCheck(acceptAll, <MermaidBlock block={mermaidBlock} />));
+    expect(el.querySelector('svg[data-sentinel="diagram"]')).not.toBeNull();
+    await rerender(withCheck(acceptAll, <MermaidBlock block={{ ...mermaidBlock, content: `${FLOW}\n  BROKEN` }} />));
+    expect(el.querySelector('svg[data-sentinel="diagram"]')).not.toBeNull();
+    expect(el.querySelector('[data-diagram-parse-error]')?.textContent).toContain('last good render');
+  });
+
+  test('an open pop-out closes when its fence is refused, and stays closed when accepted again', async () => {
+    const el = await mount(withCheck(acceptAll, <MermaidBlock block={mermaidBlock} />));
+    await act(async () => el.querySelector<HTMLButtonElement>('[data-diagram-expand]')!.click());
+    await waitFor(() => expect(document.querySelector('[data-diagram-popout] svg[data-sentinel="diagram"]')).not.toBeNull());
+    await rerender(withCheck(refuseAll, <MermaidBlock block={mermaidBlock} />));
+    expect(has(document, '[data-diagram-popout]')).toBe(false);
+    expect(has(document, 'svg[data-sentinel="diagram"]')).toBe(false);
+    expectRefusedLikeFresh(el, FLOW);
+    await rerender(withCheck(() => true, <MermaidBlock block={mermaidBlock} />));
+    await waitFor(() => expect(el.querySelector('svg[data-sentinel="diagram"]')).not.toBeNull());
+    expect(has(document, '[data-diagram-popout]')).toBe(false);
+  });
+
+  test('a stricter check on the hook alone: the state is a fresh refusal at once, with no drawing kept', async () => {
+    const seen: DiagramRenderState[] = [];
+    await mount(withCheck(acceptAll, <Probe kind="mermaid" source={FLOW} theme={THEME} seen={seen} />));
+    expect(seen.at(-1)!.svgNode).not.toBeNull();
+    const before = seen.length;
+    await rerender(withCheck(refuseAll, <Probe kind="mermaid" source={FLOW} theme={THEME} seen={seen} />));
+    // Every state from the swap on, the first included, holds no drawing.
+    for (const state of seen.slice(before)) {
+      expect(state.svgNode === null).toBe(true);
+      expect(state.error?.refused).toBe(true);
+      expect(state.pending).toBe(false);
+    }
+  });
+});
+
+describe.if(hasDom)('the shared refused result', () => {
+  test('no caller can change it: a later refusal, by source or by svg, is still the same refusal', async () => {
+    expect(() => {
+      (DIAGRAM_REFUSED_RESULT as { message: string }).message = 'changed';
+    }).toThrow();
+    expect(() => {
+      (DIAGRAM_REFUSED_RESULT as { refused?: boolean }).refused = false;
+    }).toThrow();
+    const bySvg = await renderDiagram('mermaid', 'frozen-accept', FLOW, THEME, { accept: () => false });
+    expect(bySvg).toEqual({ ok: false, message: 'The diagram is shown as its source.', line: null, runtimeUnavailable: false, refused: true });
+    const seen: DiagramRenderState[] = [];
+    await mount(withCheck(refuseAll, <Probe kind="mermaid" source={FLOW} theme={THEME} seen={seen} />));
+    expect(seen.at(-1)!.error).toEqual({ message: 'The diagram is shown as its source.', line: null, runtimeUnavailable: false, refused: true });
   });
 });

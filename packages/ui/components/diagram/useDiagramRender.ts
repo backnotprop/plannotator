@@ -39,6 +39,15 @@ export interface DiagramRenderState {
 
 let renderCounter = 0;
 
+/** What a refused source shows, whatever was drawn before: no drawing, nothing pending, the `refused` error. */
+const SOURCE_REFUSED_STATE: DiagramRenderState = Object.freeze({
+  svgNode: null,
+  renderId: null,
+  renderVersion: 0,
+  error: Object.freeze({ message: DIAGRAM_REFUSED_RESULT.message, line: null, runtimeUnavailable: false, refused: true }),
+  pending: false,
+});
+
 /**
  * Render `source` through the renderer slot whenever it, the kind, the
  * theme or `retryToken` changes. Each render gets its own id
@@ -49,7 +58,9 @@ let renderCounter = 0;
  * A host's source check (`DiagramSourceAcceptContext`) is asked first, once per
  * source: a refused source never reaches `renderDiagram`, so no engine is
  * loaded and nothing is parsed or drawn; the result is the same `refused` an
- * `accept` refusal gives.
+ * `accept` refusal gives. A source refused after an accepted one (edited in
+ * place, or a stricter check) drops the previous drawing at once rather than
+ * keeping it as a parse error does: the state is exactly a fresh refusal's.
  */
 export function useDiagramRender(
   kind: DiagramKind,
@@ -70,6 +81,15 @@ export function useDiagramRender(
   });
 
   useEffect(() => {
+    if (!sourceAccepted) {
+      // The previous drawing goes: accepted again later, the fence starts over as on a first render.
+      setState((current) =>
+        current.svgNode === null && current.error === null && current.pending
+          ? current
+          : { svgNode: null, renderId: null, renderVersion: current.renderVersion, error: null, pending: true },
+      );
+      return;
+    }
     let cancelled = false;
     renderCounter += 1;
     const renderId = `diagram-${documentId.replace(/[^\w-]/gu, '')}-${renderCounter}`;
@@ -80,10 +100,7 @@ export function useDiagramRender(
       const error = current.error?.runtimeUnavailable ? null : current.error;
       return current.pending && error === current.error ? current : { ...current, error, pending: true };
     });
-    const rendered = sourceAccepted
-      ? renderDiagram(kind, renderId, source, theme, accept ? { accept } : undefined)
-      : Promise.resolve<DiagramRenderResult>(DIAGRAM_REFUSED_RESULT);
-    void rendered.then((result: DiagramRenderResult) => {
+    void renderDiagram(kind, renderId, source, theme, accept ? { accept } : undefined).then((result: DiagramRenderResult) => {
       if (cancelled) return;
       if (isRenderError(result)) {
         const error = {
@@ -110,5 +127,6 @@ export function useDiagramRender(
     };
   }, [documentId, kind, source, theme, retryToken, accept, sourceAccepted]);
 
-  return state;
+  // Synchronous, so not one frame shows the previous drawing under a refusal.
+  return sourceAccepted ? state : SOURCE_REFUSED_STATE;
 }

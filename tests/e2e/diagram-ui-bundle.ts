@@ -143,6 +143,9 @@ await build({ ...options, alias, plugins, absWorkingDir: ${JSON.stringify(EXTENS
  *   often the check was called), the drawn svg mounted in `#host`.
  * - `engines()`: `{ mermaid, pele }`, whether the Mermaid runtime is in its slot
  *   and how often Pele's loader ran (the shipped `import('pele/lazy')`, counted).
+ * - `drawAccepted(source)`: drawn under an accepting check, `{ ok }`; then
+ *   `refuseNow()` swaps in a refusing check and resolves with the first state
+ *   after it, `{ refused, svg }` (`svg`: the state still holds a drawing).
  */
 function sourceCheckEntry(): string {
   const req = createRequire(join(UI, 'package.json'));
@@ -188,6 +191,44 @@ let checks = 0;
     mounted.render(React.createElement(DiagramSourceAcceptContext.Provider, { value: check }, React.createElement(Probe)));
   });
 (window as any).__d.engines = () => ({ mermaid: getMermaidRuntime() !== null, pele: peleLoads });
+// A fence drawn under an accepting check, then a refusing one swapped in (the host tightening its policy).
+// \`#host\` holds what the state holds, as the viewer draws it: the svg, or nothing.
+let swapTo: ((check: () => boolean) => void) | null = null;
+let onState: ((state: any) => void) | null = null;
+function Drawn({ source, id }: { source: string; id: string }) {
+  const state = useDiagramRender('mermaid', id, source, THEME);
+  React.useEffect(() => {
+    if (state.svgNode) host().replaceChildren(state.svgNode);
+    else host().replaceChildren();
+    onState?.(state);
+  }, [state]);
+  return null;
+}
+function Swappable({ source, id }: { source: string; id: string }) {
+  const [check, setCheck] = React.useState<() => boolean>(() => () => true);
+  swapTo = (next) => setCheck(() => next);
+  return React.createElement(DiagramSourceAcceptContext.Provider, { value: check }, React.createElement(Drawn, { source, id }));
+}
+(window as any).__d.drawAccepted = (source: string) =>
+  new Promise((resolve) => {
+    mounted?.unmount();
+    host().replaceChildren();
+    onState = (state) => {
+      if (state.pending) return;
+      onState = null;
+      resolve({ ok: state.error === null && state.svgNode !== null });
+    };
+    mounted = createRoot(reactRoot);
+    mounted.render(React.createElement(Swappable, { source, id: 'pn-swap-' + ++checks }));
+  });
+(window as any).__d.refuseNow = () =>
+  new Promise((resolve) => {
+    onState = (state) => {
+      onState = null;
+      resolve({ refused: state.error?.refused === true, svg: state.svgNode !== null });
+    };
+    swapTo!(() => false);
+  });
 `;
 }
 
