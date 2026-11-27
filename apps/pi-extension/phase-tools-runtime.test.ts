@@ -343,7 +343,11 @@ type ModelHostOptions = {
 	/** The registry resolves a configured model id to another id, as an alias does. */
 	registryIds?: Record<string, string>;
 	/** Another extension loaded before Plannotator: its listeners run first. */
-	before?: (api: { on: (event: string, handler: Handler) => void; appendEntry: (customType: string, data: unknown) => void }) => void;
+	before?: (api: {
+		on: (event: string, handler: Handler) => void;
+		appendEntry: (customType: string, data: unknown) => void;
+		setModel: (model: ModelRef) => Promise<boolean>;
+	}) => void;
 };
 
 /**
@@ -657,6 +661,21 @@ describe("On Pi, a model the user picks during plan mode is kept (#4111)", () =>
 		await completePlan(resumed);
 		expect(settingsOf(resumed)).toEqual([LUNA, "xhigh"]);
 	});
+
+	// Documents the accepted case the README states: Pi gives another extension's
+	// pi.setModel the same source as the user's /model, so it is kept as a pick.
+	test("a model another extension switches to during plan mode is kept", async () => {
+		const cwd = planWorkspace();
+		let otherExtension: { setModel: (model: ModelRef) => Promise<boolean> } | undefined;
+		const runtime = createModelHost({ cwd, initialModel: SOL, entries: [], before: (api) => (otherExtension = api) });
+		await runtime.run("session_start");
+		await runtime.command();
+		await otherExtension!.setModel(LUNA);
+		await runtime.submit();
+		expect(runtime.host.model).toEqual(LUNA);
+		await completePlan(runtime);
+		expect(runtime.host.model).toEqual(LUNA);
+	});
 });
 
 describe("Thinking level is not tracked: it behaves as before picks were kept", () => {
@@ -786,6 +805,26 @@ describe("Plannotator keeps the user's model across /tree (#1722)", () => {
 		await runtime.run("session_tree");
 
 		expect(runtime.host.model).toEqual(LUNA);
+	});
+
+	// Guards the README's /tree sentence: a jump to a point saved before the pick
+	// forgets it on that branch, so completion brings back the pre-plan model.
+	// Green on main too: this is main's behaviour, kept.
+	test("Pi: a /tree jump to a point saved before a pick forgets it on that branch", async () => {
+		const cwd = planWorkspace();
+		const runtime = createModelHost({ cwd, initialModel: SOL, entries: executingEntries() });
+		await runtime.run("session_start");
+		const beforePick = runtime.host.entries.length;
+		await runtime.userPicks(LUNA);
+		runtime.host.entries.length = beforePick;
+		await runtime.run("session_tree");
+		// Same phase: the live model is left alone (#1722).
+		expect(runtime.host.model).toEqual(LUNA);
+		await runtime.markDone(1);
+		await runtime.markDone(2);
+		await runtime.run("agent_end");
+		expect(lastState(runtime.host.entries).phase).toBe("idle");
+		expect(runtime.host.model).toEqual(SOL);
 	});
 });
 

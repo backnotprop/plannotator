@@ -150,9 +150,12 @@ counts, never a comparison of models: Pi's `model_select` during plan mode,
 except for Plannotator's own `setModel` calls, replaces `savedState.model`
 and sets `savedState.userSelectedModel`, persisted with the state. Every
 later restore of that state (completion, plan mode off, external hand-off,
-`/tree` out of plan mode, resume) brings back the pick, and the phase profile's model is not
-applied over it. Pi gives an extension's `pi.setModel` the same `source` as
-the user's `/model`, so another extension's switch counts too. oh-my-pi has
+`/tree` out of plan mode, resume) brings back the pick, and the phase
+profile's model is not applied over it. A `/tree` jump to a point saved
+before the pick loads that point's `savedState`, so the pick is forgotten on
+that branch (as before): later restores give that state's model. Pi gives an
+extension's `pi.setModel` the same `source` as the user's `/model`, so
+another extension's switch counts too. oh-my-pi has
 no `model_select`, so there the pre-plan model always comes back. Thinking
 level is not tracked. Whether a planning pick beats `phases.executing.model`
 at approval is the constant `USER_PICK_BEATS_EXECUTING_CONFIG_AT_APPROVAL`
