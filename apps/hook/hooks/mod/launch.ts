@@ -27,17 +27,29 @@ import { splitShellWords } from './shell-words'
 import { PLAN_APPROVALS_DIR } from './plan'
 import { looksLikeFilePath, plannotatorBundleSubject, plannotatorTargetSubject, type PlannotatorTarget } from './tool'
 
-/** The wrapper. `$1` is the launch directory; the CLI argv follows. */
-export const LAUNCH_SCRIPT = [
-  'dir=$1; shift',
-  '(',
-  "  trap '' HUP",
+const LAUNCH_WORKER = [
   '  nohup "$@" < "$dir/stdin" > "$dir/stdout" 2> "$dir/stderr" &',
   '  child=$!',
   '  echo "$child" > "$dir/pid"',
   '  wait "$child"',
   '  code=$?',
   '  echo "$code" > "$dir/exit.tmp" && mv "$dir/exit.tmp" "$dir/exit"',
+]
+
+// The scoped shell must keep the waiter with the CLI, so the exit file survives too.
+const SCOPED_WORKER = ['dir=$1; shift', ': > "$dir/scope-started" || exit 1', ...LAUNCH_WORKER].join('\n')
+
+/** The wrapper. `$1` is the launch directory; the CLI argv follows. */
+export const LAUNCH_SCRIPT = [
+  'dir=$1; shift',
+  '(',
+  "  trap '' HUP",
+  '  if [ "$(uname -s 2>/dev/null)" = Linux ] && command -v systemd-run >/dev/null 2>&1; then',
+  '    rm -f "$dir/scope-started"',
+  `    systemd-run --user --scope --quiet --collect -- /bin/sh -c '${SCOPED_WORKER}' plannotator-scope "$dir" "$@" && exit 0`,
+  '    { [ -e "$dir/scope-started" ] || [ ! -e "$dir/stdin" ]; } && exit 0',
+  '  fi',
+  ...LAUNCH_WORKER,
   ') < /dev/null > /dev/null 2>&1 &',
 ].join('\n')
 
@@ -254,7 +266,7 @@ export function cleanupArgv(dir: string): string[] {
       'exit 0',
     ].join('\n'),
     'plannotator-cleanup',
-    [dir, ...names, 'revision.json.ack', 'exit.tmp'],
+    [dir, ...names, 'revision.json.ack', 'exit.tmp', 'scope-started'],
   )
 }
 

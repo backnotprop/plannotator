@@ -124,7 +124,7 @@ describe('the scripts several Claude Code processes share', () => {
     expect(existsSync(join(kept, 'settled', 'by'))).toBe(true)
     expect((await run(claimArgv(kept, 'process-b'))).code).toBe(CLAIM_EXIT.lost)
 
-    const removed = launchDir(root, 'removed', { stdin: '', 'result.json': '{}' })
+    const removed = launchDir(root, 'removed', { stdin: '', 'result.json': '{}', 'scope-started': '' })
     expect((await run(claimArgv(removed, 'process-a'))).code).toBe(CLAIM_EXIT.won)
     writeFileSync(join(removed, 'settled', 'delivered'), '1')
     await run(cleanupArgv(removed))

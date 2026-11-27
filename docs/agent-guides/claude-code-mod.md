@@ -432,7 +432,12 @@ crashed keeps its directory (its `stderr` explains why). Servers outlive the
 terminal on purpose: the wrapper ignores SIGHUP and starts the CLI under
 `nohup` (a closing terminal otherwise took the server with it), so closing the
 terminal does not lose a review; verified live, `claude --continue` reattached
-and delivered it. They do not outlive the session for long: every lease
+and delivered it. On Linux, the wrapper first tries a separate systemd user
+scope for both the CLI and its exit waiter, so stopping an agent's scope does
+not kill an open review. If systemd cannot start that scope, it falls back to
+the original detached launch; `scope-started` in the launch directory prevents
+a CLI that already started from being launched a second time. They do not
+outlive the session for long: every lease
 write names the Claude Code process (`pid`, asked once per instance through
 the `host-pid` script, `$PPID` / the PowerShell parent; recorded only when two
 runs agree and it is over 1; Git Bash records none), and a code review whose
