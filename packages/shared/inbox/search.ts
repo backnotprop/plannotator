@@ -35,6 +35,7 @@
 import {
   inboxSearchMarksFound,
   inboxSearchPhraseOf,
+  inboxSearchPhrasesHold,
   inboxSearchRanges,
   inboxSearchSnippet,
   parseInboxSearchQuery,
@@ -69,6 +70,7 @@ import {
   type InboxSectionId,
 } from "@plannotator/core/inbox-types";
 import { inboxRowArchived } from "./list";
+import { confirmedTop, topOf } from "./search-confirm";
 import { canPrefixId, fnvString, ID_BUCKETS, ID_PREFIX_KEEP, ID_PREFIX_LENGTH, isIdLikeToken, Postings, Vocabulary } from "./search-vocabulary";
 import type { InboxStore } from "./store";
 
@@ -126,11 +128,36 @@ export function inboxSearchBodyText(markdown: string): string {
   return out.join("\n").trim();
 }
 
-/** `inboxSearchBodyText`'s lines, one at a time (the index tokenizes them without joining them). */
-export function forEachInboxSearchBodyLine(markdown: string, visit: (line: string) => void): void {
+/**
+ * A message's markdown as an exact phrase reads it (`inboxSearchPhrasesHold`):
+ * `inboxSearchBodyText`'s lines, a blank line before each line that starts a
+ * block (`forEachInboxSearchBodyLine`'s `starts`), so a phrase never runs from
+ * one paragraph, heading, list item, table row or fence into the next.
+ */
+export function inboxSearchBlockText(markdown: string): string {
+  let out = "";
+  forEachInboxSearchBodyLine(markdown, (line, starts) => {
+    out += out ? (starts ? "\n\n" : "\n") + line : line;
+  });
+  return out;
+}
+
+/**
+ * `inboxSearchBodyText`'s lines, one at a time (the index tokenizes them
+ * without joining them). `starts`: the line begins a block (a paragraph): the
+ * first line, a line after a blank line, a heading or table row (and the line
+ * after one), a list item, a change into or out of a block quote, the first
+ * line inside or after a fence, a line after a dropped one (a question block,
+ * a rule, a line that held only an image). Lines joined by a single line
+ * break inside a paragraph are one block, so a soft-wrapped sentence is one.
+ */
+export function forEachInboxSearchBodyLine(markdown: string, visit: (line: string, starts: boolean) => void): void {
   const skips = markdown.includes(":::question") ? findQuestionBlocks(markdown, { frontmatter: false }).map((b) => [b.startLine, b.endLine] as const) : [];
   let fence: string | null = null;
   let lineNo = 0;
+  // The next line visited begins a block; the last one visited was in a block quote.
+  let pending = true;
+  let quoted = false;
   for (let at = 0; at <= markdown.length; ) {
     let next = markdown.indexOf("\n", at);
     if (next < 0) next = markdown.length;
@@ -138,28 +165,59 @@ export function forEachInboxSearchBodyLine(markdown: string, visit: (line: strin
     at = next + 1;
     lineNo += 1;
     if (raw.endsWith("\r")) raw = raw.slice(0, -1);
-    if (skips.length > 0 && skips.some(([from, to]) => lineNo >= from && lineNo <= to)) continue;
-    const line = raw.trim();
-    if (fence !== null) {
-      if (line.startsWith(fence)) fence = null;
-      else visit(raw);
+    if (skips.length > 0 && skips.some(([from, to]) => lineNo >= from && lineNo <= to)) {
+      pending = true;
       continue;
     }
-    if (line.length === 0) continue;
+    const line = raw.trim();
+    if (fence !== null) {
+      if (line.startsWith(fence)) {
+        fence = null;
+        pending = true;
+      } else {
+        visit(raw, pending);
+        pending = line.length === 0;
+      }
+      continue;
+    }
+    if (line.length === 0) {
+      pending = true;
+      continue;
+    }
     const first = line.charCodeAt(0);
     if (first === 0x60 || first === 0x7e) {
       const open = /^(`{3,}|~{3,})/.exec(line);
       if (open) {
         fence = open[1]!;
+        pending = true;
+        quoted = false;
         continue;
       }
     }
     // Most lines are prose: only a line that starts with a mark, or holds inline markup, is rewritten.
     const marked = first === 0x23 || first === 0x3e || first === 0x2d || first === 0x2a || first === 0x2b || first === 0x3a || first === 0x7c || first === 0x5f || (first >= 0x30 && first <= 0x39);
-    if (marked && (/^:{3,}/.test(line) || /^[-*_]{3,}$/.test(line) || /^\|?\s*:?-{3,}/.test(line))) continue;
-    let text = marked ? line.replace(/^#{1,6}\s+/, "").replace(/^>\s?/, "").replace(/^(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?/, "") : line;
+    if (marked && (/^:{3,}/.test(line) || /^[-*_]{3,}$/.test(line) || /^\|?\s*:?-{3,}/.test(line))) {
+      pending = true;
+      continue;
+    }
+    let starts = pending;
+    let alone = false;
+    let text = line;
+    if (marked) {
+      const heading = line.replace(/^#{1,6}\s+/, "");
+      const unquoted = heading.replace(/^>\s?/, "");
+      text = unquoted.replace(/^(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?/, "");
+      // A heading or a table row is a block of its own; a list item starts one.
+      alone = heading !== line || first === 0x7c;
+      if (alone || text !== unquoted) starts = true;
+    }
+    const inQuote = first === 0x3e;
+    if (inQuote !== quoted) starts = true;
+    quoted = inQuote;
     if (INLINE_MARKUP.test(text)) text = plainInline(text.replace(/\|/g, " "));
-    visit(text);
+    visit(text, starts);
+    // A line left with no words (it held only an image) ends its block, as a blank line does.
+    pending = alone || text.trim().length === 0;
   }
 }
 
@@ -170,18 +228,23 @@ export function forEachInboxSearchBodyLine(markdown: string, visit: (line: strin
  * `$name` they typed stays in their words, so the reply is still found by it).
  */
 export function inboxSearchReplyText(body: string, message?: { reask?: readonly string[] | null }): string {
-  // A Re-ask note carries no words of the person's: its body is the instructions the Inbox wrote for the agent.
-  if ((message?.reask?.length ?? 0) > 0) return "";
-  return replyWordsText(withoutInboxSkillsBlock(body));
+  return inboxSearchBodyText(replyWordsMarkdown(body, message));
 }
 
-/** inboxSearchReplyText for a body whose skills block is already gone (a windowed long reply). */
-function replyWordsText(body: string): string {
+/** The markdown of the person's words in a reply (`inboxSearchReplyText` reads it as body text; the index reads it line by line). */
+function replyWordsMarkdown(body: string, message?: { reask?: readonly string[] | null }): string {
+  // A Re-ask note carries no words of the person's: its body is the instructions the Inbox wrote for the agent.
+  if ((message?.reask?.length ?? 0) > 0) return "";
+  return replyWordsOf(withoutInboxSkillsBlock(body));
+}
+
+/** replyWordsMarkdown for a body whose skills block is already gone (a windowed long reply). */
+function replyWordsOf(body: string): string {
   const lines = body.split(/\r?\n/);
   // The answers section, or the still-open line the store writes before it (folding.ts replyWords cuts the same).
   const at = lines.findIndex((line) => ANSWERS_HEADING_LINE.test(line.trim()) || INBOX_STILL_OPEN_LINE.test(line.trim()));
   const kept = (at >= 0 ? lines.slice(0, at) : lines).join("\n");
-  return inboxSearchBodyText(kept.replace(/^\s*(?:Answered \d+ questions?(?:, skipped \d+)?|Skipped \d+ questions?)\.\s*/, ""));
+  return kept.replace(/^\s*(?:Answered \d+ questions?(?:, skipped \d+)?|Skipped \d+ questions?)\.\s*/, "");
 }
 
 function answerText(answer: QuestionAnswer | null): string {
@@ -350,8 +413,6 @@ export class InboxSearchIndex {
   /** Ids below this carry their `BUCKET_FLAG`. */
   private termFlagged = 0;
   private seq = new Bytes(4096);
-  /** Each token's term bits in one document, for a quoted phrase (`holdsPhrases`). */
-  private tokenMasks = new Uint16Array(0);
 
   constructor(store: InboxStore, options: InboxSearchIndexOptions = {}) {
     this.store = store;
@@ -643,7 +704,7 @@ export class InboxSearchIndex {
 
   private indexProject(project: InboxProject): void {
     this.projectNames.set(project.id, project.name);
-    this.put(`p:${project.id}`, "project", { ref: project.id, threadId: null, projectId: project.id, at: project.created_at, from: null }, { title: [project.name], other: [project.root] }, `${project.name}\u0001${project.root}`);
+    this.put(`p:${project.id}`, "project", { ref: project.id, threadId: null, projectId: project.id, at: project.created_at, from: null }, projectFields(project), `${project.name}\u0001${project.root}`);
   }
 
   /** A thread's own document; with `withMessages`, its messages' too (the build). */
@@ -659,15 +720,55 @@ export class InboxSearchIndex {
       if (message) this.indexMessage(message);
     }
     const facts = this.factsOf(threadId);
-    const project = this.store.project(root.project_id);
-    const subject = facts?.subject ?? displayInboxSubject(root.subject) ?? "";
+    const fields = this.threadFields(root);
     this.put(
       `t:${threadId}`,
       "thread",
       { ref: threadId, threadId, projectId: root.project_id, at: facts?.lastAt ?? root.created_at, from: null },
-      { title: [subject, root.thread_name ?? ""], other: project ? [project.name] : [] },
-      `${subject}\u0001${root.thread_name ?? ""}\u0001${project?.name ?? ""}`,
+      fields,
+      `${fields.title[0]}\u0001${fields.title[1]}\u0001${fields.other[0] ?? ""}`,
     );
+  }
+
+  // ── fields: what each document is made of, read by the index (`put`) and again from the store (`fieldsOf`) ──
+
+  /** A thread: its current subject and its thread name as title fields; its project's name. */
+  private threadFields(root: InboxMessage): { title: [string, string]; other: string[] } {
+    const subject = this.factsOf(root.id)?.subject ?? displayInboxSubject(root.subject) ?? "";
+    const project = this.store.project(root.project_id);
+    return { title: [subject, root.thread_name ?? ""], other: project ? [project.name] : [] };
+  }
+
+  /** A message: the person's own reply words; or an agent's body, each question's texts, then the agent's name. */
+  private messageFields(message: InboxMessage): FieldSet {
+    if (message.author.kind === "person") return { title: [], other: [{ body: replyWordsMarkdown(message.body, message) }] };
+    return { title: [], other: [{ body: message.body }, ...this.store.questionsOf(message.id).flatMap(questionTexts), inboxAgentName(message.author)] };
+  }
+
+  /** The fields a document was indexed from, read again from the store (null: the record is gone). */
+  private fieldsOf(doc: Doc): FieldSet | null {
+    switch (doc.type) {
+      case "thread": {
+        const root = this.store.message(doc.ref);
+        return root ? this.threadFields(root) : null;
+      }
+      case "message": {
+        const message = this.store.message(doc.ref);
+        return message ? this.messageFields(message) : null;
+      }
+      case "file": {
+        const hit = this.store.attachment(doc.ref);
+        return hit ? fileFields(hit.attachment) : null;
+      }
+      case "guide": {
+        const guide = this.store.message(doc.ref)?.guide;
+        return guide ? guideFields(guide) : null;
+      }
+      case "project": {
+        const project = this.store.project(doc.ref);
+        return project ? projectFields(project) : null;
+      }
+    }
   }
 
   private indexMessage(message: InboxMessage): void {
@@ -676,23 +777,25 @@ export class InboxSearchIndex {
       if (isInboxNote(message)) return;
       if (message.taken_back_at) return this.remove(`m:${message.id}`);
       // A message's body never changes once stored: its length stands for it.
-      this.put(`m:${message.id}`, "message", { ...meta, from: "me" }, { title: [], other: [inboxSearchReplyText(message.body, message)] }, `${message.body.length}`);
+      this.put(`m:${message.id}`, "message", { ...meta, from: "me" }, this.messageFields(message), `${message.body.length}`);
       return;
     }
-    const questions = this.store.questionsOf(message.id).flatMap(questionTexts);
-    const name = inboxAgentName(message.author);
+    const fields = this.messageFields(message);
+    // After the body: each question's texts, then the agent's name.
+    const questions = fields.other.slice(1, -1) as string[];
+    const name = fields.other[fields.other.length - 1] as string;
     const sig = `${message.body.length}\u0001${name}\u0001${questions.join("\u0001")}`;
     const existing = this.byKey.get(`m:${message.id}`);
     if (existing === undefined || this.docs[existing]!.sig !== sig) {
-      this.put(`m:${message.id}`, "message", { ...meta, from: "agent" }, { title: [], other: [{ body: message.body }, ...questions, name] }, sig);
+      this.put(`m:${message.id}`, "message", { ...meta, from: "agent" }, fields, sig);
     } else {
       this.docs[existing]!.at = Date.parse(message.created_at) || 0;
     }
     for (const attachment of message.attachments ?? []) {
-      const tail = attachment.path.split(/[\\/]+/).slice(-2).join("/");
-      this.put(`f:${attachment.id}`, "file", { ...meta, ref: attachment.id, from: "agent" }, { title: [attachment.name], other: [tail] }, `${attachment.name}\u0001${tail}`);
+      const fields = fileFields(attachment);
+      this.put(`f:${attachment.id}`, "file", { ...meta, ref: attachment.id, from: "agent" }, fields, `${attachment.name}\u0001${fields.other[0]}`);
     }
-    if (message.guide) this.put(`g:${message.id}`, "guide", { ...meta, from: "agent" }, { title: [message.guide.title], other: [] }, message.guide.title);
+    if (message.guide) this.put(`g:${message.id}`, "guide", { ...meta, from: "agent" }, guideFields(message.guide), message.guide.title);
   }
 
   // ── facts ──
@@ -895,6 +998,8 @@ export class InboxSearchIndex {
       // One phrase of every term in order (`"file viewer"`): the scan's own phrase tier says it; else each phrase's bits.
       const wholePhrase = phrases.length === 1 && phrases[0]!.length === n && phrases[0]!.every((term, k) => term === k);
       const phraseBits = wholePhrase ? [] : phrases.map((at) => Uint16Array.from(at, (term) => 1 << term));
+      // Per phrase, which of its positions the tokens just read end (`phrasesStand`), reset for each document.
+      const phraseRuns = phraseBits.map((bits) => new Uint8Array(bits.length));
       let exactEpoch = -1;
       if (n === 1 && !withIds && phrases.length === 0 && lastExact >= 0) {
         // One word: whole when the exact token is in the document.
@@ -912,7 +1017,7 @@ export class InboxSearchIndex {
         }
         const found = scanDocument(doc.tokens, doc.titleLen, termOf, lastExact, lastBit, all, withIds ? ids : null);
         if (found < 0) continue;
-        if (phrases.length > 0 && !(wholePhrase ? (found & 3) === 3 : this.holdsPhrases(doc, termOf, withIds ? ids : null, phraseBits))) continue;
+        if (phrases.length > 0 && !(wholePhrase ? (found & 3) === 3 : phrasesStand(doc.tokens, termOf, withIds ? ids : null, phraseBits, phraseRuns))) continue;
         // The last term only as the start of an id, longer than the 12 characters kept: the text decides.
         if ((found & 8) !== 0 && prefixNeedsText && !this.textHasToken(doc, last, false)) continue;
         let tier = found & 3;
@@ -940,24 +1045,6 @@ export class InboxSearchIndex {
     }
   }
 
-  /** Whether every phrase (each position's term bit) stands somewhere in the document's tokens; a field separator breaks one. */
-  private holdsPhrases(doc: Doc, termOf: Uint16Array, ids: IdQuery | null, phrases: readonly Uint16Array[]): boolean {
-    if (this.tokenMasks.length < doc.count) this.tokenMasks = new Uint16Array(Math.max(doc.count, this.tokenMasks.length * 2, 1024));
-    const masks = this.tokenMasks;
-    const count = tokenMasksOf(doc.tokens, termOf, ids, masks);
-    for (const phrase of phrases) {
-      const n = phrase.length;
-      let found = false;
-      for (let at = 0; at + n <= count && !found; at++) {
-        let k = 0;
-        while (k < n && (masks[at + k]! & phrase[k]!) !== 0) k++;
-        found = k === n;
-      }
-      if (!found) return false;
-    }
-    return true;
-  }
-
   /**
    * Whether the document's text holds the ASCII id `term` as a whole token
    * (`whole`), or a token starting with it: read only for a document whose
@@ -969,32 +1056,12 @@ export class InboxSearchIndex {
     return false;
   }
 
-  /** The texts a document was indexed from, read again from the store. */
-  private docTexts(doc: Doc): string[] {
-    switch (doc.type) {
-      case "thread": {
-        const root = this.store.message(doc.ref);
-        if (!root) return [];
-        const facts = this.factsOf(doc.ref);
-        return [facts?.subject ?? displayInboxSubject(root.subject) ?? "", root.thread_name ?? "", this.store.project(root.project_id)?.name ?? ""];
-      }
-      case "message": {
-        const message = this.store.message(doc.ref);
-        if (!message) return [];
-        if (message.author.kind === "person") return [inboxSearchReplyText(message.body, message)];
-        return [inboxSearchBodyText(message.body), ...this.store.questionsOf(message.id).flatMap(questionTexts), inboxAgentName(message.author)];
-      }
-      case "file": {
-        const hit = this.store.attachment(doc.ref);
-        return hit ? [hit.attachment.name, hit.attachment.path.split(/[\\/]+/).slice(-2).join("/")] : [];
-      }
-      case "guide":
-        return [this.store.message(doc.ref)?.guide?.title ?? ""];
-      case "project": {
-        const project = this.store.project(doc.ref);
-        return project ? [project.name, project.root] : [];
-      }
-    }
+  /** The texts a document was indexed from, read again from the store (`blocks`: each block of a body ended by a blank line, for an exact phrase). */
+  private docTexts(doc: Doc, blocks = false): string[] {
+    const fields = this.fieldsOf(doc);
+    if (!fields) return [];
+    const text = (field: Field) => (typeof field === "string" ? field : blocks ? inboxSearchBlockText(field.body) : inboxSearchBodyText(field.body));
+    return [...fields.title.map(text), ...fields.other.map(text)];
   }
 
   /**
@@ -1107,16 +1174,24 @@ export class InboxSearchIndex {
     const totals = {} as Record<InboxSearchGroupId, number>;
     const answer: Partial<Record<InboxSearchGroupId, InboxSearchRow[]>> = {};
     const scores: Partial<Record<InboxSearchGroupId, number[]>> = {};
+    // An exact phrase: the index's candidates are confirmed in their text, best first, as far as the page and the count need.
+    const confirm = terms.length > 0 && parsed.exact.length > 0;
+    const holds = (doc: number) => inboxSearchPhrasesHold(this.docTexts(this.docs[doc]!, true), parsed.exact);
     for (const id of INBOX_SEARCH_GROUPS) {
       const list = groups[id];
-      totals[id] = list.length;
-      if (query.group && query.group !== id) continue;
-      if (terms.length === 0 && id !== "threads") continue;
+      const shown = !(query.group && query.group !== id) && !(terms.length === 0 && id !== "threads");
       const limit = Math.min(INBOX_SEARCH_LIMIT_MAX, query.limit ?? (query.group ? INBOX_SEARCH_LIMIT_MAX : terms.length === 0 ? INBOX_SEARCH_BROWSE_LIMIT : INBOX_SEARCH_CAPS[id]));
       const offset = query.group ? Math.max(0, query.offset ?? 0) : 0;
+      let top: { doc: number; score: number }[] | null = null;
+      if (confirm) {
+        const kept = confirmedTop(list, shown ? offset + limit : 0, holds);
+        totals[id] = kept.total;
+        top = kept.top;
+      } else totals[id] = list.length;
+      if (!shown) continue;
       const rows: InboxSearchRow[] = [];
       const ranks: number[] = [];
-      for (const { doc, score } of topOf(list, offset + limit).slice(offset, offset + limit)) {
+      for (const { doc, score } of (top ?? topOf(list, offset + limit)).slice(offset, offset + limit)) {
         const row = this.row(this.docs[doc]!, parsed.marks, labels, parsed.quoted ? terms : null);
         if (!row) continue;
         rows.push({ ...row, score });
@@ -1241,11 +1316,13 @@ export class InboxSearchIndex {
   private bestMessageText(message: InboxMessage, terms: readonly string[], quotedTerms: readonly string[] | null = null): { text: string; question: { key: string; replaced: boolean } | null } {
     const candidates: { text: string; question: { key: string; replaced: boolean } | null }[] = [];
     const near = (body: string) => (quotedTerms ? nearFirstHit(body, quotedTerms, firstPhraseOf(terms)) : nearFirstHit(body, terms));
+    // A quoted query reads a body by its blocks, so its marks never join two (a snippet folds the blank lines to a space).
+    const bodyText = quotedTerms ? inboxSearchBlockText : inboxSearchBodyText;
     if (message.author.kind === "person") {
       // A Re-ask note's body is the Inbox's words, not the person's: nothing to draw a row from.
-      if ((message.reask?.length ?? 0) === 0) candidates.push({ text: replyWordsText(near(withoutInboxSkillsBlock(message.body))), question: null });
+      if ((message.reask?.length ?? 0) === 0) candidates.push({ text: bodyText(replyWordsOf(near(withoutInboxSkillsBlock(message.body)))), question: null });
     } else {
-      candidates.push({ text: inboxSearchBodyText(near(message.body)), question: null });
+      candidates.push({ text: bodyText(near(message.body)), question: null });
       for (const q of this.store.questionsOf(message.id)) {
         const ref = { key: q.key, replaced: q.state === "superseded" };
         const answer = answerText(q.answer);
@@ -1471,11 +1548,18 @@ function scanDocument(bytes: Uint8Array, titleLen: number, termOf: Uint16Array, 
   return (phrase ? 3 : whole ? 2 : 1) | (seenTitle === all ? 4 : 0) | (!lastOther && lastAsIdPrefix ? 8 : 0) | (hashOnly << 8);
 }
 
-/** Each token's term bits (0 for a field separator or a word no term matches) into `out`; returns how many tokens. */
-function tokenMasksOf(bytes: Uint8Array, termOf: Uint16Array, ids: IdQuery | null, out: Uint16Array): number {
+/**
+ * Whether every phrase (each position's term bit) stands somewhere in the
+ * document's tokens, read once in order: `runs[p][k]` says the tokens just
+ * read match phrase p's positions 0 to k, so memory is the phrases' length
+ * whatever the document's. A field separator (no term bits) breaks a run.
+ */
+function phrasesStand(bytes: Uint8Array, termOf: Uint16Array, ids: IdQuery | null, phrases: readonly Uint16Array[], runs: readonly Uint8Array[]): boolean {
+  for (const run of runs) run.fill(0);
+  let left = phrases.length;
+  const stood = new Uint8Array(phrases.length);
   const length = bytes.length;
   let p = 0;
-  let t = 0;
   while (p < length) {
     let id = bytes[p++]!;
     if (id & 0x80) {
@@ -1493,9 +1577,20 @@ function tokenMasksOf(bytes: Uint8Array, termOf: Uint16Array, ids: IdQuery | nul
       p = readIdTail(bytes, p, id, ids);
       m = tail.bits;
     }
-    out[t++] = m;
+    for (let f = 0; f < phrases.length; f++) {
+      if (stood[f]) continue;
+      const phrase = phrases[f]!;
+      const run = runs[f]!;
+      const n = phrase.length;
+      for (let k = n - 1; k > 0; k--) run[k] = run[k - 1]! && (m & phrase[k]!) !== 0 ? 1 : 0;
+      run[0] = (m & phrase[0]!) !== 0 ? 1 : 0;
+      if (run[n - 1]) {
+        stood[f] = 1;
+        if (--left === 0) return true;
+      }
+    }
   }
-  return t;
+  return false;
 }
 
 /**
@@ -1551,22 +1646,17 @@ function firstPhraseOf(marks: readonly string[]): { tokens: string[]; open: bool
   return null;
 }
 
-/** The best `k` hits, best first (ties: the older document first, so the order is total). A partial selection when `k` is small. */
-function topOf(list: { doc: number; score: number }[], k: number): { doc: number; score: number }[] {
-  const better = (a: { doc: number; score: number }, b: { doc: number; score: number }) => b.score - a.score || a.doc - b.doc;
-  if (k > 64 || list.length <= k * 4) return list.sort(better).slice(0, k);
-  const best: { doc: number; score: number }[] = [];
-  for (const hit of list) {
-    if (best.length === k && better(hit, best[k - 1]!) >= 0) continue;
-    let i = best.length === k ? k - 1 : best.length;
-    if (best.length < k) best.push(hit);
-    while (i > 0 && better(hit, best[i - 1]!) < 0) {
-      best[i] = best[i - 1]!;
-      i--;
-    }
-    best[i] = hit;
-  }
-  return best;
+function projectFields(project: InboxProject): FieldSet {
+  return { title: [project.name], other: [project.root] };
+}
+
+/** An attachment: its name; the last two segments of its path. */
+function fileFields(attachment: { name: string; path: string }): { title: string[]; other: [string] } {
+  return { title: [attachment.name], other: [attachment.path.split(/[\\/]+/).slice(-2).join("/")] };
+}
+
+function guideFields(guide: { title: string }): FieldSet {
+  return { title: [guide.title], other: [] };
 }
 
 function questionTexts(question: InboxQuestion): string[] {

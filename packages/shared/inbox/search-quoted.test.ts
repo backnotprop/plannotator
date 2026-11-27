@@ -10,6 +10,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { inboxSearchRanges, inboxSearchTerms, parseInboxSearchQuery } from "@plannotator/core/inbox-search";
+import { confirmedTop } from "./search-confirm";
 import type { InboxAuthor } from "@plannotator/core/inbox-types";
 import { InboxSearchIndex, type InboxSearchAnswer, type InboxSearchMessageRow, type InboxSearchQuery, type InboxSearchThreadRow } from "./search";
 import { InboxStore } from "./store";
@@ -243,7 +244,7 @@ describe("parseInboxSearchQuery", () => {
   });
 
   test("phrases, words and the one prefix", () => {
-    expect(parseInboxSearchQuery('"file viewer" blank')).toEqual({ terms: ["file", "viewer", "blank"], prefixLast: true, phrases: [[0, 1]], marks: ['"file viewer"', "blank"], quoted: true });
+    expect(parseInboxSearchQuery('"file viewer" blank')).toEqual({ terms: ["file", "viewer", "blank"], prefixLast: true, phrases: [[0, 1]], exact: [{ tokens: ["file", "viewer"], open: false }], marks: ['"file viewer"', "blank"], quoted: true });
     expect(parseInboxSearchQuery('blank "file viewer"')).toMatchObject({ terms: ["blank", "file", "viewer"], prefixLast: false, phrases: [[1, 2]] });
     expect(parseInboxSearchQuery('"file view')).toMatchObject({ terms: ["file", "view"], prefixLast: true, phrases: [[0, 1]], marks: ['"file view'] });
     expect(parseInboxSearchQuery('"file"')).toMatchObject({ terms: ["file"], prefixLast: false, phrases: [], marks: ['"file"'] });
@@ -251,5 +252,146 @@ describe("parseInboxSearchQuery", () => {
     expect(parseInboxSearchQuery('"file viewer file')).toMatchObject({ terms: ["file", "viewer", "file"], prefixLast: true, phrases: [[0, 1, 2]] });
     expect(parseInboxSearchQuery("“file viewer”")).toMatchObject({ terms: ["file", "viewer"], prefixLast: false, phrases: [[0, 1]] });
     expect(parseInboxSearchQuery('"" file')).toMatchObject({ terms: ["file"], prefixLast: true, phrases: [], marks: ["file"] });
+  });
+});
+
+describe("an exact phrase: confirmed in the text, one-letter words kept, never across a block", () => {
+  /** One message per body, in a fresh store; the ids of those a query finds, as the bodies' labels. */
+  async function finds(bodies: Record<string, string>, queries: string[], subject = "Notes"): Promise<Record<string, string[]>> {
+    const store = open();
+    const project = store.ensureProject({ name: "harbor", root: "/w/harbor" });
+    const label = new Map<string, string>();
+    for (const [name, body] of Object.entries(bodies)) label.set(store.sendMessage({ project_id: project.id, author: CLAUDE, subject, thread: name, body }).message.id, name);
+    const index = await built(store);
+    const out: Record<string, string[]> = {};
+    for (const q of queries) out[q] = messageIds(search(index, q)).map((id) => label.get(id)!).sort();
+    return out;
+  }
+
+  test("a one-letter or digit word in a phrase must be there: step 1 is not step 2 or step 10", async () => {
+    const found = await finds({ one: "Do step 1 now.", colon: "Step 1: check the logs.", two: "Do step 2 now.", ten: "Do step 10 now." }, ['"step 1"', '"step 1', "step"]);
+    expect(found['"step 1"']).toEqual(["colon", "one"]);
+    // Open (still typing), the last token is a start: step 10 too, never step 2.
+    expect(found['"step 1']).toEqual(["colon", "one", "ten"]);
+    expect(found.step).toEqual(["colon", "one", "ten", "two"]);
+  });
+
+  test("plan a review is not plan b review or plan review; v1.2 is not v1.3", async () => {
+    const found = await finds({ a: "We plan a review on Monday.", b: "We plan b review instead.", none: "The plan review is done.", v12: "Shipped v1.2 today.", v13: "Shipped v1.3 today." }, ['"plan a review"', '"v1.2"']);
+    expect(found['"plan a review"']).toEqual(["a"]);
+    expect(found['"v1.2"']).toEqual(["v12"]);
+  });
+
+  test("never across two paragraphs, a heading and its paragraph, two list items, a fence's edge; a soft-wrapped sentence is one", async () => {
+    const found = await finds(
+      {
+        paragraphs: "The page stays blank.\n\nViewer opens later.",
+        heading: "## Stays blank\nViewer opens later.",
+        list: "- the page stays blank\n- viewer opens later",
+        fence: "The page stays blank\n```\nviewer.open()\n```",
+        after: "```\nthe page stays blank\n```\nViewer opens later.",
+        quote: "> the page stays blank\nviewer opens later",
+        question: `The page stays blank${ASK("Pick one", ["A", "B"])}\nviewer opens later`,
+        wrapped: "The page stays blank\nviewer opens later, as a soft-wrapped sentence.",
+      },
+      ['"blank viewer"', "blank viewer"],
+    );
+    expect(found['"blank viewer"']).toEqual(["wrapped"]);
+    expect(found["blank viewer"]).toHaveLength(8);
+  });
+
+  test("the person's reply words: by their blocks too", async () => {
+    const store = open();
+    const project = store.ensureProject({ name: "fern-api", root: "/w/fern-api" });
+    const a = store.sendMessage({ project_id: project.id, author: CLAUDE, subject: "Notes", thread: "a", body: "Anything." }).message;
+    const b = store.sendMessage({ project_id: project.id, author: CLAUDE, subject: "Notes", thread: "b", body: "Anything." }).message;
+    const apart = store.sendReply(a.thread_id, { idempotency_key: "k1", words: "It stays blank.\n\nViewer next." }).reply;
+    const wrapped = store.sendReply(b.thread_id, { idempotency_key: "k2", words: "It stays blank\nviewer next." }).reply;
+    const index = await built(store);
+    expect(messageIds(search(index, '"blank viewer"', { from: "me" }))).toEqual([wrapped.id]);
+    expect(sorted(messageIds(search(index, "blank viewer", { from: "me" })))).toEqual(sorted([apart.id, wrapped.id]));
+  });
+
+  test("a word and the same word in a phrase; a phrase repeating a word; two phrases sharing a word", async () => {
+    const found = await finds(
+      {
+        phrase: "Open the file viewer now.",
+        apart: "The file is big; the viewer is slow.",
+        aba: "Deploy a b a today.",
+        abc: "Deploy a b c today.",
+        both: "The file viewer opens.",
+        each: "The file viewer, then later the viewer opens.",
+        neither: "The file viewer closes; a viewer closes.",
+      },
+      ['file "file viewer"', 'deploy "a b a"', '"file viewer" "viewer opens"'],
+    );
+    expect(found['file "file viewer"']).toEqual(["both", "each", "neither", "phrase"]);
+    expect(found['deploy "a b a"']).toEqual(["aba"]);
+    expect(found['"file viewer" "viewer opens"']).toEqual(["both", "each"]);
+  });
+
+  test("a phrase cut by the 8-term cap ends on a whole word: nothing in it is a prefix", async () => {
+    const parsed = parseInboxSearchQuery('"one two three four five six seven eight nine');
+    expect(parsed.prefixLast).toBe(false);
+    expect(parsed.exact).toEqual([{ tokens: ["one", "two", "three", "four", "five", "six", "seven", "eight"], open: false }]);
+    const found = await finds({ whole: "one two three four five six seven eight nine", longer: "one two three four five six seven eighty nine" }, ['"one two three four five six seven eight nine']);
+    expect(found['"one two three four five six seven eight nine']).toEqual(["whole"]);
+  });
+
+  test("not quote marks: a curly apostrophe; quotes holding only spaces are ignored; German and French quotes are quotes", async () => {
+    expect(parseInboxSearchQuery("the user’s file")).toMatchObject({ quoted: false, terms: inboxSearchTerms("the user’s file") });
+    expect(parseInboxSearchQuery('"   " files')).toMatchObject({ terms: ["files"], prefixLast: true, phrases: [], exact: [], marks: ["files"] });
+    const found = await finds({ phrase: "The file viewer opens.", apart: "The file opens in the viewer." }, ["„file viewer“", "«file viewer»", '"   " viewer']);
+    expect(found["„file viewer“"]).toEqual(["phrase"]);
+    expect(found["«file viewer»"]).toEqual(["phrase"]);
+    expect(found['"   " viewer']).toEqual(["apart", "phrase"]);
+  });
+
+  test("folding still holds inside a phrase: case, accents, full width, ligatures; a soft hyphen joins a word", async () => {
+    const found = await finds(
+      { accent: "Your Résumé Review is due.", wide: "Ｓｔｅｐ １ first.", ligature: "The ﬁle viewer.", soft: "The file\u00adviewer opens.", near: "Résumés review later." },
+      ['"resume review"', '"step 1"', '"file viewer"'],
+    );
+    expect(found['"resume review"']).toEqual(["accent"]);
+    expect(found['"step 1"']).toEqual(["wide"]);
+    expect(found['"file viewer"']).toEqual(["ligature"]);
+  });
+
+  test("a quoted CJK phrase is its literal characters, whatever the segmenter cut", async () => {
+    const found = await finds({ city: "明日は東京都に行く", comma: "東京、都の話", other: "京都に行く" }, ['"東京都"']);
+    expect(found['"東京都"']).toEqual(["city", "comma"]);
+  });
+
+  test("the totals count confirmed rows; the marks keep the one-letter word", async () => {
+    const store = open();
+    const project = store.ensureProject({ name: "ledger", root: "/w/ledger" });
+    const send = (thread: string, body: string) => store.sendMessage({ project_id: project.id, author: CLAUDE, subject: "Steps", thread, body }).message;
+    const one = send("a", "First do step 1, then rest.");
+    send("b", "First do step 2, then rest.");
+    send("c", "First do step 10, then rest.");
+    const index = await built(store);
+    const answer = search(index, '"step 1"');
+    expect(answer.totals?.messages).toBe(1);
+    expect(answer.terms).toEqual(['"step 1"']);
+    const row = answer.groups!.messages!.find((r) => r.id === one.id) as InboxSearchMessageRow;
+    expect(marked(row.snippet.text, row.snippet.marks)).toEqual(["step 1"]);
+    expect(inboxSearchRanges("step 10, step 1.", ['"step 1"']).map(([a, b]) => "step 10, step 1.".slice(a, b))).toEqual(["step 1"]);
+    // A snippet never marks a phrase across two blocks.
+    expect(inboxSearchRanges("stays blank\n\nviewer", ['"blank viewer"'])).toEqual([]);
+  });
+
+  test("confirmedTop: the page from confirmed hits only, best first; the total confirmed, plus what the cap left unread", () => {
+    const list = Array.from({ length: 50 }, (_, i) => ({ doc: i, score: 100 - i }));
+    const holds = (doc: number) => doc % 2 === 0;
+    const all = confirmedTop([...list], 3, holds, 1000);
+    expect(all.top.map((h) => h.doc)).toEqual([0, 2, 4]);
+    expect(all.total).toBe(25);
+    // Five reads past the page (docs 5 to 9): 6 and 8 hold; the 40 after are unread and counted.
+    const capped = confirmedTop([...list], 3, holds, 5);
+    expect(capped.top.map((h) => h.doc)).toEqual([0, 2, 4]);
+    expect(capped.total).toBe(3 + 2 + 40);
+    // A page past many false hits still fills.
+    const late = confirmedTop([...list], 2, (doc) => doc >= 45, 0);
+    expect(late.top.map((h) => h.doc)).toEqual([45, 46]);
   });
 });

@@ -18,7 +18,9 @@
  *   characters is dropped unless it is CJK.
  * - A query is at most 200 characters and 8 terms; every term must match,
  *   the last one as a prefix. Words in double quotes are an exact phrase
- *   (`parseInboxSearchQuery`).
+ *   (`parseInboxSearchQuery`): the index finds candidates, then the text
+ *   confirms it with every token, one-letter ones too, inside one block
+ *   (`inboxSearchPhrasesHold`).
  */
 
 import type { InboxSectionId } from './inbox-types';
@@ -70,23 +72,23 @@ export function isCjkToken(token: string): boolean {
 /** Visits each token: its folded form and where it sits in the original. */
 export type InboxSearchTokenVisitor = (token: string, start: number, end: number) => void;
 
-function visitRun(text: string, start: number, end: number, visit: InboxSearchTokenVisitor): void {
+function visitRun(text: string, start: number, end: number, visit: InboxSearchTokenVisitor, short: boolean): void {
   const token = foldInboxSearchText(text.slice(start, end));
-  if (token.length >= 2 || (token.length > 0 && CJK.test(token))) visit(token, start, end);
+  if (token.length >= 2 || (token.length > 0 && (short || CJK.test(token)))) visit(token, start, end);
 }
 
 /** A chunk with a character outside ASCII: word runs, cut where the segmenter cuts in scripts written without spaces. */
-function visitRich(text: string, from: number, to: number, visit: InboxSearchTokenVisitor): void {
+function visitRich(text: string, from: number, to: number, visit: InboxSearchTokenVisitor, short: boolean): void {
   const part = text.slice(from, to);
   const words = NO_SPACES.test(part) ? segmenter() : null;
   if (!words) {
-    for (const match of part.matchAll(WORD_RUN)) visitRun(text, from + match.index!, from + match.index! + match[0].length, visit);
+    for (const match of part.matchAll(WORD_RUN)) visitRun(text, from + match.index!, from + match.index! + match[0].length, visit, short);
     return;
   }
   for (const segment of words.segment(part)) {
     if (!segment.isWordLike) continue;
     const base = from + segment.index;
-    for (const match of segment.segment.matchAll(WORD_RUN)) visitRun(text, base + match.index!, base + match.index! + match[0].length, visit);
+    for (const match of segment.segment.matchAll(WORD_RUN)) visitRun(text, base + match.index!, base + match.index! + match[0].length, visit, short);
   }
 }
 
@@ -121,6 +123,11 @@ export function forEachInboxSearchToken(text: string, visit: InboxSearchTokenVis
  * comes folded through `other`.
  */
 export function scanInboxSearchTokens(text: string, ascii: (start: number, end: number, upper: boolean) => void, other: InboxSearchTokenVisitor): void {
+  scanTokens(text, ascii, other, 2);
+}
+
+/** The scan, keeping tokens of `min` characters or more (2 for the index; 1 for an exact phrase, `phraseUnitsOf`). */
+function scanTokens(text: string, ascii: (start: number, end: number, upper: boolean) => void, other: InboxSearchTokenVisitor, min: number): void {
   const n = text.length;
   let i = 0;
   while (i < n) {
@@ -151,12 +158,12 @@ export function scanInboxSearchTokens(text: string, ascii: (start: number, end: 
           }
           if (up) upper = true;
         } else if (start >= 0) {
-          if (k - start >= 2) ascii(start, k, upper);
+          if (k - start >= min) ascii(start, k, upper);
           start = -1;
         }
       }
     } else {
-      visitRich(text, i, j, other);
+      visitRich(text, i, j, other, min < 2);
     }
     i = j;
   }
@@ -183,25 +190,42 @@ export function inboxSearchTerms(query: string): string[] {
   return out;
 }
 
-/** The quote marks that open or close a phrase: the straight one, and the curly ones a phone types. */
-const QUOTE_MARKS = /["“”]/;
+/**
+ * The quote marks that open or close a phrase: the straight one, the curly ones a phone types, and the German and
+ * French ones (`„…“`, `«…»`). Each one toggles: the next one closes what it opened.
+ */
+const QUOTE_MARKS = /["“”„«»]/;
+
+/** A phrase to confirm in text: its tokens as typed (folded, one-letter tokens kept), and whether its last token is a prefix (a quote not closed yet). */
+export interface InboxSearchPhrase {
+  tokens: string[];
+  open: boolean;
+}
 
 /**
  * A query as the index reads it. Without a quote mark it is `inboxSearchTerms`
  * with the last term as a prefix, exactly as before quotes. Words in double
- * quotes (straight or curly) are a phrase: its tokens next to each other, in
- * order, in one field. A quoted word is that whole word. A quote not yet
- * closed is a phrase of what is typed so far, its last token the start of a
- * word (so results do not vanish while the person types). Empty quotes are
- * ignored. Only the query's very last token may be a prefix: a word after
- * every phrase, or the last token of a phrase left open.
+ * quotes are a phrase: its tokens next to each other, in order, in one block
+ * of one field. A quoted word is that whole word. A quote not yet closed is a
+ * phrase of what is typed so far, its last token the start of a word (so
+ * results do not vanish while the person types). Empty quotes are ignored.
+ * Only the query's very last token may be a prefix: a word after every
+ * phrase, or the last token of a phrase left open.
  */
 export interface InboxSearchParsedQuery {
   /** What the index looks up: distinct tokens in order, at most 8; with `prefixLast`, the last is a prefix (it may repeat an earlier term). */
   terms: string[];
   prefixLast: boolean;
-  /** Each phrase of two tokens or more, as the index of its term at each position. */
+  /** Each phrase of two index terms or more, as the index of its term at each position: the index's candidate filter. */
   phrases: number[][];
+  /**
+   * What the text must confirm (`inboxSearchPhrasesHold`) on the index's
+   * candidates: each phrase of two tokens or more, and a quoted one-letter
+   * word, with every token (one-letter ones too, which the index drops). A
+   * quoted word of two letters or more needs no text: the index matches it
+   * whole.
+   */
+  exact: InboxSearchPhrase[];
   /**
    * What an answer's `terms` carries for the marks: the words, and each phrase
    * as `"tok tok"` (closed) or `"tok tok` (open, its last token a prefix), in
@@ -212,20 +236,31 @@ export interface InboxSearchParsedQuery {
   quoted: boolean;
 }
 
+/** A token the index keeps (`visitRun`): two characters or more, or CJK. */
+const indexed = (token: string): boolean => token.length >= 2 || CJK.test(token);
+
+/** Every token of a text, one-letter ones too, in order. */
+function wordsOf(text: string): string[] {
+  const out: string[] = [];
+  scanTokens(text, (start, end, upper) => out.push(upper ? text.slice(start, end).toLowerCase() : text.slice(start, end)), (token) => out.push(token), 1);
+  return out;
+}
+
 export function parseInboxSearchQuery(query: string): InboxSearchParsedQuery {
   const q = query.trim().slice(0, INBOX_SEARCH_QUERY_MAX);
   if (!QUOTE_MARKS.test(q)) {
     const terms = inboxSearchTerms(q);
-    return { terms, prefixLast: true, phrases: [], marks: terms, quoted: false };
+    return { terms, prefixLast: true, phrases: [], exact: [], marks: terms, quoted: false };
   }
-  // The text between quote marks, in turn outside and inside a phrase.
+  // The text between quote marks, in turn outside and inside a phrase; inside, every token, one-letter ones too.
   const parts: { tokens: string[]; quoted: boolean; closed: boolean }[] = [];
   let inside = false;
   let from = 0;
   for (let i = 0; i <= q.length; i++) {
     const end = i === q.length;
     if (!end && !QUOTE_MARKS.test(q[i]!)) continue;
-    const tokens = tokenizeInboxSearchText(q.slice(from, i)).map((t) => t.token);
+    const piece = q.slice(from, i);
+    const tokens = inside ? wordsOf(piece) : tokenizeInboxSearchText(piece).map((t) => t.token);
     if (tokens.length > 0) parts.push({ tokens, quoted: inside, closed: !end });
     if (!end) inside = !inside;
     from = i + 1;
@@ -235,6 +270,7 @@ export function parseInboxSearchQuery(query: string): InboxSearchParsedQuery {
   const terms: string[] = [];
   const termAt = new Map<string, number>();
   const phrases: number[][] = [];
+  const exact: InboxSearchPhrase[] = [];
   const marks: string[] = [];
   let prefixLast = false;
   let full = false;
@@ -242,10 +278,14 @@ export function parseInboxSearchQuery(query: string): InboxSearchParsedQuery {
     const part = parts[p]!;
     const at: number[] = [];
     const kept: string[] = [];
-    let open = false;
     for (let k = 0; k < part.tokens.length; k++) {
       const token = part.tokens[k]!;
       const prefix = prefixOn && p === parts.length - 1 && k === part.tokens.length - 1;
+      // A one-letter token in a phrase: no index term (the index never holds one), only the text confirms it.
+      if (!indexed(token)) {
+        kept.push(token);
+        continue;
+      }
       // The prefix has a term of its own, even when the same word is also wanted whole.
       const key = prefix ? `${token}*` : token;
       let index = termAt.get(key);
@@ -258,46 +298,218 @@ export function parseInboxSearchQuery(query: string): InboxSearchParsedQuery {
         terms.push(token);
         termAt.set(key, index);
       }
-      if (prefix) {
-        prefixLast = true;
-        open = part.quoted;
-      }
+      if (prefix) prefixLast = true;
       at.push(index);
       kept.push(token);
       if (!part.quoted) marks.push(token);
     }
     if (!part.quoted || kept.length === 0) continue;
+    // Cut by the term cap, a phrase ends on its last whole token: nothing in it is a prefix.
+    const open = !full && prefixOn && p === parts.length - 1;
     if (at.length >= 2) phrases.push(at);
+    if (kept.length >= 2 || at.length === 0) exact.push({ tokens: kept, open });
     marks.push(`"${kept.join(" ")}${open ? "" : '"'}`);
   }
-  return { terms, prefixLast, phrases, marks, quoted: true };
+  return { terms, prefixLast, phrases, exact, marks, quoted: true };
 }
 
 /** A phrase as `marks` writes it: its tokens, and whether its last token is a prefix (no closing quote). */
-export function inboxSearchPhraseOf(mark: string): { tokens: string[]; open: boolean } | null {
+export function inboxSearchPhraseOf(mark: string): InboxSearchPhrase | null {
   if (!mark.startsWith('"')) return null;
   const open = mark.length < 2 || !mark.endsWith('"');
   const tokens = mark.slice(1, open ? undefined : -1).split(" ").filter(Boolean);
   return tokens.length > 0 ? { tokens, open } : null;
 }
 
-/** Whether the phrase's tokens start at `at` in `tokens`; the token it ends on, or -1. */
-function phraseEndsAt(tokens: readonly InboxSearchToken[], at: number, phrase: { tokens: readonly string[]; open: boolean }): number {
-  const n = phrase.tokens.length;
-  if (at + n > tokens.length) return -1;
-  for (let k = 0; k < n; k++) {
-    const token = tokens[at + k]!.token;
-    const want = phrase.tokens[k]!;
-    if (token === want || (k === n - 1 && phrase.open && token.startsWith(want))) continue;
-    return -1;
-  }
-  return at + n - 1;
+/**
+ * A text as an exact phrase reads it, in units: every token, one-letter ones
+ * too, folded as the index folds; a token holding CJK is one unit per CJK
+ * character (the runs between them whole), so a quoted CJK phrase is its
+ * literal characters whatever the segmenter cut. `block` counts the blank
+ * lines passed: a phrase never crosses one. `start`/`end` are original
+ * offsets (a CJK unit's own character when folding kept the token's length,
+ * else the whole token).
+ */
+interface PhraseUnits {
+  units: string[];
+  starts: number[];
+  ends: number[];
+  blocks: number[];
 }
 
-/** The ranges for marks holding a phrase (`parseInboxSearchQuery`'s `marks`): each phrase as one run where it occurs, the words as before. */
+/** Whether the text between two tokens holds a blank line (two line breaks with only spaces between them). */
+function blankLineIn(text: string, from: number, to: number): boolean {
+  let lineBreak = false;
+  for (let i = from; i < to; i++) {
+    const c = text.charCodeAt(i);
+    if (c === 0x0a) {
+      if (lineBreak) return true;
+      lineBreak = true;
+    } else if (!isSpace(c)) lineBreak = false;
+  }
+  return false;
+}
+
+function pushUnits(out: PhraseUnits, token: string, start: number, end: number, block: number): void {
+  if (!CJK.test(token)) {
+    out.units.push(token);
+    out.starts.push(start);
+    out.ends.push(end);
+    out.blocks.push(block);
+    return;
+  }
+  const sameLength = token.length === end - start;
+  let run = '';
+  let runAt = 0;
+  const flush = (to: number) => {
+    if (!run) return;
+    out.units.push(run);
+    out.starts.push(sameLength ? start + runAt : start);
+    out.ends.push(sameLength ? start + to : end);
+    out.blocks.push(block);
+    run = '';
+  };
+  let i = 0;
+  for (const ch of token) {
+    if (CJK.test(ch)) {
+      flush(i);
+      out.units.push(ch);
+      out.starts.push(sameLength ? start + i : start);
+      out.ends.push(sameLength ? start + i + ch.length : end);
+      out.blocks.push(block);
+    } else {
+      if (!run) runAt = i;
+      run += ch;
+    }
+    i += ch.length;
+  }
+  flush(i);
+}
+
+function phraseUnitsOf(text: string): PhraseUnits {
+  const out: PhraseUnits = { units: [], starts: [], ends: [], blocks: [] };
+  let block = 0;
+  let last = -1;
+  const visit = (token: string, start: number, end: number) => {
+    if (last >= 0 && blankLineIn(text, last, start)) block += 1;
+    last = end;
+    pushUnits(out, token, start, end, block);
+  };
+  scanTokens(text, (start, end, upper) => visit(upper ? text.slice(start, end).toLowerCase() : text.slice(start, end), start, end), visit, 1);
+  return out;
+}
+
+/** A phrase's units (`PhraseUnits`' rule, on the typed tokens). */
+function unitsOfPhrase(phrase: InboxSearchPhrase): string[] {
+  const out: PhraseUnits = { units: [], starts: [], ends: [], blocks: [] };
+  for (const token of phrase.tokens) pushUnits(out, token, 0, token.length, 0);
+  return out.units;
+}
+
+/** Each place the phrase stands in the text's units: its first and last unit, in order; `first` stops at the first. */
+function phraseRuns(text: PhraseUnits, want: readonly string[], open: boolean, first: boolean): [number, number][] {
+  const n = want.length;
+  const out: [number, number][] = [];
+  if (n === 0) return out;
+  const { units, blocks } = text;
+  for (let at = 0; at + n <= units.length; at++) {
+    let k = 0;
+    for (; k < n; k++) {
+      const unit = units[at + k]!;
+      if (k > 0 && blocks[at + k] !== blocks[at]) break;
+      if (unit === want[k] || (open && k === n - 1 && unit.startsWith(want[k]!))) continue;
+      break;
+    }
+    if (k < n) continue;
+    out.push([at, at + n - 1]);
+    if (first) break;
+  }
+  return out;
+}
+
+/**
+ * Whether every phrase stands in one of the texts: its tokens one after
+ * another with only separators between them (spaces, punctuation, a single
+ * line break), never across a blank line or from one text to the next; the
+ * last token whole unless the phrase is open, then its start. The texts are
+ * a document's fields as the index read them, each block ended by a blank
+ * line (`inboxSearchBlockText` on the server).
+ */
+export function inboxSearchPhrasesHold(texts: readonly string[], phrases: readonly InboxSearchPhrase[]): boolean {
+  if (phrases.length === 0) return true;
+  const fast = phrases.map(phrasePattern);
+  let wants: string[][] | null = null;
+  const held = new Array<boolean>(phrases.length).fill(false);
+  let left = phrases.length;
+  for (const text of texts) {
+    if (!text) continue;
+    let units: PhraseUnits | null = null;
+    for (let p = 0; p < phrases.length; p++) {
+      if (held[p]) continue;
+      const pattern = fast[p];
+      // The pattern's yes is the rule's; its no is too unless the text holds a character that folds into a letter or
+      // digit, or a script the segmenter cuts words in (it may cut a word off its neighbour).
+      let holds = pattern ? pattern.test(text) : false;
+      if (!holds && (!pattern || FOLDS_TO_ASCII.test(text) || NO_SPACES.test(text))) {
+        wants ??= phrases.map(unitsOfPhrase);
+        units ??= phraseUnitsOf(text);
+        holds = phraseRuns(units, wants[p]!, phrases[p]!.open, true).length > 0;
+      }
+      if (!holds) continue;
+      held[p] = true;
+      left -= 1;
+    }
+    if (left === 0) return true;
+  }
+  return false;
+}
+
+/** A word character as the tokens read them (a soft hyphen joins two). */
+const WORD_CHAR = '[\\p{L}\\p{N}\\p{M}\\u00ad]';
+/** Between two tokens of a phrase: characters that are no word character, holding no blank line. */
+const PHRASE_GAP = '(?:(?!\\n\\s*\\n)[^\\p{L}\\p{N}\\p{M}\\u00ad])+';
+/**
+ * Characters that may fold (NFKC, case, accents, ignorables) into an ASCII
+ * letter or digit, or join one: Latin-1 and Latin Extended, combining
+ * marks, modifier and phonetic letters, zero-width and other ignorables,
+ * super- and subscripts, letterlike and number forms, enclosed and squared
+ * forms, ligatures, variation selectors, full width forms, mathematical
+ * letters. Without one, a phrase of ASCII words reads the same in the raw text.
+ */
+const FOLDS_TO_ASCII = /[ -ͯᴀ-ỿ​-‏⁠-⁯⁰-₟℀-↏①-⓿㈀-㏿ﬀ-ﭏ︀-️︰-﹯﻿＀-￯\u{1d400}-\u{1d7ff}\u{1f100}-\u{1f1ff}\u{e0000}-\u{e0fff}]/u;
+const PHRASE_PATTERNS = new WeakMap<InboxSearchPhrase, RegExp | null>();
+
+/**
+ * A phrase of ASCII words (letters and digits) as one pattern over the raw
+ * text, case-insensitive: each word whole (an open phrase's last one its
+ * start), only non-word characters between, never a blank line. Where it
+ * matches, the tokens hold the phrase; null for a phrase with any other
+ * token (CJK, Cyrillic), which reads the tokens.
+ */
+function phrasePattern(phrase: InboxSearchPhrase): RegExp | null {
+  let pattern = PHRASE_PATTERNS.get(phrase);
+  if (pattern !== undefined) return pattern;
+  pattern = phrase.tokens.every((token) => /^[a-z0-9]+$/.test(token))
+    ? new RegExp(`(?<!${WORD_CHAR})${phrase.tokens.join(PHRASE_GAP)}${phrase.open ? '' : `(?!${WORD_CHAR})`}`, 'iu')
+    : null;
+  PHRASE_PATTERNS.set(phrase, pattern);
+  return pattern;
+}
+
+/** The ranges where a phrase stands in a text (`inboxSearchPhrasesHold`'s rule); an open phrase's last token marks only its typed part. */
+function phraseRanges(text: string, units: PhraseUnits, phrase: InboxSearchPhrase): [number, number][] {
+  const want = unitsOfPhrase(phrase);
+  const lastWant = want[want.length - 1]!;
+  return phraseRuns(units, want, phrase.open, false).map(([a, b]) => {
+    const end = units.units[b] === lastWant ? units.ends[b]! : prefixEnd(text, units.starts[b]!, units.ends[b]!, lastWant.length);
+    return [units.starts[a]!, end];
+  });
+}
+
+/** The ranges for marks holding a phrase (`parseInboxSearchQuery`'s `marks`): each phrase as one run where it stands, the words as before. */
 function quotedRanges(text: string, marks: readonly string[], prefixLast: boolean, prefixAll: boolean): [number, number][] {
   const words: string[] = [];
-  const phrases: { tokens: string[]; open: boolean }[] = [];
+  const phrases: InboxSearchPhrase[] = [];
   for (const mark of marks) {
     const phrase = inboxSearchPhraseOf(mark);
     if (phrase) phrases.push(phrase);
@@ -306,22 +518,19 @@ function quotedRanges(text: string, marks: readonly string[], prefixLast: boolea
   const lastMark = marks[marks.length - 1]!;
   const lastWord = prefixLast && !lastMark.startsWith('"') ? lastMark : null;
   const exact = new Set(words);
-  const tokens = tokenizeInboxSearchText(text);
   const found: [number, number][] = [];
-  for (let i = 0; i < tokens.length; i++) {
-    const t = tokens[i]!;
-    if (exact.has(t.token)) found.push([t.start, t.end]);
-    else {
-      const prefix = prefixAll ? words.find((word) => t.token.startsWith(word)) : lastWord !== null && t.token.startsWith(lastWord) ? lastWord : undefined;
-      if (prefix) found.push([t.start, prefixEnd(text, t.start, t.end, prefix.length)]);
+  if (words.length > 0) {
+    for (const t of tokenizeInboxSearchText(text)) {
+      if (exact.has(t.token)) found.push([t.start, t.end]);
+      else {
+        const prefix = prefixAll ? words.find((word) => t.token.startsWith(word)) : lastWord !== null && t.token.startsWith(lastWord) ? lastWord : undefined;
+        if (prefix) found.push([t.start, prefixEnd(text, t.start, t.end, prefix.length)]);
+      }
     }
-    for (const phrase of phrases) {
-      const last = phraseEndsAt(tokens, i, phrase);
-      if (last < 0) continue;
-      const end = tokens[last]!;
-      const want = phrase.tokens[phrase.tokens.length - 1]!;
-      found.push([t.start, end.token === want ? end.end : prefixEnd(text, end.start, end.end, want.length)]);
-    }
+  }
+  if (phrases.length > 0) {
+    const units = phraseUnitsOf(text);
+    for (const phrase of phrases) found.push(...phraseRanges(text, units, phrase));
   }
   found.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
   const out: [number, number][] = [];
@@ -336,11 +545,13 @@ function quotedRanges(text: string, marks: readonly string[], prefixLast: boolea
 /** How many of a query's marks (`parseInboxSearchQuery`'s `marks`: words and phrases) occur in the text, the last word as a prefix. */
 export function inboxSearchMarksFound(text: string, marks: readonly string[]): number {
   const tokens = tokenizeInboxSearchText(text);
+  let units: PhraseUnits | null = null;
   let count = 0;
   marks.forEach((mark, i) => {
     const phrase = inboxSearchPhraseOf(mark);
     if (phrase) {
-      if (tokens.some((_, at) => phraseEndsAt(tokens, at, phrase) >= 0)) count += 1;
+      units ??= phraseUnitsOf(text);
+      if (phraseRuns(units, unitsOfPhrase(phrase), phrase.open, true).length > 0) count += 1;
     } else if (!mark.startsWith('"') && tokens.some((t) => t.token === mark || (i === marks.length - 1 && t.token.startsWith(mark)))) count += 1;
   });
   return count;

@@ -461,12 +461,18 @@ test.skipIf(!hasDom)('the landing highlight: a quoted phrase is one range where 
   const article = document.createElement('article');
   article.innerHTML =
     '<div data-open-head=""><span>file viewer</span></div>' +
-    '<div class="ib-msg"><p>The file is big. Open the file <b>viewer</b>; the page stays blank.</p><p>A viewer.</p></div>';
+    '<div class="ib-msg"><p>The file is big. Open the file <b>viewer</b>; the page stays blank.</p><p>Viewer opens.</p>' +
+    '<h2>Step one</h2><p>Viewer next.</p><ul><li>stays open</li><li>viewer two</li></ul><p>Do step 10, then step 1.</p></div>';
   expect(searchHitRanges(article, ['"file viewer"', 'blank']).map((r) => r.toString())).toEqual(['file viewer', 'blank']);
   // Without quotes, every word as before.
-  expect(searchHitRanges(article, ['file', 'viewer']).map((r) => r.toString())).toEqual(['file', 'file', 'viewer', 'viewer']);
-  // Two paragraphs never join a word: "blank." then "A" is no phrase "blank a".
+  expect(searchHitRanges(article, ['file', 'viewer']).map((r) => r.toString())).toEqual(['file', 'file', 'viewer', 'Viewer', 'Viewer', 'viewer']);
+  // A phrase never runs from one block into the next: two paragraphs, a heading and its paragraph, two list items.
+  expect(searchHitRanges(article, ['"blank viewer"']).map((r) => r.toString())).toEqual([]);
+  expect(searchHitRanges(article, ['"one viewer"']).map((r) => r.toString())).toEqual([]);
+  expect(searchHitRanges(article, ['"open viewer"']).map((r) => r.toString())).toEqual([]);
   expect(searchHitRanges(article, ['"stays blank"']).map((r) => r.toString())).toEqual(['stays blank']);
+  // A one-letter word in a phrase is marked, and must be there whole: step 1, not step 10.
+  expect(searchHitRanges(article, ['"step 1"']).map((r) => r.toString())).toEqual(['step 1']);
 });
 
 test.skipIf(!hasDom)("compose's Actions: below real results unless the words name an action; shown while the index builds", async () => {
