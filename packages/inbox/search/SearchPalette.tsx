@@ -99,8 +99,8 @@ export interface SearchPaletteProps {
   onAction?: (action: ComposeAction) => void;
   /** A thread result's tag colour (tagColours.ts), as its row in the list has: tinted, the tag named. Absent or null: as usual. */
   tintOf?: (threadId: string) => RowTint | null;
-  /** The Search tip (searchTip.ts): the Inbox has it for this page and no other one-time thing holds it back. */
-  searchTip?: boolean;
+  /** The Search tip (searchTip.ts): the Inbox has it for this page and no other one-time thing holds it back. Required, so the window cannot leave it out. */
+  searchTip: boolean;
 }
 
 type FilterKind = 'project' | 'status' | 'from';
@@ -487,7 +487,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
   };
   const [live, setLive] = useState('');
   const rowRef = useRef<HTMLDivElement>(null);
-  const tip = useSearchTip({ open, offered: !!props.searchTip, q, say: setLive });
+  const tip = useSearchTip({ open, offered: props.searchTip, q, say: setLive });
   const tipUp = tip.stage === 'shown' || tip.stage === 'leaving';
   /** Best match or Newest: this browser's pick, kept across opens (searchSort.ts). */
   const sort = useSearchSort();

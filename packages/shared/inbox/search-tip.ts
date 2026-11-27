@@ -22,8 +22,11 @@ export interface SearchTipSaved {
 }
 
 export interface SearchTipState {
-  /** A recent search holds a quote mark: the person already searched for an exact phrase. */
-  quoted: boolean;
+  /**
+   * A recent search holds a quote mark: the person already searched for an exact phrase. Asked last, and only while
+   * the tip could still be due (the server reads the recent searches from disk for it: never again once it was shown).
+   */
+  quoted: () => boolean;
   /** The person's first use of the Inbox (an ISO time), or null while it is not known (nothing in the store yet). */
   firstUseAt: string | null;
   /** This Inbox keeps first use (a release build). A dev build keeps none, so it asks for no tenure. */
@@ -39,7 +42,7 @@ function tenured(state: SearchTipState, now: number): boolean {
 
 /** The tip may show on this Inbox at `at`: what settings report as `reveal.search_tip` (with the line's gap free). */
 export function searchTipDue(state: SearchTipState, at: string): boolean {
-  return !state.quoted && !state.saved?.shownAt && tenured(state, Date.parse(at));
+  return !state.saved?.shownAt && tenured(state, Date.parse(at)) && !state.quoted();
 }
 
 /**

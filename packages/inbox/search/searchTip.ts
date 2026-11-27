@@ -5,20 +5,24 @@
  * "seen once" kept by the Inbox (packages/shared/inbox/search-tip.ts, settings `reveal.search_tip`, the claim
  * `POST /api/inbox/reveal` `id: "search_tip"`). The rules the window keeps:
  *
- *  - The next open of the palette once the Inbox has it for this page, `delayMs` after the box opens (its entrance
- *    settled). Never in the tour, on the first-run screen or while another one-time dialog or tip is claimed or up
- *    (App's `revealBlocked`, `lineBusy`), and never within the gap of one shown on this load
- *    (`oneTimeDialogShownThisLoad`). A quote typed before it shows keeps it away for that open.
- *  - It shows in the same render the claim is sent; a refused claim (another window showed it, or a dialog's gap) takes
- *    it away at once. Once shown, the other one-time things hold back for the gap (`noteOneTimeDialogShown`).
+ *  - The next open of the palette once the Inbox has it for this page. Never in the tour, on the first-run screen or
+ *    while another one-time dialog or tip is claimed or up (App's `revealBlocked`, `lineBusy`), and never within the
+ *    gap of one shown on this load (`oneTimeDialogShownThisLoad`).
+ *  - It never moves a row once drawn (a person reaching for a row must not tap another): whether it shows is decided
+ *    from what the page already knows, as the palette opens, so it is in the palette's first paint (no wait, no late
+ *    push), and the claim goes out in that same moment. A refused claim (another window showed it, or a dialog's gap)
+ *    leaves it up for this open, since taking it away would move the rows back; this page asks no more. A lost answer
+ *    leaves it up too, as the Launch tip's does. Only the Inbox's yes holds the other one-time things back for the gap
+ *    (`noteOneTimeDialogShown`) and says it to a screen reader.
  *  - Where: beside the palette, level with the box and pointing at it, when the window has room for the card and its
  *    gaps (the Launch tip's rule); else (a narrow window, a phone) under the box, in the palette's flow, so it covers
- *    neither the box nor a result.
+ *    neither the box nor a result. There the results list gives up the card's height (`--ib-sp-tip-h`, measured), so
+ *    the palette still ends inside the window.
  *  - It leaves on Got it, Escape (the first Escape closes only the tip; the next is the palette's), a quote mark typed
- *    in the box, or the palette closing. No timer. A palette closed before it showed leaves it for the next open.
+ *    in the box, or the palette closing. No timer.
  *  - Focus never moves to it: typing goes on in the box. While it is up the box is described by its line.
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { inboxSearchQuoted } from '@plannotator/core/inbox-search';
 import type { SettingsModel } from '../api';
 import { claimRevealOnce, noteOneTimeDialogShown, oneTimeDialogShownThisLoad } from '../reveal';
@@ -35,8 +39,6 @@ export const SEARCH_TIP_SAID = `${SEARCH_TIP_WORDS.eyebrow}: ${SEARCH_TIP_WORDS.
 
 /** The card's timings, ms. A test shrinks them (and puts them back). */
 export const SEARCH_TIP_TIMES = {
-  /** After the palette opens: its 150 ms entrance has settled. */
-  delayMs: 300,
   /** The way out (a 120 ms fade), then it is gone from the DOM. */
   leaveMs: 130,
 };
@@ -75,51 +77,43 @@ export function resetSearchTipForTests(): void {
   spentThisLoad = false;
 }
 
-export type SearchTipStage = 'none' | 'wait' | 'shown' | 'leaving' | 'done';
+export type SearchTipStage = 'none' | 'shown' | 'leaving' | 'done';
 
 /**
- * The tip's stages for one palette. `offered`: the Inbox has it for this page and nothing holds it back (App).
- * `say`: the palette's polite region. Returns the stage and `close` (Got it, Escape).
+ * The tip's stages for one palette. `offered`: the Inbox has it for this page and nothing holds it back (App), read
+ * as the palette opens (a change while it is open draws nothing and takes nothing away). `say`: the palette's polite
+ * region. Returns the stage and `close` (Got it, Escape).
  */
 export function useSearchTip(input: { open: boolean; offered: boolean; q: string; say: (words: string) => void }) {
-  const { open, offered, q } = input;
+  const { open, q } = input;
   const [stage, setStage] = useState<SearchTipStage>('none');
   const say = useRef(input.say);
   say.current = input.say;
-  const qRef = useRef(q);
-  qRef.current = q;
+  const offered = useRef(input.offered);
+  offered.current = input.offered;
   const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // An open with the tip offered and unspent waits for the entrance, then shows and claims in the same render.
-  useEffect(() => {
+  // Decided as the palette opens, before it is painted (a layout effect), so a shown card is in its first paint and
+  // no row it pushes down is ever drawn above it first. The claim goes out in the same moment.
+  useLayoutEffect(() => {
     if (!open) {
-      // The palette closed: a shown tip is done; one still waiting stays for the next open.
-      setStage((was) => (was === 'none' || was === 'wait' ? 'none' : 'done'));
+      setStage((was) => (was === 'none' ? 'none' : 'done'));
       return;
     }
-    if (!offered || spentThisLoad) return;
-    setStage('wait');
-    let live = true;
-    const timer = setTimeout(() => {
-      if (!live || spentThisLoad || oneTimeDialogShownThisLoad() || inboxSearchQuoted(qRef.current)) {
-        setStage('none');
-        return;
-      }
-      spentThisLoad = true;
-      noteOneTimeDialogShown();
-      setStage('shown');
-      void claimRevealOnce('search_tip', pageKey)
-        .then((answer) => {
-          if (!answer.show) setStage((was) => (was === 'shown' ? 'done' : was));
-          else say.current(SEARCH_TIP_SAID);
-        })
-        .catch(() => setStage((was) => (was === 'shown' ? 'done' : was)));
-    }, SEARCH_TIP_TIMES.delayMs);
-    return () => {
-      live = false;
-      clearTimeout(timer);
-    };
-  }, [open, offered]);
+    if (!offered.current || spentThisLoad || oneTimeDialogShownThisLoad()) return;
+    spentThisLoad = true;
+    setStage('shown');
+    void claimRevealOnce('search_tip', pageKey).then(
+      (answer) => {
+        // Refused: it stays up for this open (taking it away would move the rows under a finger); this page asks no more.
+        if (!answer.show) return;
+        noteOneTimeDialogShown();
+        say.current(SEARCH_TIP_SAID);
+      },
+      // A lost answer (retried once already): it stays for this open, as the Launch tip's does.
+      () => {},
+    );
+  }, [open]);
 
   const stageRef = useRef(stage);
   stageRef.current = stage;

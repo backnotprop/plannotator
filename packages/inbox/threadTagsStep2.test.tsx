@@ -377,7 +377,7 @@ function palette(value: ThreadTagsHost | null) {
     asked.push(params);
     return new Response(JSON.stringify(answerFor(params.get('q') ?? '')), { status: 200, headers: { 'Content-Type': 'application/json' } });
   }) as typeof fetch;
-  const node = <SearchPalette open phone={false} currentProject={null} projects={[{ id: 'prj_web', name: 'web', root: '/code/web' }] as never} onClose={() => {}} onOpenResult={() => {}} />;
+  const node = <SearchPalette open searchTip={false} phone={false} currentProject={null} projects={[{ id: 'prj_web', name: 'web', root: '/code/web' }] as never} onClose={() => {}} onOpenResult={() => {}} />;
   draw(value ? <ThreadTagsContext.Provider value={value}>{node}</ThreadTagsContext.Provider> : node);
 }
 async function typeIn(value: string) {

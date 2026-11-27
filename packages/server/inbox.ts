@@ -4105,7 +4105,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * order, as the Sidebar tip: its claim stamps only `inboxReveals.search_tip`, and it keeps the gap both ways.
    */
   const searchTipState = (): SearchTipState => ({
-    quoted: readRecentSearches(store.dir).some(inboxSearchQuoted),
+    // Read from disk only while it could still be due (never once stamped, nor before the person's first day is over).
+    quoted: () => readRecentSearches(store.dir).some(inboxSearchQuoted),
     firstUseAt: snoozeIntroSaved()?.firstUseAt ?? null,
     tenure: snoozeIntroRelease,
     saved: loadConfig().inboxReveals?.search_tip,

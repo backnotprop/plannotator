@@ -351,6 +351,7 @@ packages/inbox/searchPalette.test.tsx
 packages/inbox/searchPaletteMachines.test.tsx
 packages/inbox/searchShortcut.test.tsx
 packages/inbox/searchTip.test.tsx
+packages/inbox/searchTipApp.test.tsx
 packages/inbox/openIn.test.tsx
 packages/inbox/openInCheck.test.tsx
 packages/inbox/openInFile.test.tsx

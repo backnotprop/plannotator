@@ -127,6 +127,7 @@ async function render(props: { currentProject?: string | null; phone?: boolean; 
     root!.render(
       <SearchPalette
         open
+        searchTip={false}
         phone={props.phone ?? false}
         currentProject={props.currentProject ?? null}
         projects={props.projects ?? [{ ...project, root: '/src/plannotator' }, { id: 'prj_01M4V7JERHR0Y3XQERK1MR604B', name: 'api', root: '/w/api' }]}
@@ -486,6 +487,7 @@ test.skipIf(!hasDom)("compose's Actions: below real results unless the words nam
     root!.render(
       <SearchPalette
         open
+        searchTip={false}
         phone={false}
         currentProject={null}
         projects={[{ ...project, root: '/src/plannotator' }]}
@@ -640,6 +642,7 @@ test.skipIf(!hasDom)('a renamed project: a thread row marks the indexed name onl
     root!.render(
       <SearchPalette
         open
+        searchTip={false}
         phone={false}
         currentProject={null}
         projects={[
@@ -840,6 +843,7 @@ async function renderTyped(open: boolean, currentProject: string | null = null):
     root!.render(
       <SearchPalette
         open={open}
+        searchTip={false}
         phone={false}
         currentProject={currentProject}
         projects={[{ ...project, root: '/src/plannotator' }]}

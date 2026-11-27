@@ -1,8 +1,10 @@
 /**
  * The Search tip's card (rules in searchTip.ts): the Launch tip's card (`.ib-tour-coach.ib-ctip`, LaunchTipCard.tsx),
  * drawn inside the palette's `<dialog>` (a portal to the body would sit under the backdrop, inert): beside the palette
- * level with the box, or under the box in the palette's flow. It never takes focus: Got it keeps focus in the box on a
- * press, and on a keyboard press sends it back there.
+ * level with the box, or under the box in the palette's flow. Under the box, its height (with its margins) is set on
+ * the dialog as `--ib-sp-tip-h`, which the results list gives up (inbox.css `.ib-sp-list`), so the palette still ends
+ * inside the window. Placed and measured before the first paint. It never takes focus: Got it keeps focus in the box
+ * on a press, and on a keyboard press sends it back there.
  */
 import { useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { SEARCH_TIP_WORDS, searchTipPlace, type SearchTipPlace } from './searchTip';
@@ -19,6 +21,7 @@ export function SearchTipCard(props: {
 }) {
   const { leaving, phone, dialogRef, rowRef } = props;
   const okRef = useRef<HTMLButtonElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
   const [place, setPlace] = useState<SearchTipPlace | null>(null);
   useLayoutEffect(() => {
     const measure = () => {
@@ -32,8 +35,26 @@ export function SearchTipCard(props: {
     return () => window.removeEventListener('resize', measure);
   }, [phone, dialogRef, rowRef]);
   const side = place?.side ?? 'below';
+  // Under the box: the room it takes in the palette, which the results list gives up. Beside it: none.
+  useLayoutEffect(() => {
+    const dialog = dialogRef.current;
+    const card = cardRef.current;
+    if (!dialog || !card || place?.side !== 'below') return;
+    const room = () => {
+      const style = getComputedStyle(card);
+      const height = card.getBoundingClientRect().height + (parseFloat(style.marginTop) || 0) + (parseFloat(style.marginBottom) || 0);
+      dialog.style.setProperty('--ib-sp-tip-h', `${Math.ceil(height)}px`);
+    };
+    room();
+    window.addEventListener('resize', room);
+    return () => {
+      window.removeEventListener('resize', room);
+      dialog.style.removeProperty('--ib-sp-tip-h');
+    };
+  }, [place, dialogRef]);
   return (
     <div
+      ref={cardRef}
       className="ib-tour-coach ib-ctip"
       role="group"
       aria-labelledby={props.titleId}

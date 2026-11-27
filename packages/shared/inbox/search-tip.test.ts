@@ -9,7 +9,7 @@ import { searchTipClaim, searchTipDue, type SearchTipState } from "./search-tip"
 
 const AT = "2026-11-27T10:00:00.000Z";
 const TWO_DAYS_BEFORE = "2026-11-25T10:00:00.000Z";
-const fresh: SearchTipState = { quoted: false, firstUseAt: TWO_DAYS_BEFORE, tenure: true, saved: undefined };
+const fresh: SearchTipState = { quoted: () => false, firstUseAt: TWO_DAYS_BEFORE, tenure: true, saved: undefined };
 
 describe("searchTipDue", () => {
   test("a day or more after first use, no quoted search, never shown", () => {
@@ -17,7 +17,7 @@ describe("searchTipDue", () => {
     expect(searchTipDue({ ...fresh, firstUseAt: "2026-11-26T10:00:00.000Z" }, AT)).toBe(true);
   });
   test("never for someone who already searched with quotes, never once shown", () => {
-    expect(searchTipDue({ ...fresh, quoted: true }, AT)).toBe(false);
+    expect(searchTipDue({ ...fresh, quoted: () => true }, AT)).toBe(false);
     expect(searchTipDue({ ...fresh, saved: { shownAt: AT } }, AT)).toBe(false);
     // A key alone (no stamp) is not a show.
     expect(searchTipDue({ ...fresh, saved: { key: "page-key-1" } }, AT)).toBe(true);
@@ -26,6 +26,22 @@ describe("searchTipDue", () => {
     expect(searchTipDue({ ...fresh, firstUseAt: "2026-11-26T10:00:01.000Z" }, AT)).toBe(false);
     expect(searchTipDue({ ...fresh, firstUseAt: null }, AT)).toBe(false);
     expect(searchTipDue({ ...fresh, firstUseAt: null, tenure: false }, AT)).toBe(true);
+  });
+});
+
+describe("the recent searches are read only while the tip could still be due", () => {
+  test("never once it was shown, nor on the first day; a claim or a settings read after the stamp reads nothing", () => {
+    let reads = 0;
+    const counted = (state: Partial<SearchTipState>): SearchTipState => ({ ...fresh, ...state, quoted: () => (reads++, false) });
+    const stamped = counted({ saved: { shownAt: AT, key: "page-key-1" } });
+    expect(searchTipDue(stamped, AT)).toBe(false);
+    expect(searchTipClaim(stamped, "page-key-1", AT).show).toBe(true);
+    expect(searchTipClaim(stamped, "phone-key-2", AT).show).toBe(false);
+    expect(searchTipDue(counted({ firstUseAt: AT }), AT)).toBe(false);
+    expect(reads).toBe(0);
+    // Still due: read, once per question.
+    expect(searchTipDue(counted({}), AT)).toBe(true);
+    expect(reads).toBe(1);
   });
 });
 
@@ -41,7 +57,7 @@ describe("searchTipClaim", () => {
     expect(searchTipClaim(stamped, null, AT)).toEqual({ show: false, save: null });
   });
   test("a quoted search or the first day refuses the claim, writing nothing", () => {
-    expect(searchTipClaim({ ...fresh, quoted: true }, "page-key-1", AT)).toEqual({ show: false, save: null });
+    expect(searchTipClaim({ ...fresh, quoted: () => true }, "page-key-1", AT)).toEqual({ show: false, save: null });
     expect(searchTipClaim({ ...fresh, firstUseAt: AT }, "page-key-1", AT)).toEqual({ show: false, save: null });
   });
 });
