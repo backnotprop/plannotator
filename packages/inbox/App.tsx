@@ -5918,8 +5918,8 @@ function Inbox() {
           onAnswer={(answer) => void inboxApi.starAskAnswer(answer)}
         />
       )}
-      {/* The launch dialog (launchDialog.tsx): ahead of every other one-time dialog, once per computer. */}
-      <InboxLaunchDialog due={settings?.reveal?.launch === true} ready={latest !== null && !firstRun && !tourOn && soonClear} heldBack={oneTimeHeldBack} />
+      {/* The launch dialog (launchDialog.tsx): ahead of every other one-time dialog, once per computer, but after the welcome to the code review Inbox (never on the load that drew it). */}
+      <InboxLaunchDialog due={settings?.reveal?.launch === true} ready={latest !== null && !firstRun && !tourOn && soonClear && reviewWelcome.stage === 'none'} heldBack={oneTimeHeldBack} />
       {sidebarTip.stage === 'open' && <SidebarTipCard gone={!sidebarDocked || !listIntroClear || sidebarCustomizing} onSay={say} onLeave={sidebarTip.close} />}
       {listViewChoiceOpen && (
         <ListViewIntro

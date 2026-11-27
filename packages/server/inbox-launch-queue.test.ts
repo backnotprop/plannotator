@@ -4,7 +4,8 @@
  *
  * What regresses: the line of one-time dialogs frozen until the launch's end (up to 14 days) by a page whose claim came
  * back late or no, or by a data folder where the stamp cannot be written; the page no longer told to claim it after
- * the line moved on; a page left open not told when a kept launch starts.
+ * the line moved on; a page left open not told when a kept launch starts; the launch drawn before, or over, the welcome
+ * to the code review Inbox.
  */
 import { describe, expect, test } from "bun:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
@@ -24,7 +25,7 @@ const DOC = {
 };
 const offline = (() => Promise.reject(new Error("offline"))) as unknown as typeof fetch;
 
-function setup(store?: Partial<LaunchShownStore>, at = START + 1000) {
+function setup(store?: Partial<LaunchShownStore>, at = START + 1000, after?: () => boolean) {
   const dir = mkdtempSync(join(tmpdir(), "inbox-launch-queue-"));
   writeFileSync(join(dir, LAUNCH_SWITCH_FILE), JSON.stringify({ checkedAt: new Date(at).toISOString(), doc: DOC }));
   const records = new Map<string, LaunchShownRecord>();
@@ -36,10 +37,18 @@ function setup(store?: Partial<LaunchShownStore>, at = START + 1000) {
   };
   let now = at;
   const service = createLaunchSwitch({ dataDir: () => dir, endpoint: () => "http://127.0.0.1:9/launch.json", shown, fetch: offline, now: () => now });
-  return { queue: createInboxLaunchQueue(service, () => dir), records, setNow: (t: number) => (now = t) };
+  return { queue: createInboxLaunchQueue(service, () => dir, after), records, setNow: (t: number) => (now = t) };
 }
 
 describe("the launch dialog in the Inbox's line", () => {
+  test("after the welcome to the code review Inbox: while that waits, the launch is not due and holds nothing; then it is next", () => {
+    let welcomeWaits = true;
+    const { queue } = setup(undefined, START + 1000, () => welcomeWaits);
+    expect([queue.due(), queue.holdsLine()]).toEqual([false, false]);
+    welcomeWaits = false;
+    expect([queue.due(), queue.holdsLine()]).toEqual([true, true]);
+  });
+
   test("it holds the line until a claim is answered; the page is still told to claim it after that", () => {
     const { queue } = setup();
     expect([queue.due(), queue.holdsLine()]).toEqual([true, true]);

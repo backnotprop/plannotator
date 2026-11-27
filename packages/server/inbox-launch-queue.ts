@@ -11,6 +11,10 @@
  *
  * `startsIn`: the time until a kept "on" launch starts, so a page left open reads its settings again then and claims
  * it from the kept copy, with no request to the site.
+ *
+ * `after`: a dialog that goes before it (the welcome to the code review Inbox, inbox-review-only.ts, still unshown).
+ * While it waits, the launch is neither due nor holding the line, so that dialog comes first and the two never draw
+ * at once; once it is shown, the launch is next.
  */
 import { launchInstant, launchSwitchAction, readLaunchKept, type LaunchSwitchAction, type LaunchSwitchService } from "@plannotator/shared/launch-switch";
 
@@ -25,9 +29,10 @@ export interface InboxLaunchQueue {
   action(action: LaunchSwitchAction, body: unknown): { status: number; body: unknown };
 }
 
-export function createInboxLaunchQueue(service: LaunchSwitchService, dataDir: () => string): InboxLaunchQueue {
+export function createInboxLaunchQueue(service: LaunchSwitchService, dataDir: () => string, after: () => boolean = () => false): InboxLaunchQueue {
   let released = false;
   const due = () => {
+    if (after()) return false;
     try {
       return service.claim().show;
     } catch {

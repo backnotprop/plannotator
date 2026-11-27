@@ -1426,8 +1426,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // every 3 hours while no launch is on (launchRefreshMs); the window's claim answers from the kept copy only.
   const launchSwitch = createLaunchSwitch({ dataDir: () => dataDir, endpoint: () => launchSwitchEndpointNow(), shown: configLaunchShownStore });
   launchSwitch.start();
-  // Its place in the line of one-time dialogs: first, until a claim is answered (inbox-launch-queue.ts).
-  const launchQueue = createInboxLaunchQueue(launchSwitch, () => dataDir);
+  // Its place in the line of one-time dialogs: first, until a claim is answered (inbox-launch-queue.ts), after only the
+  // welcome to the code review Inbox while that is unshown (`reviewWelcomeAhead`).
+  const launchQueue = createInboxLaunchQueue(launchSwitch, () => dataDir, () => reviewWelcomeAhead());
   let lastDailyPingCheck = 0;
   const updates = createInboxUpdates({
     dataDir,
@@ -3858,6 +3859,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
   type LineOfferSaved = { shownAt?: string; key?: string };
   const lineOfferSaved = (id: RevealId): LineOfferSaved | undefined => (loadConfig().inboxReveals as Record<string, LineOfferSaved | undefined> | undefined)?.[id];
+  /** The welcome to the code review Inbox is due and not yet shown: it goes before the launch dialog (inbox-launch-queue.ts `after`). */
+  const reviewWelcomeAhead = (): boolean => reviewOnly.welcomeOpen() && !lineOfferSaved("review_welcome")?.shownAt;
   /** The agent messages the person has looked at (up to each thread's `person_seen_seq`): heavy use reads their dates. */
   const seenAgentMessages = function* (): Generator<{ threadId: string; at: string }> {
     for (const threadId of store.threadIds()) {
