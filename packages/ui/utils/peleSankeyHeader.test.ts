@@ -47,6 +47,12 @@ describe.if(hasDom)('a sankey with a header row in Pele', () => {
     expect(nodes(result.svgNode).sort()).toEqual(['Electricity', 'Gas', 'Homes']);
   });
 
+  test('a first row with an empty value is not a header: it is still an error at its own line', async () => {
+    const result = await renderDiagram('mermaid', 'sankey-empty', 'sankey-beta\nElectricity,Homes,\nGas,Homes,20', theme);
+    expect(result.ok).toBe(false);
+    if (result.ok === false) expect(result.line).toBe(2);
+  });
+
   test('a bad value after the first row is still an error at its own line', async () => {
     const result = await renderDiagram('mermaid', 'sankey-bad', 'sankey-beta\nSource,Target,Value\nElectricity,Homes,40\nGas,Homes,lots', theme);
     expect(result.ok).toBe(false);

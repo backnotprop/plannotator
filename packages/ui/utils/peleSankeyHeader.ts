@@ -6,7 +6,7 @@
  * diagram fall back to Mermaid. Mermaid and Pele 1.3 drew the header as a
  * flow of 0 from a "Source" node to a "Target" node. This reads it as what
  * the author meant, a header: the first row is blanked when its value is
- * not a number by Pele's own test (`parseFloat`). The line stays, empty, so
+ * there and is not a number by Pele's own test (`parseFloat`). The line stays, empty, so
  * an error further down still names its line as written. Every later row is
  * left as written, so a bad value there is still Pele's error.
  */
@@ -59,7 +59,9 @@ export function withoutSankeyHeader(source: string): string {
   if (index >= lines.length) return source;
   const row = lines[index]!;
   const fields = csvFields(row.replace(/\r$/, ''));
-  if (fields.length !== 3 || Number.isFinite(parseFloat(fields[2]!))) return source;
+  // An empty value (`A,B,`) is a flow missing its number, not a header: left as written, it stays Pele's error.
+  const value = fields[2]?.trim() ?? '';
+  if (fields.length !== 3 || value === '' || Number.isFinite(parseFloat(value))) return source;
   lines[index] = row.endsWith('\r') ? '\r' : '';
   return lines.join('\n');
 }

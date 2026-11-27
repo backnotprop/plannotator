@@ -303,9 +303,16 @@ describe('review entry assets', () => {
   //
   // dist/ is gitignored, so this is skipped on an unbuilt checkout; the CI job
   // that builds the bundles runs it right after.
+  //
+  // Mermaid's presence marker is a name on Mermaid's public API object, so it
+  // survives minification. It is not `flowchart-v2`: Pele 1.13 names that
+  // diagram id in its own detect table, so a bundle carrying Pele has it
+  // without any Mermaid. (`flowchart-v2` still serves as an ABSENT marker for
+  // the review page, which carries neither Pele nor Mermaid.)
+  const MERMAID_RUNTIME_MARKER = 'registerExternalDiagrams';
   const REGISTRATION_MARKERS = ['plannotator-math-eager', 'uniqueUsernameGenerator'];
   const markerExpectations: Array<[bundle: string, present: string[], absent: string[]]> = [
-    ['apps/hook/dist/index.html', [...REGISTRATION_MARKERS, 'katex-display', 'flowchart-v2', 'viz_set_y_invert', '__plannotatorLiveConfig'], ['plannotator-mermaid-eager']],
+    ['apps/hook/dist/index.html', [...REGISTRATION_MARKERS, 'katex-display', MERMAID_RUNTIME_MARKER, 'viz_set_y_invert', '__plannotatorLiveConfig'], ['plannotator-mermaid-eager']],
     ['apps/review/dist/index.html', [...REGISTRATION_MARKERS, 'katex-display', '__plannotatorLiveConfig'], ['plannotator-mermaid-eager', 'flowchart-v2', 'viz_set_y_invert']],
   ];
   for (const [path, present, absent] of markerExpectations) {
@@ -323,12 +330,8 @@ describe('review entry assets', () => {
   // Each runtime lives in its own file, the engine carries neither, and the
   // engine brings no React of its own: every module it shares with the page
   // is read from the host the page installs (no bare import survives).
-  // The Mermaid marker is a name on Mermaid's public API object, so it survives
-  // minification. It is not `flowchart-v2`: Pele 1.13 names that diagram id in
-  // its own detect table, so the engine carries it without any Mermaid.
-  // `mermaidRuntime` below asserts the same marker in mermaid.js, so it would
-  // find Mermaid if Mermaid were bundled into the engine.
-  const MERMAID_RUNTIME_MARKER = 'registerExternalDiagrams';
+  // `mermaidRuntime` below asserts MERMAID_RUNTIME_MARKER in mermaid.js, so it
+  // would find Mermaid if Mermaid were bundled into the engine.
   const ENGINE_DIRS = ['apps/review/dist/diagram-engine', 'apps/hook/dist/diagram-engine'];
   for (const dir of ENGINE_DIRS) {
     test.skipIf(!existsSync(resolve(root, dir)))(`${dir} holds the engine and both runtimes, apart`, () => {
@@ -479,7 +482,7 @@ describe('review entry assets', () => {
   // neither: its diagrams come from the engine file, which holds Pele (and
   // fetches the Mermaid runtime file only for a fence that falls back).
   const PELE_CORE_MARKER = 'PeleError';
-  const MERMAID_MARKER = 'flowchart-v2';
+  const MERMAID_MARKER = MERMAID_RUNTIME_MARKER;
   const packedScripts = async (path: string): Promise<{ upFront: Map<string, string>; all: Map<string, string> }> => {
     const bundle = readFileSync(resolve(root, path), 'utf8');
     const app = openPackedApp(bundle);
@@ -584,7 +587,7 @@ describe('review entry assets', () => {
   const INBOX_LAZY_MARKERS: Record<string, string> = {
     'guide viewer (#guide-reader)': 'data-guide-code-view-mounted',
     'Shiki TypeScript grammar': '"scopeName":"source.ts"',
-    Mermaid: 'flowchart-v2',
+    Mermaid: MERMAID_RUNTIME_MARKER,
     Graphviz: 'viz_set_y_invert',
     // KaTeX's own error text: its class names are also in Plannotator's
     // label code (`utils/pele-labels.ts` reads `katex-display`).
