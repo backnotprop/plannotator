@@ -164,6 +164,9 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
   const [isExpanded, setIsExpanded] = useState(false);
   const [retryToken, setRetryToken] = useState(0);
   const [renderState, setRenderState] = useState<DiagramRenderState | null>(null);
+  // Room under the drawing for the zoom strip, which the canvas asks for when the fitted drawing would reach the strip.
+  const [controlsReservePx, setControlsReservePx] = useState(0);
+  const controlsReserve = useMemo(() => ({ px: controlsReservePx, onChange: setControlsReservePx }), [controlsReservePx]);
 
   // The (palette, mode) the diagram must follow: the same resolution the
   // code fences use (see useFenceTheme). Outside a ThemeProvider the default
@@ -465,7 +468,11 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
           <div
             data-diagram-inline=""
             className={svgReady ? 'rounded-xl bg-muted/30 border border-border/30 overflow-hidden' : undefined}
-            style={svgReady ? { height: inlineHeight(renderState) } : undefined}
+            style={
+              svgReady
+                ? { height: controlsReservePx > 0 ? `calc(${inlineHeight(renderState)} + ${controlsReservePx}px)` : inlineHeight(renderState) }
+                : undefined
+            }
           >
             <DiagramViewer
               {...viewerProps}
@@ -475,6 +482,7 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
               // (below) zooms on a plain wheel.
               wheelZoom="modifier"
               fitAtMostNaturalSize
+              controlsReserve={controlsReserve}
               onAskAI={handleAskAI}
               onResolutionChange={setResolution}
               onRenderState={setRenderState}

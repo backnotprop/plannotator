@@ -24,6 +24,7 @@ import {
   WHEEL_ZOOM_SENSITIVITY,
   ZOOM_STEP,
   type ContentSize,
+  type ControlsReserve,
   type Viewport,
 } from './useDiagramViewport';
 
@@ -125,6 +126,7 @@ export function DiagramCanvas({
   className,
   wheelZoom = 'always',
   fitMaxScale,
+  controlsReserve,
 }: {
   /** The last good render's sanitized svg root, or null before the first. */
   svgNode: SVGSVGElement | null;
@@ -157,11 +159,20 @@ export function DiagramCanvas({
   wheelZoom?: DiagramWheelZoom;
   /** The largest scale Fit may choose (`useDiagramViewport`). Default: the zoom range's top. */
   fitMaxScale?: number;
+  /** Opt-in: the host grows its box by `px` so the drawing at rest is clear of the zoom strip (`fitInHost`).
+   * Absent: the strip is painted over whatever is under it, as before. */
+  controlsReserve?: ControlsReserve;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const stripRef = useRef<HTMLDivElement | null>(null);
   const [content, setContent] = useState<ContentSize | null>(null);
-  const { viewport, fit, zoomBy, toggleZoom, panBy, panIntoView } = useDiagramViewport(hostRef, content, fitMaxScale);
+  const { viewport, fit, zoomBy, toggleZoom, panBy, panIntoView } = useDiagramViewport(
+    hostRef,
+    content,
+    fitMaxScale,
+    controlsReserve === undefined ? undefined : { stripRef, reserve: controlsReserve },
+  );
 
   // Mount the sanitized node once per render and size the wrapper to the
   // diagram's own box so the transform scales real pixels.
@@ -535,6 +546,7 @@ export function DiagramCanvas({
         // Screen chrome: never printed (rings and badges are, they are the
         // comments). On a narrow screen the strip takes the left edge so it
         // never stacks under a host's own bottom-right controls.
+        ref={stripRef}
         data-print-hide=""
         data-diagram-control=""
         data-diagram-zoom-strip=""
