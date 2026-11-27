@@ -318,6 +318,23 @@ every agent" in
 `terminal-prompts.test.ts`, the guard in `register.test.ts`, and the engine
 matrix's case in `tests/register.test.ts`.
 
+**Background tasks (Inbox).** What the session still runs in the background
+(shells, monitors, subagents, workflows) shows in a strip above its Inbox
+thread's reply box ("Background tasks" in `inbox-notifications-and-agents.md`).
+Claude Code lists that work only for the `Stop` and `SubagentStop` hooks
+(`background_tasks`: `{ id, type, status, description, command?, agent_type? }`),
+so the mod hooks `classic.Stop` and `classic.SubagentStop`, reads the list and
+passes the event on unchanged (`background-tasks.ts`). `InboxLink` sends the
+running and pending entries at its next tick as the bridge event
+`{ type: "tasks", at, tasks }`, again every 4 min while any run (the Inbox
+forgets a list 5 min after its report, and a session waiting on its subagents
+fires no hook), and `[]` once when the last ends. A SubagentStop's list still
+names the stopping subagent as running: it is left out. Claude Code names no
+start time, so `started_at` is when this process first saw the task, and no
+`last_output_at` is sent (the strip then never calls a task quiet). A Claude
+Code without the field sends nothing. Tests: `background-tasks.test.ts`, the
+classic-event guard in `register.test.ts`.
+
 **Files.** `register.ts` holds every `$` call (`claude plugin validate` follows
 `$` only through top-level functions and inline hooks) and builds a `Host` of
 closures; `controller.ts` (`PlannotatorMod`) is the per-session state machine;

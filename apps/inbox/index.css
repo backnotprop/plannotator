@@ -90,6 +90,8 @@
 @import "../../packages/inbox/picks.css";
 /* Recent activity's bar above the list while its view is on (packages/inbox/recentView.css). */
 @import "../../packages/inbox/recentView.css";
+/* The background-work strip above a thread's reply box (packages/inbox/taskStrip.css). */
+@import "../../packages/inbox/taskStrip.css";
 @import "../../packages/inbox/cloud/cloud.css";
 @import "../../packages/inbox/cloud/how/how.css";
 /* A phone's composer card and its picker sheet (components/BottomSheet.tsx, PhoneReplyRecipient.tsx, compose/PhoneToSheet.tsx). */

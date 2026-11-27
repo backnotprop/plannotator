@@ -55,6 +55,7 @@
  * (`startAskClient`).
  */
 
+import { BACKGROUND_TASKS_RESEND_MS, backgroundTasksOf, type BackgroundTaskReport } from './background-tasks'
 import { bridgeBaseUrl, createBridge, type BridgeHandle } from './bridge'
 import { PromptDropped, type Host, type HttpResult, type LoadedPluginInfo } from './host'
 import { isAbsolutePath } from './paths'
@@ -1239,6 +1240,11 @@ export class InboxLink {
   private touchedAt = 0
   /** Ticks in a row the session was idle; a reply goes in once it is idle for a whole tick. */
   private idleTicks = 0
+  /** The session's background tasks (background-tasks.ts): the hook's raw list waiting for the tick, the last list read, when it was sent. */
+  private tasksGiven: { given: unknown; stopping: string | null } | null = null
+  private tasks: BackgroundTaskReport[] | null = null
+  private tasksSentAt: number | null = null
+  private readonly tasksSeen = new Map<string, number>()
   /** Replies handed out by the Inbox and not yet settled here, in arrival order. */
   private pending = new Map<string, InboxReplyCommand>()
   /** Replies settled here (delivered, dropped, claimed elsewhere, reported). */
@@ -1626,6 +1632,7 @@ export class InboxLink {
     }
     for (const id of [...this.unacked]) await this.acknowledge(id)
     if (!this.leader) return
+    this.sendTasks(now)
     if (!this.polling && now >= this.retryAt) void this.poll()
     // Auto reload looks at the same idle state, outside any hook (this is a $.clock timer). Not awaited:
     // a queued /reload-plugins never holds the tick (it guards itself against a second look meanwhile).
@@ -1703,6 +1710,30 @@ export class InboxLink {
    * carried (the turn was making its last request when the row landed) has
    * not been read: a short turn of its own points Claude at it.
    */
+  /**
+   * A `Stop` or `SubagentStop` hook's `background_tasks` (register.ts): the next tick reads it and tells the Inbox.
+   * `stopping`: the subagent a SubagentStop is for, which that list still names as running.
+   */
+  onBackgroundTasks(given: unknown, stopping: string | null): void {
+    if (this.disposed || !Array.isArray(given)) return
+    this.tasksGiven = { given, stopping }
+  }
+
+  /** A new list goes at once; a list with tasks in it again every BACKGROUND_TASKS_RESEND_MS, so the Inbox keeps it. */
+  private sendTasks(now: number): void {
+    if (this.tasksGiven) {
+      const next = backgroundTasksOf(this.tasksGiven.given, this.tasksGiven.stopping, this.tasksSeen, now)
+      this.tasksGiven = null
+      if (next && (next.length > 0 || (this.tasks?.length ?? 0) > 0)) {
+        this.tasks = next
+        this.tasksSentAt = null
+      }
+    }
+    if (!this.tasks || (this.tasksSentAt !== null && (this.tasks.length === 0 || now - this.tasksSentAt < BACKGROUND_TASKS_RESEND_MS))) return
+    this.tasksSentAt = now
+    void this.bridge(INBOX_BRIDGE_EVENT_PATH, { type: 'tasks', at: now, tasks: this.tasks })
+  }
+
   onMainTurnComplete(turnId: string): void {
     const ended = this.sentNow.filter((entry) => entry.turnId === turnId)
     this.sentNow = this.sentNow.filter((entry) => entry.turnId !== turnId)

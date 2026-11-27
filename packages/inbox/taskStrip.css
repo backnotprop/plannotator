@@ -1,0 +1,21 @@
+/* The background-work strip above a thread's reply box (parts/TaskStrip.tsx): one wrapping line of tasks;
+   "no output N" in the warning tone. */
+.ib-tasks { margin: 0 0 10px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); min-width: 0; }
+.ib-tasks-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-width: 0; }
+.ib-tasks-n { font-weight: 600; color: var(--foreground); }
+.ib-tasks-n::after, .ib-task:not(:last-child)::after { content: "·"; margin-left: 6px; color: var(--muted-foreground); }
+.ib-task { display: inline-flex; align-items: baseline; gap: 4px; min-width: 0; max-width: 100%; padding: 2px 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.ib-task-l { min-width: 0; max-width: 32ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--foreground); }
+.ib-task-f { flex: none; white-space: nowrap; }
+.ib-task-quiet .ib-task-f { color: color-mix(in oklab, var(--warning) 60%, var(--foreground)); }
+.ib-task:hover .ib-task-l, .ib-task[aria-expanded="true"] .ib-task-l { text-decoration: underline; }
+.ib-task:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 4px; }
+.ib-tasks-detail { margin: 6px 0 0; padding: 6px 8px; border-radius: 6px; background: var(--muted); color: var(--foreground); font: inherit; font-size: var(--ib-fs-12, 12px); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 30vh; overflow: auto; }
+@media (max-width: 640px) {
+  .ib-task { min-height: 32px; align-items: center; }
+  .ib-task-l { max-width: 22ch; }
+}
+
+/* fork (tag-older), 2026-11-22: the sidebar Tags' "Older N" row (fork/tagOlder.tsx), as the old topics' "Older N". */
+.pn-inbox .ib-tags .ib-tags-older { padding: 2px 8px; font-size: 11.5px; color: var(--muted-foreground); text-align: start; }
+.pn-inbox .ib-tags .ib-tags-older:hover { color: var(--foreground); }

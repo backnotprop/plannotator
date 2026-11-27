@@ -2038,6 +2038,11 @@ export class PlannotatorMod {
     this.pushBridgeStatus()
   }
 
+  /** A `Stop` or `SubagentStop` hook's `background_tasks`, for the Inbox thread's strip (background-tasks.ts). */
+  onBackgroundTasks(given: unknown, stopping: string | null): void {
+    this.inbox?.onBackgroundTasks(given, stopping)
+  }
+
   private pushBridgeStatus(): void {
     for (const launch of this.launches.values()) launch.bridge?.pushStatus()
     this.inbox?.pushAskStatus()

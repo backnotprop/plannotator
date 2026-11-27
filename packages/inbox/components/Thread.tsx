@@ -21,6 +21,9 @@ import { outboxLine } from '../machines';
 import { ThreadSessions } from './ThreadSessions';
 import { snoozeBackAbove } from '../snoozeBack';
 import { HeldWrites } from './HeldWrites';
+import { TaskStrip } from '../parts/TaskStrip';
+import { CameBackNote } from '../parts/CameBackNote';
+import { readThreadTasks } from '../data/threadTasks';
 import { annotationOf, attachmentFeedback, attachmentImageUrl, isFileComment, OWN_MESSAGE_COMMENT_ROW, readableVersion } from '../attachments';
 import { withPictures } from '../commentPictureFiles';
 import { CommentPictures } from '../commentPictures';
@@ -5294,22 +5297,13 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         </div>
       )}
       <div className="ib-pfoot" hidden={artifactsOn} data-under={textUnder ? '' : undefined}>
+        <TaskStrip threadId={thread.thread_id} load={readThreadTasks} />
         {/* One status region, always mounted, so a screen reader announces the note when it appears. */}
         <div role="status" id={noteId} data-asker-note="">
           {/* With the pill there, the open box's pill says who gets the reply (and that it ended): no note above it. */}
           {showAskerNote && !(pillActive && box.open) && asking && <AskerEndedNote asking={asking} project={thread.project.name} anyLive={anotherTakes} />}
         </div>
-        {cameBack && (
-          <div className="ib-acts ib-archnote" data-came-back="">
-            <span className="ib-st">
-              Archived · {cameBackName} wrote after you archived it. Your reply goes to {replyTo === cameBackName ? 'it' : replyTo}; the thread stays
-              archived.
-            </span>
-            <button type="button" className="ib-btn" onClick={() => void resolve(false)}>
-              Unarchive
-            </button>
-          </div>
-        )}
+        {cameBack && <CameBackNote name={cameBackName} replyTo={replyTo} onUnarchive={() => void resolve(false)} />}
         {resolved ? (
           <ArchivedFoot movedTo={root.moved_to} asker={asker} onUnarchive={() => void resolve(false)} />
         ) : guard && staleQuestions.length > 0 ? (

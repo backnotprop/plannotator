@@ -251,6 +251,7 @@ import { INBOX_DECISION_POST_ROUTE, postThreadDecisions } from "./inbox-decision
 import { DECISION_POST_DESTINATIONS, decisionPostDestinationOf } from "@plannotator/shared/inbox/decision-post";
 import { createInboxAccountsFor, switchTarget } from "./inbox-accounts";
 import { INBOX_ACCOUNT_SWITCHING, INBOX_ACTIVITY_MAX_DAYS, type InboxNoteAutoAdd, type InboxPullRiskAnswer } from "@plannotator/core/inbox-types";
+import { createInboxBgTasks } from "./inbox-bg-tasks";
 import { createInboxOpenInRoute, systemOpenInLauncher, type InboxOpenInLauncher } from "./inbox-open-in";
 import { recordInboxAttachments, sweepStaleInboxSendTemps } from "@plannotator/shared/inbox/attachments";
 import { assertInboxUploadsPending, inboxBodyForAgent, inboxDiskFullError, inboxUploadAttachments, removeInboxAttachmentFiles, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
@@ -1249,6 +1250,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   /** The tags the person put on projects (project-tags.ts): only the filters read them. */
   const projectTags = createInboxProjectTags(store);
   const serverSession = createServerSessionNonce();
+  // What each agent session still runs in the background, for a thread's strip (inbox-bg-tasks.ts).
+  const bgTasks = createInboxBgTasks(store);
   // The requests the device door hands in, in-process, after it checked the device's token (inbox-devices.ts
   // `toWindow`), with the device that asked: a paired phone answers a permission prompt as a window does; a linked
   // machine does for a press in a window there (`window`), and may start, stop or trust for one (remote launch).
@@ -4922,6 +4925,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       live.stateChanged(session, host, body);
       return json({ ok: true });
     }
+    const tasks = bgTasks.bridgeEvent(session, body);
+    if (tasks) return tasks;
     // An item this session took for a session its conversation continues is recorded for that one, the session
     // the thread knows (`continues`, inbox-continuations.ts).
     const acting = typeof body.id === "string" ? live.actingFor(session, body.id) : session;
@@ -4932,7 +4937,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       return json({ ok: true });
     }
     if (body.type !== "delivered" || typeof body.id !== "string") {
-      throw new InboxError("validation_error", 'type: "delivered" with the reply id, or "state" with busy.', { field: "type" });
+      throw new InboxError("validation_error", 'type: "delivered" with the reply id, "state" with busy, or "tasks" with a list.', { field: "type" });
     }
     live.steerDone(session);
     live.tookItem(session);
@@ -8804,6 +8809,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Thread steps (approval "inbox-thread-steps"): a thread's lists with each session's presence (packages/server/inbox-steps.ts).
       const steps = stepsRoute.route(req, path);
       if (steps) return steps;
+      const tasksRoute = bgTasks.route(req, path, serverSession);
+      if (tasksRoute) return tasksRoute;
       // A thread's PRs (approval "inbox-pr-binding"): the window's read and the person's add and remove (inbox-thread-pulls.ts).
       // Never another site. On the device door for a linked machine (mark `pulls`), never a phone.
       if (/^\/api\/inbox\/threads\/[A-Za-z0-9_]+\/pulls$/.test(path)) {
