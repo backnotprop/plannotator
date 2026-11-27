@@ -86,7 +86,7 @@ import { killGitTree, runtime as gitRuntime, trackIsolatedGitGroup } from "./git
 import { REF_AUTH_HOSTS_MS, REF_FAILURE_MS, REF_RATE_LIMIT_MS, readCliHosts, refCliRunner, refErrorOf, refRunnerKill, type RefCli, type RefCommandResult, type RefRunner } from "./ref-cards";
 import { cliAnsweredPlainly, createSignedKeep } from "./inbox-pull-signed-keep";
 import { createDepartedPulls } from "./inbox-pull-departed";
-import { type ForgePullRead, forgePullState, readForgePull } from "./inbox-pull-forge";
+import { type ForgePullRead, forgePullState, readForgePull, saysNotFound } from "./inbox-pull-forge";
 import { createLastDiffs, lastDiffId, withNewerState } from "./inbox-pull-last-diff";
 import { join as joinPath } from "node:path";
 
@@ -2165,7 +2165,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         // A readable merge request can still lack raw_diffs on a self-managed GitLab.
         const paginatedGitlab = pull.platform === "gitlab" && cli === "glab" && scope === "layer" && before?.sha &&
           result.exitCode !== 0 && !result.tooLarge &&
-          /^(?:glab: *)?(?:HTTP 404(?: Not Found)?|404 Not Found(?: \(HTTP 404\))?|Not Found \(HTTP 404\))\s*$/im.test(result.stderr) &&
+          saysNotFound(result.stderr) &&
           refErrorOf(cli, { ...result, stdout: "" }) === "refused";
         if (paginatedGitlab) {
           result = await diffRun(cli, ["api", "--hostname", pull.host, `${gitlabMergeRequest}/diffs?per_page=100`, "--paginate"], INBOX_PULL_DIFF_MAX_BYTES);
@@ -2193,7 +2193,9 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
             const expected = Math.max(listedFiles, /^\d+$/.test(counted) ? Number(counted) : 0);
             // The paged diffs carry no flags before GitLab 18.4: an empty diff there may be one it held back, whatever
             // the file's kind (a renamed file's held-back changes would show as a pure rename).
-            if (!counted.endsWith("+") && expected > 0 && entries.length >= expected && entries.every((entry) =>
+            // Files, not entries: a page that repeats an entry cannot stand in for one that is missing.
+            const files = new Set(entries.map((entry) => `${entry.old_path}\u0000${entry.new_path}`)).size;
+            if (!counted.endsWith("+") && expected > 0 && files >= expected && entries.every((entry) =>
               typeof entry.old_path === "string" && typeof entry.new_path === "string" && !glMayBeHeldBack(entry) &&
               !(entry.diff.trim() === "" && entry.too_large == null && entry.collapsed == null)
             )) patch = reconstructGitlabPatch(entries);

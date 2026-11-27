@@ -1774,6 +1774,19 @@ describe("the whole stack's diff (finding C and merged layers)", () => {
       },
     );
 
+    test.each(["ERROR: 404 Not Found", "glab: 404 Project Not Found (HTTP 404)", "error: HTTP 404: 404 Not Found (https://gitlab.com/api/v4/projects/northwind%2Fdata%2Fledger/merge_requests/61/raw_diffs)"])(
+      "falls back on %s", async (rawError) => {
+        const { diff, pagedCalls } = await layer({ rawError });
+        expect((await diff()).patch).toContain("diff --git a/format.py b/format.py\n");
+        expect(pagedCalls()).toHaveLength(1);
+      },
+    );
+
+    test("a repeated entry does not stand in for a missing file", async () => {
+      const { diff } = await layer({ paged: JSON.stringify([entry("ledger.py"), entry("ledger.py")]), changesCount: "2" });
+      await expect(diff()).rejects.toMatchObject({ code: "pull_diff_failed" });
+    });
+
     test("does not read a second diff endpoint when the merge request itself is missing", async () => {
       const { diff, pagedCalls } = await layer({ firstHead: null });
       await expect(diff()).rejects.toMatchObject({ code: "pull_diff_failed" });
