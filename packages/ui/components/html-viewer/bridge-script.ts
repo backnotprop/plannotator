@@ -2111,20 +2111,28 @@ ${SANDBOX_SHIM_SCRIPT}
 
   // Resolve one contiguous document Range for the first occurrence of text.
   // Overlay-owned text (labels, vim chrome) is skipped by IDENTITY so viewer
-  // chrome can never satisfy a page-text search.
-  function findTextRange(text, root) {
+  // chrome can never satisfy a page-text search. With at, only an occurrence
+  // starting at that offset of root's text counts (root may be a text node).
+  function findTextRange(text, root, at) {
     var scope = root || document.body;
     if (!text || !scope) return null;
-    var walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT, null);
     var buffer = '';
     var nodes = [];
-    while (walker.nextNode()) {
-      var current = walker.currentNode;
-      if (current.parentElement && isViewerOverlayNode(current.parentElement)) continue;
-      nodes.push({ node: current, start: buffer.length });
-      buffer += current.textContent;
+    if (scope.nodeType === 3) {
+      nodes.push({ node: scope, start: 0 });
+      buffer = scope.data;
+    } else {
+      var walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT, null);
+      while (walker.nextNode()) {
+        var current = walker.currentNode;
+        if (current.parentElement && isViewerOverlayNode(current.parentElement)) continue;
+        nodes.push({ node: current, start: buffer.length });
+        buffer += current.textContent;
+      }
     }
-    var idx = buffer.indexOf(text);
+    var idx = typeof at === 'number'
+      ? (buffer.substr(at, text.length) === text ? at : -1)
+      : buffer.indexOf(text);
     if (idx === -1) return null;
     var endIdx = idx + text.length;
     var startEntry = null;
@@ -2141,6 +2149,73 @@ ${SANDBOX_SHIM_SCRIPT}
       range.setStart(startEntry.node, idx - startEntry.start);
       range.setEnd(endEntry.node, endIdx - endEntry.start);
       return range;
+    } catch (ex) {
+      return null;
+    }
+  }
+
+  // A live Range the page collapsed marks the place its text was. Removing the
+  // node it covered (a virtualized row scrolled away) moves both ends to that
+  // place in the parent, and the DOM keeps the point there as siblings come and
+  // go; rewriting the text node's data collapses it inside that node. Two rows
+  // can share the quoted words, so the text is looked for only where it was:
+  // the same node coming back there (same name, same text), nearest the point,
+  // at the same offset. Never the bare quote elsewhere: a highlight moved onto
+  // the other row would point at words the person did not comment on. The
+  // text node itself back in the page (a recycled row) is the first place.
+  // Called on the pass that finds the Range dead, with home/homeOffset from
+  // the last pass it was alive (refreshRecordTargets).
+  function lostPlaceOf(target) {
+    var point = target.range;
+    var home = target.home;
+    if (!point || !point.collapsed || !home || home.nodeType !== 3) return null;
+    try {
+      var lost = { point: point, home: home, homeOffset: target.homeOffset, name: '', text: '', offset: 0 };
+      if (point.startContainer === home || home.isConnected) return lost;
+      if (!point.startContainer.isConnected) return null;
+      var removed = home;
+      while (removed.parentNode && removed.parentNode.nodeType === 1) removed = removed.parentNode;
+      var offset = target.homeOffset;
+      if (removed !== home) {
+        var walker = document.createTreeWalker(removed, NodeFilter.SHOW_TEXT, null);
+        while (walker.nextNode() && walker.currentNode !== home) offset += walker.currentNode.length;
+        if (walker.currentNode !== home) return null;
+      }
+      lost.name = removed.nodeName;
+      lost.text = removed.textContent;
+      lost.offset = offset;
+      return lost;
+    } catch (ex) {
+      return null;
+    }
+  }
+
+  // Whether the place a lost Range marked is still in the page; once it is not,
+  // the target falls back to the restore ladder's search.
+  function lostPlaceConnected(lost) {
+    return lost.home.isConnected || (!!lost.name && lost.point.startContainer.isConnected);
+  }
+
+  function findAtLostPlace(text, lost) {
+    if (lost.home.isConnected) return findTextRange(text, lost.home, lost.homeOffset);
+    if (!lost.name) return null;
+    try {
+      var walker = document.createTreeWalker(
+        lost.point.startContainer,
+        lost.name === '#text' ? NodeFilter.SHOW_TEXT : NodeFilter.SHOW_ELEMENT,
+        null
+      );
+      var before = null;
+      var after = null;
+      while (walker.nextNode()) {
+        var node = walker.currentNode;
+        if (node.nodeName !== lost.name || node.textContent !== lost.text) continue;
+        // A node inserted at the point lands just after it.
+        if (lost.point.comparePoint(node, 0) < 0) before = node;
+        else { after = node; break; }
+      }
+      var back = after || before;
+      return back ? findTextRange(text, back, lost.offset) : null;
     } catch (ex) {
       return null;
     }
@@ -2334,16 +2409,30 @@ ${SANDBOX_SHIM_SCRIPT}
           noteDeadSearchResult(target, !!target.element);
         }
       } else if (!rangeAlive(target.range)) {
+        if (target.range) {
+          target.lost = lostPlaceOf(target);
+          target.home = null;
+        }
         target.range = null;
         if (target.text) {
           if (!deadSearchAllowed(target)) continue;
-          var scopeEl = record.params && record.params.anchor
-            ? resolveAnchorElement(record.params.anchor)
-            : null;
-          target.range = (scopeEl && findTextRange(target.text, scopeEl))
-            || findTextRange(target.text, null);
+          if (target.lost && !lostPlaceConnected(target.lost)) target.lost = null;
+          if (target.lost) {
+            target.range = findAtLostPlace(target.text, target.lost);
+          } else {
+            var scopeEl = record.params && record.params.anchor
+              ? resolveAnchorElement(record.params.anchor)
+              : null;
+            target.range = (scopeEl && findTextRange(target.text, scopeEl))
+              || findTextRange(target.text, null);
+          }
+          if (target.range) target.lost = null;
           noteDeadSearchResult(target, !!target.range);
         }
+      } else {
+        // Where the text is, for the pass that finds this Range collapsed.
+        target.home = target.range.startContainer;
+        target.homeOffset = target.range.startOffset;
       }
     }
   }
