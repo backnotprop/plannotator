@@ -11,9 +11,10 @@
 //   `images: false` / `links: false`, or our label step, stops holding);
 // - a future engine change moves a fence between Pele and Mermaid, or changes
 //   what a host's `accept` sees, without a test saying so: under Pele the
-//   check is handed an svg the outside reference was already removed from, so
-//   a check that refuses such references lets the diagram draw; under Mermaid
-//   it is handed the reference and refuses.
+//   check was handed, in every case here, an svg Pele's own output had no
+//   outside reference in, so a check that refuses such references lets the
+//   diagram draw; down the Mermaid fallback the check runs before the
+//   clean-up, and its refusal is the block's `refused`.
 //
 // Mermaid here is a stand-in that answers with the markup real Mermaid writes
 // for each case; happy-dom cannot run Mermaid or DOMPurify. What real Mermaid
@@ -65,7 +66,7 @@ const CASES: Record<string, HostileCase> = {
     drawnBy: 'pele',
     mermaid: `<g class="actor"><image href="${FAR}/icon.png" width="24" height="24"/><text class="actor">A</text></g>`,
   },
-  'flowchart classDef with url()': {
+  'classDef that paints with url()': {
     source: `flowchart TD\n  A --> B\n  classDef bad fill:url(${FAR}/cd.svg),background-image:url(${FAR}/cd.png)\n  class A bad`,
     drawnBy: 'mermaid',
     mermaid: `<style>#ID .bad&gt;*{fill:url(${FAR}/cd.svg)!important;background-image:url(${FAR}/cd.png)!important}</style><g class="node bad" id="ID-flowchart-A-0"><rect style="fill:url(${FAR}/cd.svg) !important;background-image:url(${FAR}/cd.png) !important"/></g>`,
@@ -194,7 +195,7 @@ describe.if(hasDom)('host diagram safety, as shipped', () => {
       'picture beside words in a label': ['img@src'],
       'a label that is only a picture': ['img@src'],
       'sequence actor icon from a URL': ['image@href'],
-      'flowchart classDef with url()': ['rect@style'],
+      'classDef that paints with url()': ['rect@style'],
       'state style with url()': ['rect@style'],
       // An `<a>` never keeps its link, whatever the setting.
       'click link with an href': [],
@@ -222,7 +223,7 @@ describe.if(hasDom)("a host's accept check (DiagramSvgAcceptContext), as shipped
     return { accept: accept as (svg: SVGSVGElement) => boolean, handed };
   }
 
-  test('it is handed the drawn svg alone, never the source; under Pele the outside reference is already gone, so the fence draws', async () => {
+  test('it is handed the drawn svg alone, never the source; in every case here Pele\'s own output held no outside reference, so the fence draws', async () => {
     usePath('pele');
     for (const [name, c] of Object.entries(CASES)) {
       if (c.drawnBy !== 'pele') continue;
@@ -235,34 +236,45 @@ describe.if(hasDom)("a host's accept check (DiagramSvgAcceptContext), as shipped
     }
   });
 
-  test('down the Mermaid fallback it is handed the outside reference, and refuses: the block shows the source', async () => {
-    for (const path of ['pele', 'mermaid fallback'] as const) {
-      usePath(path);
-      for (const [name, c] of Object.entries(CASES)) {
-        if (path === 'pele' && c.drawnBy === 'pele') continue;
-        const { accept, handed } = refusingCheck();
-        const result = await renderDiagram('mermaid', `accept-mermaid-${++seq}`, c.source, theme, { accept });
-        expect(handed).toHaveLength(1);
-        expect(handed[0]!.args).toBe(1);
-        // The check runs before the post-pass, so it sees what Mermaid wrote, even what the post-pass would drop.
-        if (handed[0]!.references.length > 0) expect([path, name, result.ok === false && result.refused === true]).toEqual([path, name, true]);
-        else expect([path, name, result.ok]).toEqual([path, name, true]);
-      }
-    }
+  test('under Pele the check never sees the final svg: the style sheets Plannotator adds come after it', async () => {
+    usePath('pele');
+    let handedStyles = -1;
+    const accept = (svg: SVGSVGElement): boolean => {
+      handedStyles = svg.querySelectorAll('style').length;
+      return true;
+    };
+    const source = "%%{init: {'themeVariables': {'primaryColor': '#ff0000', 'lineColor': '#00ff00'}}}%%\nflowchart LR\n  A --> B";
+    const result = await renderDiagram('mermaid', `accept-final-${++seq}`, source, { ...theme, shadowAmount: 1 }, { accept });
+    if (result.ok === false) throw new Error(result.message);
+    expect(engineOf(result)).toBe('pele');
+    expect(handedStyles).toBe(0);
+    expect(result.svgNode.querySelectorAll('style').length).toBeGreaterThan(0);
   });
 
-  test('every case that reaches Mermaid hands the check a reference to refuse; none that reaches Pele does', async () => {
-    const refusedBy: Record<Path, string[]> = { pele: [], 'mermaid fallback': [] };
-    for (const path of ['pele', 'mermaid fallback'] as const) {
-      usePath(path);
-      for (const [name, c] of Object.entries(CASES)) {
-        const { accept } = refusingCheck();
-        const result = await renderDiagram('mermaid', `refused-${++seq}`, c.source, theme, { accept });
-        if (result.ok === false && result.refused === true) refusedBy[path].push(name);
+  // With the real Mermaid and `diagramRemoteLoads: false`, Mermaid's own label
+  // pass has already removed a label's picture before the check runs, so the
+  // check may see nothing to refuse: tests/e2e/diagram-remote-loads.spec.ts.
+  test("down the Mermaid fallback the check runs before the clean-up, and its refusal is the block's `refused`", async () => {
+    usePath('mermaid fallback');
+    for (const on of [true, false]) {
+      setDiagramRemoteLoads(on);
+      // A link and a style rule that fetches: the clean-up drops both whatever the setting.
+      for (const name of ['click link with an href', 'stylesheet and font in a style block'] as const) {
+        const seen: string[][] = [];
+        const passing = await renderDiagram('mermaid', `accept-order-${++seq}`, CASES[name].source, theme, {
+          accept: (svg) => {
+            seen.push(outsideReferences(svg));
+            return true;
+          },
+        });
+        if (passing.ok === false) throw new Error(passing.message);
+        expect([on, name, seen.length, seen[0]!.length > 0]).toEqual([on, name, 1, true]);
+        expect([on, name, outsideReferences(passing.svgNode)]).toEqual([on, name, []]);
+        asked.length = 0;
+        const refused = await renderDiagram('mermaid', `accept-refuse-${++seq}`, CASES[name].source, theme, { accept: () => false });
+        expect([on, name, refused.ok === false && refused.refused === true, asked.length]).toEqual([on, name, true, 1]);
       }
     }
-    expect(refusedBy['mermaid fallback']).toEqual(Object.keys(CASES));
-    expect(refusedBy.pele).toEqual(Object.entries(CASES).filter(([, c]) => c.drawnBy === 'mermaid').map(([name]) => name));
   });
 
   test('a refusal of a fence Pele drew is final: it does not fall back to Mermaid', async () => {

@@ -27,7 +27,9 @@
  *   load nothing, with the option on or off; a picture, an icon, a link, a
  *   style, an svg image or a font from another host never reaches the drawn
  *   diagram with the option off, whichever engine draws it; and a host's
- *   `accept` check is handed Pele's svg without the reference, Mermaid's with it.
+ *   `accept` check is handed Pele's svg with no outside reference, Mermaid's
+ *   with the reference it kept when the option is on, and without a label's
+ *   picture when it is off.
  *
  * Runs in Chromium and WebKit (playwright.config.ts).
  */
@@ -91,7 +93,7 @@ const escaped = (file: string) => `https\\00003a\\00002f\\00002ffar.test\\00002f
  * What Mermaid loads while it draws, before any sanitizer or config check: a
  * diagram's own `style` / `classDef` statements (Mermaid applies them itself),
  * picture nodes, a sequence actor's icon. When Mermaid draws them, only an
- * enforced page CSP stops these; as shipped, Pele draws each of them and loads nothing.
+ * enforced page CSP stops these; as shipped, Pele drew each of them here and nothing loaded.
  * `everywhere`: loads in both Chromium and WebKit without a CSP (an external
  * svg paint server in `fill: url(…)` is fetched by Chromium only).
  */
@@ -359,15 +361,21 @@ test('as shipped, remote loads off: a picture, an icon, a link, a style, an svg 
   }
 });
 
-test("as shipped: a host's accept check is handed Pele's svg with the outside reference already removed, so it draws; down the Mermaid fallback it is handed the reference and refuses", async ({ page }) => {
-  await open(page, undefined, shipped);
-  for (const [name, { source, drawnBy }] of Object.entries(HOSTILE)) {
-    const r = await render(page, source, 'far.test');
-    if (drawnBy === 'pele') {
-      expect([name, r.ok, r.refused]).toEqual([name, true, false]);
-      expect([name, await engineInHost(page)]).toEqual([name, 'pele']);
-    } else {
-      expect([name, r.ok, r.refused]).toEqual([name, false, true]);
+test("as shipped: a host's accept check is handed Pele's svg with no outside reference in it, so it draws; down the Mermaid fallback it gets the reference Mermaid kept with remote loads on, and none of a label's picture with them off", async ({ browser }) => {
+  for (const on of [true, false]) {
+    const page = await browser.newPage();
+    await open(page, undefined, shipped);
+    await remoteLoads(page, on);
+    for (const [name, { source, drawnBy }] of Object.entries(HOSTILE)) {
+      const r = await render(page, source, 'far.test');
+      if (drawnBy === 'pele' || !on) {
+        // Off: Mermaid's own label pass removed the picture before the check ran, so there is nothing to refuse.
+        expect([on, name, r.ok, r.refused]).toEqual([on, name, true, false]);
+        expect([on, name, await engineInHost(page)]).toEqual([on, name, drawnBy]);
+      } else {
+        expect([on, name, r.ok, r.refused]).toEqual([on, name, false, true]);
+      }
     }
+    await page.close();
   }
 });
