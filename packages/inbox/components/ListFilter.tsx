@@ -43,7 +43,7 @@ import { sectionIsLong } from '../listFilterSearch';
 import { TITLE_FILTER_LABEL, filterRowsByTitle } from '../listTitleFilter';
 import { openTitleFilter, useTitleFilterTextWhen } from '../listTitleFilterStore';
 import { noteTravelFrom } from './titleFilterMotion';
-import { FilterMenuRows, rowKeyToField, type FilterSection } from './ListFilterSections';
+import { FilterMenuRows, noProjectsMatch, noTagsMatch, rowKeyToField, type FilterSection } from './ListFilterSections';
 export { useTitleFilterList } from './TitleFilter';
 export { RecentViewBar, RecentViewSaid } from './RecentViewBar';
 import {
@@ -294,7 +294,7 @@ export const ListFilterButton = memo(function ListFilterButton({ source, phone }
     {
       id: 'tags',
       title: 'Tag',
-      find: { words: 'Find a tag', none: (query) => `No tags match “${query}”` },
+      find: { words: 'Find a tag', none: noTagsMatch },
       rows: tags.map((tag) => ({
         key: tag.id,
         label: tag.name,
@@ -308,7 +308,7 @@ export const ListFilterButton = memo(function ListFilterButton({ source, phone }
     {
       id: 'projects',
       title: 'Project',
-      find: { words: 'Find a project', none: (query) => `No projects match “${query}”` },
+      find: { words: 'Find a project', none: noProjectsMatch },
       rows: showProjects
         ? projects.map((p) => ({
             key: p.id,

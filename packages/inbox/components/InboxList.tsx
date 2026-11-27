@@ -11,7 +11,9 @@ import { RowTagName, rowTintOf, tintProps, type ListTagColours, type RowTintProp
 import { RowAgents, RowAgentTiles, rowScriptOf } from './RowAgents';
 import { RowPullsMark } from '../threadPulls/ThreadPulls';
 import { isTextCut, ProjectTipText, Tip } from './Tip';
-import { RowTip } from './RowTip';
+import { GuideMark, guideWord } from './RowGuideMark';
+import { ListPlacePicker } from './ListPlacePicker';
+import type { SidebarPlaces } from '../sidebarPlaces';
 import { Icon } from '../icons';
 import { PinMark, PinnedWords } from '../parts/RowPin';
 import { notePressPointer, pressRow } from '../starPress';
@@ -75,6 +77,8 @@ export interface InboxListProps {
    */
   titleMark?: ReactNode;
   titleNote?: string | null;
+  /** The sidebar's places (sidebarPlaces.ts): a ⌄ beside the title opens them (ListPlacePicker.tsx). Absent: no ⌄. */
+  places?: SidebarPlaces;
   /** The project's folder, `~/src/billing-svc`, when one project is shown: in the title's tooltip, never drawn in the header. */
   path: string | null;
   sections: readonly InboxListSection[];
@@ -332,22 +336,6 @@ export function ThreadChip({ name }: { name: string | null }) {
 function Preview({ row }: { row: InboxListRow }) {
   const preview = previewOf(row);
   return preview ? <ClipText className="ib-pv" text={preview} /> : null;
-}
-
-const guideWord = (row: InboxListRow) => (row.guide_walkthrough ? 'Walkthrough' : 'Guided review');
-
-/** The record's 1.1: a thread that carries a guided review says so after its subject. */
-function GuideMark({ row }: { row: InboxListRow }) {
-  if (!row.guide || row.section === 'sent') return null;
-  const word = guideWord(row);
-  return (
-    <RowTip content={word} when={guideLabelHidden}>
-      <span className="ib-att" data-guide-mark="" role="img" aria-label={word}>
-        <Icon name="book" size={13} />
-        <span className="ib-att-l">{word}</span>
-      </span>
-    </RowTip>
-  );
 }
 
 /**
@@ -1070,6 +1058,7 @@ export function InboxList(props: InboxListProps) {
             </h1>
           </Tip>
         )}
+        {props.places && <ListPlacePicker places={props.places} phone={isMobile} />}
         {props.titleNote && (
           <span className="ib-lhead-note" data-list-title-note="">
             {props.titleNote}
@@ -1278,9 +1267,3 @@ export const ListRow = memo(
   },
   sameListRow,
 );
-
-/** The guided review mark drops its label to its icon when the row is short of room: only then does it need a tooltip. */
-function guideLabelHidden(trigger: Element): boolean {
-  const label = trigger.querySelector<HTMLElement>('.ib-att-l');
-  return !label || label.offsetWidth === 0 || getComputedStyle(label).display === 'none';
-}

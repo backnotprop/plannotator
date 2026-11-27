@@ -972,3 +972,4 @@ packages/inbox/guide/usePowerUp.test.tsx
 packages/inbox/guide/useViewedTicks.test.tsx
 packages/inbox/components/reply/replyBoxParity.test.tsx
 packages/inbox/guide/diffFontLoad.test.tsx
+packages/inbox/listPlacePicker.test.tsx

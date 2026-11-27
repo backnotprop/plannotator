@@ -102,6 +102,7 @@ import { plural, shortAgentName, tildePath } from './format';
 import { copyMarkdown, threadMarkdown } from './copyMarkdown';
 import { shellLine, type ConnectContext } from './harnesses';
 import { Sidebar } from './components/Sidebar';
+import { sidebarPlacesOf } from './sidebarPlaces';
 import { UsagePeek } from './components/Usage';
 import { ActivityChart } from './components/ActivityChart';
 import { AccountsProvider, useAccounts } from './useAccounts';
@@ -5022,6 +5023,8 @@ function Inbox() {
   /** A PR's Back, opened from the board in Reviews, from the board, or from a stack's page. */
   const prsBack = (from: Route): Route =>
     from.prsFrom === 'reviews' ? { page: 'reviews', project: from.project ?? null, thread: null } : from.prsFrom === 'sheet' ? prsHome(from) : { ...from, layer: null, scope: 'layer', prsFrom: 'stack' };
+  // The sidebar's places (sidebarPlaces.ts): the sidebar draws them, and the list title's ⌄ offers the same.
+  const places = sidebarPlacesOf({ route, fromCard: !!fromCard, filterMachine, filterAgent, tags: sidebarTags, inboxCount: waitingCount(latestSections), projects, self: machines.self, projectNames, projectCounts, projectActivity: latestProjectActivity, refreshInbox, leave });
   let main: ReactNode;
   if (tourOn && !tourFixture) {
     main = <TourLoading />;
@@ -5406,6 +5409,7 @@ function Inbox() {
           title={listTitle}
           titleMark={filterTag ? <TagIcon className="ib-ic" /> : undefined}
           titleNote={filterTag && listSections ? tagListSummary(listSections.flatMap((section) => section.threads)) : null}
+          places={places}
           path={filterProject ? tildePath(filterProject.root, settings?.home) : null}
           sections={listSections ?? filterShown(listShown ?? shown)}
           listFilter={{ rows: listFilterRows, scoped: listFilterScoped, names: projectNames, filter: listFilterPicks, onChange: setListFilter, place: [route.project, route.machine, route.agent, route.tag].join('\n') }}
@@ -5642,15 +5646,7 @@ function Inbox() {
               onSettings={() => endTour('exit', { page: 'settings', project: null, thread: null })}
             />
           ) : (
-          <Sidebar
-            page={route.page === 'tour' ? 'inbox' : fromCard ? 'board' : route.reviews ? 'reviews' : route.page}
-            projectId={route.project}
-            machineId={route.page === 'inbox' ? (filterMachine?.id ?? null) : null}
-            agentFilter={filterAgent ? { id: filterAgent.id, name: filterAgent.name } : null}
-            tags={sidebarTags}
-            inboxCount={waitingCount(latestSections)}
-            // One machine's list: that machine's projects only.
-            projects={filterMachine ? projects.filter((p) => (p.machine ?? machines.self) === filterMachine.id) : projects}
+          <Sidebar {...places}
             machines={machines}
             machineCounts={sidebarMachineCounts}
             onMachineUpdate={pageOffersUpdates(settings) ? (id) => setMachineUpdateOpen({ id, snooze: false }) : undefined}
@@ -5672,9 +5668,6 @@ function Inbox() {
             onMessageAgent={(session, opener) => openCompose({ session }, opener)}
             onAddAgent={(opener) => openCompose(plusOn ? { launch: { agent: composeLastAgent } } : {}, opener)}
             onAddMachine={machines.self ? () => leave({ page: 'settings', project: null, thread: null, section: 'machines' }) : undefined}
-            projectNames={projectNames}
-            projectCounts={projectCounts}
-            projectActivity={latestProjectActivity}
             projectsReadable={projectsReadable}
             onProjectAction={(projectId, action) => void projectAction(projectId, action)}
             onProjectRename={renameProject}
@@ -5706,11 +5699,6 @@ function Inbox() {
             onArtifacts={() => leave({ page: 'artifacts', project: null, thread: null })}
             {...pageLinks({ board: Boolean(boardEnabled), plans: plansOn, grid: gridOn, scheduled: scheduledOn, reviews: Boolean(pullsShown) }, leave)}
             pullsCount={pullsShown && pulls.reviews ? reviewsOnYou(pulls.reviews) : 0}
-            // On the list it shows, Inbox (or a project) refreshes; with a thread open it closes it as before, and refreshes.
-            onInbox={() => (route.page === 'inbox' && route.project === null && !route.machine && !route.agent && !route.tag ? void refreshInbox(null, route.thread !== null) : leave({ page: 'inbox', project: null, thread: null }))}
-            onProject={(projectId) =>
-              route.page === 'inbox' && route.project === projectId ? void refreshInbox(projectId, route.thread !== null) : route.page === 'plans' ? leave({ page: 'plans', project: projectId, thread: null }) : leave({ page: 'inbox', project: projectId, machine: filterMachine?.id ?? null, thread: null })
-            }
             refreshes={route.page === 'inbox' && route.thread === null}
             refreshSpin={refreshSpin}
             onSettings={() => leave({ page: 'settings', project: null, thread: null })}

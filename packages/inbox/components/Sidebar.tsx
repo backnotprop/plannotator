@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { inboxSidebarShown, type InboxSidebarItem } from '@plannotator/core/inbox-sidebar';
 import { useSidebarLayout } from '../sidebarLayout';
 import { drawnSidebarItems } from '../sidebarItems';
@@ -23,8 +23,8 @@ import { useSidebarSections, type SidebarSection } from '../sidebarSections';
 import { useSidebar } from '../shell/sidebar';
 import { usePhone } from '../phone';
 import { shortProjectNames } from '../projectLabels';
-import { shownProjects, type ProjectAction } from '../projectMenu';
-import { projectSortControl, setProjectSort, sortProjects, useProjectSort, type ProjectSort } from '../projectSort';
+import type { ProjectAction } from '../projectMenu';
+import { projectSortControl, setProjectSort, type ProjectSort } from '../projectSort';
 import { selfMachineId } from '../inboxUrl';
 import { ProjectRow } from './ProjectRow';
 import { newSessionTip } from '../compose/model';
@@ -32,6 +32,7 @@ import { PinnedRow, type PinnedAction } from './PinnedRow';
 import { useStarredAbove } from '../starredPills';
 import { useInboxTheme } from '../theme';
 import { TaterMark } from './TaterMark';
+import { inboxIsOn, useShownProjects } from '../sidebarPlaces';
 import { ProjectTip } from './ProjectRow';
 import { Tip } from './Tip';
 import { SectionSortToggle } from './SectionSortToggle';
@@ -264,16 +265,9 @@ export function Sidebar(props: SidebarProps) {
   const phone = usePhone();
   // Another machine's project keeps what that machine gives it: only this machine's are renamed or combined.
   const local = (project: ProjectFolder) => !project.machine || project.machine === selfMachineId();
-  // A project with nothing in the list leaves the sidebar (automatic hiding); the one the list shows stays until the person leaves it.
-  const held = props.page === 'inbox' ? props.projectId : null;
-  // Each project by the window's one name for it (windowProjectNames, App.tsx), as the rows name it.
-  const projectSort = useProjectSort();
-  // Only most recent reads the activity, so another order does not sort again when a row's time changes.
-  const activity = projectSort === 'recent' ? props.projectActivity : undefined;
-  const shown = useMemo(
-    () => sortProjects(shownProjects(props.projects, held).map((project) => ({ ...project, name: props.projectNames?.get(project.id) ?? project.name })), projectSort, activity),
-    [props.projects, props.projectNames, held, projectSort, activity],
-  );
+  // A project with nothing in the list leaves the sidebar (automatic hiding); the one the list shows stays until the
+  // person leaves it. The list title's picker lists the same (sidebarPlaces.ts).
+  const { shown, projectSort } = useShownProjects(props);
   const pins = props.pins ?? [];
   // Pinned and Projects close like folders; closed, a section still shows where the person is (the open pinned thread, the project the list shows).
   const sections = useSidebarSections(props.rememberSections !== false);
@@ -327,7 +321,7 @@ export function Sidebar(props: SidebarProps) {
     next?.focus({ preventScroll: true });
   });
   const inboxRef = useRef<HTMLButtonElement>(null);
-  const inboxRefreshes = props.refreshes === true && props.page === 'inbox' && props.projectId === null && !props.machineId && !props.agentFilter && !props.tags?.tagId;
+  const inboxRefreshes = props.refreshes === true && inboxIsOn(props);
   const spinOf = (scope: string | null) => (props.refreshSpin && props.refreshSpin.scope === scope ? props.refreshSpin.key : null);
   const refreshHintId = useId();
   const pinnedLabelId = useId();
@@ -514,9 +508,9 @@ export function Sidebar(props: SidebarProps) {
         <button
           ref={inboxRef}
           type="button"
-          className={`ib-nav ib-nav-inbox${props.page === 'inbox' && props.projectId === null && !props.machineId && !props.agentFilter && !props.tags?.tagId ? ' ib-on' : ''}`}
+          className={`ib-nav ib-nav-inbox${inboxIsOn(props) ? ' ib-on' : ''}`}
           onClick={pick(props.onInbox)}
-          aria-current={props.page === 'inbox' && props.projectId === null && !props.machineId && !props.agentFilter && !props.tags?.tagId ? 'page' : undefined}
+          aria-current={inboxIsOn(props) ? 'page' : undefined}
           aria-describedby={inboxRefreshes ? refreshHintId : undefined}
           data-refreshes={inboxRefreshes ? '' : undefined}
           data-refreshing={spinOf(null) != null ? '' : undefined}

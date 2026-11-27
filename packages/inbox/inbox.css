@@ -1087,6 +1087,19 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .pn-inbox .ib-lhead-title:focus-visible svg.ib-ic-refresh, .pn-inbox .ib-lhead-title[data-refreshing] svg.ib-ic-refresh { opacity: 1; }
 /* The ↻'s tooltip trigger (its own, apart from the name's): the icon's box and the gap before it, so the gap opens it too. */
 .ib-lhead-ic { display: inline-flex; flex: none; padding-left: 8px; }
+/* The ⌄ beside the title (ListPlacePicker.tsx): a quiet icon button hugging the ↻'s box; hovered or open, the header
+   buttons' fill. The title gives way with "…" before it does. Its menu is the filter menu's (`ib-lflt-menu`). */
+.pn-inbox .ib-lhead-switch { flex: none; display: inline-grid; place-items: center; width: 26px; height: 26px; margin-left: -10px; padding: 0; border: 0; border-radius: var(--ib-r10-s, 7px); background: none; color: var(--muted-foreground); cursor: pointer; transition: var(--ib-fade2-s, var(--ib-ui-fade)); }
+.pn-inbox .ib-lhead-switch:hover, .pn-inbox .ib-lhead-switch[data-popup-open] { background: var(--ib-hb-hover-s, var(--muted)); color: var(--foreground); }
+.pn-inbox .ib-lhead-switch:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  /* A phone has no hover, so the title is its name alone: the ↻'s room shows only while a refresh turns it (the
+     tap's one sign on the title). The ⌄: a thumb's height, narrow, 8 px clear of the title, so a tap beside it never
+     refreshes instead. */
+  .pn-inbox .ib-lhead-title:not([data-refreshing]) .ib-lhead-ic { display: none; }
+  .pn-inbox .ib-lhead-title .ib-lhead-ic { padding-left: 4px; }
+  .pn-inbox .ib-lhead-switch { width: 32px; height: 44px; margin-left: 4px; border-radius: 8px; }
+}
 .ib-lbody { padding: 0 10px 10px; overflow-y: auto; flex: 1; min-height: 0; position: relative; }
 /* A row that left the rows on screen when the list settled (settle.ts): a copy drawn where it was, fading
    out under the rows sliding past it (they are opaque and sit above it while they move). */
