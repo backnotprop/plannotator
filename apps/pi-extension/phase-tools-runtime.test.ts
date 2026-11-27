@@ -329,12 +329,27 @@ type ModelRef = { provider: string; id: string };
 /** The host's own default thinking level, applied on every model switch. */
 const HOST_DEFAULT_THINKING = "minimal";
 
+type ModelHostOptions = {
+	cwd: string;
+	initialModel: ModelRef;
+	initialThinking?: string;
+	entries: SessionEntry[];
+	/** oh-my-pi: no model_select or thinking_level_select, and a model switch keeps the thinking level. */
+	omp?: boolean;
+	/** Another extension listens to thinking_level_select ahead of Plannotator, so Pi reaches Plannotator later. */
+	thinkingListenerAhead?: boolean;
+	/** The registry resolves a configured model id to another id, as an alias does. */
+	registryIds?: Record<string, string>;
+};
+
 /**
  * A host whose model and thinking level are real state: `setModel` changes the
  * model the context reports and every call is recorded, so a test can tell a
- * model Plannotator set apart from one the user picked.
+ * model Plannotator set apart from one the user picked. The Pi host records
+ * model and thinking changes on the session branch and reports them the way Pi
+ * does (agent-session.ts setModel / setThinkingLevel).
  */
-function createModelHost(options: { cwd: string; initialModel: ModelRef; initialThinking?: string; entries: SessionEntry[] }) {
+function createModelHost(options: ModelHostOptions) {
 	const handlers = new Map<string, Handler[]>();
 	const commands = new Map<string, { handler: (args: string, context: ReturnType<typeof createContext>) => unknown }>();
 	const registeredTools = new Map<string, { name: string; execute: (...args: any[]) => Promise<unknown> }>();
@@ -346,6 +361,40 @@ function createModelHost(options: { cwd: string; initialModel: ModelRef; initial
 		entries: options.entries,
 	};
 	const tools = { active: ["read", "bash", "edit", "write"] };
+	let nextEntryId = 0;
+	const emit = (event: string, payload: unknown) => {
+		for (const handler of handlers.get(event) ?? []) handler(payload, context as never);
+	};
+
+	// Pi's setThinkingLevel: a real change is written to the branch, then
+	// reported with no word on who made it.
+	const changeThinking = (level: string) => {
+		if (options.omp) {
+			host.thinking = level;
+			return;
+		}
+		const previousLevel = host.thinking;
+		if (level === previousLevel) return;
+		host.thinking = level;
+		host.entries.push({ type: "thinking_level_change", id: `host-${nextEntryId++}`, thinkingLevel: level } as SessionEntry);
+		const report = () => emit("thinking_level_select", { type: "thinking_level_select", level, previousLevel });
+		if (options.thinkingListenerAhead) void Promise.resolve().then(report);
+		else report();
+	};
+
+	// Pi's setModel: the model moves, the switch is written, the thinking level is
+	// re-derived from the host default, then model_select. oh-my-pi keeps the
+	// thinking level and reports nothing.
+	const switchModel = async (model: ModelRef) => {
+		const previousModel = host.model;
+		host.model = model;
+		if (options.omp) return;
+		host.entries.push({ type: "model_change", id: `host-${nextEntryId++}`, provider: model.provider, modelId: model.id } as SessionEntry);
+		changeThinking(HOST_DEFAULT_THINKING);
+		if (previousModel.provider !== model.provider || previousModel.id !== model.id) {
+			for (const handler of handlers.get("model_select") ?? []) await handler({ source: "set", model, previousModel }, context as never);
+		}
+	};
 
 	const pi = {
 		appendEntry: (customType: string, data: unknown) => {
@@ -368,20 +417,13 @@ function createModelHost(options: { cwd: string; initialModel: ModelRef; initial
 			tools.active = [...next];
 		},
 		setModel: async (model: ModelRef) => {
-			const previousModel = host.model;
 			host.modelCalls.push({ provider: model.provider, id: model.id });
-			host.model = model;
-			// Like Pi and oh-my-pi, a model switch re-derives the thinking level
-			// from the host's default instead of keeping the current one.
-			host.thinking = HOST_DEFAULT_THINKING;
-			if (previousModel.provider !== model.provider || previousModel.id !== model.id) {
-				for (const handler of handlers.get("model_select") ?? []) await handler({ source: "set", model, previousModel }, context as never);
-			}
+			await switchModel(model);
 			return true;
 		},
 		setThinkingLevel: (level: string) => {
 			host.thinkingCalls.push(level);
-			host.thinking = level;
+			changeThinking(level);
 		},
 	};
 	plannotator(pi as never);
@@ -392,7 +434,7 @@ function createModelHost(options: { cwd: string; initialModel: ModelRef; initial
 		get model() {
 			return host.model;
 		},
-		modelRegistry: { find: (provider: string, id: string) => ({ provider, id }) },
+		modelRegistry: { find: (provider: string, id: string) => ({ provider, id: options.registryIds?.[id] ?? id }) },
 	};
 
 	return {
@@ -401,17 +443,36 @@ function createModelHost(options: { cwd: string; initialModel: ModelRef; initial
 		command: async () => commands.get("plannotator-plan-mode")!.handler("", context as never),
 		submit: async () => registeredTools.get("plannotator_submit_plan")!.execute("call", { filePath: "PLAN.md" }, undefined, undefined, context),
 		markDone: async (step: number) => registeredTools.get("plannotator_mark_done")!.execute("done", { step }, undefined, undefined, context),
-		/** The user picks a model in the host's own UI, not through Plannotator. */
+		/**
+		 * The user picks a model in the host's own UI, not through Plannotator,
+		 * then (if given) a thinking level.
+		 */
 		userPicks: (model: ModelRef, thinking?: string) => {
-			const previousModel = host.model;
-			host.model = model;
-			if (thinking) host.thinking = thinking;
-			if (previousModel.provider !== model.provider || previousModel.id !== model.id) {
-				for (const handler of handlers.get("model_select") ?? []) handler({ source: "set", model, previousModel }, context as never);
-			}
+			void switchModel(model);
+			if (thinking) changeThinking(thinking);
 			host.modelCalls.length = 0;
 			host.thinkingCalls.length = 0;
 		},
+		/** The user changes only the thinking level (Pi's /thinking or shift+tab). */
+		userSetsThinking: (level: string) => {
+			changeThinking(level);
+		},
+		/** The host changes the level by itself (oh-my-pi's auto thinking re-resolving for a turn). */
+		hostDriftsThinking: (level: string) => {
+			host.thinking = level;
+		},
+		/** oh-my-pi moves to a fallback model after a provider error. */
+		hostFallsBack: (model: ModelRef) => {
+			const from = `${host.model.provider}/${host.model.id}`;
+			host.model = model;
+			emit("retry_fallback_applied", { type: "retry_fallback_applied", from, to: `${model.provider}/${model.id}`, role: "default" });
+		},
+		/** oh-my-pi goes back to the primary model once the fallback cools down, without an extension event. */
+		hostRestoresPrimary: (model: ModelRef) => {
+			host.model = model;
+		},
+		/** Let a thinking report delayed by an earlier listener arrive. */
+		settle: () => new Promise((resolveSettle) => setTimeout(resolveSettle, 0)),
 		run: async (event: string) => {
 			for (const handler of handlers.get(event) ?? []) await handler({}, context as never);
 		},
@@ -687,4 +748,97 @@ describe("Plannotator re-applies phase settings after /tree into another phase",
 			expect([runtime.host.model, runtime.host.thinking]).toEqual([SOL, "xhigh"]);
 		});
 	}
+});
+
+async function completePlan(runtime: ReturnType<typeof createModelHost>) {
+	// The first agent_end after approval only schedules the continuation.
+	await runtime.run("agent_end");
+	await runtime.markDone(1);
+	await runtime.markDone(2);
+	await runtime.run("agent_end");
+	expect(lastState(runtime.host.entries).phase).toBe("idle");
+}
+
+describe("Plannotator counts a thinking level as the user's only when the user set it", () => {
+	test("Pi: a thinking level the user sets mid-plan survives approval and completion, while the pre-plan model comes back", async () => {
+		const cwd = makeWorkspace({ phases: { planning: { model: LUNA, thinking: "low" } } });
+		writeFileSync(join(cwd, "PLAN.md"), PLAN, "utf-8");
+		const runtime = createModelHost({ cwd, initialModel: SOL, initialThinking: "xhigh", entries: [] });
+		await runtime.run("session_start");
+		await runtime.command();
+		runtime.userSetsThinking("medium");
+		await runtime.submit();
+		expect([runtime.host.model, runtime.host.thinking]).toEqual([SOL, "medium"]);
+		await completePlan(runtime);
+		expect([runtime.host.model, runtime.host.thinking]).toEqual([SOL, "medium"]);
+	});
+
+	for (const { name, omp } of HOSTS) {
+		test(`${name}: a thinking level the host changed by itself does not block the configured executing thinking`, async () => {
+			const cwd = makeWorkspace({ phases: { executing: { thinking: "low" } } });
+			writeFileSync(join(cwd, "PLAN.md"), PLAN, "utf-8");
+			const runtime = createModelHost({ cwd, initialModel: SOL, initialThinking: "medium", entries: [], omp });
+			await runtime.run("session_start");
+			await runtime.command();
+			// oh-my-pi's auto thinking resolves a new level for a turn.
+			runtime.hostDriftsThinking("high");
+			await runtime.submit();
+			expect(runtime.host.thinking).toBe("low");
+			await completePlan(runtime);
+			expect([runtime.host.model, runtime.host.thinking]).toEqual([SOL, "medium"]);
+		});
+	}
+
+	test("Pi: the thinking reset that comes with a model pick is not a thinking choice", async () => {
+		const cwd = makeWorkspace({ phases: { executing: { thinking: "low" } } });
+		writeFileSync(join(cwd, "PLAN.md"), PLAN, "utf-8");
+		const runtime = createModelHost({ cwd, initialModel: SOL, initialThinking: "xhigh", entries: [] });
+		await runtime.run("session_start");
+		await runtime.command();
+		// Pi's /model: setModel resets thinking to the host default, then model_select.
+		runtime.userPicks(LUNA);
+		expect(runtime.host.thinking).toBe(HOST_DEFAULT_THINKING);
+		await runtime.submit();
+		expect([runtime.host.model, runtime.host.thinking]).toEqual([LUNA, "low"]);
+		await completePlan(runtime);
+		expect([runtime.host.model, runtime.host.thinking]).toEqual([LUNA, "xhigh"]);
+	});
+
+	test("Pi, with another thinking listener ahead of Plannotator: Plannotator's own thinking changes are not taken for the user's", async () => {
+		const cwd = makeWorkspace({ phases: { planning: { thinking: "low" }, executing: { thinking: "medium" } } });
+		writeFileSync(join(cwd, "PLAN.md"), PLAN, "utf-8");
+		const runtime = createModelHost({ cwd, initialModel: SOL, initialThinking: "xhigh", entries: [], thinkingListenerAhead: true });
+		await runtime.run("session_start");
+		await runtime.command();
+		await runtime.settle();
+		expect(runtime.host.thinking).toBe("low");
+		await runtime.submit();
+		await runtime.settle();
+		expect(runtime.host.thinking).toBe("medium");
+		await completePlan(runtime);
+		await runtime.settle();
+		expect([runtime.host.model, runtime.host.thinking]).toEqual([SOL, "xhigh"]);
+	});
+
+	test("Pi, with another thinking listener ahead of Plannotator: a model pick's thinking reset is still not a choice, a later thinking change is", async () => {
+		const cwd = makeWorkspace({ phases: { executing: { thinking: "low" } } });
+		writeFileSync(join(cwd, "PLAN.md"), PLAN, "utf-8");
+		const first = createModelHost({ cwd, initialModel: SOL, initialThinking: "xhigh", entries: [], thinkingListenerAhead: true });
+		await first.run("session_start");
+		await first.command();
+		first.userPicks(LUNA);
+		await first.settle();
+		await first.submit();
+		expect([first.host.model, first.host.thinking]).toEqual([LUNA, "low"]);
+
+		const cwd2 = makeWorkspace({ phases: { executing: { thinking: "low" } } });
+		writeFileSync(join(cwd2, "PLAN.md"), PLAN, "utf-8");
+		const second = createModelHost({ cwd: cwd2, initialModel: SOL, initialThinking: "xhigh", entries: [], thinkingListenerAhead: true });
+		await second.run("session_start");
+		await second.command();
+		second.userPicks(LUNA, "high");
+		await second.settle();
+		await second.submit();
+		expect([second.host.model, second.host.thinking]).toEqual([LUNA, "high"]);
+	});
 });

@@ -192,12 +192,25 @@ async function loadAnnotateCommandModules() {
 type SavedPhaseState = {
 	model?: { provider: string; id: string };
 	thinkingLevel: ThinkingLevel;
-	// Last settings the extension applied. A different current value belongs to the user.
+	// Last settings the extension applied. A different current model belongs to the user.
+	// Absent (an entry from before picks were tracked, or forgotten after /tree into
+	// another phase) means: restore the saved settings without comparing.
 	managedModel?: { provider: string; id: string } | null;
 	managedThinkingLevel?: ThinkingLevel;
 	userSelectedModel?: boolean;
+	// Set only by Pi's thinking_level_select for a change the user made, never by
+	// comparing levels: oh-my-pi's auto thinking and the reset that follows a model
+	// pick change the level without the user choosing one.
 	userSelectedThinking?: boolean;
 };
+
+/**
+ * A model or thinking level the user picked by hand while planning beats
+ * `phases.executing.model`/`thinking` at approval (owner decision pending).
+ * `false` lets the configured executing settings apply at approval instead; a
+ * pick made after approval still survives resume and plan completion.
+ */
+const USER_PICK_BEATS_EXECUTING_CONFIG_AT_APPROVAL = true;
 
 type PersistedPlannotatorState = {
 	phase: Phase;
@@ -494,6 +507,11 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 	let checklistItems: ChecklistItem[] = [];
 	let savedState: SavedPhaseState | null = null;
 	let settingPhaseModel: { provider: string; id: string } | null = null;
+	let settingPhaseThinking = false;
+	// Session entries Plannotator's own thinking changes wrote (see thinking_level_select).
+	const phaseThinkingEntries = new Set<string>();
+	// The model oh-my-pi last switched to on its own after a provider error.
+	let hostFallbackModel: { provider: string; id: string } | null = null;
 	let phaseAddedTools: string[] = [];
 	let plannotatorConfig = {};
 	let justApprovedPlan = false;
@@ -704,6 +722,7 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 	function captureSavedState(ctx: ExtensionContext): void {
 		const model = ctx.model ? { provider: ctx.model.provider, id: ctx.model.id } : undefined;
 		const thinkingLevel = pi.getThinkingLevel();
+		phaseThinkingEntries.clear();
 		savedState = {
 			model,
 			thinkingLevel,
@@ -730,14 +749,41 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 		savedState.model = model;
 		savedState.managedModel = model;
 		savedState.userSelectedModel = true;
-		const thinking = pi.getThinkingLevel();
-		if (savedState.managedThinkingLevel !== undefined && thinking !== savedState.managedThinkingLevel) {
-			savedState.thinkingLevel = thinking;
-			savedState.managedThinkingLevel = thinking;
-			savedState.userSelectedThinking = true;
-		}
 		persistState();
 	});
+
+	// Pi reports every thinking change with thinking_level_select and no source:
+	// the user's own change, the reset Pi makes when a model is selected, and any
+	// extension's call, Plannotator's included. Only the first is the user's
+	// choice. The session branch tells them apart whatever order extensions run
+	// in (an earlier listener delays this handler): the reset's entry directly
+	// follows the model_change entry of the same switch, and Plannotator
+	// remembers the entries its own calls wrote. oh-my-pi has no such event, so
+	// there no thinking level is ever taken for the user's choice.
+	pi.on("thinking_level_select", (event, ctx) => {
+		if (!savedState || settingPhaseThinking || settingPhaseModel) return;
+		const branch = ctx.sessionManager.getBranch();
+		let index = branch.length - 1;
+		while (index >= 0 && branch[index]!.type !== "thinking_level_change") index--;
+		if (index < 0 || phaseThinkingEntries.has(branch[index]!.id) || branch[index - 1]?.type === "model_change") return;
+		savedState.thinkingLevel = event.level;
+		savedState.managedThinkingLevel = event.level;
+		savedState.userSelectedThinking = true;
+		persistState();
+	});
+
+	function setPhaseThinkingLevel(level: ThinkingLevel, ctx: ExtensionContext): void {
+		const before = pi.getThinkingLevel();
+		settingPhaseThinking = true;
+		try {
+			pi.setThinkingLevel(level);
+		} finally {
+			settingPhaseThinking = false;
+		}
+		if (pi.getThinkingLevel() === before) return;
+		const written = ctx.sessionManager.getBranch().at(-1);
+		if (written?.type === "thinking_level_change") phaseThinkingEntries.add(written.id);
+	}
 
 	async function applyModelRef(
 		ref: { provider: string; id: string },
@@ -770,24 +816,21 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 
 		const current = ctx.model ? { provider: ctx.model.provider, id: ctx.model.id } : null;
 		const managed = savedState.managedModel;
-		const currentThinking = pi.getThinkingLevel();
 		const modelChanged = managed !== undefined && (current?.provider !== managed?.provider || current?.id !== managed?.id);
-		const thinkingChanged = savedState.managedThinkingLevel !== undefined && currentThinking !== savedState.managedThinkingLevel;
 		if (modelChanged) {
 			savedState.model = current ?? undefined;
 			savedState.managedModel = current;
 			savedState.userSelectedModel = true;
 		}
-		if (thinkingChanged) {
-			savedState.thinkingLevel = currentThinking;
-			savedState.userSelectedThinking = true;
-		}
 
 		if (savedState.model && (managed === undefined || current?.provider !== savedState.model.provider || current?.id !== savedState.model.id)) {
 			await applyModelRef(savedState.model, ctx, "restore");
 		}
+		// The thinking level is the user's only if Pi said so (userSelectedThinking,
+		// set by thinking_level_select). Otherwise the saved level comes back, as
+		// before picks were tracked.
 		if (savedState.managedThinkingLevel === undefined || pi.getThinkingLevel() !== savedState.thinkingLevel) {
-			pi.setThinkingLevel(savedState.thinkingLevel);
+			setPhaseThinkingLevel(savedState.thinkingLevel, ctx);
 		}
 		savedState.managedThinkingLevel = pi.getThinkingLevel();
 	}
@@ -852,7 +895,7 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 			// of the `ThinkingLevel` union of the pinned Pi floor (#1304). Pi clamps
 			// a level the running model does not support, so handing it one this
 			// build's types have not heard of yet is safe.
-			pi.setThinkingLevel(profile.thinking as ThinkingLevel);
+			setPhaseThinkingLevel(profile.thinking as ThinkingLevel, ctx);
 			if (savedState) savedState.managedThinkingLevel = pi.getThinkingLevel();
 		}
 
