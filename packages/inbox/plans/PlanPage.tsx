@@ -225,7 +225,7 @@ function PlanLoaded({ id, version, diff, phone, doc, file, read, versions, fresh
   // name once the document's title is out of view), Share and the page's menu, which holds Files and the document's
   // actions; the document hands those up (`acts`) and says whether its state line is above its title (`bar.a3`).
   const acts = useRef<PlanDocActs | null>(null);
-  const [bar, setBar] = useState<PlanBarState>({ a3: false, shown: null, away: null, line: null });
+  const [bar, setBar] = useState<PlanBarState>({ a3: false, shown: null, away: null, line: null, editing: false });
   const [marks, setMarks] = useState<HTMLSpanElement | null>(null);
   const chrome = useMemo(() => ({ acts, setBar, marks }), [marks]);
   const [filesSheet, setFilesSheet] = useState(false);
@@ -255,7 +255,9 @@ function PlanLoaded({ id, version, diff, phone, doc, file, read, versions, fresh
     >
       <PageHeader
         identity={
-          phone && bar.line ? (
+          // While editing, a phone's bar is Done and Cancel and "…": crumbs cut to a few letters say nothing, so there
+          // are none (the page's region keeps the plan's name, `aria-label` below).
+          phone && bar.editing ? null : phone && bar.line ? (
             <span className="ib-plan-barline" role="status" data-plan-barline="">
               {bar.line}
             </span>
@@ -484,10 +486,11 @@ function DocLoaded({
   });
   // A phone's one bar says what is on screen when it is not the newest version (the frame's reading line's words).
   const line = !phone ? null : compare ? `Comparing v${compare.from} with v${compare.to}` : older ? `v${shown} of ${head}, an older version` : null;
+  const barEditing = phone && editing.editing;
   useEffect(() => {
-    chrome?.setBar((b) => (b.a3 === a3 && b.shown === shown && b.line === line ? b : { ...b, a3, shown, line }));
-  }, [chrome, a3, shown, line]);
-  useEffect(() => () => chrome?.setBar(() => ({ a3: false, shown: null, away: null, line: null })), [chrome]);
+    chrome?.setBar((b) => (b.a3 === a3 && b.shown === shown && b.line === line && b.editing === barEditing ? b : { ...b, a3, shown, line, editing: barEditing }));
+  }, [chrome, a3, shown, line, barEditing]);
+  useEffect(() => () => chrome?.setBar(() => ({ a3: false, shown: null, away: null, line: null, editing: false })), [chrome]);
   const onTitleAway = useCallback((away: boolean) => chrome?.setBar((b) => (b.away === away ? b : { ...b, away })), [chrome]);
   const decisionMark = <PlanDecisionMark info={editing.decision} phone={phone} />;
   // A phone: Approve, the decision's mark and the clock are the top bar's, nothing under it. While editing, Done and

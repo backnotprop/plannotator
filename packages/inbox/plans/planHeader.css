@@ -124,6 +124,9 @@
 .ib-plan-topmarks:empty { display: none; }
 .ib-plan-topmarks > [data-plan-approve], .ib-plan-topmarks > [data-plan-edit-done], .ib-plan-topmarks > [data-plan-edit-cancel] { margin: 0 2px; position: relative; }
 .ib-plan-topmarks > button[data-plan-approve]::after, .ib-plan-topmarks > [data-plan-edit-done]::after, .ib-plan-topmarks > [data-plan-edit-cancel]::after { content: ""; position: absolute; inset: -10px -4px; }
+/* Done and Cancel are the bar's controls, not a block that fills it: 32 px to see, 44 px to hit (as the list's pill). */
+.ib-plan-topmarks > [data-plan-edit-done], .ib-plan-topmarks > [data-plan-edit-cancel] { height: 32px; min-height: 32px; }
+.ib-plan-topmarks > [data-plan-edit-done]::after, .ib-plan-topmarks > [data-plan-edit-cancel]::after { inset: -6px -4px; }
 @media (prefers-reduced-motion: reduce) { .ib-plan-bartitle > *, .ib-plan-bartitle[data-settled] > * { transition: none; transform: none !important; } }
 /* A phone's one bar is as slim as the Inbox list's own phone header (`.ib-lhead`, 52 px): its 44 px targets fit it. */
 .ib-plan-page[data-phone] nav[data-page-header] { min-height: 0; height: 52px; padding-top: 1px; padding-bottom: 0; flex-wrap: nowrap; }
@@ -131,7 +134,8 @@
    squeeze the bar, so it is not drawn while it holds nothing. */
 .ib-plan-page[data-phone] nav[data-page-header] > [data-document-actions]:empty { display: none; }
 /* While editing, Done and Cancel take the room of Share too (it shares the newest version, not a draft), and the
-   crumbs give way below the frame's 96 px floor, so a 320 px bar keeps Done, Cancel and "…" on screen. */
+   crumbs' place (empty: PlanPage.tsx draws no crumbs then) gives way below the frame's 96 px floor, so a 320 px bar
+   keeps Done, Cancel and "…" on screen. */
 .ib-plan-page[data-phone] nav[data-page-header]:has([data-plan-edit-done]) [data-plan-share] { display: none; }
 .ib-plan-page[data-phone] nav[data-page-header]:has([data-plan-edit-done]) > div:not([data-document-actions]) { min-width: 0; }
 /* Under 400 px a phone's one bar has no room for Share's words beside the marks and "…" (the bar does not wrap, so

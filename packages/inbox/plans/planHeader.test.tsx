@@ -315,12 +315,19 @@ test.skipIf(!hasDom)('a phone’s menu holds what the file-name row and the chip
     // They take the room of the mark and the clock (a 320 px bar holds no more); the clock is a row of "…".
     expect(host.querySelector('nav [data-plan-decision-mark]')).toBeNull();
     expect(host.querySelector('nav [data-reading-versions]')).toBeNull();
+    // No crumbs beside them (a 320 px bar cut them to a few letters); the page's region keeps the plan's name.
+    const nav = host.querySelector('nav[data-page-header]')!;
+    expect(nav.querySelector('[data-breadcrumb-root], [aria-current="page"], [data-plan-bartitle], [data-plan-barline]')).toBeNull();
+    expect(text(nav)).not.toContain('trailhead-api');
+    expect(text(nav)).not.toContain('Rate limiting');
+    expect(host.querySelector('section[data-plan-page]')!.getAttribute('aria-label')).toBe('Rate limiting for public endpoints');
     await openMenu(host);
     await pick('versions');
     expect(document.querySelector('[data-versions-panel]')).not.toBeNull();
     await act(async () => host.querySelector<HTMLButtonElement>('[data-plan-edit-cancel]')!.click());
     await settle();
     expect(host.querySelector('nav [data-plan-decision-mark]')).not.toBeNull();
+    expect(host.querySelector('nav [data-plan-bartitle]')).not.toBeNull();
 
     await openMenu(host);
     await pick('close');

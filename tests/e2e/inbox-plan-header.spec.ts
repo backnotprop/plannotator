@@ -210,6 +210,13 @@ test('the document’s title is the header: a phone’s bar, state line, bottom 
         expect(b.x + b.width).toBeLessThanOrEqual(320);
       }
       await expect(page.locator('nav [data-plan-decision-mark]')).toHaveCount(0);
+      // No crumbs cut to a few letters beside them: the bar is the sidebar button, Done, Cancel and "…".
+      await expect(page.locator('nav [data-breadcrumb-root], nav [aria-current="page"], nav [data-plan-bartitle]')).toHaveCount(0);
+      // Done is the bar's control, not a block filling it: 32 px to see, a press 5 px above it is still Done.
+      const done = page.locator('nav [data-plan-edit-done]');
+      const doneBox = (await done.boundingBox())!;
+      expect(doneBox.height).toBe(32);
+      expect(await done.evaluate((el, p) => el.contains(document.elementFromPoint(p.x, p.y)), { x: doneBox.x + doneBox.width / 2, y: doneBox.y - 5 })).toBe(true);
       expect(await page.locator('nav[data-page-header]').evaluate((el) => el.getBoundingClientRect().height)).toBe(PHONE_BAR);
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
       await blur(page);

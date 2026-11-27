@@ -41,13 +41,15 @@ export interface PlanDocActs {
 /**
  * The phone's bar: the main page's newest version is read (`a3`: the document's title is the header), the version on
  * screen, whether the title is out of view (null until the document is there to measure: the bar shows neither name
- * nor project moving meanwhile), and the words for an older version or a comparison (`line`).
+ * nor project moving meanwhile), the words for an older version or a comparison (`line`), and whether the plan is being
+ * edited (`editing`: Done and Cancel take the bar, so it shows no crumbs; the page keeps the plan's name as its own).
  */
 export interface PlanBarState {
   a3: boolean;
   shown: number | null;
   away: boolean | null;
   line: string | null;
+  editing: boolean;
 }
 
 interface PlanChrome {
