@@ -59,6 +59,7 @@ import { finishPeleLabels, needsPeleLabels, pageMathTypesetter, peleLabelMeasure
 import { peleAuthorColors } from './peleAuthorTheme';
 import { clampPeleStyles } from './peleStyleClamp';
 import { spaceWrappedRows } from './peleRowSpaces';
+import { withoutSankeyHeader } from './peleSankeyHeader';
 import { applyPeleThemeVariables, peleShadowCss, readPeleThemeVariables } from './peleTheme';
 
 export type { DiagramKind } from '@plannotator/core/diagram-anchor';
@@ -1134,15 +1135,17 @@ async function renderPele(renderId: string, source: string, theme: DiagramTheme,
   // Math and styled text in labels (`pele-labels.ts`): the source Pele draws, then its svg finished. Inside the
   // try: a step that throws is this fence's error (so 'pele-where-safe' falls back), never a rejected render.
   let labels: PreparedPeleLabels | null = null;
+  // A sankey's CSV header row is read as a header, not a flow (`peleSankeyHeader.ts`).
+  const drawn = withoutSankeyHeader(source);
   try {
     const fonts = peleFonts();
-    if (needsPeleLabels(source)) {
-      const typesetter = hasMermaidMath(source) ? await pageMathTypesetter(fonts.sans) : null;
-      labels = preparePeleLabels(source, typesetter);
+    if (needsPeleLabels(drawn)) {
+      const typesetter = hasMermaidMath(drawn) ? await pageMathTypesetter(fonts.sans) : null;
+      labels = preparePeleLabels(drawn, typesetter);
     }
     const prepared = labels;
     let measurer: TextMeasurer | undefined;
-    const result = await renderPeleSource(runtime, prepared?.text ?? source, renderId, fonts, prepared === null ? undefined : (base) => (measurer = peleLabelMeasurer(base, prepared)));
+    const result = await renderPeleSource(runtime, prepared?.text ?? drawn, renderId, fonts, prepared === null ? undefined : (base) => (measurer = peleLabelMeasurer(base, prepared)));
     const markup = result.svg.length > PELE_OUTPUT_LIMIT || prepared === null ? result.svg : finishPeleLabels(result.svg, prepared, measurer ?? peleLabelMeasurer(undefined, prepared));
     // Again after the formulas are in: their MathML is not part of what Pele measured.
     if (markup.length > PELE_OUTPUT_LIMIT) {
