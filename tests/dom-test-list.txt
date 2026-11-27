@@ -67,6 +67,7 @@ packages/ui/components/DiagramBlock.anchor.test.tsx
 packages/ui/components/DiagramBlock.askAI.test.tsx
 packages/ui/components/DiagramBlock.engine.test.tsx
 packages/ui/components/DiagramBlock.restoreReportLoop.test.tsx
+packages/ui/components/DiagramBlock.restoreReportFresh.test.tsx
 packages/ui/utils/pele-labels.test.ts
 packages/ui/utils/pele-render.test.ts
 packages/ui/utils/pele-hostile.test.ts
