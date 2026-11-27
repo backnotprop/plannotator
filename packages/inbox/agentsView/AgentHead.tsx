@@ -1,25 +1,32 @@
 /**
  * An agent's row in the list's Agents view (design A): its face at 44 (the animated mark with its picker, AgentMark.tsx),
- * its name and newest time, then one muted line "project · [machine ·] line", the line being what it does now
- * (agentProfile/line.ts: "Working · 3m", "Idle since 9:15 AM", amber "Asking for permission"), and folded, what waits
- * on the person (the rows' marks added up), else how many threads it has.
- *
- * In the window (approval "inbox-agent-profile-card", C1, C2) the row is one button that opens the agent's profile in
- * the reading pane (pressed while it is open), and the small arrow at its right end is its own button that opens or
- * folds its threads. Without the window's profile (`onOpen` absent: the tour, a picture, an agent the list no longer
- * names), the row folds, as before.
+ * its name and newest time, then one muted line "project · [machine ·] state", and folded, what waits on the person
+ * (the rows' marks added up), else how many threads it has. The rest of the row is one button that opens or folds it.
  *
  * Memoized on what it shows: a list read that changes one thread draws that thread's row and its agent's row again,
  * never the other agents' (40 of them, each with a moving face).
  */
 import { memo } from 'react';
 import { formatCount, shortTime } from '../format';
-import { Icon } from '../icons';
 import { AgentMark, type AgentMarkPicks } from '../agents/AgentMark';
 import { ActionBadge, QuestionMark, rowMarks, type RowMarks, type WaitStep } from '../components/RowBadge';
-import { agentLineOf, sameLineFacts } from '../agentProfile/line';
-import { AgentLine } from '../agentProfile/AgentLine';
 import type { AgentRow, ViewAgent } from './model';
+
+/** "Waiting on you", "Working", "Idle", "Ended 4:10 PM"; nothing for a state the list cannot know or say. */
+export function agentStateWords(agent: Pick<ViewAgent, 'state' | 'turnsUnknown' | 'endedAt'>): string | null {
+  switch (agent.state) {
+    case 'waiting':
+      return 'Waiting on you';
+    case 'working':
+      return 'Working';
+    case 'idle':
+      return agent.turnsUnknown ? null : 'Idle';
+    case 'ended':
+      return agent.endedAt ? `Ended ${shortTime(agent.endedAt)}` : 'Ended';
+    default:
+      return null;
+  }
+}
 
 const STEPS: readonly WaitStep[] = ['open', 'hold', 'stop'];
 const higher = (a: WaitStep, b: WaitStep) => (STEPS.indexOf(a) >= STEPS.indexOf(b) ? a : b);
@@ -44,7 +51,7 @@ export function agentMarks(rows: readonly AgentRow[]): RowMarks | null {
 export interface AgentHeadProps {
   agentKey: string;
   agent: ViewAgent;
-  /** Its project and its machine when another one; then its line, the part never cut. */
+  /** Its project and its machine when another one; then its state words (`agentStateWords`), the part never cut. */
   project: string | null;
   machine: string | null;
   picks: AgentMarkPicks;
@@ -55,26 +62,14 @@ export interface AgentHeadProps {
   count: number;
   phone: boolean;
   onToggle: (key: string) => void;
-  /** Opens (or closes) its profile; absent: the row folds, as before. */
-  onOpen?: (key: string) => void;
-  /** Its profile is open. */
-  pressed?: boolean;
 }
 
-function AgentHeadView({ agentKey, agent, project, machine, picks, open, last, marks, count, phone, onToggle, onOpen, pressed = false }: AgentHeadProps) {
-  const line = agentLineOf(agent);
+function AgentHeadView({ agentKey, agent, project, machine, picks, open, last, marks, count, phone, onToggle }: AgentHeadProps) {
+  const state = agentStateWords(agent);
   return (
-    <div className="ib-agh" data-agent-opens={onOpen ? '' : undefined}>
+    <div className="ib-agh">
       <AgentMark id={agent.id} host={agent.host} name={agent.name} agent={agent.ref} picks={picks} size={44} />
-      <button
-        type="button"
-        className="ib-agh-b"
-        data-agent-head=""
-        aria-expanded={onOpen ? undefined : open}
-        aria-pressed={onOpen ? pressed : undefined}
-        data-agent-profile-opener={onOpen ? agent.id : undefined}
-        onClick={() => (onOpen ? onOpen(agentKey) : onToggle(agentKey))}
-      >
+      <button type="button" className="ib-agh-b" data-agent-head="" aria-expanded={open} onClick={() => onToggle(agentKey)}>
         <span className="ib-agh-1">
           <span className="ib-agh-n" dir="auto">
             {agent.name}
@@ -94,10 +89,10 @@ function AgentHeadView({ agentKey, agent, project, machine, picks, open, last, m
                 {machine}
               </span>
             )}
-            {line && (
+            {state && (
               <span className="ib-agh-s">
                 {project || machine ? ' · ' : ''}
-                <AgentLine line={line} />
+                {state}
               </span>
             )}
           </span>
@@ -116,12 +111,6 @@ function AgentHeadView({ agentKey, agent, project, machine, picks, open, last, m
             ))}
         </span>
       </button>
-      {onOpen && (
-        // The fold, at the row's right end: open ⌄, folded ›, as the Smart groups' bands.
-        <button type="button" className="ib-agh-fold" aria-expanded={open} aria-label={`${agent.name} threads`} data-agent-fold="" onClick={() => onToggle(agentKey)}>
-          <Icon name="chevD" size={16} />
-        </button>
-      )}
     </div>
   );
 }
@@ -130,7 +119,7 @@ const sameMarks = (a: RowMarks | null, b: RowMarks | null) =>
   a === b || (!!a && !!b && a.questions === b.questions && a.question === b.question && a.actions === b.actions && a.action === b.action);
 const sameAgent = (a: ViewAgent, b: ViewAgent) =>
   a === b ||
-  (a.id === b.id && a.host === b.host && a.name === b.name && sameLineFacts(a, b) && a.ref.id === b.ref.id && a.ref.session === b.ref.session && (a.ref.continues ?? []).join() === (b.ref.continues ?? []).join());
+  (a.id === b.id && a.host === b.host && a.name === b.name && a.state === b.state && a.turnsUnknown === b.turnsUnknown && a.endedAt === b.endedAt && a.ref.id === b.ref.id && a.ref.session === b.ref.session && (a.ref.continues ?? []).join() === (b.ref.continues ?? []).join());
 
 export const AgentHead = memo(
   AgentHeadView,
@@ -145,7 +134,5 @@ export const AgentHead = memo(
     sameMarks(a.marks, b.marks) &&
     a.count === b.count &&
     a.phone === b.phone &&
-    a.onToggle === b.onToggle &&
-    a.onOpen === b.onOpen &&
-    a.pressed === b.pressed,
+    a.onToggle === b.onToggle,
 );

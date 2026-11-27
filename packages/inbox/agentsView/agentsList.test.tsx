@@ -85,7 +85,7 @@ function agent(id: string, label: string, state: InboxAgent['state']): InboxAgen
   return { id, session: id, host: 'claude-code', label, project: { id: 'prj_a', name: 'harbor-ops' }, state, waiting: state === 'waiting' ? 1 : 0, live: state !== 'ended', started_at: null, last_seen_at: T(1) };
 }
 
-const AGENTS = [{ agents: [{ ...agent('ses_ops', 'Ops', 'waiting'), turn_state: 'working' as const }, agent('ses_docs', 'Docs pass', 'idle'), agent('ses_old', 'Search index', 'ended')], total: 3, ended_today: 1 }];
+const AGENTS = [{ agents: [agent('ses_ops', 'Ops', 'waiting'), agent('ses_docs', 'Docs pass', 'idle'), agent('ses_old', 'Search index', 'ended')], total: 3, ended_today: 1 }];
 
 function sections(byGroup: Partial<Record<InboxListGroupId, InboxListRow[]>>): InboxListSection[] {
   const ids: InboxListGroupId[] = ['stopped', 'holding', 'waiting', 'new', 'sent', 'quiet', 'snoozed'];
@@ -165,10 +165,9 @@ describe.skipIf(!hasDom)('the Agents view', () => {
     expect(rowsOf(el, 'Ops')).toEqual(['ops-wait', 'ops-1', 'ops-2', 'ops-3', 'ops-4']);
     expect(rowsOf(el, 'Docs pass')).toEqual([]);
     expect(el.querySelectorAll('[data-thread-id="ops-1"]').length).toBe(1);
-    // The face at 44; its line says what it does besides waiting on the person (approval C1), not "Waiting on you".
+    // The face at 44, the state word on its line.
     expect(el.querySelector('[data-agent] .am')!.getAttribute('data-size')).toBe('44');
-    expect(el.querySelector('[data-agent] .ib-agh-m')!.textContent).toContain('Working');
-    expect(el.querySelector('[data-agent] .ib-agh-m')!.textContent).not.toContain('Waiting on you');
+    expect(el.querySelector('[data-agent] .ib-agh-m')!.textContent).toContain('Waiting on you');
   });
 
   test('"N more" after five threads shows the rest', () => {

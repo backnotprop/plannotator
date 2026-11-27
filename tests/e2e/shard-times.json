@@ -26,7 +26,6 @@
   "inbox-actions.spec.ts": 30,
   "inbox-agent-icon-sets.spec.ts": 8,
   "inbox-agent-icon-tap-webkit.spec.ts": 6,
-  "inbox-agent-profile-card.spec.ts": 10,
   "inbox-agent-rename.spec.ts": 3,
   "inbox-agent-status.spec.ts": 3,
   "inbox-agents.spec.ts": 30,

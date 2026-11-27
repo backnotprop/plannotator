@@ -1891,18 +1891,6 @@
             }
           ]
         },
-        "state_since": {
-          "type": "string"
-        },
-        "turn_state": {
-          "type": "string",
-          "enum": [
-            "ended",
-            "idle",
-            "working"
-          ],
-          "x-open": true
-        },
         "model": {
           "type": "string"
         },

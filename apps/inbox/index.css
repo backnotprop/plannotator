@@ -82,8 +82,6 @@
 @import "../../packages/inbox/agents/rexMark.css";
 /* The list's Agents view: each agent with its threads under it (packages/inbox/agentsView/). */
 @import "../../packages/inbox/agentsView/agentsView.css";
-/* An agent's card atop a list filtered to it, its line, and its profile in the reading pane (packages/inbox/agentProfile/). */
-@import "../../packages/inbox/agentProfile/agentProfile.css";
 /* Thread tags: the sidebar's Tags, Add tag, a tag's list header (packages/inbox/threadTags.css). */
 @import "../../packages/inbox/threadTags.css";
 @import "../../packages/inbox/cloudflare.css";

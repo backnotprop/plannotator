@@ -197,7 +197,6 @@ import { canToggleRead, confirmSetAside, MARK_READ_LOOK_WAIT_MS, MARK_READ_UNDO_
 import { MarkReadWarning } from './components/MarkReadWarning';
 import { AgentDeleteDialog } from './agents/AgentDeleteDialog';
 import { agentDeleteThreads } from './agents/agentDelete';
-import { AgentProfileHost } from './agentProfile/nav';
 import { threadLink, type RowMenuAction } from './rowMenu';
 import { movePin, sameMachinePins, unpinnedWhere } from './pins';
 import { noteStarred } from './starPop';
@@ -4686,7 +4685,7 @@ function Inbox() {
     route.page === 'inbox'
       ? fileOpen
         ? 'file'
-        : (route.thread && (threadReady || awayWait)) || (!route.thread && !route.reviews && route.profile) // An agent's profile (agentProfile/) is a pane as a thread is.
+        : route.thread && (threadReady || awayWait)
           ? 'thread'
           : 'list'
       : route.page;
@@ -5395,7 +5394,7 @@ function Inbox() {
     main = firstRunScreen({ tour: false });
   } else {
     main = (
-      <AgentProfileHost route={route} go={go} close={close} machines={machines} rows={windowRows} phone={phone} stacked={stack.thread} backLabel={listTitle} onMessage={(session, opener) => openCompose({ session }, opener)}>
+      <>
         {/* In full screen the list stays drawn, hidden (inbox.css `data-thread-full`): J/K and G I read its order, and
             its scroll stays where it was. */}
         {!fileOpen && !fromCard && route.reviews && pullsShown && reviewsList(route.reviews.project, route.reviews.view, route.thread)}
@@ -5418,7 +5417,7 @@ function Inbox() {
           hideAway={hideAway}
           onHideAway={setHideAway}
           // A stacked thread covers the list, which keeps its own width (and scroll) under it.
-          narrow={(route.thread !== null || !!route.profile || panelView) && !stack.thread}
+          narrow={(route.thread !== null || panelView) && !stack.thread}
           onHide={route.thread !== null && !stack.thread ? () => setThreadFull(true) : undefined}
           threadPanel={phone ? undefined : { on: threadPanelOn, onChange: setThreadPanelOn }}
           onCustomizeRows={() => go({ page: 'settings', project: null, thread: null, section: 'rows' })}
@@ -5426,7 +5425,7 @@ function Inbox() {
           selectedThreadId={route.thread}
           lit={lit}
           notice={notice}
-          covered={(route.thread !== null || !!route.profile) && (phone || stack.thread || full)}
+          covered={route.thread !== null && (phone || stack.thread || full)}
           unseenNew={unseenNew}
           onGoNew={goToNew}
           stale={staleNotice}
@@ -5513,8 +5512,10 @@ function Inbox() {
           }
         />
         )}
-        {panelView && !route.thread && !route.profile && (
-          <div className="ib-pane ib-pempty" data-thread-panel-empty=""><EmptyThreadPanel onOpen={(thread_id) => openRow({ thread_id })} /></div>
+        {panelView && !route.thread && (
+          <div className="ib-pane ib-pempty" data-thread-panel-empty="">
+            <EmptyThreadPanel onOpen={(thread_id) => openRow({ thread_id })} />
+          </div>
         )}
         <ThreadPanes windowPanes={windowPanes} held={openHeld} host={{
             route, routeRef, rowsPending: reviewRowsPending, paneReads, outbox, dismissOutbox,
@@ -5529,7 +5530,7 @@ function Inbox() {
             fullSidebar: sidebarOpen && !sidebarHeld, inboxLink, holdSidebarIfTight, backFromFile,
           }}
         />
-      </AgentProfileHost>
+      </>
     );
   }
   // Shift+R: the refresh of the page on screen (keyboard/appKeys.ts `refreshKind` decides which).

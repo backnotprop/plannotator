@@ -4020,18 +4020,6 @@ export interface InboxAgent {
   started_at: string | null;
   /** When this Inbox last heard from it (a poll, a state change, an Inbox tool call, its latest message); null when never. */
   last_seen_at: string | null;
-  /**
-   * Live, and its connection says whether a turn runs: when that last changed (its turn started, or ended). Unlike
-   * `last_seen_at`, a poll does not move it: the agent card's "Working · 3m" and "Idle since 9:15 AM". Absent when
-   * not known (a host that reports no turns, an older Inbox). Additive.
-   */
-  state_since?: string;
-  /**
-   * While `state` is `waiting` (a thread waits on the person): what `state` would say otherwise, `working`, `idle` or
-   * `ended` (the agent card's line says this, and "Waiting on you" only on the thread). Absent for any other state, and
-   * when its host reports nothing about its turns. Additive.
-   */
-  turn_state?: "working" | "idle" | "ended";
   model?: string;
   effort?: string;
   context?: number;
