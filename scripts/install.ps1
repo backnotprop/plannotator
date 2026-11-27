@@ -54,12 +54,14 @@ if ($Minimal -and $NoMinimal) {
 # elsewhere - no CallDiff or agent-terminal runtime, skills, hooks, or per-agent
 # config. Precedence: -Minimal / -NoMinimal switch > PLANNOTATOR_MINIMAL env var
 # > default (off). Mirrors install.sh's --minimal / --no-minimal.
-$minimal = $false
+# Not named $minimal: PowerShell variable names ignore case, so that is the
+# -Minimal switch itself and assigning it would discard the switch.
+$minimalResolved = $false
 if ($env:PLANNOTATOR_MINIMAL -match '^(1|true|yes)$') {
-    $minimal = $true
+    $minimalResolved = $true
 }
-if ($Minimal) { $minimal = $true }
-if ($NoMinimal) { $minimal = $false }
+if ($Minimal) { $minimalResolved = $true }
+if ($NoMinimal) { $minimalResolved = $false }
 
 $repo = "backnotprop/plannotator"
 $installDir = "$env:LOCALAPPDATA\plannotator"
@@ -933,13 +935,13 @@ function Show-PathAdvice {
     Write-Host "To uninstall later: plannotator uninstall"
 }
 
-# Binary-only mode stops here (see the $minimal resolution near the top): the
+# Binary-only mode stops here (see the $minimalResolved resolution near the top): the
 # binary is installed, so add it to PATH and exit before any sidecar download,
 # agent integration, skill checkout, config write, or cleanup runs. Only the
 # binary, its PATH entry, and install-flags.json (Write-InstallFlags, so a
 # later auto-update stays binary-only) are added - none of the CallDiff, agent-terminal
 # runtime, or per-agent skills, hooks, or config.
-if ($minimal) {
+if ($minimalResolved) {
     Write-InstallFlags
     Show-PathAdvice
     Write-Host ""

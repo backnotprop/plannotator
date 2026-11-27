@@ -718,7 +718,7 @@ describe("install.ps1", () => {
     const binaryInstalled = script.indexOf(
       'Move-Item -Force $tmpFile "$installDir\\plannotator.exe"',
     );
-    const minimalExit = script.indexOf("if ($minimal) {");
+    const minimalExit = script.indexOf("if ($minimalResolved) {");
     const callFlow = script.indexOf("Install-CallFlowRuntime\n");
     const pathAdvice = script.indexOf("function Show-PathAdvice");
 
@@ -730,6 +730,56 @@ describe("install.ps1", () => {
     const gateBody = script.slice(minimalExit, minimalExit + 400);
     expect(gateBody).toContain("exit 0");
   });
+
+  // Runs the script's own switch resolution and Write-InstallFlags: a resolved
+  // variable that differs from its switch only by case overwrites the switch,
+  // which made -Minimal a full install that then forgot the flag.
+  const minimalShell = Bun.which("powershell.exe") ?? Bun.which("powershell") ?? Bun.which("pwsh");
+  test.skipIf(!minimalShell)("-Minimal, -NoMinimal and PLANNOTATOR_MINIMAL resolve in a real PowerShell", () => {
+    const resolvedEnd = "if ($NoMinimal) { $minimalResolved = $false }";
+    const headEnd = script.indexOf(resolvedEnd);
+    const flagsStart = script.indexOf("function Write-InstallFlags {");
+    const flagsEnd = script.indexOf("function Install-AgentTerminalRuntime");
+    expect(headEnd).toBeGreaterThan(0);
+    expect(flagsEnd).toBeGreaterThan(flagsStart);
+
+    const dir = mkdtempSync(join(tmpdir(), "plannotator-minimal-test-"));
+    try {
+      const driverPath = join(dir, "driver.ps1");
+      writeFileSync(
+        driverPath,
+        [
+          script.slice(0, headEnd + resolvedEnd.length),
+          "$configDir = $env:MINIMAL_TEST_DIR",
+          script.slice(flagsStart, flagsEnd),
+          "Write-InstallFlags",
+          '[Console]::Out.WriteLine("RESOLVED:" + $minimalResolved)',
+        ].join("\n"),
+      );
+      const run = (args: string[], minimalEnv?: string) => {
+        const env: Record<string, string | undefined> = { ...process.env, MINIMAL_TEST_DIR: dir };
+        delete env.PLANNOTATOR_MINIMAL;
+        if (minimalEnv !== undefined) env.PLANNOTATOR_MINIMAL = minimalEnv;
+        const r = Bun.spawnSync(
+          [minimalShell!, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", driverPath, ...args],
+          { env, stdout: "pipe", stderr: "pipe" },
+        );
+        if (r.exitCode !== 0) throw new Error(`driver failed: ${r.stderr.toString()}`);
+        return {
+          resolved: /RESOLVED:(\w+)/.exec(r.stdout.toString())?.[1],
+          flags: JSON.parse(readFileSync(join(dir, "install-flags.json"), "utf-8")).flags as string[],
+        };
+      };
+
+      expect(run([])).toEqual({ resolved: "False", flags: [] });
+      expect(run(["-Minimal"])).toEqual({ resolved: "True", flags: ["minimal"] });
+      expect(run(["-BinaryOnly"])).toEqual({ resolved: "True", flags: ["minimal"] });
+      expect(run([], "1")).toEqual({ resolved: "True", flags: [] });
+      expect(run(["-NoMinimal"], "1")).toEqual({ resolved: "False", flags: ["no-minimal"] });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60_000);
 
   test("per-agent skip opt-outs: switches, env vars, config keys, precedence (#1178)", () => {
     expect(script).toContain("[switch]$SkipCodex");
