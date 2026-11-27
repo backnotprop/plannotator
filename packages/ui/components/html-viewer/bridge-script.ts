@@ -2100,6 +2100,9 @@ ${SANDBOX_SHIM_SCRIPT}
       if (!s || !e) return false;
       if (typeof s.isConnected === 'boolean' && !s.isConnected) return false;
       if (typeof e.isConnected === 'boolean' && !e.isConnected) return false;
+      // A page that detaches and re-attaches the node (virtualized lists, e.g. Feishu docs) collapses the
+      // live Range onto the still-connected parent: connected but empty, so treat it as dead to re-search by text.
+      if (range.collapsed) return false;
       return true;
     } catch (ex) {
       return false;
