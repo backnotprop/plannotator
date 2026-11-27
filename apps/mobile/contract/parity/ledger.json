@@ -23841,6 +23841,76 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-field-inboxagent-state-since",
+      "title": "field:InboxAgent.state_since",
+      "surface": [
+        "field:InboxAgent.state_since"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxagent-turn-state-ended",
+      "title": "enum:InboxAgent.turn_state.ended",
+      "surface": [
+        "enum:InboxAgent.turn_state.ended"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxagent-turn-state-idle",
+      "title": "enum:InboxAgent.turn_state.idle",
+      "surface": [
+        "enum:InboxAgent.turn_state.idle"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxagent-turn-state-working",
+      "title": "enum:InboxAgent.turn_state.working",
+      "surface": [
+        "enum:InboxAgent.turn_state.working"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxagent-turn-state",
+      "title": "field:InboxAgent.turn_state",
+      "surface": [
+        "field:InboxAgent.turn_state"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }

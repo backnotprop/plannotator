@@ -109,6 +109,12 @@ export interface Route {
    * place of a project or a machine, never beside them.
    */
   agent?: string | null;
+  /**
+   * An agent's profile open in the reading pane (`&profile=<InboxAgent.id>`, approval "inbox-agent-profile-card"):
+   * from the card atop a list filtered to that agent, or an agent's row in the Agents view. Never with a thread: a
+   * thread opened takes its place.
+   */
+  profile?: string | null;
   tag?: string | null;
   thread: string | null;
   /**
@@ -236,6 +242,7 @@ export function routeOf(fullHash: string): Route {
     project: fromReviews ? null : params.get('project'),
     machine: params.get('machine'),
     agent: fromReviews ? null : params.get('agent'),
+    profile: fromReviews || thread ? null : params.get('profile') || null,
     tag: fromReviews ? null : params.get('tag'),
     thread,
     ref: thread && !fileId && params.get('ref') && params.get('in') ? { path: params.get('ref')!, messageId: params.get('in')!, ...(Number(params.get('line')) > 0 ? { line: Number(params.get('line')) } : {}), ...(Number(params.get('to')) > 0 ? { lineEnd: Number(params.get('to')) } : {}), ...(params.has('skill') ? { skill: true as const } : {}) } : null,

@@ -210,6 +210,7 @@ packages/inbox/listViewMenu.test.tsx
 packages/inbox/listRecentHolds.test.tsx
 packages/inbox/listRecentView.test.tsx
 packages/inbox/agentsView/agentsList.test.tsx
+packages/inbox/agentProfile/agentProfile.test.tsx
 packages/inbox/archivedGroup.test.tsx
 packages/inbox/lineLatch.test.tsx
 packages/inbox/listViewReveal.test.tsx

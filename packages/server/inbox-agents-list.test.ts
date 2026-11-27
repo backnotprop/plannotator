@@ -64,6 +64,27 @@ describe("who is listed, and how", () => {
     expect(group.agents[1]).toMatchObject({ host: "claude-code", label: "Fix login redirect", project: { id: "prj_ledger", name: "ledger" }, waiting: 0 });
   });
 
+  test("a live session carries when its turn started or ended (state_since), which a later poll in the same state never moves", async () => {
+    const { live, clock } = liveSessions();
+    const since = () => Object.fromEntries(inboxAgentsGroup(evidence({ sessions: live.agentSessions(inboxStartOfDay(clock.t)) })).agents.map((agent) => [agent.id, agent.state_since]));
+    const start = clock.t;
+    await poll(live, "ses-a", { busy: true });
+    await poll(live, "ses-quiet");
+    expect(since()).toEqual({ "ses-a": new Date(start).toISOString(), "ses-quiet": undefined });
+    clock.t += 90_000;
+    await poll(live, "ses-a", { busy: true });
+    expect(since()["ses-a"]).toBe(new Date(start).toISOString());
+    clock.t += 30_000;
+    const ended = clock.t;
+    await poll(live, "ses-a", { busy: false });
+    clock.t += 45_000;
+    await poll(live, "ses-a", { busy: false });
+    expect(since()["ses-a"]).toBe(new Date(ended).toISOString());
+    // A linked machine's value is kept only when it is a time.
+    const peer = inboxPeerAgentsGroup([{ agents: [{ id: "p1", session: "p1", host: "pi", project: null, state: "idle", waiting: 0, live: true, started_at: null, last_seen_at: null, state_since: "2026-11-09T11:00:00.000Z" }, { id: "p2", session: "p2", host: "pi", project: null, state: "idle", waiting: 0, live: true, started_at: null, last_seen_at: null, state_since: "<b>soon</b>" }] }], "ibx_studio")!;
+    expect(peer.agents.map((agent) => agent.state_since)).toEqual(["2026-11-09T11:00:00.000Z", undefined]);
+  });
+
   test("a live session carries its model and effort from its latest poll; a bad value, an older connection or an ended session carries none", async () => {
     const { live, clock } = liveSessions();
     await poll(live, "ses-set", { model: "claude-opus-5-5", effort: "high" });
@@ -155,6 +176,35 @@ describe("who is listed, and how", () => {
     // Never heard in this run: when its latest waiting thread moved, where it waits.
     expect(group.agents[0]).toMatchObject({ host: "pi", project: { id: "prj_other", name: "other" }, started_at: null, last_seen_at: "2026-11-03T09:00:00.000Z" });
     expect(group.ended_today).toBe(0);
+  });
+
+  test("a waiting agent says what it does besides (turn_state), without changing its state; none when its turns are unknown", () => {
+    const session = (id: string, busy: boolean | null, live = true) => ({ session: id, host: "claude-code", root: "/work/ledger", startedAt: 1, lastSeen: 2, live, busy, label: null });
+    const wait = (id: string) => ({ thread_id: `msg_${id}`, session: id, host: "claude-code", project: { id: "prj_ledger", name: "ledger" }, at: "2026-11-09T10:00:00.000Z" });
+    const group = inboxAgentsGroup(
+      evidence({
+        sessions: [session("ses-busy", true), session("ses-rest", false), session("ses-codex", null), session("ses-done", null, false), session("ses-free", true)],
+        waits: [wait("ses-busy"), wait("ses-busy"), wait("ses-rest"), wait("ses-codex"), wait("ses-done"), wait("ses-gone")],
+      }),
+    );
+    const byId = Object.fromEntries(group.agents.map((agent) => [agent.id, [agent.state, agent.turn_state]]));
+    expect(byId).toEqual({
+      "ses-busy": ["waiting", "working"],
+      "ses-rest": ["waiting", "idle"],
+      "ses-codex": ["waiting", undefined],
+      "ses-done": ["waiting", "ended"],
+      "ses-gone": ["waiting", "ended"],
+      "ses-free": ["working", undefined],
+    });
+    // The sidebar's mark is still the waiting thread's.
+    expect(group.agents.find((agent) => agent.id === "ses-busy")!.status_mark).toEqual({ state: "blocked", where: "inbox" });
+    // A linked machine's is kept only when it is one of the three, on a waiting agent.
+    const peer = inboxPeerAgentsGroup([{ agents: [
+      { id: "p1", session: "p1", host: "pi", project: null, state: "waiting", waiting: 1, live: true, started_at: null, last_seen_at: null, turn_state: "working" },
+      { id: "p2", session: "p2", host: "pi", project: null, state: "waiting", waiting: 1, live: true, started_at: null, last_seen_at: null, turn_state: "<b>busy</b>" },
+      { id: "p3", session: "p3", host: "pi", project: null, state: "idle", waiting: 0, live: true, started_at: null, last_seen_at: null, turn_state: "working" },
+    ] }], "ibx_studio")!;
+    expect(peer.agents.map((agent) => agent.turn_state)).toEqual(["working", undefined, undefined]);
   });
 
   test("a launched agent is listed by its launch: working while it starts, idle once stopped, ended when its start failed; done with an archived thread", () => {

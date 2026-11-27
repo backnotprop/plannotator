@@ -2,7 +2,8 @@
  * The list's Agents view as drawn (design A "Agents that open"; the model is agentsView/model.ts): each agent its row
  * (AgentHead.tsx); open, its threads follow one line each (LineRow.tsx, through the list's own `renderRow`), the first
  * `AGENT_ROWS_SHOWN`, then "N more". Then the "Ended" band with the agents that ended (faces grey), then "No agent".
- * A click on an agent's row opens or folds it, remembered per agent (folds.ts); a folded agent draws no rows, so a long
+ * In the window a click on an agent's row opens its profile (agentProfile/), and its arrow opens or folds it; without
+ * the window's profile the row itself folds. Folds are remembered per agent (folds.ts); a folded agent draws no rows, so a long
  * list stays light. A fold gives way to a new thread that waits on the person, and Show opens the agents its rows land
  * under, as it opens groups (the owner, 2026-11-08).
  *
@@ -25,6 +26,7 @@ import { agentsLayout, rowWaits, type AgentBlock, type AgentPlaces, type AgentRo
 import { ENDED_BAND, NONE_BAND, agentFoldKey, foldHash, useAgentFolds } from './folds';
 import { AgentHead, agentMarks } from './AgentHead';
 import { LineAgent } from './LineRow';
+import { useAgentProfileNav } from '../agentProfile/nav';
 
 /** How many of an open agent's threads show before "N more". */
 export const AGENT_ROWS_SHOWN = 5;
@@ -180,6 +182,14 @@ export function AgentsList({ sections, sort, machines = NO_MACHINES, selectedThr
     const { folds: f, foldKey: k } = latest.current;
     f.toggle(k(block.agent), block.open, waitsSince(block.rows));
   }, []);
+  // In the window, an agent's row opens its profile (agentProfile/nav.tsx); its fold moves to the arrow at its end.
+  const nav = useAgentProfileNav();
+  const navNow = useRef(nav);
+  navNow.current = nav;
+  const onOpen = useCallback((key: string) => {
+    const block = blocks.current.get(key);
+    if (block) navNow.current?.toggle(block.agent.id);
+  }, []);
 
   const uid = useId();
   const groupId = (block: AgentBlock) => `${uid}-ag-${foldHash(block.agent.key)}`;
@@ -204,6 +214,8 @@ export function AgentsList({ sections, sort, machines = NO_MACHINES, selectedThr
           count={rows.length}
           phone={phone}
           onToggle={onToggle}
+          onOpen={nav && agent.listed ? onOpen : undefined}
+          pressed={nav?.open === agent.id}
         />
         {shown.length > 0 && <LineAgent.Provider value={agent.sessions}>{shown.map((r) => renderRow(r.row, r.drawn))}</LineAgent.Provider>}
         {hidden > 0 && (
