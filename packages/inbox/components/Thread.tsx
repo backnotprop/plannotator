@@ -3275,7 +3275,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         if (request.input.words) wordsKey = request.input.idempotency_key;
         postingTo = request.input.to && 'session' in request.input.to ? request.input.to : undefined;
         const last = index === requests.length - 1;
-        const answer = await sendReply.mutateAsync({ messageId: request.messageId, input: last && !machine ? { ...request.input, with_thread: true } : request.input });
+        const answer = await sendReply.mutateAsync({ messageId: request.messageId, input: last && !machine ? { ...request.input, with_thread: true } : request.input, shown: current });
         const written = answer.reply as InboxMessageWire | null;
         if (written?.handoff && !answer.replayed) handedReply = written;
         if (last) sentRead = answer.thread_read ?? null;
