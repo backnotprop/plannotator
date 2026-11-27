@@ -4,7 +4,7 @@
  * them the same.
  */
 import { createContext, useContext, useState, type ReactNode } from 'react';
-import { HueDot, LetterMark, showsThreads, useRowMarks } from '../letterMarks';
+import { HueDot, LetterMark, ListRowMarks, showsThreads, useGivenRowMarks, useRowMarks, type MarksChoice } from '../letterMarks';
 import { withShortcut } from '../shortcuts/hint';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
 import type { InboxListGroupId, InboxListRow } from '@plannotator/core/inbox-types';
@@ -91,13 +91,16 @@ export const RowTimeBy = createContext<((row: InboxListRow) => string) | null>(n
 
 /**
  * Around a list's rows: their tooltips mounted on first use (`LazyRowTips`, RowTip.tsx), the time they show
- * (`RowTimeBy`), and the session names their slots read, read once for the list (`RowSlotNames`, RowSlot.tsx).
+ * (`RowTimeBy`), and what every row reads from a store, read once for the list: the session names their slots and
+ * agent tiles show (`RowSlotNames`, RowSlot.tsx) and their letter marks (`ListRowMarks`, letterMarks.tsx).
  */
 export function ListRows({ timeBy, children }: { timeBy?: ((row: InboxListRow) => string) | null; children: ReactNode }) {
   return (
     <LazyRowTips.Provider value={true}>
       <RowTimeBy.Provider value={timeBy ?? null}>
-        <RowSlotNames>{children}</RowSlotNames>
+        <RowSlotNames>
+          <ListRowMarks>{children}</ListRowMarks>
+        </RowSlotNames>
       </RowTimeBy.Provider>
     </LazyRowTips.Provider>
   );
@@ -190,8 +193,17 @@ export function RowTitle({ row, className, pill, tip = false }: { row: InboxList
 }
 
 /** Letter marks (letterMarks.tsx), style "Inline": a 20 px tile before the title; style "Dot": the thread's hue alone. */
-export function TitleMark({ row, children }: { row: InboxListRow; children: ReactNode }) {
-  const { marks } = useRowMarks();
+export function TitleMark(props: { row: InboxListRow; children: ReactNode }) {
+  // In a list's rows, the list's marks (letterMarks.tsx `ListRowMarks`); anywhere else the row reads them itself.
+  const given = useGivenRowMarks();
+  return given ? drawTitleMark(props, given.marks) : <OwnTitleMark {...props} />;
+}
+
+function OwnTitleMark(props: { row: InboxListRow; children: ReactNode }) {
+  return drawTitleMark(props, useRowMarks().marks);
+}
+
+function drawTitleMark({ row, children }: { row: InboxListRow; children: ReactNode }, marks: MarksChoice) {
   if (marks.style === 'avatar' || !showsThreads(marks.what)) return <>{children}</>;
   return (
     <span className="ib-lm-tt" data-take={marks.style}>

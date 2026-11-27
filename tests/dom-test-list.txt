@@ -258,6 +258,7 @@ packages/inbox/keyGuardsPageQueries.test.tsx
 packages/ui/shortcuts/runtime.guardCalls.test.tsx
 packages/inbox/rowSlotRenders.test.tsx
 packages/inbox/rowSlotWatchers.test.tsx
+packages/inbox/rowWatchers.test.tsx
 packages/inbox/actionDraftSend.test.tsx
 packages/inbox/actionNoteRefusal.test.tsx
 packages/inbox/actionSkip.test.tsx
