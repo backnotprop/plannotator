@@ -11,8 +11,9 @@ export type DiagramSourceAccept = (kind: DiagramKind, source: string) => boolean
 /**
  * Opt-in: a host's check of every diagram fence's SOURCE before either engine runs (no engine is loaded, nothing is
  * parsed or drawn, for a refused fence). Refused, the block shows its source as code, exactly as a
- * `DiagramSvgAcceptContext` refusal does, whatever was drawn before. Asked synchronously, once per (kind, source) for a
- * given function, so pass a stable function (module-level or memoised), and a NEW function when the policy changes. A
+ * `DiagramSvgAcceptContext` refusal does, whatever was drawn before. Asked synchronously; the answer is kept only while
+ * that diagram stays mounted with the same function, kind and source, so pass a stable function (module-level or
+ * memoised), a NEW function when the policy changes, and decide only what you would decide again at any remount. A
  * check that throws, or returns anything but `true`, refuses. Absent (null), every diagram renders exactly as before:
  * a host that loads its policy later passes a function that refuses until then, never null. Its own small module, so a
  * host can provide it without importing the diagram engine.
@@ -30,33 +31,33 @@ export function diagramSourceAccepted(check: DiagramSourceAccept | null, kind: D
   }
 }
 
-/** The most answers kept per check function; past it the oldest is asked again when it comes back. */
-const REMEMBERED_PER_CHECK = 256;
-const remembered = new WeakMap<DiagramSourceAccept, Map<string, boolean>>();
-
-/** `diagramSourceAccepted`, remembered per check function, kind and source, so every part of one block (the inline
- * viewer, its pop-out, the block's own controls) gets the same answer from one call. */
-function rememberedVerdict(check: DiagramSourceAccept | null, kind: DiagramKind, source: string): boolean {
-  if (check === null) return true;
-  const key = `${kind}\u0000${source}`;
-  let verdicts = remembered.get(check);
-  const known = verdicts?.get(key);
-  if (known !== undefined) return known;
-  const verdict = diagramSourceAccepted(check, kind, source);
-  if (verdicts === undefined) {
-    verdicts = new Map();
-    remembered.set(check, verdicts);
-  }
-  if (verdicts.size >= REMEMBERED_PER_CHECK) {
-    const oldest = verdicts.keys().next();
-    if (!oldest.done) verdicts.delete(oldest.value);
-  }
-  verdicts.set(key, verdict);
-  return verdict;
+/** One mounted block's answer, and what it was asked with. */
+export interface DiagramSourceVerdict {
+  readonly check: DiagramSourceAccept | null;
+  readonly kind: DiagramKind;
+  readonly source: string;
+  readonly accepted: boolean;
 }
 
-/** The context's check on one source, asked once per check function, kind and source (a new function is asked again). */
-export function useDiagramSourceAccepted(kind: DiagramKind, source: string): boolean {
+/**
+ * @internal A diagram block hands its own answer to the viewers inside it (inline and pop-out), so the host is asked
+ * once per mounted block. Scoped to that block's subtree and kept no longer than it is mounted; a viewer uses it only
+ * when it was asked with the same check function, kind and source, and asks for itself otherwise.
+ */
+export const DiagramSourceVerdictContext = createContext<DiagramSourceVerdict | null>(null);
+
+/** The context's check on one source, asked again only when the check, the kind or the source changes, or on a remount
+ * (nothing outlives the component); an enclosing block's answer for the same three is used instead of asking. */
+export function useDiagramSourceVerdict(kind: DiagramKind, source: string): DiagramSourceVerdict {
   const check = useContext(DiagramSourceAcceptContext);
-  return useMemo(() => rememberedVerdict(check, kind, source), [check, kind, source]);
+  const enclosing = useContext(DiagramSourceVerdictContext);
+  return useMemo(() => {
+    if (enclosing !== null && enclosing.check === check && enclosing.kind === kind && enclosing.source === source) return enclosing;
+    return { check, kind, source, accepted: diagramSourceAccepted(check, kind, source) };
+  }, [enclosing, check, kind, source]);
+}
+
+/** `useDiagramSourceVerdict`'s answer alone. */
+export function useDiagramSourceAccepted(kind: DiagramKind, source: string): boolean {
+  return useDiagramSourceVerdict(kind, source).accepted;
 }

@@ -17,7 +17,10 @@
  *   stricter check swapped in), keeps its old drawing, its Expand or an open
  *   pop-out, instead of showing exactly what a fresh refusal shows; or a
  *   parse error stops keeping the last good render;
- * - a caller can change the shared refused result for everyone.
+ * - a caller can change the shared refused result for everyone;
+ * - an answer outlives the mounted diagram it was given for (an accept from
+ *   one mount reused on a remount after the host's answer changed), or the
+ *   host is asked again on a re-render or when the pop-out opens.
  *
  * The engines are stand-ins behind their loader seams, so a load is counted
  * and the real libraries never load. The switch is as shipped
@@ -466,5 +469,39 @@ describe.if(hasDom)('the shared refused result', () => {
     const seen: DiagramRenderState[] = [];
     await mount(withCheck(refuseAll, <Probe kind="mermaid" source={FLOW} theme={THEME} seen={seen} />));
     expect(seen.at(-1)!.error).toEqual({ message: 'The diagram is shown as its source.', line: null, runtimeUnavailable: false, refused: true });
+  });
+});
+
+describe.if(hasDom)('how long an answer lasts, and how often the host is asked', () => {
+  test('an accept does not outlive the mount: the same function, now refusing, refuses on a remount and no engine loads', async () => {
+    let allow = true;
+    const stable: DiagramSourceAccept = () => allow;
+    const first = await mount(withCheck(stable, <MermaidBlock block={mermaidBlock} />));
+    expect(has(first, 'svg[data-sentinel="diagram"]')).toBe(true);
+    await act(async () => root!.unmount());
+    root = null;
+    host?.remove();
+    allow = false;
+    Object.assign(calls, { peleLoads: 0, peleSupports: [], mermaidLoads: 0, mermaidRenders: [], vizLoads: 0, vizRenders: 0 });
+    const second = await mount(withCheck(stable, <MermaidBlock block={mermaidBlock} />));
+    expectRefusedLikeFresh(second, FLOW);
+    expect(engineUntouched()).toEqual(NOTHING);
+  });
+
+  test('one fence: asked once at mount, not again on a re-render or when the pop-out opens, once more on a remount', async () => {
+    const asked: string[] = [];
+    const check: DiagramSourceAccept = (_kind, source) => (asked.push(source), true);
+    const el = await mount(withCheck(check, <MermaidBlock block={mermaidBlock} />));
+    expect(asked).toEqual([FLOW]);
+    await rerender(withCheck(check, <MermaidBlock block={{ ...mermaidBlock }} />));
+    expect(asked).toEqual([FLOW]);
+    await act(async () => el.querySelector<HTMLButtonElement>('[data-diagram-expand]')!.click());
+    await waitFor(() => expect(has(document, '[data-diagram-popout] svg[data-sentinel="diagram"]')).toBe(true));
+    expect(asked).toEqual([FLOW]);
+    await act(async () => root!.unmount());
+    root = null;
+    host?.remove();
+    await mount(withCheck(check, <MermaidBlock block={mermaidBlock} />));
+    expect(asked).toEqual([FLOW, FLOW]);
   });
 });

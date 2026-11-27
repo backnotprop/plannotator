@@ -8,7 +8,7 @@ import { diagramShadowAmount } from '../utils/diagramShadow';
 import { getIdentity } from '../utils/identity';
 import { createRuntimeRetryEpoch } from '../utils/runtimeRetry';
 import { copyTextToClipboard } from '../utils/clipboard';
-import { useDiagramSourceAccepted } from './diagramSourceAccept';
+import { DiagramSourceVerdictContext, useDiagramSourceVerdict } from './diagramSourceAccept';
 import { DiagramAnchorClaims, DiagramAnchorClaimsContext } from './diagram/anchorClaims';
 import { DiagramPending, DiagramInlineSource } from './diagram/DiagramPending';
 import { DiagramViewer, type DiagramAskAI } from './diagram/DiagramViewer';
@@ -209,8 +209,10 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
 
   // A fence the host's source check refuses shows what a fresh refusal shows, whatever was there before: no
   // controls, no "Show source" view, no pop-out (it closes, as when the fence's content changes). Read here, in the
-  // same render as the viewer's own answer (the same remembered call), so no frame keeps the old controls.
-  const sourceAccepted = useDiagramSourceAccepted(kind, block.content);
+  // same render as the viewers' answer (they get this one through DiagramSourceVerdictContext, so the host is asked
+  // once per mounted block), so no frame keeps the old controls.
+  const sourceVerdict = useDiagramSourceVerdict(kind, block.content);
+  const sourceAccepted = sourceVerdict.accepted;
   useEffect(() => {
     if (sourceAccepted) return;
     setIsExpanded(false);
@@ -424,7 +426,7 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
   };
 
   return (
-    <>
+    <DiagramSourceVerdictContext.Provider value={sourceVerdict}>
       {/* `annotation-exclude`: the text highlighter never enters a diagram,
           so a text restore (a reply that lost its anchor, a quote that also
           appears in a node label) can never wrap a <mark> inside the svg. */}
@@ -522,6 +524,6 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
           </Suspense>
         </LazyBlockBoundary>
       )}
-    </>
+    </DiagramSourceVerdictContext.Provider>
   );
 };
