@@ -73,8 +73,8 @@ import { newRecordBatch, noteOwnRecord, noteRecord } from './openThreadReads';
 import { archivedRowPatch, patchShownRow, readRowPatch, shownRowOf } from './rowActions';
 import { createOwnSaves } from './ownSaves';
 import { createKeyedSignal } from './signal';
-import { keepSame } from './listSame';
-import { keepWatched, newDecisionWatch } from './decisions/model';
+import { newDecisionWatch } from './decisions/model';
+import { readKeptDecisions } from './decisions/keptRead';
 import { draftsReadOwed, replyDraftsDiffer, unsentThreads } from './draftsReads';
 import { machinesModel, rowSnoozes, snoozeBlockedBy, threadAwayLine } from './machines';
 import { ASK_AGENT_TO_UPDATE, ASK_AGENT_TO_UPDATE_THREAD, MachineUpdateDialog } from './components/MachineUpdate';
@@ -404,16 +404,8 @@ function Inbox() {
     questionListeners.current.add(listener);
     return () => void questionListeners.current.delete(listener);
   }, []);
-  const refreshDecisions = useCallback(async () => {
-    if (!decisionWatch.current.on) return;
-    try {
-      const kept = keepWatched((await inboxApi.decisions()).decisions, decisionWatch.current);
-      // Only the watched threads' decisions are held (the read lists the whole store's); a read that brought nothing new keeps the decisions drawn (listSame.ts `keepSame`).
-      if (decisionWatch.current.on) setDecisions((current) => keepSame(current, kept));
-    } catch {
-      // Off on the server (another window turned it off): the next settings read says so.
-    }
-  }, []);
+  // Only the watched threads' decisions are held (the read lists the whole store's): decisions/keptRead.ts.
+  const refreshDecisions = useCallback(() => readKeptDecisions(inboxApi.decisions, decisionWatch.current, setDecisions), []);
   /** The latest list read's sections, for the event stream's `deliveries` (which reads again only while a delivery can move). */
   const latestSectionsRef = useRef<ListModel['sections'] | null>(null);
   latestSectionsRef.current = latest?.sections ?? null;
@@ -3667,7 +3659,7 @@ function Inbox() {
       },
     },
   });
-  const { decisionModeOn, decideInThread, sittingDecisions, closeDecide, decisionsTouched } = useDecideSitting({ settings, decisions, setDecisions, decide, setDecide, decideOpener, decisionWatch, refreshDecisions, refreshList, route });
+  const { decisionModeOn, decideInThread, sittingDecisions, sittingRead, closeDecide, decisionsTouched } = useDecideSitting({ settings, decisions, setDecisions, decide, setDecide, decideOpener, decisionWatch, refreshDecisions, refreshList, route });
   const snoozeBack = useSnoozeBack({ thread, route, listedOpenRow, looking, openThreadCovered, lookRef: paneReads.activeLook, trackLook, refreshList, snoozed: latest?.snoozed, refreshSnoozes, seen: inboxApi.seen });
   // The list's Archived group (approval "inbox-archived-group") and Settings → Archived's Unarchive.
   const archivedFilter = useCallback((rows: readonly InboxListRow[]) => filterShown([{ id: 'archived', label: 'Archived', threads: [...rows] }])[0]?.threads ?? rows, [filterShown]);
@@ -6219,6 +6211,8 @@ function Inbox() {
         <DecisionMode
           open={!decide.tucked}
           decisions={sittingDecisions}
+          readFailed={sittingRead.failed}
+          onReadAgain={sittingRead.retry}
           scope={decide.title}
           rows={latestRows}
           start={decide.start}

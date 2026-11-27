@@ -3,12 +3,17 @@
  * turns on and cleared when it turns off; a thread's "Decide these N", the sitting's queue, and opening and ending
  * one (focus back on what opened it). App holds the state.
  */
-import { useCallback, useEffect, useMemo, useRef, type Dispatch, type SetStateAction } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import type { InboxDecision } from '@plannotator/core/inbox-types';
 import type { SettingsModel } from '../api';
 import type { Route } from './route';
 import { decideEntryShown } from '../decisions/entry';
 import { batchTouches, threadDecisions, type DecisionWatch } from '../decisions/model';
+import { readWithRetries } from '../decisions/readRetry';
+
+/** A sitting waiting on its thread's decisions: tries, and the wait before the next (longer each time), as the sitting's thread read. */
+export const SITTING_DECISIONS_TRIES = 3;
+const SITTING_DECISIONS_RETRY_MS = 1_500;
 
 /** The sitting: its thread, open or tucked into its pill; `startNonce`: a new start while it is open moves it to that card. */
 export interface DecideSitting {
@@ -40,9 +45,10 @@ export function useDecideSitting({
   decide: DecideSitting | null;
   setDecide: Dispatch<SetStateAction<DecideSitting | null>>;
   decideOpener: { current: HTMLElement | null };
-  /** App's refreshDecisions keeps only the watched threads' decisions (decisions/model.ts `watchedDecisions`). */
+  /** App's refreshDecisions keeps only the watched threads' decisions (decisions/model.ts `keepWatched`). */
   decisionWatch: { current: DecisionWatch };
-  refreshDecisions: () => Promise<unknown>;
+  /** True once a read landed (decisions/keptRead.ts). */
+  refreshDecisions: () => Promise<boolean>;
   refreshList: (adopt: boolean) => Promise<unknown>;
 }) {
   // Decision mode is on unless Settings → Capabilities turned it off; with it off, nothing of it renders and nothing is read.
@@ -99,13 +105,38 @@ export function useDecideSitting({
   };
   /** The sitting's queue: its thread's decisions only; null (loading) until a read has kept that thread's. */
   const sittingHeld = useMemo(() => (decisions && decide ? threadDecisions(decisions, decide.thread) : null), [decisions, decide?.thread]);
-  const sittingDecisions = decide && !decisionWatch.current.readFor.has(decide.thread) ? null : sittingHeld;
+  const waiting = !!decide && !decisionWatch.current.readFor.has(decide.thread);
+  const sittingDecisions = waiting ? null : sittingHeld;
+  /**
+   * A sitting opened before its thread's read (its "Decide these N" came from the counts): the read goes again, a
+   * little later each time, until one lands, and each landing draws again, since a read that kept the same list (the
+   * thread has nothing left) draws nothing by itself. Every try failed: the dialog says so, with Try again.
+   */
+  const [, setLanded] = useState(0);
+  const [readFailed, setReadFailed] = useState(false);
+  const [readRound, setReadRound] = useState(0);
+  useEffect(() => {
+    if (!waiting) return;
+    setReadFailed(false);
+    const read = async () => {
+      if (!(await refreshDecisions())) throw new Error('decisions not read');
+    };
+    return readWithRetries(read, { onRead: () => setLanded((n) => n + 1), onFailed: () => setReadFailed(true) }, { tries: SITTING_DECISIONS_TRIES, waitMs: SITTING_DECISIONS_RETRY_MS });
+  }, [waiting, decide?.thread, readRound, refreshDecisions]);
+  const sittingRead = { failed: waiting && readFailed, retry: () => setReadRound((n) => n + 1) };
+  // A sitting opened before its thread's read has no name yet: it takes its first decision's once the read lands.
+  const named = sittingDecisions?.[0];
+  useEffect(() => {
+    const title = named ? (named.thread.subject ?? named.thread.thread_name) : null;
+    if (named && title) setDecide((current) => (current && current.thread === named.thread.id && current.title === null ? { ...current, title } : current));
+  }, [named]);
   const openDecide = (threadId: string) => {
     // Opened from the open-questions list, whose row goes with the list: focus comes back to its button.
     decideOpener.current = document.querySelector<HTMLElement>('section.ib-pane [data-open-questions]');
     const first = decisions ? threadDecisions(decisions, threadId)[0] : undefined;
     setDecide((current) => ({ thread: threadId, title: first ? (first.thread.subject ?? first.thread.thread_name) : null, tucked: false, start: null, startNonce: (current?.startNonce ?? 0) + 1 }));
-    void refreshDecisions();
+    // Not read yet for this thread: the sitting's own reads above go.
+    if (decisionWatch.current.readFor.has(threadId)) void refreshDecisions();
   };
   /** The sitting ended: focus back on what opened it, else on the thread's open-questions button. */
   const closeDecide = () => {
@@ -118,5 +149,5 @@ export function useDecideSitting({
       target?.focus({ preventScroll: true });
     });
   };
-  return { decisionModeOn, decideInThread, sittingDecisions, closeDecide, decisionsTouched };
+  return { decisionModeOn, decideInThread, sittingDecisions, sittingRead, closeDecide, decisionsTouched };
 }
