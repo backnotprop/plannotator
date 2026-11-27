@@ -113,7 +113,9 @@ export function useFileQuestionViewerProps(questions: FileQuestions | null | und
       questionAnswers: fileQuestionAnswers(byFileKey, answers),
       onAnswerQuestion: (_blockId: string, answer: QuestionAnswer | null, fileKey: string) => {
         const record = byFileKey.get(fileKey);
-        if (!fileQuestionLocked(record, locked)) onPick(record!.key, answer);
+        if (fileQuestionLocked(record, locked)) return;
+        // The card answers under its file's key; a repeat's record has its own (`<key>-2`), and the store checks the answer's key against it.
+        onPick(record!.key, answer && answer.key !== record!.key ? { ...answer, key: record!.key } : answer);
       },
       questionReadOnly: (indexed: IndexedQuestion) => fileQuestionLocked(cardRecord(byFileKey, indexed), locked),
       questionStatusLabel: (indexed: IndexedQuestion, status: QuestionStatus) => {
