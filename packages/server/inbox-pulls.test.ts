@@ -1792,6 +1792,15 @@ describe("the whole stack's diff (finding C and merged layers)", () => {
       }
     });
 
+    test("refuses an empty added file that an older GitLab may have held back", async () => {
+      const emptyAdded = { ...entry("seed.sql"), new_file: true, diff: "" };
+      const { diff } = await layer({ paged: JSON.stringify([entry("ledger.py"), emptyAdded]) });
+      await expect(diff()).rejects.toMatchObject({ code: "pull_diff_failed" });
+      const added = { ...entry("seed.sql"), new_file: true, diff: "@@ -0,0 +1 @@\n+insert into ledger\n" };
+      const complete = await layer({ paged: JSON.stringify([entry("ledger.py"), added]) });
+      expect((await complete.diff()).patch).toContain("+insert into ledger\n");
+    });
+
     test("checks the count only against the head it describes", async () => {
       const paged = JSON.stringify([entry("ledger.py")]);
       const { diff } = await layer({ paged, listedHead: "b".repeat(40), rawError: "glab: Not Found (HTTP 404)" });

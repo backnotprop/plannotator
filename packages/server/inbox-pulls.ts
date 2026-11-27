@@ -2172,7 +2172,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
             // A cached file count describes only the head that was listed with it.
             const listedFiles = pull.head_sha === before?.sha ? pull.files : 0;
             if (entries.length >= Math.max(1, listedFiles) && entries.every((entry) =>
-              typeof entry.old_path === "string" && typeof entry.new_path === "string" && !glEntryMissingContent(entry)
+              typeof entry.old_path === "string" && typeof entry.new_path === "string" && !glMayBeHeldBack(entry)
             )) patch = reconstructGitlabPatch(entries);
           } catch {
             // An invalid page cannot supply the layer's complete diff.
