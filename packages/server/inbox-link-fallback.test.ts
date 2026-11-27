@@ -6,7 +6,8 @@
  * link from the folders that sender wrote from before (never another checkout's from a linked worktree). The pane's
  * view, its raw bytes, a comment's attach, the hover and Open in all take that one order. A file found nowhere says
  * where it was looked for, and never hands a linked machine a path it could not see. Nothing it may not read before
- * opens now. And send_message names each link that opens nothing (`links_not_found`), asking the thread's PR first.
+ * opens now. And send_message names each link that opens nothing (`links_not_found`), asking the thread's PR only
+ * what is kept in memory: a send never waits on the forge, and a link memory cannot answer for is not warned of.
  *
  * What regresses if this fails: the person clicks a link to a file the thread already holds and is told it is not
  * on this computer; or a link that opens nothing reaches the person with no word to the agent; or the fallback reads
@@ -15,7 +16,7 @@
  * A real store in a temp data dir and the route called directly; no Inbox server, no network, never the real home.
  */
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { InboxStore } from "@plannotator/shared/inbox/store";
@@ -38,13 +39,21 @@ afterEach(() => {
   else process.env.PLANNOTATOR_DATA_DIR = savedDataDir;
 });
 
+/** What Open in launched, in order: the path each launch was handed. */
+const launched: string[] = [];
 const launcher: InboxOpenInLauncher = {
   platform: "darwin",
   apps: () => [],
   reveal: async () => ({ ok: false }) as never,
   openWithApp: async () => ({ ok: false }) as never,
-  openWithSystemDefault: async () => ({ ok: false }) as never,
+  openWithSystemDefault: async (path) => {
+    launched.push(path);
+    return { ok: true } as never;
+  },
 };
+afterEach(() => {
+  launched.length = 0;
+});
 
 const CHARLIE = { kind: "agent" as const, host: "claude-code", session: "ses_charlie", name: "Charlie Dunn" };
 const BOB = { kind: "agent" as const, host: "codex", session: "ses_bob", name: "Bob Tully" };
@@ -108,18 +117,22 @@ function world(options: { door?: boolean; pulls?: Pulls } = {}) {
       throw error;
     }
   };
-  const query = (message: At, path: string) => new URLSearchParams({ thread: message.thread_id, message: message.id, path });
+  /** `from: "root"`: a diff header's path (ReviewPane), from the repository's top. */
+  type From = { from?: "root" };
+  const query = (message: At, path: string, extra: From = {}) => new URLSearchParams({ thread: message.thread_id, message: message.id, path, ...extra });
   const view = async (message: At, path: string): Promise<Json> => (await (await call(new Request(`http://127.0.0.1/api/inbox/open-in/file/view?${query(message, path)}`))).json()) as Json;
   const raw = (message: At, path: string) => call(new Request(`http://127.0.0.1/api/inbox/open-in/file/raw?${query(message, path)}`));
   /** The hover's check (Open in, Copy path): `GET /open-in/file`. */
-  const hover = async (message: At, path: string): Promise<Json> => (await (await call(new Request(`http://127.0.0.1/api/inbox/open-in/file?${query(message, path)}`))).json()) as Json;
+  const hover = async (message: At, path: string, extra: From = {}): Promise<Json> => (await (await call(new Request(`http://127.0.0.1/api/inbox/open-in/file?${query(message, path, extra)}`))).json()) as Json;
+  /** The hover's code window: `GET /open-in/file/code`. */
+  const code = async (message: At, path: string, extra: From = {}): Promise<Json> => (await (await call(new Request(`http://127.0.0.1/api/inbox/open-in/file/code?${query(message, path, extra)}`))).json()) as Json;
   const post = async (url: string, body: Json): Promise<Json> =>
     (await (await call(new Request(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serverSession: "srv", ...body }) }))).json()) as Json;
   /** A comment's attach (the annotate route). */
   const attachRef = (message: At, path: string) => post("http://127.0.0.1/api/inbox/open-in/file/attach", { thread: message.thread_id, message: message.id, path });
   /** Open in's launch. */
-  const openIn = (message: At, path: string) => post("http://127.0.0.1/api/inbox/open-in/file", { thread: message.thread_id, message: message.id, path, app_id: "default" });
-  return { root, home, harbor, worktree, elsewhere, store, project, say, view, raw, hover, attachRef, openIn };
+  const openIn = (message: At, path: string, extra: From = {}) => post("http://127.0.0.1/api/inbox/open-in/file", { thread: message.thread_id, message: message.id, path, app_id: "default", ...extra });
+  return { root, home, harbor, worktree, elsewhere, store, project, say, view, raw, hover, code, attachRef, openIn };
 }
 
 test("a link that misses its own folder opens the newest same-named file the same sender attached earlier in the thread", async () => {
@@ -315,14 +328,100 @@ test("a file linked at the project's top names no path that is only its name; a 
   expect((await l.view(own, "~/todo.md")).looked_in).toBe(join(l.home, "todo.md"));
 });
 
-test("links_not_found asks the thread's PR first, as the view does: a link only the PR holds is not warned of", async () => {
-  const pulls: Pulls = {
-    threadPulls: () => ["github.com/o/harbor#7"],
-    pullFile: async (_pull, path) => (path === "docs/only-in-pr.md" ? { contents: "# In the PR\n", label: "#7", platform: "github", url: "https://github.com/o/harbor/pull/7" } : null),
+test("send_message never reads a PR for links_not_found: only what is kept; a link no PR is involved in is still warned of", async () => {
+  const w = world();
+  const IN_PR = { contents: "# In the PR\n", label: "#7", platform: "github" as const, url: "https://github.com/o/harbor/pull/7" };
+  let prThread = "";
+  const asked: string[] = [];
+  const linkPulls = {
+    threadPulls: (thread: string) => (thread === prThread ? ["github.com/o/harbor#7"] : []),
+    // What the Inbox's pulls hold in memory: in the PR, said absent by the forge, or never read.
+    cachedFile: (_pull: string, path: string) => {
+      asked.push(path);
+      return path === "docs/only-in-pr.md" ? IN_PR : path === "docs/not-in-pr.md" ? null : undefined;
+    },
+    // The route's read of the forge: a send must never reach it.
+    pullFile: async () => {
+      throw new Error("the send read a PR");
+    },
   };
-  const w = world({ pulls });
-  const message = await w.say("See [the change](docs/only-in-pr.md) and [gone](docs/gone.md).", { base: w.harbor });
-  expect(await w.view(message, "docs/only-in-pr.md")).toMatchObject({ found: true, contents: "# In the PR\n" });
-  const warned = await linksNotFound(w.store, message, w.home, pulls);
-  expect(warned.map((link) => link.ref)).toEqual(["docs/gone.md"]);
+  const context = { store: w.store, baseUrl: () => "http://localhost:1/", linkPulls } as unknown as InboxMcpContext;
+  const plain = await sendAgentMessage(context, w.project, { body: "See [gone](docs/gone.md).", project_path: w.harbor, agent_session: "ses_charlie" } as never);
+  expect(plain.structured.links_not_found).toEqual([{ ref: "docs/gone.md", path: join(w.harbor, "docs", "gone.md") }]);
+  expect(asked).toEqual([]);
+  prThread = String(plain.structured.thread_id);
+  const sent = await sendAgentMessage(
+    context,
+    w.project,
+    { body: "See [the change](docs/only-in-pr.md), [this](docs/not-in-pr.md) and [that](docs/never-read.md).", project_path: w.harbor, reply_to: String(plain.structured.message_id), agent_session: "ses_charlie" } as never,
+  );
+  // Kept as absent: warned of. Kept as there: not. Never read: not warned of (a missed warning, never a slow send).
+  expect(sent.structured.links_not_found).toEqual([{ ref: "docs/not-in-pr.md", path: join(w.harbor, "docs", "not-in-pr.md") }]);
+  expect(asked).toEqual(["docs/only-in-pr.md", "docs/not-in-pr.md", "docs/never-read.md"]);
+});
+
+test("a diff header's path (from the repository's top) is exact: never an earlier folder's file nor an attachment of its name", async () => {
+  const w = world();
+  mkdirSync(join(w.harbor, "packages", "ui", "src"), { recursive: true });
+  writeFileSync(join(w.harbor, "packages", "ui", "src", "index.ts"), "export {};\n");
+  writeFileSync(join(w.harbor, "packages", "ui", "package.json"), "{}\n");
+  const first = await w.say("Working in the UI package; its manifest attached.", { base: join(w.harbor, "packages", "ui"), attach: ["package.json"] });
+  // The review's diff deletes the top-level src/index.ts and package.json: neither is on disk.
+  const review = await w.say("The review.", { base: w.harbor, reply_to: first.id });
+  for (const path of ["src/index.ts", "package.json"]) {
+    expect(await w.hover(review, path, { from: "root" })).toEqual({ found: false });
+    expect(await w.code(review, path, { from: "root" })).toEqual({ found: false });
+    expect((await w.openIn(review, path, { from: "root" })).code).toBe("attachment_missing");
+  }
+  expect(launched).toEqual([]);
+  // A link in a message (no `from`) still takes the fallback.
+  expect(await w.hover(review, "src/index.ts")).toMatchObject({ found: true, path: join(w.harbor, "packages", "ui", "src", "index.ts") });
+});
+
+test("a linked machine's window: a file there whose realpath leads out of its reach names no place", async () => {
+  const d = world({ door: true });
+  symlinkSync(join(d.elsewhere, "far.md"), join(d.harbor, "docs", "far-link.md"));
+  // The body does not name the path, so the window's reach is the thread's folders.
+  const message = await d.say("The notes are in the docs folder.", { base: join(d.harbor, "docs") });
+  expect(await d.view(message, "far-link.md")).toEqual({ found: false, name: "far-link.md", path: "far-link.md", reason: "missing" });
+  expect((await d.attachRef(message, "far-link.md")).error).toBe("Couldn't find far-link.md.");
+  // A file truly not there still says where it was looked for.
+  expect((await d.attachRef(message, "gone.md")).error).toBe("gone.md isn't at docs/gone.md.");
+});
+
+test("the hover shows an attached file whenever the pane opens it; Open in launches only its path still on disk", async () => {
+  const w = world();
+  const first = await w.say("The plan, attached.", { base: join(w.harbor, "notes"), attach: ["plan.md"] });
+  const later = await w.say("See [the plan](plan.md).", { base: join(w.harbor, "review", "build"), reply_to: first.id });
+  expect(await w.view(later, "plan.md")).toMatchObject({ found: true, attachment_id: first.attachments![0]!.id });
+  expect(await w.code(later, "plan.md")).toEqual({ found: true, contents: "# Plan\n" });
+  expect(await w.hover(later, "plan.md")).toMatchObject({ found: true, path: join(w.harbor, "notes", "plan.md") });
+  expect(await w.openIn(later, "plan.md")).toEqual({ ok: true });
+  expect(launched).toEqual([join(w.harbor, "notes", "plan.md")]);
+  // The file moved away: the pane opens the copy kept at send, the hover shows that copy, and Open in offers nothing.
+  renameSync(join(w.harbor, "notes", "plan.md"), join(w.elsewhere, "plan.md"));
+  expect(await w.view(later, "plan.md")).toMatchObject({ found: true, attachment_id: first.attachments![0]!.id });
+  expect(await w.code(later, "plan.md")).toEqual({ found: true, contents: "# Plan\n" });
+  expect(await w.hover(later, "plan.md")).toEqual({ found: false });
+});
+
+test("a refused file stays refused on hover and Open in, never replaced by a file of its name in an earlier folder", async () => {
+  const w = world();
+  const first = await w.say("Started in docs.", { base: join(w.harbor, "docs") });
+  // .env is in docs (the earlier folder) and here, where this message stands.
+  writeFileSync(join(w.harbor, "review", "build", ".env"), "TOKEN=here\n");
+  const later = await w.say("The [settings](.env).", { base: join(w.harbor, "review", "build"), reply_to: first.id });
+  expect(await w.hover(later, ".env")).toEqual({ found: false });
+  expect((await w.openIn(later, ".env")).code).toBe("open_not_allowed");
+  // Refused for a link out of the project too: notes.md here leads out, and docs (written from before) has a notes.md.
+  writeFileSync(join(w.harbor, "docs", "notes.md"), "# Docs notes\n");
+  symlinkSync(join(w.elsewhere, "far.md"), join(w.harbor, "review", "build", "notes.md"));
+  const linked = await w.say("See [notes](notes.md).", { base: join(w.harbor, "review", "build"), reply_to: first.id });
+  expect(await w.hover(linked, "notes.md")).toEqual({ found: false });
+  expect((await w.openIn(linked, "notes.md")).code).toBe("open_not_allowed");
+  expect(launched).toEqual([]);
+  // A file of an earlier folder Open in does launch: the fallback's own path.
+  const guide = await w.say("See [the guide](guide.md).", { base: join(w.harbor, "review", "build"), reply_to: first.id });
+  expect(await w.openIn(guide, "guide.md")).toEqual({ ok: true });
+  expect(launched).toEqual([join(w.harbor, "docs", "guide.md")]);
 });

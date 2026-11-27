@@ -315,6 +315,26 @@ describe("InboxPulls.file: the PR's head commit, from the forge", () => {
     expect(f.contentReads()).toHaveLength(1);
   });
 
+  // The send's `links_not_found` reads this: it must never wait on the forge.
+  test("cachedFile answers from memory alone: undefined until a read, then that read's answer, with no forge call", async () => {
+    const f = forge({ "src/a.ts": "in the PR\n" });
+    const pulls = createInboxPulls({ run: f.run });
+    expect(pulls.cachedFile(KEY, "src/a.ts")).toBeUndefined();
+    expect(f.calls).toHaveLength(0);
+    await pulls.list(repos);
+    const listed = f.calls.length;
+    expect(pulls.cachedFile(KEY, "src/a.ts")).toBeUndefined();
+    expect(f.calls).toHaveLength(listed);
+    const read = await pulls.file(KEY, "src/a.ts");
+    expect(read?.contents).toBe("in the PR\n");
+    expect(await pulls.file(KEY, "no/such.ts")).toBeNull();
+    const after = f.calls.length;
+    expect(pulls.cachedFile(KEY, "src/a.ts")).toEqual(read);
+    expect(pulls.cachedFile(KEY, "no/such.ts")).toBeNull();
+    expect(pulls.cachedFile(KEY, "never/read.ts")).toBeUndefined();
+    expect(f.calls).toHaveLength(after);
+  });
+
   test("no such file, what is not text, and a PR the list does not name: null, and the miss is kept", async () => {
     const f = forge({ "bin/tool": "a\0b" });
     const pulls = createInboxPulls({ run: f.run });

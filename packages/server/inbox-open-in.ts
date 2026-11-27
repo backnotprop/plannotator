@@ -53,6 +53,7 @@ import {
   checkInboxReadableFile,
   inboxAttachmentState,
   inboxStatEtag,
+  readInboxAttachmentText,
   recordInboxAttachments,
   type InboxProjectFilePlace,
   type InboxReadableFile,
@@ -314,19 +315,27 @@ export function inboxMessageCandidates(store: InboxStore, givenHome: string, hom
   return [...new Set(inboxMessagePlaces(store, home, scope, named).map((place) => join(place.root, place.relative)))];
 }
 
-/** The PRs a thread owns and a file's text at a PR: the route's, and the send's `links_not_found` (the same reads). */
+/** The PRs a thread owns and a file's text at a PR, as the route reads them (the send's `links_not_found` reads only what is kept). */
 export type InboxLinkPulls = Pick<InboxOpenInRouteContext, "threadPulls" | "pullFile">;
+
+/** A readable file held to a window's reach: `away`, a file that is there but whose realpath leads out of that reach. */
+type Reached = InboxReadableFile | { ok: false; code: "missing"; away: true };
+
+/** The paths a relative link may have in a thread's PR, in the order to try ([] for an absolute or `~` path). */
+export function inboxPullPaths(store: InboxStore, home: string, scope: FileScope, named: string): string[] {
+  if (typeof scope.thread !== "string" || named === "" || isAbsolute(named) || named.startsWith("~")) return [];
+  const clean = posix.normalize(named.replace(/\\/g, "/")).replace(/^\.\//, "");
+  return [...new Set([...inboxMessagePlaces(store, home, scope, named).map((place) => place.relative), clean])].filter((path) => isShapeProjectPath(path) && !inboxAttachmentNameRefusal(path) && !holdsCredentials(path));
+}
 
 /**
  * The PR's version of a relative path a thread's message names, where the thread owns a PR (what the message talks
- * about is that commit): the referenced file view's first look, and so the send's before it warns of a link.
+ * about is that commit): the referenced file view's first look.
  */
 export async function inboxPullVersion(store: InboxStore, home: string, pulls: InboxLinkPulls, scope: FileScope, named: string): Promise<InboxPullFile | null> {
-  if (typeof scope.thread !== "string" || named === "" || isAbsolute(named) || named.startsWith("~")) return null;
-  const keys = pulls.threadPulls(scope.thread);
+  const keys = typeof scope.thread === "string" ? pulls.threadPulls(scope.thread) : [];
   if (keys.length === 0) return null;
-  const clean = posix.normalize(named.replace(/\\/g, "/")).replace(/^\.\//, "");
-  const paths = [...new Set([...inboxMessagePlaces(store, home, scope, named).map((place) => place.relative), clean])].filter((path) => isShapeProjectPath(path) && !inboxAttachmentNameRefusal(path) && !holdsCredentials(path));
+  const paths = inboxPullPaths(store, home, scope, named);
   for (const pull of keys) {
     for (const path of paths) {
       const file = await pulls.pullFile(pull, path);
@@ -416,7 +425,11 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
       }
     }
     const file = await projectFileOf(scope, named);
-    if (!file.ok || !isInboxTextKind(file.kind) || holdsCredentials(file.path) || isPlannotatorState(file.path, dataDirs)) return json({ found: false });
+    if (!file.ok) {
+      const held = await heldText(req, scope, named);
+      return json(held !== null ? { found: true, contents: held } : { found: false });
+    }
+    if (!isInboxTextKind(file.kind) || holdsCredentials(file.path) || isPlannotatorState(file.path, dataDirs)) return json({ found: false });
     const read = await readFileCapped(file.path);
     return json(read.ok && !read.content.includes("\0") ? { found: true, contents: read.content } : { found: false });
   };
@@ -461,13 +474,17 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
   };
   const within = (roots: string[] | null, path: string): boolean => roots === null || roots.some((root) => pathInside(root, path) !== null);
 
-  /** `checkInboxReadableFile` held to a reach: a candidate outside it, or one whose realpath leads out, is not here. */
-  const readableWithin = async (roots: string[] | null, scope: FileScope, named: string, keep: boolean, candidates = candidatesOf(scope, named)): Promise<InboxReadableFile> => {
+  /**
+   * `checkInboxReadableFile` held to a reach: a candidate outside it, or one whose realpath leads out, is not here. The
+   * latter is there, only out of reach (`away`): missing to that window, and said with no place, as it is at that path.
+   */
+  const readableWithin = async (roots: string[] | null, scope: FileScope, named: string, keep: boolean, candidates = candidatesOf(scope, named)): Promise<Reached> => {
     const file = await checkInboxReadableFile(candidates.filter((path) => within(roots, path)), refusedHere, { keep });
     if (!file.ok || within(roots, file.path)) return file;
     await file.handle?.close().catch(() => {});
-    return { ok: false, code: "missing" };
+    return { ok: false, code: "missing", away: true };
   };
+  const away = (file: Reached): boolean => !file.ok && "away" in file;
 
   /**
    * Where a missing file was looked for first (the message's own folder), as the window names a file of the thread:
@@ -485,10 +502,10 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
     return context.doorOf?.(req) ? inProject : (inProject ?? first);
   };
 
-  /** What a route says of a file found nowhere (inbox-file-missing-words.ts, the pane's own words). */
-  const notFoundSentence = (req: Request, scope: FileScope, named: string): string => {
+  /** What a route says of a file found nowhere (inbox-file-missing-words.ts, the pane's own words); `outOfReach`: with no place. */
+  const notFoundSentence = (req: Request, scope: FileScope, named: string, outOfReach = false): string => {
     const clean = posix.normalize(named.replace(/\\/g, "/")).replace(/^\.\//, "");
-    return fileNotFoundSentence(clean.split("/").pop() || clean, lookedIn(req, scope, named));
+    return fileNotFoundSentence(clean.split("/").pop() || clean, outOfReach ? null : lookedIn(req, scope, named));
   };
 
   /** A linked machine's request that is not a press in a window there: refused, as its own Inbox refuses it. */
@@ -515,15 +532,15 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
    * were sent from (inbox-link-fallback.ts: its shell may have moved between them). A linked machine's request holds
    * them to the thread's folders even for a path its message names: they are not what the message names.
    */
-  const fromEarlierFolders = async (req: Request, roots: string[] | null, scope: FileScope, named: string, keep: boolean, fallbacks = fallbacksOf(scope, named)): Promise<InboxReadableFile | null> => {
+  const fromEarlierFolders = async (req: Request, roots: string[] | null, scope: FileScope, named: string, keep: boolean, fallbacks = fallbacksOf(scope, named)): Promise<Reached | null> => {
     const earlier = earlierFolderPaths(fallbacks);
     if (earlier.length === 0) return null;
     const there = await readableWithin(roots ?? (context.doorOf?.(req) ? threadFolders(scope) : null), scope, named, keep, earlier);
-    return there.ok ? there : null;
+    return there.ok || away(there) ? there : null;
   };
 
   /** The file a message names: at its own places, else (only when nothing is there) from the sender's earlier folders. */
-  const locate = async (req: Request, roots: string[] | null, scope: FileScope, named: string, keep: boolean): Promise<InboxReadableFile> => {
+  const locate = async (req: Request, roots: string[] | null, scope: FileScope, named: string, keep: boolean): Promise<Reached> => {
     const file = await readableWithin(roots, scope, named, keep);
     if (file.ok || file.code !== "missing") return file;
     return (await fromEarlierFolders(req, roots, scope, named, keep)) ?? file;
@@ -546,17 +563,42 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
   };
 
   /**
-   * `checkInboxProjectFile` at a scope's places, then (only when none opens) at its fallbacks, which the same path rule
-   * holds: a `../` link's place from the project's top is refused by that rule, and the file may still be in a folder
-   * the sender wrote from before.
+   * `checkInboxProjectFile` at a scope's places, then (only after a miss, as `locate`) at its fallbacks, which the same
+   * path rule holds. A refused file (a dotenv name, a link out of the project) stays refused, never replaced by another
+   * file. A place that only leads out of the project (a `../` link from the project's top) is no file of it: that alone
+   * is a miss, and the file may still be in a folder the sender wrote from before.
    */
   const projectFileOf = async (scope: FileScope, named: string) => {
-    const file = await checkInboxProjectFile(placesOf(scope, named));
+    const places = placesOf(scope, named);
+    const file = await checkInboxProjectFile(places);
     if (file.ok) return file;
+    if (file.code === "refused") {
+      const shaped = await checkInboxProjectFile(places.filter((place) => isShapeProjectPath(place.relative)));
+      if (!shaped.ok && shaped.code === "refused") return file;
+    }
     const fallback = fallbackPlacesOf(scope, named);
     if (fallback.length === 0) return file;
     const there = await checkInboxProjectFile(fallback);
     return there.ok ? there : file;
+  };
+
+  /**
+   * The text of the attachment the pane opens for a link its message's own places miss (inbox-link-fallback.ts), so
+   * the hover shows a file exactly when the pane would: the file as it is now, else the copy kept when it was sent.
+   * Open in has no such path to launch: its check stays the attachment's own path on disk, when that is still there.
+   */
+  const heldText = async (req: Request, scope: FileScope, named: string): Promise<string | null> => {
+    const held = sameNamedAttachment(fallbacksOf(scope, named));
+    if (!held) return null;
+    const own = await readableWithin(reachOf(req, scope, named), scope, named, false);
+    if (own.ok || own.code !== "missing") return null;
+    const attachment = store.attachment(held)?.attachment;
+    if (!attachment || !isInboxTextKind(attachment.kind) || holdsCredentials(attachment.path)) return null;
+    for (const version of ["current", "sent"] as const) {
+      const read = await readInboxAttachmentText(store.dir, attachment, version);
+      if (read.ok) return read.bytes.includes(0) ? null : read.bytes.toString("utf8");
+    }
+    return null;
   };
 
   /** The text of the file on this computer a message names, under the view's refusals and cap; null when there is none. */
@@ -605,7 +647,7 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
       if (held) return json({ found: true, name, path: clean, kind: "file", attachment_id: held });
       file = (await fromEarlierFolders(req, roots, scope, named, true, fallbacks)) ?? file;
     }
-    const looked = !file.ok && file.code === "missing" ? lookedIn(req, scope, named) : null;
+    const looked = !file.ok && file.code === "missing" && !away(file) ? lookedIn(req, scope, named) : null;
     if (!file.ok) return json({ found: false, name, path: clean, reason: file.code, ...(looked ? { looked_in: looked } : {}) });
     const handle = file.handle!;
     try {
@@ -691,7 +733,7 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
     if (!store.messageAnswerable(message.id)) throw new InboxError("thread_resolved", "This thread is resolved; reopen it to annotate.");
     const roots = reachOf(req, scope, body.path);
     const file = await locate(req, roots, scope, body.path, false);
-    if (!file.ok) throw new InboxError("attachment_missing", file.code === "refused" ? `${body.path} does not show here.` : notFoundSentence(req, scope, body.path));
+    if (!file.ok) throw new InboxError("attachment_missing", file.code === "refused" ? `${body.path} does not show here.` : notFoundSentence(req, scope, body.path, away(file)));
     // The pane showed the PR's version: a comment on it attaches this computer's file only when that is the same text.
     const pulled = await pullVersion(scope, body.path);
     if (pulled && (await localText(req, roots, scope, body.path)) !== pulled.contents) {

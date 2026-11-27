@@ -67,10 +67,12 @@ function sameSender(a: ThreadMessage["author"], b: ThreadMessage["author"]): boo
 
 /**
  * Where a relative link may be when the message's own places miss, in the order above. `home` is the home folder's
- * realpath (a checkout at home is no checkout). [] for an absolute or `~` link, a message out of that thread, or one
- * that is not an agent's.
+ * realpath (a checkout at home is no checkout). [] for an absolute or `~` link, a message out of that thread, one
+ * that is not an agent's, or a diff's path (`from: "root"`): that starts at the repository's top, exactly, and is never
+ * another folder's file nor an attachment of its name.
  */
-export function linkFallbacks(store: InboxStore, home: string, scope: { thread?: unknown; message?: unknown }, named: string): LinkFallback[] {
+export function linkFallbacks(store: InboxStore, home: string, scope: { thread?: unknown; message?: unknown; from?: unknown }, named: string): LinkFallback[] {
+  if (scope.from === "root") return [];
   const clean = relativeLinkPath(named);
   if (!clean) return [];
   const [own, ...earlier] = upTo(store, scope.thread, scope.message);

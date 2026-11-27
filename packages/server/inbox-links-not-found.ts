@@ -4,19 +4,50 @@
  * own order (inbox-open-in.ts `inboxPullVersion` in a thread that owns a PR, `inboxMessageCandidates`, then
  * inbox-link-fallback.ts: a file of that name the same sender attached in the thread, its earlier folders). A warning
  * in the result, never a refusal: the message is sent.
+ *
+ * A send never waits on the network for it: a thread's PR is asked only what is already kept in memory
+ * (`InboxSendLinkPulls`), and a link that memory cannot answer for is not warned of. A missed warning is fine; a false
+ * one, or a slow send, is not.
  */
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { checkInboxReadableFile } from "@plannotator/shared/inbox/attachments";
 import { blankCode } from "@plannotator/shared/inbox/message-images";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
-import { inboxMessageCandidates, inboxPullVersion, type InboxLinkPulls } from "./inbox-open-in";
+import { inboxMessageCandidates, inboxPullPaths } from "./inbox-open-in";
+import type { InboxPullFile } from "./inbox-pulls";
 import { earlierFolderPaths, linkFallbacks, sameNamedAttachment } from "./inbox-link-fallback";
 
 /** The most links the warning names (the structured list and the text alike); the rest are counted. */
 export const LINKS_NOT_FOUND_MAX = 10;
 /** The most links one send looks for on disk. */
 const LINKS_CHECKED_MAX = 50;
+
+/** What the send asks of a thread's PRs: from memory alone, never the forge or a list read. */
+export interface InboxSendLinkPulls {
+  /** The PRs the thread owns. */
+  threadPulls(thread: string): string[];
+  /** A file at a PR's head as kept (`InboxPulls.cachedFile`): the file, null when the forge said none, undefined when nothing kept says. */
+  cachedFile(pull: string, path: string): InboxPullFile | null | undefined;
+}
+
+/**
+ * Whether the thread's PR holds the link, from what is kept: "absent" when the thread owns no PR (or the link is no
+ * path a PR has) or every kept answer says no; "unknown" when one is not kept, so the send says nothing of it.
+ */
+function inKeptPull(store: InboxStore, home: string, pulls: InboxSendLinkPulls, scope: { thread: string; message: string }, named: string): "found" | "absent" | "unknown" {
+  const keys = pulls.threadPulls(scope.thread);
+  if (keys.length === 0) return "absent";
+  let unknown = false;
+  for (const pull of keys) {
+    for (const path of inboxPullPaths(store, home, scope, named)) {
+      const kept = pulls.cachedFile(pull, path);
+      if (kept) return "found";
+      if (kept === undefined) unknown = true;
+    }
+  }
+  return unknown ? "unknown" : "absent";
+}
 
 export interface LinkNotFound {
   /** The link as written in the body. */
@@ -58,9 +89,9 @@ export function bodyFileLinks(body: string): { ref: string; path: string }[] {
 /**
  * The body's links of a sent message that open nothing: no file where the window would look, nor one of that name the
  * thread was handed, nor the thread's PR's version (`pulls`: the view opens that first, inbox-open-in.ts
- * `inboxPullVersion`). Absent `pulls`: no PR is asked.
+ * `inboxPullVersion`; here only as kept in memory). Absent `pulls`: no PR is asked.
  */
-export async function linksNotFound(store: InboxStore, message: { id: string; thread_id: string; body: string }, home = homedir(), pulls?: InboxLinkPulls): Promise<LinkNotFound[]> {
+export async function linksNotFound(store: InboxStore, message: { id: string; thread_id: string; body: string }, home = homedir(), pulls?: InboxSendLinkPulls): Promise<LinkNotFound[]> {
   const scope = { thread: message.thread_id, message: message.id };
   const out: LinkNotFound[] = [];
   for (const { ref, path } of bodyFileLinks(message.body).slice(0, LINKS_CHECKED_MAX)) {
@@ -72,7 +103,7 @@ export async function linksNotFound(store: InboxStore, message: { id: string; th
     const file = await checkInboxReadableFile(all, () => false);
     // Something is there (a file, or one the window refuses to show and says so): not this warning's.
     if (file.ok || file.code === "refused" || all.some((place) => existsSync(place))) continue;
-    if (pulls && (await inboxPullVersion(store, home, pulls, scope, path))) continue;
+    if (pulls && inKeptPull(store, home, pulls, scope, path) !== "absent") continue;
     out.push({ ref, path: places[0]! });
   }
   return out;

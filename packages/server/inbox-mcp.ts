@@ -33,8 +33,7 @@ import { bodyShowsLocalImages, captureInboxInlineImages, INBOX_INLINE_IMAGES_MAX
 import { inboxMessageImageRefsInOrder, inboxMessageRemoteImageRefsInOrder } from "@plannotator/shared/inbox/message-images";
 import { inboxInlineMediaKind } from "@plannotator/core/inbox-inline-media";
 import { MEDIA_NOT_SHOWN_MAX, mediaNotShown, mediaNotShownText, type MediaNotShown } from "./inbox-media-not-shown";
-import { LINKS_NOT_FOUND_MAX, linksNotFound, linksNotFoundText, type LinkNotFound } from "./inbox-links-not-found";
-import type { InboxLinkPulls } from "./inbox-open-in";
+import { LINKS_NOT_FOUND_MAX, linksNotFound, linksNotFoundText, type InboxSendLinkPulls, type LinkNotFound } from "./inbox-links-not-found";
 import { SEND_WARNINGS_MAX, pagesNotShown, pagesNotShownText, questionMediaNotShown, questionMediaNotShownText, type PageNotShown, type QuestionMediaNotShown } from "./inbox-send-warnings";
 import { questionsWithoutPictureChoices } from "./inbox-picture-choices";
 import { attachedImagesNotInBody, attachedImagesNotInBodyText } from "@plannotator/shared/inbox/attached-images";
@@ -298,8 +297,8 @@ export interface InboxMcpContext extends InboxSnoozeMcpContext, InboxScheduledMc
    * attachments are refused.
    */
   recordAttachments?: (paths: readonly string[], project: InboxProject, base: string) => Promise<InboxAttachment[]>;
-  /** A thread's PRs and a file's text at one, as the referenced-file view reads them (`links_not_found` asks them too). Absent: no PR is asked. */
-  linkPulls?: InboxLinkPulls;
+  /** A thread's PRs and a file's text at one as kept in memory, for `links_not_found` (never a forge read at send). Absent: no PR is asked. */
+  linkPulls?: InboxSendLinkPulls;
   /**
    * A question's running-app prototypes (`Prototype: http://localhost:…`): checked and probed before anything is
    * written (inbox-live.ts `checkPrototypeApps`); a refusal names the question and the option. Absent: a body that
