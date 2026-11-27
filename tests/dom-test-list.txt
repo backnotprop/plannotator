@@ -66,6 +66,8 @@ packages/ui/components/MermaidBlock.theme.test.tsx
 packages/ui/components/DiagramBlock.anchor.test.tsx
 packages/ui/components/DiagramBlock.askAI.test.tsx
 packages/ui/components/DiagramBlock.engine.test.tsx
+packages/ui/components/DiagramBlock.restoreReportLoop.test.tsx
+packages/ui/components/DiagramBlock.restoreReportFresh.test.tsx
 packages/ui/utils/pele-labels.test.ts
 packages/ui/utils/pele-render.test.ts
 packages/ui/utils/pele-hostile.test.ts
@@ -120,6 +122,7 @@ packages/inbox/panePollsPause.test.tsx
 packages/inbox/decisionMode.test.tsx
 packages/inbox/decisionCardContract.test.tsx
 packages/inbox/decisionModeSettings.test.tsx
+packages/inbox/decisionSittingWait.test.tsx
 packages/inbox/threadFolding.test.tsx
 packages/inbox/threadNameMeta.test.tsx
 packages/inbox/components/stalePageNotice.test.tsx
@@ -256,6 +259,8 @@ packages/inbox/keyboardKeys.test.tsx
 packages/inbox/keyGuardsPageQueries.test.tsx
 packages/ui/shortcuts/runtime.guardCalls.test.tsx
 packages/inbox/rowSlotRenders.test.tsx
+packages/inbox/rowSlotWatchers.test.tsx
+packages/inbox/rowWatchers.test.tsx
 packages/inbox/actionDraftSend.test.tsx
 packages/inbox/actionNoteRefusal.test.tsx
 packages/inbox/actionSkip.test.tsx
@@ -351,6 +356,8 @@ packages/inbox/settingsSections.test.tsx
 packages/inbox/searchPalette.test.tsx
 packages/inbox/searchPaletteMachines.test.tsx
 packages/inbox/searchShortcut.test.tsx
+packages/inbox/searchTip.test.tsx
+packages/inbox/searchTipApp.test.tsx
 packages/inbox/openIn.test.tsx
 packages/inbox/openInCheck.test.tsx
 packages/inbox/openInFile.test.tsx
@@ -817,6 +824,7 @@ packages/inbox/contextNotes/contextNotes.test.tsx
 packages/inbox/composeLaunchTip.test.tsx
 packages/inbox/sidebarTip.test.tsx
 packages/inbox/attachmentDownload.test.tsx
+packages/inbox/attachmentPageTooLarge.test.tsx
 packages/inbox/listFilterButton.test.tsx
 packages/inbox/listFilterSearchMenu.test.tsx
 packages/inbox/prototypeWindow.test.tsx
@@ -845,6 +853,7 @@ packages/inbox/agents/setAgentIcons.test.tsx
 packages/inbox/agents/animateAnyIcon.test.tsx
 packages/inbox/agents/agentRename.test.tsx
 packages/inbox/agents/agentMenuLaunch.test.tsx
+packages/inbox/agents/agentMenuNewMessage.test.tsx
 packages/inbox/agents/agentRexPlace.test.tsx
 packages/inbox/agents/rexMark.test.tsx
 packages/inbox/agents/agentStatusMark.test.tsx
@@ -975,3 +984,4 @@ packages/inbox/guide/useViewedTicks.test.tsx
 packages/inbox/components/reply/replyBoxParity.test.tsx
 packages/inbox/guide/diffFontLoad.test.tsx
 packages/ui/components/diagram/DiagramCanvas.controlsReserve.test.tsx
+packages/ui/components/diagram/diagramSourceAccept.test.tsx

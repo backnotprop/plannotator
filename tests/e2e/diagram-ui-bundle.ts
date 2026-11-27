@@ -43,7 +43,7 @@ import { dirname, join, resolve } from 'node:path';
 const EXTENSION = resolve(__dirname, '../../apps/vscode-extension');
 const UI = resolve(__dirname, '../../packages/ui');
 
-export function buildDiagramUiBundle(options: { splitPurify?: boolean; realKatex?: boolean; engine?: 'mermaid' | 'pele-where-safe' | 'pele' } = {}): string {
+export function buildDiagramUiBundle(options: { splitPurify?: boolean; realKatex?: boolean; engine?: 'mermaid' | 'pele-where-safe' | 'pele'; sourceCheck?: boolean } = {}): string {
   const work = mkdtempSync(join(tmpdir(), 'pn-diagram-scrub-'));
   try {
     const entry = join(work, 'entry.ts');
@@ -112,7 +112,7 @@ function describe(el: Element): string[] {
     return out;
   },
 };
-`);
+${options.sourceCheck ? sourceCheckEntry() : ''}`);
     const out = join(work, 'bundle.js');
     const build = join(work, 'build.ts');
     writeFileSync(build, `
@@ -133,6 +133,103 @@ await build({ ...options, alias, plugins, absWorkingDir: ${JSON.stringify(EXTENS
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
+}
+
+/**
+ * `sourceCheck`: the fence drawn the way the document draws it, through
+ * `useDiagramRender` (React) under a host's `DiagramSourceAcceptContext`.
+ * - `checked(source, accept)`: the check answers `accept`; resolves
+ *   `{ ok, refused, message, asked }` once the render settles (`asked`: how
+ *   often the check was called), the drawn svg mounted in `#host`.
+ * - `engines()`: `{ mermaid, pele }`, whether the Mermaid runtime is in its slot
+ *   and how often Pele's loader ran (the shipped `import('pele/lazy')`, counted).
+ * - `drawAccepted(source)`: drawn under an accepting check, `{ ok }`; then
+ *   `refuseNow()` swaps in a refusing check and resolves with the first state
+ *   after it, `{ refused, svg }` (`svg`: the state still holds a drawing).
+ */
+function sourceCheckEntry(): string {
+  const req = createRequire(join(UI, 'package.json'));
+  return `
+import * as React from ${JSON.stringify(req.resolve('react'))};
+import { createRoot } from ${JSON.stringify(req.resolve('react-dom/client'))};
+import { useDiagramRender } from ${JSON.stringify(join(UI, 'components/diagram/useDiagramRender.ts'))};
+import { DiagramSourceAcceptContext } from ${JSON.stringify(join(UI, 'components/diagramSourceAccept.tsx'))};
+import { getMermaidRuntime } from ${JSON.stringify(join(UI, 'utils/mermaid.ts'))};
+import { __setPeleRuntimeLoaderForTests, peleRuntimeFrom } from ${JSON.stringify(join(UI, 'utils/pele.ts'))};
+let peleLoads = 0;
+__setPeleRuntimeLoaderForTests(() => {
+  peleLoads += 1;
+  return import(${JSON.stringify(req.resolve('pele/lazy'))}).then(peleRuntimeFrom);
+});
+const THEME = { colorTheme: 'plannotator', mode: 'light' } as const;
+const reactRoot = document.createElement('div');
+document.body.appendChild(reactRoot);
+let mounted: ReturnType<typeof createRoot> | null = null;
+let checks = 0;
+(window as any).__d.checked = (source: string, accept: boolean) =>
+  new Promise((resolve) => {
+    mounted?.unmount();
+    host().replaceChildren();
+    const id = 'pn-check-' + ++checks;
+    let asked = 0;
+    const check = () => {
+      asked += 1;
+      return accept;
+    };
+    let done = false;
+    function Probe() {
+      const state = useDiagramRender('mermaid', id, source, THEME);
+      React.useEffect(() => {
+        if (state.pending || done) return;
+        done = true;
+        if (state.svgNode) host().replaceChildren(state.svgNode);
+        resolve({ ok: state.error === null && state.svgNode !== null, refused: state.error?.refused === true, message: state.error?.message ?? '', asked });
+      }, [state]);
+      return null;
+    }
+    mounted = createRoot(reactRoot);
+    mounted.render(React.createElement(DiagramSourceAcceptContext.Provider, { value: check }, React.createElement(Probe)));
+  });
+(window as any).__d.engines = () => ({ mermaid: getMermaidRuntime() !== null, pele: peleLoads });
+// A fence drawn under an accepting check, then a refusing one swapped in (the host tightening its policy).
+// \`#host\` holds what the state holds, as the viewer draws it: the svg, or nothing.
+let swapTo: ((check: () => boolean) => void) | null = null;
+let onState: ((state: any) => void) | null = null;
+function Drawn({ source, id }: { source: string; id: string }) {
+  const state = useDiagramRender('mermaid', id, source, THEME);
+  React.useEffect(() => {
+    if (state.svgNode) host().replaceChildren(state.svgNode);
+    else host().replaceChildren();
+    onState?.(state);
+  }, [state]);
+  return null;
+}
+function Swappable({ source, id }: { source: string; id: string }) {
+  const [check, setCheck] = React.useState<() => boolean>(() => () => true);
+  swapTo = (next) => setCheck(() => next);
+  return React.createElement(DiagramSourceAcceptContext.Provider, { value: check }, React.createElement(Drawn, { source, id }));
+}
+(window as any).__d.drawAccepted = (source: string) =>
+  new Promise((resolve) => {
+    mounted?.unmount();
+    host().replaceChildren();
+    onState = (state) => {
+      if (state.pending) return;
+      onState = null;
+      resolve({ ok: state.error === null && state.svgNode !== null });
+    };
+    mounted = createRoot(reactRoot);
+    mounted.render(React.createElement(Swappable, { source, id: 'pn-swap-' + ++checks }));
+  });
+(window as any).__d.refuseNow = () =>
+  new Promise((resolve) => {
+    onState = (state) => {
+      onState = null;
+      resolve({ refused: state.error?.refused === true, svg: state.svgNode !== null });
+    };
+    swapTo!(() => false);
+  });
+`;
 }
 
 /**

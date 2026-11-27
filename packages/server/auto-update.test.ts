@@ -11,6 +11,7 @@ import {
   compareStableVersions,
   deriveAutoUpdateNotice,
   installerCommand,
+  installerBaseEnv,
   installerFlagArgs,
   installerPathWith,
   parseInstallFlags,
@@ -660,6 +661,33 @@ describe.skipIf(process.platform !== "win32" || !Bun.which("powershell.exe"))("W
     } finally {
       server.stop(true);
     }
+  }, 60_000);
+
+  // A stand-in for PowerShell 7's module folder: a Microsoft.PowerShell.Utility
+  // manifest that names Get-FileHash and carries no Windows PowerShell function
+  // for it, listed ahead of the system folder as PowerShell 7 lists its own.
+  test("the installer's shell has Get-FileHash when Plannotator inherited PowerShell 7's PSModulePath", () => {
+    const moduleDir = join(dataDir, "ps7-modules", "Microsoft.PowerShell.Utility");
+    mkdirSync(moduleDir, { recursive: true });
+    writeFileSync(
+      join(moduleDir, "Microsoft.PowerShell.Utility.psd1"),
+      "@{ GUID = '1DA87E53-152B-403E-98DC-74D7B4D63D59'; ModuleVersion = '7.0.0.0'; CmdletsToExport = @('Get-FileHash'); FunctionsToExport = @() }",
+    );
+    const inherited: NodeJS.ProcessEnv = Object.fromEntries(
+      Object.entries(process.env).filter(([key]) => key.toLowerCase() !== "psmodulepath"),
+    );
+    inherited.PSModulePath = `${join(dataDir, "ps7-modules")};${join(process.env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "Modules")}`;
+    const hashCommand = (env: NodeJS.ProcessEnv) =>
+      Bun.spawnSync(
+        ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", "[string](Get-Command Get-FileHash -ErrorAction SilentlyContinue).Name"],
+        { env, stdout: "pipe", stderr: "pipe" },
+      )
+        .stdout.toString()
+        .trim();
+
+    expect(hashCommand(inherited)).toBe("");
+    expect(hashCommand(installerBaseEnv(inherited, "win32"))).toBe("Get-FileHash");
+    expect(installerBaseEnv(inherited, "linux")).toBe(inherited);
   }, 60_000);
 });
 

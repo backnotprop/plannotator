@@ -297,7 +297,7 @@
     },
     "packages/core": {
       "name": "@plannotator/core",
-      "version": "0.25.34",
+      "version": "0.25.35",
       "dependencies": {
         "croner": "11.0.0",
       },
@@ -492,7 +492,7 @@
     },
     "packages/ui": {
       "name": "@plannotator/ui",
-      "version": "0.66.0",
+      "version": "0.67.0",
       "dependencies": {
         "@base-ui/react": "^1.9.0",
         "@codemirror/autocomplete": "^6.20.3",

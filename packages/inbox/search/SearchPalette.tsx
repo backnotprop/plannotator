@@ -62,6 +62,8 @@ import {
 } from './model';
 import { readSearchSort, SEARCH_SORT_OPTIONS, setSearchSort, useSearchSort } from './searchSort';
 import { keepingRow, optionKey, searchPasses, unansweredWords } from './searchMachines';
+import { useSearchTip } from './searchTip';
+import { SearchTipCard } from './SearchTipCard';
 
 /** How long typing settles before a query goes out. */
 export const SEARCH_DEBOUNCE_MS = 120;
@@ -97,6 +99,8 @@ export interface SearchPaletteProps {
   onAction?: (action: ComposeAction) => void;
   /** A thread result's tag colour (tagColours.ts), as its row in the list has: tinted, the tag named. Absent or null: as usual. */
   tintOf?: (threadId: string) => RowTint | null;
+  /** The Search tip (searchTip.ts): the Inbox has it for this page and no other one-time thing holds it back. Required, so the window cannot leave it out. */
+  searchTip: boolean;
 }
 
 type FilterKind = 'project' | 'status' | 'from';
@@ -482,6 +486,9 @@ export default function SearchPalette(props: SearchPaletteProps) {
     setTypeState(next);
   };
   const [live, setLive] = useState('');
+  const rowRef = useRef<HTMLDivElement>(null);
+  const tip = useSearchTip({ open, offered: props.searchTip, q, say: setLive });
+  const tipUp = tip.stage === 'trying' || tip.stage === 'shown' || tip.stage === 'leaving';
   /** Best match or Newest: this browser's pick, kept across opens (searchSort.ts). */
   const sort = useSearchSort();
   const [fades, setFades] = useState({ top: false, bottom: false });
@@ -851,6 +858,10 @@ export default function SearchPalette(props: SearchPaletteProps) {
         const kind = menu.kind;
         setMenu(null);
         filtersRef.current?.querySelector<HTMLElement>(`[data-chip="${kind}"]`)?.focus();
+      } else if (tip.stage === 'shown') {
+        // The first Escape closes only the Search tip, as the Launch tip's does; focus goes back to the box.
+        tip.close();
+        inputRef.current?.focus();
       } else close('dismissed');
       return;
     }
@@ -1212,6 +1223,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
         // An Escape that cancelled an IME composition closes nothing.
         if (composing.current) return;
         if (menu) setMenu(null);
+        else if (tip.stage === 'shown') tip.close();
         else close('dismissed');
       }}
       onClick={(event) => {
@@ -1222,7 +1234,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
         if (event.clientX < r.left || event.clientX > r.right || event.clientY < r.top || event.clientY > r.bottom) close('dismissed');
       }}
     >
-      <div className="ib-sp-inrow">
+      <div className="ib-sp-inrow" ref={rowRef}>
         <Icon name="search" />
         <input
           ref={inputRef}
@@ -1239,6 +1251,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
           aria-activedescendant={hl !== null && options[hl] ? optionId(hl) : undefined}
           placeholder="Search threads, messages and files"
           aria-label="Search threads, messages and files"
+          aria-describedby={tip.stage === 'shown' ? `ib-sp-tipl-${uid}` : undefined}
           dir="auto"
           maxLength={400}
           value={q}
@@ -1261,6 +1274,22 @@ export default function SearchPalette(props: SearchPaletteProps) {
           Cancel
         </button>
       </div>
+      {tipUp && (
+        <SearchTipCard
+          phone={phone}
+          leaving={tip.stage === 'leaving'}
+          dialogRef={dialogRef}
+          rowRef={rowRef}
+          listRef={listRef}
+          onPlaced={tip.placed}
+          titleId={`ib-sp-tipt-${uid}`}
+          lineId={`ib-sp-tipl-${uid}`}
+          onOk={(keyboard) => {
+            tip.close();
+            if (keyboard) inputRef.current?.focus();
+          }}
+        />
+      )}
       {/* The filters and Clear filters on one line. A phone's filters scroll sideways, the order pinned at the line's end. */}
       <div className="ib-sp-fbar" data-search-filter-bar="">
         <div className="ib-sp-filters" ref={filtersRef}>

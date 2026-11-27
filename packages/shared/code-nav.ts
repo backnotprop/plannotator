@@ -404,6 +404,19 @@ interface RgMatchData {
 
 const PARSE_CAP = 500;
 
+/**
+ * rg prints paths relative to the search root as `./src/a.ts`, or `.\src\a.ts`
+ * on Windows. Return the repo-relative form with forward slashes, which is
+ * what the file endpoint accepts.
+ */
+export function normalizeRgPath(
+  rgPath: string,
+  platform: string = process.platform,
+): string {
+  const slashed = platform === "win32" ? rgPath.replace(/\\/g, "/") : rgPath;
+  return slashed.startsWith("./") ? slashed.slice(2) : slashed;
+}
+
 export function parseRgJsonOutput(
   stdout: string,
   symbol: string,
@@ -436,9 +449,7 @@ export function parseRgJsonOutput(
     if (parsed.type !== "match") continue;
 
     const d = parsed.data;
-    const filePath = d.path.text.startsWith("./")
-      ? d.path.text.slice(2)
-      : d.path.text;
+    const filePath = normalizeRgPath(d.path.text);
     // rg's parallel output order is arbitrary. Keep origin-file matches even
     // after the repository-wide cap, so ranking can still prefer that file.
     const target = filePath === originFilePath ? originLocations : locations;

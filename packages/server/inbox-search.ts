@@ -22,9 +22,9 @@
  * carries the search (`GET search`, contract 7.42), not the recent searches.
  */
 
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { INBOX_SEARCH_QUERY_MAX } from "@plannotator/core/inbox-search";
+import { INBOX_SEARCH_QUERY_MAX, inboxSearchQuoted } from "@plannotator/core/inbox-search";
 import { isInboxId } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { InboxError } from "@plannotator/shared/inbox/schema";
@@ -88,6 +88,30 @@ export function readRecentSearches(storeDir: string): string[] {
   } catch {
     return [];
   }
+}
+
+/**
+ * Whether a recent search holds a quote mark (the Search tip is not for someone who already searched for an exact
+ * phrase: packages/shared/inbox/search-tip.ts), asked on every settings read while the tip is not stamped. That is
+ * forever for such a person (they are never shown it) and for an Inbox whose data folder cannot be written, so the
+ * file is read again only when it changed (its inode, change time or size: every write is a new file renamed in).
+ * `read` is for a test.
+ */
+export function recentSearchesQuotedReader(storeDir: string, read: (dir: string) => string[] = readRecentSearches): () => boolean {
+  let seen: { stamp: string; quoted: boolean } | null = null;
+  return () => {
+    let stamp: string;
+    try {
+      const stat = statSync(join(storeDir, INBOX_RECENT_SEARCHES_FILE));
+      stamp = `${stat.ino}:${stat.mtimeMs}:${stat.size}`;
+    } catch {
+      // No file (or none readable): no recent search.
+      seen = null;
+      return false;
+    }
+    if (seen?.stamp !== stamp) seen = { stamp, quoted: read(storeDir).some(inboxSearchQuoted) };
+    return seen.quoted;
+  };
 }
 
 function writeRecentSearches(storeDir: string, searches: string[]): void {

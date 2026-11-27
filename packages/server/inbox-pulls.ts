@@ -86,7 +86,7 @@ import { killGitTree, runtime as gitRuntime, trackIsolatedGitGroup } from "./git
 import { REF_AUTH_HOSTS_MS, REF_FAILURE_MS, REF_RATE_LIMIT_MS, readCliHosts, refCliRunner, refErrorOf, refRunnerKill, type RefCli, type RefCommandResult, type RefRunner } from "./ref-cards";
 import { cliAnsweredPlainly, createSignedKeep } from "./inbox-pull-signed-keep";
 import { createDepartedPulls } from "./inbox-pull-departed";
-import { type ForgePullRead, forgePullState, readForgePull } from "./inbox-pull-forge";
+import { type ForgePullRead, forgePullState, readForgePull, saysNotFound } from "./inbox-pull-forge";
 import { createLastDiffs, lastDiffId, withNewerState } from "./inbox-pull-last-diff";
 import { join as joinPath } from "node:path";
 
@@ -831,6 +831,11 @@ export interface InboxPulls {
    * Null when the PR is not in the last list, has no known head, or has no such text file there. Never throws.
    */
   file(key: string, path: string, repos?: InboxPullRepo[]): Promise<InboxPullFile | null>;
+  /**
+   * `file`'s answer from memory alone: never the forge, never a list read. The file; null when the forge said there is
+   * no such text file at the PR's head; undefined when nothing kept says (the PR, its head or that path never read).
+   */
+  cachedFile(key: string, path: string): InboxPullFile | null | undefined;
   /** Whether a PR still has this commit (a force-push takes it off); null when the forge did not say. */
   hasCommit(key: string, sha: string): Promise<boolean | null>;
   /** Whether a GitLab MR has a version whose head is this commit; null when the forge did not say. */
@@ -1271,6 +1276,12 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
     const own = departed.get(key);
     if (own && lastRepos.has(inboxPullRepoKey(own.host, own.repo))) return own;
     return departedWide.get(key);
+  };
+  /** A file's text at a PR's head, with its label and its address on the forge. */
+  const headFileOf = (pull: InboxPull, sha: string, path: string, contents: string): InboxPullFile => {
+    const encoded = path.split("/").map(encodeURIComponent).join("/");
+    const url = `https://${pull.host}/${pull.repo}/${pull.platform === "gitlab" ? "-/" : ""}blob/${sha}/${encoded}`;
+    return { contents, label: inboxPullLabel(pull), platform: pull.platform, url };
   };
   /** The PR a diff, details or file read is for: one the last lists name in a repository they showed, or one that left. */
   const readable = (key: string): InboxPull | undefined => {
@@ -2002,10 +2013,14 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
           while (headFiles.size > INBOX_PULL_FILES_KEPT) headFiles.delete(headFiles.keys().next().value!);
         }
       }
-      if (contents === null) return null;
-      const encoded = path.split("/").map(encodeURIComponent).join("/");
-      const url = `https://${pull.host}/${pull.repo}/${pull.platform === "gitlab" ? "-/" : ""}blob/${sha}/${encoded}`;
-      return { contents, label: inboxPullLabel(pull), platform: pull.platform, url };
+      return contents === null ? null : headFileOf(pull, sha, path, contents);
+    },
+    cachedFile(key, path) {
+      const pull = findKnown(key) ?? departedOf(key);
+      const sha = pull ? (pull.head_sha ?? readHeads.get(key)) : null;
+      if (!pull || !sha || !splitPath(pull.repo)) return undefined;
+      const contents = headFiles.get(`${pull.host}/${pull.repo}@${sha}:${path}`);
+      return contents === undefined ? undefined : contents === null ? null : headFileOf(pull, sha, path, contents);
     },
     async hasCommit(key, sha) {
       const pull = findKnown(key) ?? departedOf(key);
@@ -2106,20 +2121,21 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         const cli: RefCli = state?.cli ?? (pull.platform === "github" ? "gh" : "glab");
         if (now() < (holdUntil.get(pull.host) ?? 0)) throw new InboxPullsError("pull_diff_failed", `${pull.host} asked to slow down. Try again in a minute.`);
         const parts = splitPath(pull.repo)!;
+        const gitlabMergeRequest = `projects/${encodeURIComponent(pull.repo)}/merge_requests/${pull.number}`;
         let forkProjects: GitlabForkProjects | null = null;
         const argsFor = (base: string): string[] => {
           if (pull.platform === "github") {
             const endpoint = scope === "layer" ? `repos/${parts.owner}/${parts.repo}/pulls/${pull.number}` : `repos/${parts.owner}/${parts.repo}/compare/${compareRef(base)}...${headRef}`;
             return ["api", "--hostname", pull.host, endpoint, "-H", "Accept: application/vnd.github.v3.diff"];
           }
-          const endpoint = scope === "layer" ? `projects/${encodeURIComponent(pull.repo)}/merge_requests/${pull.number}/raw_diffs` : gitlabCompareEndpoint(pull.repo, base, pull.head, forkProjects);
+          const endpoint = scope === "layer" ? `${gitlabMergeRequest}/raw_diffs` : gitlabCompareEndpoint(pull.repo, base, pull.head, forkProjects);
           return ["api", "--hostname", pull.host, endpoint];
         };
         // The PR as the forge has it now, one call: its head commit, read around the patch (a push between the two reads
         // leaves it unknown; a layer posts nothing), and its description.
         // `tojson`: gh colours an object answer under CLICOLOR_FORCE, whatever NO_COLOR says, and prints a string raw.
-        const pullNow = async (): Promise<{ sha: string | null; description: string | null; fork?: GitlabForkProjects | null; state: InboxPullState | null; merged_at: string | null } | null> => {
-          const endpoint = pull.platform === "github" ? `repos/${parts.owner}/${parts.repo}/pulls/${pull.number}` : `projects/${encodeURIComponent(pull.repo)}/merge_requests/${pull.number}`;
+        const pullNow = async (): Promise<{ sha: string | null; description: string | null; fork?: GitlabForkProjects | null; state: InboxPullState | null; merged_at: string | null; changes_count?: string | null } | null> => {
+          const endpoint = pull.platform === "github" ? `repos/${parts.owner}/${parts.repo}/pulls/${pull.number}` : gitlabMergeRequest;
           const read = await run(cli, ["api", "--hostname", pull.host, endpoint, ...(pull.platform === "github" ? ["--jq", INBOX_PULL_NOW_JQ] : [])]).catch(() => null);
           if (!read || read.exitCode !== 0) return null;
           try {
@@ -2128,7 +2144,9 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
             const state = forgePullState(pull.platform, answer);
             const merged_at = typeof answer.merged_at === "string" ? answer.merged_at : null;
             if (pull.platform === "github") return { sha: shaOf(answer.sha), description: descriptionOf(answer.body), state, merged_at };
-            return { sha: shaOf(answer.sha) ?? shaOf(obj(answer.diff_refs).head_sha), description: descriptionOf(answer.description), fork: gitlabForkProjects(answer), state, merged_at };
+            // GitLab's own count of the files in the merge request's latest diff, a string ("1000+" past its limit).
+            const changes_count = typeof answer.changes_count === "string" || typeof answer.changes_count === "number" ? String(answer.changes_count) : null;
+            return { sha: shaOf(answer.sha) ?? shaOf(obj(answer.diff_refs).head_sha), description: descriptionOf(answer.description), fork: gitlabForkProjects(answer), state, merged_at, changes_count };
           } catch {
             return null;
           }
@@ -2144,17 +2162,51 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
           base = bases[1]!;
           result = await diffRun(cli, argsFor(base), INBOX_PULL_DIFF_MAX_BYTES);
         }
+        // A readable merge request can still lack raw_diffs on a self-managed GitLab.
+        const paginatedGitlab = pull.platform === "gitlab" && cli === "glab" && scope === "layer" && before?.sha &&
+          result.exitCode !== 0 && !result.tooLarge &&
+          saysNotFound(result.stderr) &&
+          refErrorOf(cli, { ...result, stdout: "" }) === "refused";
+        if (paginatedGitlab) {
+          result = await diffRun(cli, ["api", "--hostname", pull.host, `${gitlabMergeRequest}/diffs?per_page=100`, "--paginate"], INBOX_PULL_DIFF_MAX_BYTES);
+        }
         if (result.tooLarge) throw new InboxPullsError("pull_diff_too_large", "This diff is too large to read here. Open it on the forge.");
         if (result.exitCode !== 0) {
-          const error = refErrorOf(cli, result);
+          const stdout = paginatedGitlab ? "" : result.stdout;
+          const error = refErrorOf(cli, { ...result, stdout });
           if (error === "rate_limited") holdUntil.set(pull.host, now() + REF_RATE_LIMIT_MS);
-          if (/too_large|maximum number of (lines|files)|diff is taking too long|\b406\b/i.test(`${result.stderr}\n${result.stdout}`)) {
+          if (/too_large|maximum number of (lines|files)|diff is taking too long|\b406\b/i.test(`${result.stderr}\n${stdout}`)) {
             throw new InboxPullsError("pull_diff_too_large", "This diff is too large to read here. Open it on the forge.");
           }
           throw new InboxPullsError("pull_diff_failed", error === "signed_out" ? `${cli} is not signed in to ${pull.host}.` : `${cli} could not read this diff. Try again, or open it on the forge.`);
         }
         let patch = result.stdout;
-        if (pull.platform === "gitlab" && compare) {
+        if (paginatedGitlab) {
+          patch = "";
+          try {
+            const pages = result.stdout.trim();
+            const entries = pages.startsWith("[") && pages.endsWith("]") ? parsePaginatedArray<GitLabDiffEntry>(pages) : [];
+            // A cached file count describes only the head that was listed with it. GitLab's own count comes with the head
+            // read just now; "1000+" means it stopped storing files. With no count at all, nothing says no page is missing.
+            const listedFiles = pull.head_sha === before?.sha ? pull.files : 0;
+            const counted = before?.changes_count?.trim() ?? "";
+            const expected = Math.max(listedFiles, /^\d+$/.test(counted) ? Number(counted) : 0);
+            // The paged diffs carry no flags before GitLab 18.4: an empty diff there may be one it held back, whatever
+            // the file's kind (a renamed file's held-back changes would show as a pure rename).
+            // Files, not entries: a page that repeats an entry cannot stand in for one that is missing.
+            const files = new Set(entries.map((entry) => `${entry.old_path}\u0000${entry.new_path}`)).size;
+            if (!counted.endsWith("+") && expected > 0 && files >= expected && entries.every((entry) =>
+              typeof entry.old_path === "string" && typeof entry.new_path === "string" && !glMayBeHeldBack(entry) &&
+              !(entry.diff.trim() === "" && entry.too_large == null && entry.collapsed == null)
+            )) patch = reconstructGitlabPatch(entries);
+          } catch {
+            // An invalid page cannot supply the layer's complete diff.
+          }
+          if (!patch) throw new InboxPullsError("pull_diff_failed", "glab did not return a complete diff. Open it on the forge.");
+          if (Buffer.byteLength(patch, "utf8") > INBOX_PULL_DIFF_MAX_BYTES) {
+            throw new InboxPullsError("pull_diff_too_large", "This diff is too large to read here. Open it on the forge.");
+          }
+        } else if (pull.platform === "gitlab" && compare) {
           try {
             const diffsOf = obj(JSON.parse(result.stdout)).diffs;
             patch = reconstructGitlabPatch((Array.isArray(diffsOf) ? diffsOf : []) as GitLabDiffEntry[]);
@@ -2165,6 +2217,8 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         const headBefore = before?.sha ?? null;
         const headAfter = headBefore ? ((await pullNow())?.sha ?? null) : null;
         const head_sha = headBefore && headBefore === headAfter ? headBefore : null;
+        // The paged read is many requests: a new diff version (the merge request's head moved) during it may mix two.
+        if (paginatedGitlab && !head_sha) throw new InboxPullsError("pull_diff_failed", "glab could not read this diff. Try again, or open it on the forge.");
         const description = before?.description ?? null;
         if (head_sha) readHeads.set(key, head_sha);
         const answer: InboxPullDiffAnswer = { key, scope, base, head, patch, description, head_sha, ...(before?.state ? { state: before.state, merged_at: before.merged_at } : {}) };
