@@ -434,8 +434,13 @@ describe("Plannotator preserves user model selections during plan transitions", 
 		await runtime.submit();
 		expect(runtime.host.model).toEqual(LUNA);
 		expect(runtime.host.thinking).toBe("high");
-		writeFileSync(join(cwd, "PLAN.md"), "- [x] Step one\n- [x] Step two\n", "utf-8");
+		// The first agent_end after approval only schedules the continuation.
 		await runtime.run("agent_end");
+		await runtime.markDone(1);
+		await runtime.markDone(2);
+		await runtime.run("agent_end");
+		const state = runtime.host.entries.filter((entry) => entry.customType === "plannotator").at(-1)?.data as { phase?: string };
+		expect(state.phase).toBe("idle");
 		expect(runtime.host.model).toEqual(LUNA);
 		expect(runtime.host.thinking).toBe("high");
 	});
