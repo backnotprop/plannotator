@@ -219,7 +219,7 @@ test.skipIf(!hasDom)("a row's tooltips wait with two hooks each and one handler;
  * Every hook a plain wide row holds (no PR, no waiting reply, relative time off): its tooltips waiting (two each),
  * its focus and menu state, its agent icon's face. Each was paid on every row a list mounts.
  */
-const PLAIN_ROW_HOOKS = 17;
+const PLAIN_ROW_HOOKS = 15;
 
 /** A reply waiting on a busy agent since `minutes` ago (approval "inbox-busy-agent-reply"). */
 const waitingReply = (minutes: number): InboxListRow['delivery'] => ({ kind: 'reply', state: 'queued', reason: 'working', send_now: false, message_id: 'msg_r', at: null, host: 'claude-code', name: null, waiting_since: new Date(Date.now() - minutes * 60_000).toISOString() }) as InboxListRow['delivery'];
@@ -236,4 +236,18 @@ test.skipIf(!hasDom)('only a row whose reply waits keeps a minute clock; a wait 
   expect(first!.querySelector('[data-undelivered]')).not.toBeNull();
   expect(first!.querySelector('[data-count-words]')?.getAttribute('data-count-words')).toBe(undeliveredLabel(new Date(Date.now() - 12.5 * 60_000).toISOString(), Date.now()));
   expect(second!.querySelector('[data-undelivered]')).toBeNull();
+});
+
+test.skipIf(!hasDom)('with relative time off a row keeps no clock; turned on after the list drew, every row says it in words and back off', () => {
+  const recent = new Date(Date.now() - 5.5 * 60_000).toISOString();
+  const el = mount(Array.from({ length: ROWS }, (_, i) => listRow(i, { created_at: recent, last_at: recent })));
+  expect(rowHooks(rowEls(el)[0]!)).toBeLessThanOrEqual(PLAIN_ROW_HOOKS);
+  expect(el.querySelectorAll('[data-relative-time]').length).toBe(0);
+  act(() => adoptSavedRows(['smallNames', 'relativeTime'], 1));
+  const relative = [...el.querySelectorAll<HTMLElement>('[data-relative-time]')];
+  expect(relative.length).toBe(ROWS);
+  // Its words for a screen reader, and the clock time in the pointer's tooltip.
+  expect(relative.every((time) => time.querySelector('.ib-sr')!.textContent === '5 minutes ago' && !!time.title)).toBe(true);
+  act(() => adoptSavedRows(['smallNames'], 2));
+  expect(el.querySelectorAll('[data-relative-time]').length).toBe(0);
 });

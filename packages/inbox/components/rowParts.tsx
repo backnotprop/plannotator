@@ -112,19 +112,10 @@ export function ListRows({ timeBy, children }: { timeBy?: ((row: InboxListRow) =
 
 /** The row's time. A thread back from a snooze shows a small clock before it until the person reads it. */
 export function RowTime({ row, relative = false }: { row: InboxListRow; relative?: boolean }) {
-  // A relative time moves on by itself: the shared minute clock renders it again (only while it is on).
-  const now = useRelativeClock(relative);
   const timeBy = useContext(RowTimeBy);
   const iso = timeBy?.(row) || rowTimeIso(row);
-  // Relative: a screen reader hears "4 minutes ago" (never "4m"), and the pointer's tooltip gives the clock time.
-  const time = relative ? (
-    <span className="ib-trel" data-relative-time="" title={whenTime(iso)}>
-      <span aria-hidden="true">{relativeTime(iso, now)}</span>
-      <span className="ib-sr">{relativeWords(iso, now)}</span>
-    </span>
-  ) : (
-    shortTime(iso)
-  );
+  // Relative time off (the default): no clock at all in the row, on any of the ~2,200 rows a large Inbox mounts.
+  const time = relative ? <RelativeTime iso={iso} /> : shortTime(iso);
   return (
     <>
       {row.snooze_back && (
@@ -134,6 +125,18 @@ export function RowTime({ row, relative = false }: { row: InboxListRow; relative
       )}
       <TimeWithTick delivery={row.delivery} time={time} />
     </>
+  );
+}
+
+/** A relative time: it moves on by itself, the shared minute clock renders it again. */
+function RelativeTime({ iso }: { iso: string }) {
+  const now = useRelativeClock(true);
+  // A screen reader hears "4 minutes ago" (never "4m"), and the pointer's tooltip gives the clock time.
+  return (
+    <span className="ib-trel" data-relative-time="" title={whenTime(iso)}>
+      <span aria-hidden="true">{relativeTime(iso, now)}</span>
+      <span className="ib-sr">{relativeWords(iso, now)}</span>
+    </span>
   );
 }
 
