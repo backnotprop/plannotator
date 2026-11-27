@@ -32,9 +32,28 @@ test('a 200 whose body broke off fails the read; it is never an empty answer', a
   await expect(readJson(cutAnswer())).rejects.toThrow('aborted');
 });
 
-test('an empty or unparsable OK body still reads as {} (a 204, a bare 200)', async () => {
+test('an empty OK body still reads as {} (a 204, a bare 200)', async () => {
   expect(await readJson(new Response(null, { status: 204 }))).toEqual({});
   expect(await readJson(new Response('', { status: 200 }))).toEqual({});
+});
+
+/** As WebKit (Safari, every iOS browser) answers: `json()` on a bad body rejects with a DOMException named SyntaxError. */
+class WebKitResponse extends Response {
+  override json(): Promise<never> {
+    return Promise.reject(new DOMException('The string did not match the expected pattern.', 'SyntaxError'));
+  }
+}
+
+test('a whole OK body that is not JSON reads as {}, whatever error the browser would throw parsing it', async () => {
+  expect(await readJson(new Response('<html>a proxy page</html>', { status: 200 }))).toEqual({});
+  expect(await readJson(new WebKitResponse('<html>a proxy page</html>', { status: 200 }))).toEqual({});
+  expect(await readJson(new WebKitResponse('', { status: 200 }))).toEqual({});
+});
+
+test('a refusal whose body broke off is still the refusal, with its status', async () => {
+  const cut = cutAnswer();
+  const refused = new Response(cut.body, { status: 503 });
+  await expect(readJson(refused)).rejects.toMatchObject({ name: 'InboxApiError', status: 503 });
 });
 
 test('the agents read with its body cut fails, so the dialog never checks a model without its list', async () => {

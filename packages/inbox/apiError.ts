@@ -21,15 +21,25 @@ export class InboxApiError extends Error {
 }
 
 /**
- * An answer's JSON. An empty or unparsable body reads as `{}` (a 204, a refusal with no JSON). A body that could not
- * be read at all (the connection cut or aborted after the headers: the page leaving, the Inbox restarting) is no
- * answer: an OK one throws, as the fetch would have before its headers, never `{}` passed off as the model.
+ * An answer's JSON. A whole body that is empty or not JSON reads as `{}` (a 204, a refusal with no JSON). A body that
+ * could not be read at all (the connection cut or aborted after the headers: the page leaving, the Inbox restarting)
+ * is no answer: an OK one throws, as the fetch would have before its headers, never `{}` passed off as the model.
+ * Told apart by where it fails (reading the body, or parsing what was read), not by the error's type, which differs
+ * between browsers (WebKit's `json()` rejects a bad body with a DOMException, not a SyntaxError).
  */
 export async function readJson<T>(response: Response): Promise<T> {
-  const body = (await response.json().catch((cause: unknown) => {
-    if (response.ok && !(cause instanceof SyntaxError)) throw cause;
-    return {};
-  })) as Record<string, unknown>;
+  let text = '';
+  try {
+    text = await response.text();
+  } catch (cause) {
+    if (response.ok) throw cause;
+  }
+  let body: Record<string, unknown> = {};
+  try {
+    if (text) body = JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    body = {};
+  }
   if (!response.ok) {
     throw new InboxApiError(
       response.status,

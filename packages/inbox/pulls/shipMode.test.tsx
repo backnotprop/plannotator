@@ -11,7 +11,7 @@
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt. The log's one read is a stubbed fetch,
  * put back after each test.
  */
-import { afterAll, afterEach, beforeEach, expect, setSystemTime, test } from 'bun:test';
+import { afterEach, beforeEach, expect, setSystemTime, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { inboxPullStacks, type InboxPull, type InboxPullsAnswer, type InboxReviewRow, type InboxReviewsAnswer } from '@plannotator/core/inbox-types';
@@ -24,13 +24,12 @@ const hasDom = typeof document !== 'undefined';
 const { ReviewsList, ReviewsMenu } = (hasDom ? await import('./ReviewsList') : {}) as typeof import('./ReviewsList');
 const { ShipLogBody } = (hasDom ? await import('./ShipLog') : {}) as typeof import('./ShipLog');
 
-// The clock is pinned to a midday, before any time below is made: a merge "5 minutes ago" is today's ("Merged 2:47 PM")
-// whenever the file runs. On the real clock, in the first minutes after midnight it was yesterday's ("Merged Nov 26").
-setSystemTime(new Date(2026, 10, 24, 12, 0, 0));
-afterAll(() => setSystemTime());
-
+// Every time here is made from a fixed midday, and each test runs with the clock pinned there: a merge "5 minutes ago"
+// is today's ("Merged 2:47 PM") whenever the file runs. On the real clock, in the first minutes after midnight it was
+// yesterday's ("Merged Nov 26").
+const NOW = new Date(2026, 10, 24, 12, 0, 0).getTime();
 const HOUR = 3_600_000;
-const ago = (ms: number) => new Date(Date.now() - ms).toISOString();
+const ago = (ms: number) => new Date(NOW - ms).toISOString();
 
 function pull(number: number, fields: Partial<InboxPull> = {}): InboxPull {
   const repo = 'harbor/fern-api';
@@ -114,10 +113,15 @@ function ship(key: string, fields: Partial<InboxShipView> = {}): InboxShipView {
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 const realFetch = globalThis.fetch;
-beforeEach(() => window.localStorage?.clear());
+beforeEach(() => {
+  if (!hasDom) return;
+  setSystemTime(NOW);
+  window.localStorage?.clear();
+});
 afterEach(() => {
   globalThis.fetch = realFetch;
   if (!hasDom) return;
+  setSystemTime();
   act(() => root?.unmount());
   host?.remove();
   root = null;
