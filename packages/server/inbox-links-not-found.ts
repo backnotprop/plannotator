@@ -14,7 +14,7 @@ import { homedir } from "node:os";
 import { checkInboxReadableFile } from "@plannotator/shared/inbox/attachments";
 import { blankCode } from "@plannotator/shared/inbox/message-images";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
-import { inboxMessageCandidates, inboxPullPaths } from "./inbox-open-in";
+import { inboxMessageCandidates, inboxPullPaths } from "./inbox-message-places";
 import type { InboxPullFile } from "./inbox-pulls";
 import { earlierFolderPaths, linkFallbacks, sameNamedAttachment } from "./inbox-link-fallback";
 

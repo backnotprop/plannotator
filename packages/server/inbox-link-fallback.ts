@@ -19,7 +19,7 @@
 import { join, posix } from "node:path";
 import { isLinkedWorktree } from "@plannotator/shared/linked-worktree";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
-import { checkoutOf } from "./inbox-open-in";
+import { checkoutOf } from "./inbox-message-places";
 
 type ThreadMessage = NonNullable<ReturnType<InboxStore["thread"]>>["messages"][number];
 
