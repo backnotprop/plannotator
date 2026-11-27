@@ -149,6 +149,8 @@ test.skipIf(!hasDom)("the rows' agent icons watch the agents' Rex marks once for
 
 type Fiber = { tag: number; elementType: unknown; memoizedState: { next: unknown } | null; child: Fiber | null; sibling: Fiber | null; return: Fiber | null };
 const fiberOf = (el: Element) => (el as unknown as Record<string, Fiber>)[Object.keys(el).find((k) => k.startsWith('__reactFiber$'))!]!;
+/** The props React holds for an element (its handlers). */
+const reactProps = (node: HTMLElement) => (node as unknown as Record<string, Record<string, unknown>>)[Object.keys(node).find((k) => k.startsWith('__reactProps$'))!]!;
 const isComponent = (f: Fiber) => f.tag === 0 || f.tag === 11 || f.tag === 15;
 const hooksOf = (f: Fiber) => {
   let n = 0;
@@ -201,10 +203,7 @@ test.skipIf(!hasDom)("a row's tooltips wait with two hooks each and one handler;
   // Each waiting tooltip's own component holds two hooks (it held six, with nine closures and an effect).
   expect(waiting.map(ownerHooks)).toEqual(waiting.map(() => 2));
   // And one handler for the seven events it waits on.
-  const handlers = (node: HTMLElement) => {
-    const props = (node as unknown as Record<string, Record<string, unknown>>)[Object.keys(node).find((k) => k.startsWith('__reactProps$'))!]!;
-    return new Set(['onPointerEnter', 'onPointerOver', 'onMouseOver', 'onMouseMove', 'onPointerLeave', 'onPointerDown', 'onFocus'].map((name) => props[name])).size;
-  };
+  const handlers = (node: HTMLElement) => new Set(['onPointerEnter', 'onPointerOver', 'onMouseOver', 'onMouseMove', 'onPointerLeave', 'onPointerDown', 'onFocus'].map((name) => reactProps(node)[name])).size;
   expect(waiting.map(handlers)).toEqual(waiting.map(() => 1));
   // The session gets its label after the list drew: its tiles' tooltip, first hovered now, says it.
   await act(async () => setSessionLabels({ ses_1: 'Docs pass' }));
@@ -269,4 +268,22 @@ test.skipIf(!hasDom)("the rows' agent icons hear the agents' faces once for the 
   // Picked back to its own mark: every one of its rows follows.
   act(() => void hearAgentFacesEvent({ faces: {}, rev: 2 }));
   expect(rowEls(el).filter((row) => faceOf(row) !== null).length).toBe(0);
+});
+
+test.skipIf(!hasDom)('a row with no badge makes no keyboard-focus handlers; one that starts holding up work after the list drew opens its card on keyboard focus', async () => {
+  const el = mount([listRow(0), listRow(1)]);
+  const handlers = (row: HTMLElement) => ['onFocus', 'onBlur', 'onKeyDown'].filter((name) => typeof reactProps(row)[name] === 'function');
+  expect(handlers(rowEls(el)[1]!)).toEqual([]);
+  // The next list read: the second thread now holds up work (its card, A, opens while the row has keyboard focus).
+  draw([listRow(0), listRow(1, { section: 'holding', thread_name: 'Fix login redirect', questions: { open: 1, picked: 0, stopped: false, holds_up: ['the install page'], prompt: null }, waits: [{ message_id: 'thr_1', key: 'q-1', position: 0, prompt: 'Which page?', stopped: null, holds_up: ['the install page'] }] } as Partial<InboxListRow>)]);
+  const holding = rowEls(el).find((row) => row.dataset.threadId === 'thr_1')!;
+  expect(handlers(holding)).toEqual(['onFocus', 'onBlur', 'onKeyDown']);
+  // happy-dom matches :focus-visible for every focus, so this is a keyboard focus.
+  act(() => holding.focus());
+  await settle(50);
+  const card = () => [...document.querySelectorAll<HTMLElement>('[data-wait-card]')].find((c) => !c.closest('[data-pn-tooltip]')?.hasAttribute('data-closed'));
+  expect(card()?.dataset.waitCard).toBe('hold');
+  act(() => holding.blur());
+  await settle();
+  expect(card()).toBeUndefined();
 });
