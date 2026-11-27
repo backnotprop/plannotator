@@ -17,7 +17,8 @@
  *   ASCII takes a fast path that gives the same tokens. A token under 2
  *   characters is dropped unless it is CJK.
  * - A query is at most 200 characters and 8 terms; every term must match,
- *   the last one as a prefix.
+ *   the last one as a prefix. Words in double quotes are an exact phrase
+ *   (`parseInboxSearchQuery`).
  */
 
 import type { InboxSectionId } from './inbox-types';
@@ -182,6 +183,169 @@ export function inboxSearchTerms(query: string): string[] {
   return out;
 }
 
+/** The quote marks that open or close a phrase: the straight one, and the curly ones a phone types. */
+const QUOTE_MARKS = /["“”]/;
+
+/**
+ * A query as the index reads it. Without a quote mark it is `inboxSearchTerms`
+ * with the last term as a prefix, exactly as before quotes. Words in double
+ * quotes (straight or curly) are a phrase: its tokens next to each other, in
+ * order, in one field. A quoted word is that whole word. A quote not yet
+ * closed is a phrase of what is typed so far, its last token the start of a
+ * word (so results do not vanish while the person types). Empty quotes are
+ * ignored. Only the query's very last token may be a prefix: a word after
+ * every phrase, or the last token of a phrase left open.
+ */
+export interface InboxSearchParsedQuery {
+  /** What the index looks up: distinct tokens in order, at most 8; with `prefixLast`, the last is a prefix (it may repeat an earlier term). */
+  terms: string[];
+  prefixLast: boolean;
+  /** Each phrase of two tokens or more, as the index of its term at each position. */
+  phrases: number[][];
+  /**
+   * What an answer's `terms` carries for the marks: the words, and each phrase
+   * as `"tok tok"` (closed) or `"tok tok` (open, its last token a prefix), in
+   * the query's order. `inboxSearchRanges` reads these. The same as `terms`
+   * for a query with no quote mark.
+   */
+  marks: string[];
+  quoted: boolean;
+}
+
+export function parseInboxSearchQuery(query: string): InboxSearchParsedQuery {
+  const q = query.trim().slice(0, INBOX_SEARCH_QUERY_MAX);
+  if (!QUOTE_MARKS.test(q)) {
+    const terms = inboxSearchTerms(q);
+    return { terms, prefixLast: true, phrases: [], marks: terms, quoted: false };
+  }
+  // The text between quote marks, in turn outside and inside a phrase.
+  const parts: { tokens: string[]; quoted: boolean; closed: boolean }[] = [];
+  let inside = false;
+  let from = 0;
+  for (let i = 0; i <= q.length; i++) {
+    const end = i === q.length;
+    if (!end && !QUOTE_MARKS.test(q[i]!)) continue;
+    const tokens = tokenizeInboxSearchText(q.slice(from, i)).map((t) => t.token);
+    if (tokens.length > 0) parts.push({ tokens, quoted: inside, closed: !end });
+    if (!end) inside = !inside;
+    from = i + 1;
+  }
+  const lastPart = parts[parts.length - 1];
+  const prefixOn = lastPart !== undefined && (!lastPart.quoted || !lastPart.closed);
+  const terms: string[] = [];
+  const termAt = new Map<string, number>();
+  const phrases: number[][] = [];
+  const marks: string[] = [];
+  let prefixLast = false;
+  let full = false;
+  for (let p = 0; p < parts.length && !full; p++) {
+    const part = parts[p]!;
+    const at: number[] = [];
+    const kept: string[] = [];
+    let open = false;
+    for (let k = 0; k < part.tokens.length; k++) {
+      const token = part.tokens[k]!;
+      const prefix = prefixOn && p === parts.length - 1 && k === part.tokens.length - 1;
+      // The prefix has a term of its own, even when the same word is also wanted whole.
+      const key = prefix ? `${token}*` : token;
+      let index = termAt.get(key);
+      if (index === undefined) {
+        if (terms.length >= INBOX_SEARCH_TERMS_MAX) {
+          full = true;
+          break;
+        }
+        index = terms.length;
+        terms.push(token);
+        termAt.set(key, index);
+      }
+      if (prefix) {
+        prefixLast = true;
+        open = part.quoted;
+      }
+      at.push(index);
+      kept.push(token);
+      if (!part.quoted) marks.push(token);
+    }
+    if (!part.quoted || kept.length === 0) continue;
+    if (at.length >= 2) phrases.push(at);
+    marks.push(`"${kept.join(" ")}${open ? "" : '"'}`);
+  }
+  return { terms, prefixLast, phrases, marks, quoted: true };
+}
+
+/** A phrase as `marks` writes it: its tokens, and whether its last token is a prefix (no closing quote). */
+export function inboxSearchPhraseOf(mark: string): { tokens: string[]; open: boolean } | null {
+  if (!mark.startsWith('"')) return null;
+  const open = mark.length < 2 || !mark.endsWith('"');
+  const tokens = mark.slice(1, open ? undefined : -1).split(" ").filter(Boolean);
+  return tokens.length > 0 ? { tokens, open } : null;
+}
+
+/** Whether the phrase's tokens start at `at` in `tokens`; the token it ends on, or -1. */
+function phraseEndsAt(tokens: readonly InboxSearchToken[], at: number, phrase: { tokens: readonly string[]; open: boolean }): number {
+  const n = phrase.tokens.length;
+  if (at + n > tokens.length) return -1;
+  for (let k = 0; k < n; k++) {
+    const token = tokens[at + k]!.token;
+    const want = phrase.tokens[k]!;
+    if (token === want || (k === n - 1 && phrase.open && token.startsWith(want))) continue;
+    return -1;
+  }
+  return at + n - 1;
+}
+
+/** The ranges for marks holding a phrase (`parseInboxSearchQuery`'s `marks`): each phrase as one run where it occurs, the words as before. */
+function quotedRanges(text: string, marks: readonly string[], prefixLast: boolean, prefixAll: boolean): [number, number][] {
+  const words: string[] = [];
+  const phrases: { tokens: string[]; open: boolean }[] = [];
+  for (const mark of marks) {
+    const phrase = inboxSearchPhraseOf(mark);
+    if (phrase) phrases.push(phrase);
+    else if (!mark.startsWith('"')) words.push(mark);
+  }
+  const lastMark = marks[marks.length - 1]!;
+  const lastWord = prefixLast && !lastMark.startsWith('"') ? lastMark : null;
+  const exact = new Set(words);
+  const tokens = tokenizeInboxSearchText(text);
+  const found: [number, number][] = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i]!;
+    if (exact.has(t.token)) found.push([t.start, t.end]);
+    else {
+      const prefix = prefixAll ? words.find((word) => t.token.startsWith(word)) : lastWord !== null && t.token.startsWith(lastWord) ? lastWord : undefined;
+      if (prefix) found.push([t.start, prefixEnd(text, t.start, t.end, prefix.length)]);
+    }
+    for (const phrase of phrases) {
+      const last = phraseEndsAt(tokens, i, phrase);
+      if (last < 0) continue;
+      const end = tokens[last]!;
+      const want = phrase.tokens[phrase.tokens.length - 1]!;
+      found.push([t.start, end.token === want ? end.end : prefixEnd(text, end.start, end.end, want.length)]);
+    }
+  }
+  found.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const out: [number, number][] = [];
+  for (const range of found) {
+    const prev = out[out.length - 1];
+    if (prev && range[0] < prev[1]) prev[1] = Math.max(prev[1], range[1]);
+    else out.push([range[0], range[1]]);
+  }
+  return out;
+}
+
+/** How many of a query's marks (`parseInboxSearchQuery`'s `marks`: words and phrases) occur in the text, the last word as a prefix. */
+export function inboxSearchMarksFound(text: string, marks: readonly string[]): number {
+  const tokens = tokenizeInboxSearchText(text);
+  let count = 0;
+  marks.forEach((mark, i) => {
+    const phrase = inboxSearchPhraseOf(mark);
+    if (phrase) {
+      if (tokens.some((_, at) => phraseEndsAt(tokens, at, phrase) >= 0)) count += 1;
+    } else if (!mark.startsWith('"') && tokens.some((t) => t.token === mark || (i === marks.length - 1 && t.token.startsWith(mark)))) count += 1;
+  });
+  return count;
+}
+
 /**
  * Where in an original token a folded prefix of `length` characters ends: the
  * smallest original end whose folded form is at least that long.
@@ -201,12 +365,15 @@ function prefixEnd(text: string, start: number, end: number, length: number): nu
 /**
  * The ranges ([start, end), original offsets) where the terms occur in a
  * text: a token equal to a term, or (`prefixLast`, the default) one that
- * starts with the last term, which then marks only the typed part. Sorted,
+ * starts with the last term, which then marks only the typed part. A term
+ * that starts with a quote mark is a phrase (`parseInboxSearchQuery`'s
+ * `marks`), marked as one run where its tokens stand together. Sorted,
  * never overlapping.
  */
 export function inboxSearchRanges(text: string, terms: readonly string[], options: { prefixLast?: boolean; prefixAll?: boolean } = {}): [number, number][] {
   if (!text || terms.length === 0) return [];
   const prefixLast = options.prefixLast ?? true;
+  if (terms.some((term) => term.startsWith('"'))) return quotedRanges(text, terms, prefixLast, options.prefixAll ?? false);
   const last = terms[terms.length - 1]!;
   const exact = new Set(terms);
   const out: [number, number][] = [];

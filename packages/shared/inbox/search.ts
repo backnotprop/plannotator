@@ -22,7 +22,10 @@
  * Text rules (normalization, tokens, ranges, snippets) are
  * @plannotator/core/inbox-search, which the window shares.
  *
- * A query's terms must all match, the last one as a prefix. Ranking inside a
+ * A query's terms must all match, the last one as a prefix. Words in double
+ * quotes must stand together, in order, in one field (`parseInboxSearchQuery`):
+ * the terms are intersected first, then each candidate's token sequence is
+ * checked for the phrase. Ranking inside a
  * group: the match tier (the terms as a phrase, then every term as a whole
  * word, then the last as a prefix; inside a tier a match in title fields
  * first), then open before archived, then the project the person searches
@@ -30,9 +33,11 @@
  */
 
 import {
+  inboxSearchMarksFound,
+  inboxSearchPhraseOf,
   inboxSearchRanges,
   inboxSearchSnippet,
-  inboxSearchTerms,
+  parseInboxSearchQuery,
   scanInboxSearchTokens,
   tokenizeInboxSearchText,
   INBOX_SEARCH_BROWSE_LIMIT,
@@ -345,6 +350,8 @@ export class InboxSearchIndex {
   /** Ids below this carry their `BUCKET_FLAG`. */
   private termFlagged = 0;
   private seq = new Bytes(4096);
+  /** Each token's term bits in one document, for a quoted phrase (`holdsPhrases`). */
+  private tokenMasks = new Uint16Array(0);
 
   constructor(store: InboxStore, options: InboxSearchIndexOptions = {}) {
     this.store = store;
@@ -773,9 +780,11 @@ export class InboxSearchIndex {
    * each occurrence; a last term that may start an id (`canPrefixId`, at least
    * 7 characters with a letter) also matches ids that start with it, compared
    * with the first 12 characters kept beside each id, and when it is longer
-   * than 12, the rest is read from those documents' text.
+   * than 12, the rest is read from those documents' text. Without
+   * `prefixLast` the last term is a whole word too; each of `phrases` (term
+   * indexes, position by position) must stand in one field of the document.
    */
-  private match(terms: readonly string[]): { doc: number; tier: number; title: boolean }[] {
+  private match(terms: readonly string[], prefixLast = true, phrases: readonly number[][] = []): { doc: number; tier: number; title: boolean }[] {
     const n = terms.length;
     const vocab = this.vocab;
     const exactIds: number[] = [];
@@ -797,18 +806,18 @@ export class InboxSearchIndex {
     const lastBit = 1 << (n - 1);
     const lastIdLike = isIdLikeToken(last);
     const lastExact = lastIdLike ? -1 : vocab.idOf(last);
-    // The words the last term starts, then the buckets that may hold it as an id.
-    const prefix = vocab.prefixIds(last);
+    // The words the last term starts (only itself when it is a whole word), then the buckets that may hold it as an id.
+    const prefix = prefixLast ? vocab.prefixIds(last) : lastExact >= 0 ? [lastExact] : [];
     const sources = [...prefix];
     if (lastIdLike) {
-      const spec = this.wholeIdTerm(last, lastBit, true);
+      const spec = this.wholeIdTerm(last, lastBit, prefixLast);
       if (spec) {
         sources.push(spec.bucket);
         ids.whole.push(spec);
       }
     }
     let prefixNeedsText = false;
-    if (canPrefixId(last)) {
+    if (prefixLast && canPrefixId(last)) {
       const bucket = vocab.prefixBucketOf(fnvString(last.slice(0, ID_PREFIX_LENGTH)));
       if (bucket >= 0) {
         // An id-like last term with a letter is already there: its whole value and its starts share one bucket.
@@ -883,8 +892,11 @@ export class InboxSearchIndex {
 
       const all = (1 << n) - 1;
       const out: { doc: number; tier: number; title: boolean }[] = [];
+      // One phrase of every term in order (`"file viewer"`): the scan's own phrase tier says it; else each phrase's bits.
+      const wholePhrase = phrases.length === 1 && phrases[0]!.length === n && phrases[0]!.every((term, k) => term === k);
+      const phraseBits = wholePhrase ? [] : phrases.map((at) => Uint16Array.from(at, (term) => 1 << term));
       let exactEpoch = -1;
-      if (n === 1 && !withIds && lastExact >= 0) {
+      if (n === 1 && !withIds && phrases.length === 0 && lastExact >= 0) {
         // One word: whole when the exact token is in the document.
         exactEpoch = this.nextEpoch();
         const list = this.postingsOf(lastExact);
@@ -893,13 +905,14 @@ export class InboxSearchIndex {
       for (let c = 0; c < candidates.length; c++) {
         const d = candidates[c]!;
         const doc = this.docs[d]!;
-        if (n === 1 && !withIds) {
+        if (n === 1 && !withIds && phrases.length === 0) {
           // One word: every candidate holds it, and the title needs only the leading tokens.
           out.push({ doc: d, tier: exactEpoch >= 0 && this.mark[d] === exactEpoch ? 2 : 1, title: scanTitle(doc.tokens, doc.titleLen, termOf) });
           continue;
         }
         const found = scanDocument(doc.tokens, doc.titleLen, termOf, lastExact, lastBit, all, withIds ? ids : null);
         if (found < 0) continue;
+        if (phrases.length > 0 && !(wholePhrase ? (found & 3) === 3 : this.holdsPhrases(doc, termOf, withIds ? ids : null, phraseBits))) continue;
         // The last term only as the start of an id, longer than the 12 characters kept: the text decides.
         if ((found & 8) !== 0 && prefixNeedsText && !this.textHasToken(doc, last, false)) continue;
         let tier = found & 3;
@@ -925,6 +938,24 @@ export class InboxSearchIndex {
     } finally {
       for (const id of touched) termOf[id] = 0;
     }
+  }
+
+  /** Whether every phrase (each position's term bit) stands somewhere in the document's tokens; a field separator breaks one. */
+  private holdsPhrases(doc: Doc, termOf: Uint16Array, ids: IdQuery | null, phrases: readonly Uint16Array[]): boolean {
+    if (this.tokenMasks.length < doc.count) this.tokenMasks = new Uint16Array(Math.max(doc.count, this.tokenMasks.length * 2, 1024));
+    const masks = this.tokenMasks;
+    const count = tokenMasksOf(doc.tokens, termOf, ids, masks);
+    for (const phrase of phrases) {
+      const n = phrase.length;
+      let found = false;
+      for (let at = 0; at + n <= count && !found; at++) {
+        let k = 0;
+        while (k < n && (masks[at + k]! & phrase[k]!) !== 0) k++;
+        found = k === n;
+      }
+      if (!found) return false;
+    }
+    return true;
   }
 
   /**
@@ -974,12 +1005,15 @@ export class InboxSearchIndex {
     const started = this.now();
     this.flush();
     const q = query.q.trim();
-    const terms = inboxSearchTerms(q);
+    // Without a quote mark: the terms as always, the last a prefix, and `marks` the same array.
+    const parsed = parseInboxSearchQuery(q);
+    const terms = parsed.terms;
     const tags = query.tags?.length ? new Set(query.tags) : null;
     const filtered = Boolean(query.project || query.status || query.from || tags);
     // The threads in any picked tag, read once per answer.
     const tagged = tags ? new Set([...this.store.allThreadTags()].filter(([, ids]) => ids.some((id) => tags.has(id))).map(([thread]) => thread)) : null;
-    const base = { q, terms, indexing: false, threads: this.threadCount() };
+    // The answer's `terms` are the marks: a phrase as one entry (`"file viewer"`), so every highlight marks it as one run.
+    const base = { q, terms: parsed.marks, indexing: false, threads: this.threadCount() };
     // Every folder, each read as the project it shows under: a combined project's hits name the group.
     const labels = new Map(this.store.allProjects().map((project) => [project.id, { id: this.store.canonicalProjectId(project.id), name: project.name }]));
     if (terms.length === 0 && !filtered) {
@@ -1059,7 +1093,7 @@ export class InboxSearchIndex {
         }
         return projectLatest.get(doc.ref) ?? doc.at;
       };
-      for (const hit of this.match(terms)) {
+      for (const hit of this.match(terms, parsed.prefixLast, parsed.phrases)) {
         const doc = this.docs[hit.doc]!;
         const admitted = admit(doc);
         if (!admitted) continue;
@@ -1083,7 +1117,7 @@ export class InboxSearchIndex {
       const rows: InboxSearchRow[] = [];
       const ranks: number[] = [];
       for (const { doc, score } of topOf(list, offset + limit).slice(offset, offset + limit)) {
-        const row = this.row(this.docs[doc]!, terms, labels);
+        const row = this.row(this.docs[doc]!, parsed.marks, labels, parsed.quoted ? terms : null);
         if (!row) continue;
         rows.push({ ...row, score });
         ranks.push(score);
@@ -1124,7 +1158,7 @@ export class InboxSearchIndex {
   }
 
   /** A result row as the window draws it, with marks only in the fields that matched. */
-  private row(doc: Doc, terms: readonly string[], labels: Map<string, InboxSearchProjectRef>): InboxSearchRow | null {
+  private row(doc: Doc, terms: readonly string[], labels: Map<string, InboxSearchProjectRef>, quotedTerms: readonly string[] | null = null): InboxSearchRow | null {
     const project = labels.get(doc.projectId) ?? { id: doc.projectId, name: "" };
     const facts = doc.threadId ? this.factsOf(doc.threadId) : null;
     const where = { project, section: facts?.section ?? null, archived: facts?.archived ?? false };
@@ -1137,7 +1171,7 @@ export class InboxSearchIndex {
       case "message": {
         const message = this.store.message(doc.ref);
         if (!message || !facts) return null;
-        const best = this.bestMessageText(message, terms);
+        const best = this.bestMessageText(message, terms, quotedTerms);
         return {
           type: "message",
           id: message.id,
@@ -1200,15 +1234,18 @@ export class InboxSearchIndex {
   /**
    * The text a message row shows: the field holding every term (the body,
    * else a question's prompt, its prompt with a choice or the answer, its
-   * context), else the field holding the most of them.
+   * context), else the field holding the most of them. For a quoted query
+   * (`quotedTerms`: the index's terms; `terms` are then the marks), a phrase
+   * counts where its words stand together.
    */
-  private bestMessageText(message: InboxMessage, terms: readonly string[]): { text: string; question: { key: string; replaced: boolean } | null } {
+  private bestMessageText(message: InboxMessage, terms: readonly string[], quotedTerms: readonly string[] | null = null): { text: string; question: { key: string; replaced: boolean } | null } {
     const candidates: { text: string; question: { key: string; replaced: boolean } | null }[] = [];
+    const near = (body: string) => (quotedTerms ? nearFirstHit(body, quotedTerms, firstPhraseOf(terms)) : nearFirstHit(body, terms));
     if (message.author.kind === "person") {
       // A Re-ask note's body is the Inbox's words, not the person's: nothing to draw a row from.
-      if ((message.reask?.length ?? 0) === 0) candidates.push({ text: replyWordsText(nearFirstHit(withoutInboxSkillsBlock(message.body), terms)), question: null });
+      if ((message.reask?.length ?? 0) === 0) candidates.push({ text: replyWordsText(near(withoutInboxSkillsBlock(message.body))), question: null });
     } else {
-      candidates.push({ text: inboxSearchBodyText(nearFirstHit(message.body, terms)), question: null });
+      candidates.push({ text: inboxSearchBodyText(near(message.body)), question: null });
       for (const q of this.store.questionsOf(message.id)) {
         const ref = { key: q.key, replaced: q.state === "superseded" };
         const answer = answerText(q.answer);
@@ -1223,6 +1260,15 @@ export class InboxSearchIndex {
     let bestCount = -1;
     for (const candidate of candidates) {
       if (!candidate.text) continue;
+      if (quotedTerms) {
+        const found = inboxSearchMarksFound(candidate.text, terms);
+        if (found === terms.length) return candidate;
+        if (found > bestCount) {
+          best = candidate;
+          bestCount = found;
+        }
+        continue;
+      }
       const tokens = new Set(tokenizeInboxSearchText(candidate.text).map((t) => t.token));
       let count = 0;
       terms.forEach((term, i) => {
@@ -1425,6 +1471,33 @@ function scanDocument(bytes: Uint8Array, titleLen: number, termOf: Uint16Array, 
   return (phrase ? 3 : whole ? 2 : 1) | (seenTitle === all ? 4 : 0) | (!lastOther && lastAsIdPrefix ? 8 : 0) | (hashOnly << 8);
 }
 
+/** Each token's term bits (0 for a field separator or a word no term matches) into `out`; returns how many tokens. */
+function tokenMasksOf(bytes: Uint8Array, termOf: Uint16Array, ids: IdQuery | null, out: Uint16Array): number {
+  const length = bytes.length;
+  let p = 0;
+  let t = 0;
+  while (p < length) {
+    let id = bytes[p++]!;
+    if (id & 0x80) {
+      id &= 0x7f;
+      let shift = 7;
+      let b: number;
+      do {
+        b = bytes[p++]!;
+        id |= (b & 0x7f) << shift;
+        shift += 7;
+      } while (b & 0x80);
+    }
+    let m = termOf[id]!;
+    if (m >= BUCKET_FLAG) {
+      p = readIdTail(bytes, p, id, ids);
+      m = tail.bits;
+    }
+    out[t++] = m;
+  }
+  return t;
+}
+
 /**
  * An ASCII term as a token in text, case-insensitive: a whole token
  * (`whole`), else a token's start. Tokens end at anything but an ASCII letter
@@ -1448,19 +1521,34 @@ const ROW_TEXT_WINDOW_SIDE = 4096;
  * in ways a case-insensitive search cannot), or when no term is found as
  * written.
  */
-function nearFirstHit(body: string, terms: readonly string[]): string {
+function nearFirstHit(body: string, terms: readonly string[], phrase: { tokens: string[]; open: boolean } | null = null): string {
   if (body.length <= ROW_TEXT_WINDOW_FROM) return body;
   let first = -1;
-  for (let i = 0; i < terms.length; i++) {
-    const term = terms[i]!;
-    if (!/^[\x20-\x7e]+$/.test(term)) return body;
-    const at = body.search(tokenPattern(term, i < terms.length - 1));
-    if (at >= 0 && (first < 0 || at < first)) first = at;
+  // A quoted phrase: where its words first stand together, so the row shows the phrase, not an earlier lone word.
+  if (phrase && phrase.tokens.every((token) => /^[a-z0-9]+$/.test(token))) {
+    first = body.search(new RegExp(`(?<![A-Za-z0-9])${phrase.tokens.join("[^A-Za-z0-9]+")}${phrase.open ? "" : "(?![A-Za-z0-9])"}`, "i"));
+  }
+  if (first < 0) {
+    for (let i = 0; i < terms.length; i++) {
+      const term = terms[i]!;
+      if (!/^[\x20-\x7e]+$/.test(term)) return body;
+      const at = body.search(tokenPattern(term, i < terms.length - 1));
+      if (at >= 0 && (first < 0 || at < first)) first = at;
+    }
   }
   if (first < 0) return body;
   const start = first <= ROW_TEXT_WINDOW_SIDE ? 0 : body.lastIndexOf("\n", first - ROW_TEXT_WINDOW_SIDE) + 1;
   const end = body.indexOf("\n", first + ROW_TEXT_WINDOW_SIDE);
   return body.slice(start, end < 0 ? body.length : end);
+}
+
+/** The first phrase of two words or more in a quoted query's marks (`"file viewer"`), or null. */
+function firstPhraseOf(marks: readonly string[]): { tokens: string[]; open: boolean } | null {
+  for (const mark of marks) {
+    const phrase = inboxSearchPhraseOf(mark);
+    if (phrase && phrase.tokens.length >= 2) return phrase;
+  }
+  return null;
 }
 
 /** The best `k` hits, best first (ties: the older document first, so the order is total). A partial selection when `k` is small. */

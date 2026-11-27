@@ -457,6 +457,18 @@ test.skipIf(!hasDom)('the landing highlight finds the words in the text, not in 
   expect(ranges.map((r) => r.toString())).toEqual(['retry', 'retry', 'budget', 'Résumé']);
 });
 
+test.skipIf(!hasDom)('the landing highlight: a quoted phrase is one range where it stands, across markup, never each word everywhere', () => {
+  const article = document.createElement('article');
+  article.innerHTML =
+    '<div data-open-head=""><span>file viewer</span></div>' +
+    '<div class="ib-msg"><p>The file is big. Open the file <b>viewer</b>; the page stays blank.</p><p>A viewer.</p></div>';
+  expect(searchHitRanges(article, ['"file viewer"', 'blank']).map((r) => r.toString())).toEqual(['file viewer', 'blank']);
+  // Without quotes, every word as before.
+  expect(searchHitRanges(article, ['file', 'viewer']).map((r) => r.toString())).toEqual(['file', 'file', 'viewer', 'viewer']);
+  // Two paragraphs never join a word: "blank." then "A" is no phrase "blank a".
+  expect(searchHitRanges(article, ['"stays blank"']).map((r) => r.toString())).toEqual(['stays blank']);
+});
+
 test.skipIf(!hasDom)("compose's Actions: below real results unless the words name an action; shown while the index builds", async () => {
   const { composeActions } = await import('./compose/model');
   const headings = () => [...host!.querySelectorAll('[role="group"]')].map((g) => host!.querySelector(`#${g.getAttribute('aria-labelledby')}`)!.textContent);

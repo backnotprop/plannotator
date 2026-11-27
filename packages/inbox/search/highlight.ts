@@ -34,6 +34,7 @@ export function searchHitRanges(root: Node, terms: readonly string[], skip = '[d
   const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
     acceptNode: (node) => (node.parentElement?.closest(skip) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
   });
+  if (terms.some((term) => term.startsWith('"'))) return phraseRanges(walker, doc, terms);
   for (let node = walker.nextNode() as Text | null; node; node = walker.nextNode() as Text | null) {
     for (const [start, end] of inboxSearchRanges(node.data, terms, { prefixAll: true })) {
       const range = doc.createRange();
@@ -43,6 +44,41 @@ export function searchHitRanges(root: Node, terms: readonly string[], skip = '[d
     }
   }
   return out;
+}
+
+/**
+ * A quoted query's ranges: the text nodes read as one text, a line break
+ * between each two (whitespace, so no word joins across them), so a phrase
+ * split by markup ("file **viewer**") is still one range, from its first
+ * node to its last.
+ */
+function phraseRanges(walker: TreeWalker, doc: Document, terms: readonly string[]): Range[] {
+  const nodes: Text[] = [];
+  const starts: number[] = [];
+  let text = '';
+  for (let node = walker.nextNode() as Text | null; node; node = walker.nextNode() as Text | null) {
+    if (nodes.length > 0) text += '\n';
+    nodes.push(node);
+    starts.push(text.length);
+    text += node.data;
+  }
+  // The node holding an offset: the last whose start is at or before it (an end may sit at a node's very end).
+  const at = (offset: number, end: boolean): [Text, number] => {
+    let lo = 0;
+    let hi = nodes.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (starts[mid]! < offset || (!end && starts[mid] === offset)) lo = mid;
+      else hi = mid - 1;
+    }
+    return [nodes[lo]!, offset - starts[lo]!];
+  };
+  return inboxSearchRanges(text, terms, { prefixAll: true }).map(([start, end]) => {
+    const range = doc.createRange();
+    range.setStart(...at(start, false));
+    range.setEnd(...at(end, true));
+    return range;
+  });
 }
 
 /** Paint the terms under `root`; returns how many ranges, and the way to clear them. */
