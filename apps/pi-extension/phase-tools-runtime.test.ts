@@ -326,6 +326,9 @@ describe("Plannotator phase tool ownership", () => {
 
 type ModelRef = { provider: string; id: string };
 
+/** The host's own default thinking level, applied on every model switch. */
+const HOST_DEFAULT_THINKING = "minimal";
+
 /**
  * A host whose model and thinking level are real state: `setModel` changes the
  * model the context reports and every call is recorded, so a test can tell a
@@ -368,6 +371,9 @@ function createModelHost(options: { cwd: string; initialModel: ModelRef; initial
 			const previousModel = host.model;
 			host.modelCalls.push({ provider: model.provider, id: model.id });
 			host.model = model;
+			// Like Pi and oh-my-pi, a model switch re-derives the thinking level
+			// from the host's default instead of keeping the current one.
+			host.thinking = HOST_DEFAULT_THINKING;
 			if (previousModel.provider !== model.provider || previousModel.id !== model.id) {
 				for (const handler of handlers.get("model_select") ?? []) await handler({ source: "set", model, previousModel }, context as never);
 			}
@@ -394,6 +400,7 @@ function createModelHost(options: { cwd: string; initialModel: ModelRef; initial
 		tools,
 		command: async () => commands.get("plannotator-plan-mode")!.handler("", context as never),
 		submit: async () => registeredTools.get("plannotator_submit_plan")!.execute("call", { filePath: "PLAN.md" }, undefined, undefined, context),
+		markDone: async (step: number) => registeredTools.get("plannotator_mark_done")!.execute("done", { step }, undefined, undefined, context),
 		/** The user picks a model in the host's own UI, not through Plannotator. */
 		userPicks: (model: ModelRef, thinking?: string) => {
 			const previousModel = host.model;
@@ -465,8 +472,13 @@ describe("Plannotator preserves user model selections during plan transitions", 
 		await runtime.command();
 		await runtime.submit();
 		runtime.userPicks(LUNA, "high");
-		writeFileSync(join(cwd, "PLAN.md"), "- [x] Step one\n- [x] Step two\n", "utf-8");
+		// The first agent_end after approval only schedules the continuation.
 		await runtime.run("agent_end");
+		await runtime.markDone(1);
+		await runtime.markDone(2);
+		await runtime.run("agent_end");
+		const state = runtime.host.entries.filter((entry) => entry.customType === "plannotator").at(-1)?.data as { phase?: string };
+		expect(state.phase).toBe("idle");
 		expect(runtime.host.model).toEqual(LUNA);
 		expect(runtime.host.thinking).toBe("high");
 	});
