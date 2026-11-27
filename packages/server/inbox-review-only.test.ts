@@ -12,14 +12,17 @@
  *    PLANNOTATOR_INBOX_NOTES=0; a second, marked note beside one pasted by hand; the person's own switch during the
  *    mode not followed on the way back; an edited section lost instead of put back as they left it (also in a file
  *    two agents share, whichever agent comes first, and with two edited files for one agent, each back where it came
- *    from); a file left read-only retried every minute forever instead of less and less often.
+ *    from); a file left read-only retried every minute forever instead of less and less often; the person's saved text
+ *    dropped when they turn a note on by hand in the mode (Plannotator's note written instead), deleted when no agent
+ *    reads its file any more (a link pointed elsewhere), written into an extra file they deleted, or put back a second
+ *    time after they deleted it because an agent sharing the file was away at the switch back.
  *  - the switch: code review only needing a second switch (Code review) to hold, or switching back leaving Code
  *    review off; the Settings row's `chosen` lost; the welcome open outside the mode.
  *  - linked computers: the mode, or Code review while in it, given to or taken from a linked computer; a linked
  *    computer's flip of Code review made while in the mode turning it off here after the switch back.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { INBOX_CAPABILITY_AGENT_IDS, INBOX_CAPABILITY_SET_KEYS, INBOX_CAPABILITY_SWITCH_KEYS, type InboxCapabilitySetKey, type InboxNoteAgentId } from "@plannotator/core/inbox-types";
 import type { PlannotatorConfig } from "@plannotator/shared/config";
@@ -259,6 +262,107 @@ describe("the notes, out with code review only and back with the full Inbox", ()
     }
   }
 
+  test("one shared file, edited: turning one agent's note on by hand while code review only puts the person's text back, and it stays for both", async () => {
+    const { real } = sharedFile("link");
+    writeFileSync(real, read(real).replace("## Plannotator Inbox", "## Plannotator Inbox (ours)"));
+    const edited = read(real);
+    const one = computer({ inboxCodeReview: true });
+    await one.reviewOnly.save({ on: false });
+    expect(read(real)).toBe(MINE_BEFORE);
+    // Settings → Agents shows the switch in the mode (the note is out: off); the person turns Pi's on.
+    expect(await one.notes.add("pi")).toMatchObject({ ok: true });
+    expect(read(real)).toBe(edited);
+    await one.notes.sync();
+    expect(read(real)).toBe(edited);
+    await one.reviewOnly.save({ on: true });
+    expect(read(real)).toBe(edited);
+    for (const id of ["codex", "pi"] as const) expect(noteStatus(id, dataDir, e).state).toBe("edited");
+    expect(one.config().inboxReviewOnlyNotes).toBeUndefined();
+    expect(one.config().inboxNoteSectionsKept).toBeUndefined();
+  });
+
+  test("a link pointed at another file while code review only: the old file is never written, and the person's text is kept aside, not deleted", async () => {
+    fake.install("pi");
+    const old = join(fake.root, "dotfiles", "OLD.md");
+    const next = join(fake.root, "dotfiles", "NEW.md");
+    mkdirSync(dirname(old), { recursive: true });
+    writeFileSync(old, MINE_BEFORE);
+    writeFileSync(next, "# New rules\n");
+    written.push(old, next);
+    const piAgents = join(fake.home, ".pi", "agent", "AGENTS.md");
+    mkdirSync(dirname(piAgents), { recursive: true });
+    symlinkSync(old, piAgents);
+    expect(addInboxNote("pi", dataDir, e)).toMatchObject({ ok: true, action: "added" });
+    writeFileSync(old, read(old).replace("## Plannotator Inbox", "## Plannotator Inbox (mine)"));
+    const section = read(old).slice(MINE_BEFORE.length + 1);
+    const one = computer({ inboxCodeReview: true });
+    await one.reviewOnly.save({ on: false });
+    expect(read(old)).toBe(MINE_BEFORE);
+    // The person points Pi's AGENTS.md at another file (as `ln -sfn` does: a new link renamed over the old one).
+    symlinkSync(next, `${piAgents}.new`);
+    renameSync(`${piAgents}.new`, piAgents);
+    await one.reviewOnly.save({ on: true });
+    expect(read(old)).toBe(MINE_BEFORE);
+    expect(one.config().inboxReviewOnlyNotes).toBeUndefined();
+    expect(one.config().inboxNoteSectionsKept).toEqual([{ file: realpathSync(old), text: section.trimEnd(), at: expect.any(String) }]);
+  });
+
+  for (const target of ["no section", "its own section"] as const) {
+    test(`an extra instructions file the person deleted while code review only is never made again; the target has ${target}`, async () => {
+      fake.install("codex");
+      const codexHome = join(fake.home, ".codex");
+      mkdirSync(codexHome, { recursive: true });
+      const main = join(codexHome, "AGENTS.md");
+      const override = join(codexHome, "AGENTS.override.md");
+      writeFileSync(main, MINE_BEFORE);
+      written.push(main, override);
+      expect(addInboxNote("codex", dataDir, e)).toMatchObject({ ok: true, path: "~/.codex/AGENTS.md" });
+      writeFileSync(main, read(main).replace("## Plannotator Inbox", "## Plannotator Inbox (main)"));
+      const section = read(main).slice(MINE_BEFORE.length + 1).trimEnd();
+      const theirs = "<!-- plannotator-inbox:start -->\n## Plannotator Inbox (override, by hand)\n<!-- plannotator-inbox:end -->\n";
+      // AGENTS.override.md appears: Codex reads it first, so AGENTS.md is the extra file.
+      writeFileSync(override, "# Override\n");
+      const one = computer({ inboxCodeReview: true });
+      await one.reviewOnly.save({ on: false });
+      expect(read(main)).toBe(MINE_BEFORE);
+      // The person deletes AGENTS.md (moved out of Codex's folder), and maybe writes a section of their own in the override.
+      renameSync(main, join(fake.root, "deleted-AGENTS.md"));
+      if (target === "its own section") writeFileSync(override, `# Override\n\n${theirs}`);
+      const overrideBefore = read(override);
+      await one.reviewOnly.save({ on: true });
+      expect(existsSync(main)).toBe(false);
+      if (target === "no section") {
+        expect(read(override)).toBe(`# Override\n\n${section}\n`);
+        expect(one.config().inboxNoteSectionsKept).toBeUndefined();
+      } else {
+        expect(read(override)).toBe(overrideBefore);
+        expect(one.config().inboxNoteSectionsKept?.map((item) => item.text)).toEqual([section]);
+      }
+      expect(one.config().inboxReviewOnlyNotes).toBeUndefined();
+    });
+  }
+
+  test("one shared file, edited, one agent not installed at the switch back: once the text is back it is done for both, so it never comes back after the person deletes it", async () => {
+    const { real } = sharedFile("link");
+    writeFileSync(real, read(real).replace("## Plannotator Inbox", "## Plannotator Inbox (ours)"));
+    const edited = read(real);
+    const one = computer({ inboxCodeReview: true });
+    await one.reviewOnly.save({ on: false });
+    // Pi is not on this computer at the switch back (only Codex on PATH).
+    const onlyCodex = join(fake.root, "only-codex");
+    mkdirSync(onlyCodex, { recursive: true });
+    symlinkSync(join(fake.bin, "codex"), join(onlyCodex, "codex"));
+    const away = computer(one.config(), { env: { PATH: `${onlyCodex}:/usr/bin:/bin` } });
+    await away.reviewOnly.save({ on: true });
+    expect(read(real)).toBe(edited);
+    // In the full Inbox the person deletes the section; then Pi is installed again and the Inbox starts.
+    writeFileSync(real, MINE_BEFORE);
+    const later = computer(away.config());
+    await later.notes.sync();
+    expect(read(real)).toBe(MINE_BEFORE);
+    expect(later.config().inboxReviewOnlyNotes).toBeUndefined();
+  });
+
   test("one agent with two files that both hold an edited section (AGENTS.md and AGENTS.override.md): each goes back into its own file", async () => {
     fake.install("codex");
     const codexHome = join(fake.home, ".codex");
@@ -323,7 +427,7 @@ describe("the notes, out with code review only and back with the full Inbox", ()
     const one = computer({ inboxCodeReview: true });
     await one.reviewOnly.save({ on: false });
     // Gemini's note on again, by hand in Settings → Agents; Qwen's turned off (it is out already).
-    expect(await one.notes.person("gemini", () => addInboxNote("gemini", dataDir, e))).toMatchObject({ ok: true });
+    expect(await one.notes.add("gemini")).toMatchObject({ ok: true });
     expect(await one.notes.person("qwen", () => removeInboxNote("qwen", dataDir, e))).toMatchObject({ ok: true });
     // The next pass leaves Gemini's in.
     await one.notes.sync();

@@ -653,8 +653,8 @@ export interface AddNoteOptions {
   block?: string;
   /**
    * With `block`: the file the section came out of (resolved; one of `agentNoteFiles`), in place of the agent's target.
-   * Missing, it is made again (it held the section when the section came out), except where the target's own rule says
-   * no file may be made.
+   * One that is not the target is never made again when it is missing (the person deleted it); the target keeps its own
+   * rule.
    */
   path?: string;
   /** Tests: runs between the read and the write, to change the file under the add. */
@@ -702,7 +702,7 @@ function putBackTarget(agent: InboxNoteAgentId, e: AgentEnvironment, options: Ad
   const files = agentNoteFiles(agent, e);
   if (!files.includes(options.path)) return null;
   if (options.path === files[0]) return target;
-  return { path: options.path, create: !existsSync(options.path), reason: null };
+  return { path: options.path, create: false, reason: null };
 }
 
 /** Add (or bring up to date) the note for one agent. Never overwrites a block the person edited. */
@@ -728,10 +728,12 @@ export function addInboxNote(agent: InboxNoteAgentId, dataDir: string, e: AgentE
   let action: "added" | "created" | "updated" | "unchanged" | "shared";
   /** The block's hash before this add (null: there was none), for the other records naming the same file. */
   let before: string | null = null;
-  // Putting the person's section back where a section is already: theirs or Plannotator's, it stays as it is. When it
-  // is this very text (another agent sharing the file put it back first), this agent's record names it again.
+  // Putting the person's section back where a section is already: theirs or Plannotator's, it stays as it is
+  // (`kept-edited`: the text was not put back). When it is this very text (another agent sharing the file put it back
+  // first), this agent's record names it again.
   if (found.kind === "one" && options.block !== undefined) {
-    if (found.block.replace(/\r\n/g, "\n") !== options.block.replace(/\r\n/g, "\n") || notes[agent]?.path === real) return { ok: true, agent, action: "unchanged", path: shown! };
+    if (found.block.replace(/\r\n/g, "\n") !== options.block.replace(/\r\n/g, "\n")) return { ok: true, agent, action: "kept-edited", path: shown! };
+    if (notes[agent]?.path === real) return { ok: true, agent, action: "unchanged", path: shown! };
     const file = readInboxAgentNotes(dataDir);
     file.notes[agent] = { path: real, created: owner?.created === true, version: INBOX_NOTE_VERSION, block_sha256: sha256(INBOX_NOTE_BLOCK), at: now.toISOString() };
     writeInboxAgentNotes(dataDir, file);

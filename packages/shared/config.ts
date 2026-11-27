@@ -661,6 +661,12 @@ export interface PlannotatorConfig {
    * (resolved through links), put back there as they left it.
    */
   inboxReviewOnlyNotes?: { for: "review_only" | "full"; back: string[]; out: string[]; edited?: Record<string, string> };
+  /**
+   * Machine state: an edited section from `inboxReviewOnlyNotes.edited` that could not be put back (no agent reads its
+   * file any more, or the file holds another section now), kept here rather than lost. The 16 newest (`file`, `text`,
+   * `at`); nothing reads them back by itself.
+   */
+  inboxNoteSectionsKept?: { file: string; text: string; at: string }[];
   /** Machine state: the welcome dialog `plannotator inbox --review` asked for on a first run (`dueAt`); its one showing is the line's (`inboxReveals.review_welcome`). */
   inboxReviewWelcome?: { dueAt?: string };
   /**
@@ -1152,6 +1158,7 @@ function getStatePath(): string {
 const MACHINE_STATE_KEYS = [
   "inboxAgentNotes", "inboxTour", "inboxBoardIntro", "inboxListIntro", "inboxVoiceIntro", "inboxSnoozeIntro",
   "inboxReveals", "starAsk", "inboxThemeChooser", "inboxPriorityIntro", "launch", "inboxReviewWelcome", "inboxReviewOnlyNotes",
+  "inboxNoteSectionsKept",
 ] as const;
 type MachineStateKey = (typeof MACHINE_STATE_KEYS)[number];
 /** Machine-state fields inside a key whose other fields are settings (`inboxSound.enabled` / `volume`). */

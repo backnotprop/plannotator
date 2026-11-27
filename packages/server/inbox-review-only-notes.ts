@@ -15,23 +15,31 @@
  *    `edited`), not by agent: two agents sharing one file (Pi's AGENTS.md a link to Codex's) and one agent with two
  *    files (AGENTS.md and AGENTS.override.md) each keep every file's own text.
  *  - Back: each saved agent's note is put back (`auto`: never a second, marked copy beside one pasted by hand): each
- *    edited text into the file it came from, whichever agent comes first (a file that holds a section already keeps
- *    it, and a later agent sharing it only takes its record back), else Plannotator's note into the agent's file.
- *    Each agent leaves the list once its note is back, and the list goes when it is empty. Then the automatic add runs
- *    as a full Inbox's start runs it.
+ *    edited text into the file it came from, whichever agent comes first, else Plannotator's note into the agent's
+ *    file. Once a text is in its file it is done for every agent: each other agent on the list reading that file takes
+ *    its record back then. Each agent leaves the list once its note is back, and the list goes when it is empty. Then
+ *    the automatic add runs as a full Inbox's start runs it.
+ *  - Never lost: a text that cannot go back (its file holds another section now; no agent reads its file any more; a
+ *    file other than the target the person deleted, never made again, when the target cannot take it) is kept aside
+ *    in `inboxNoteSectionsKept` (the KEPT_MAX newest), in the same save that takes it off the list.
  *  - Left over (a read-only or hard-linked file): tried again after a minute, then twice as long each time up to an
  *    hour (`RETRY_MAX_MS`), and nothing is logged.
  *  - The person's own switch while either is going on: the list follows (that agent leaves it), so switching back gives
- *    what they last chose.
+ *    what they last chose. Turning a note on puts back their own text saved for its files, not Plannotator's note.
  *  - PLANNOTATOR_INBOX_NOTES=0: no write at all.
  */
 import type { PlannotatorConfig } from "@plannotator/shared/config";
 import { INBOX_NOTE_AGENT_IDS, type InboxNoteAgentId } from "@plannotator/core/inbox-types";
+import { existsSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { addInboxNote, agentNoteFiles, inboxNotesDisabled, isOwnNoteBlock, noteHolderIds, removeInboxNote, type NoteChange } from "./inbox-agent-notes";
 import { agentHomeAllowed, agentSpec, type AgentEnvironment } from "./inbox-agents";
 
 type NotesState = NonNullable<PlannotatorConfig["inboxReviewOnlyNotes"]>;
+type KeptSection = NonNullable<PlannotatorConfig["inboxNoteSectionsKept"]>[number];
+
+/** The most edited sections kept aside (`inboxNoteSectionsKept`) that could not be put back; the oldest goes first. */
+export const KEPT_MAX = 16;
 
 export interface AgentNotesHost {
   dataDir: string;
@@ -83,9 +91,20 @@ export function createAgentNotes(host: AgentNotesHost) {
     const edited = kept.edited && typeof kept.edited === "object" ? Object.fromEntries(Object.entries(kept.edited).filter(([file, text]) => isAbsolute(file) && typeof text === "string")) : {};
     return { for: kept.for, back: ids(kept.back), out: ids(kept.out), edited };
   };
-  /** Saves the state and reads it back: false when it did not land (nothing may change then). */
-  const keep = (next: NotesState | null): boolean => {
-    host.save({ inboxReviewOnlyNotes: next ?? undefined });
+  const keptAside = (): KeptSection[] => {
+    const list = host.load().inboxNoteSectionsKept;
+    return Array.isArray(list) ? list.filter((item): item is KeptSection => !!item && typeof item === "object" && typeof item.file === "string" && typeof item.text === "string" && typeof item.at === "string") : [];
+  };
+  /**
+   * Saves the state and reads it back: false when it did not land (nothing may change then). `aside`: texts that leave
+   * `edited` without being put back, kept in `inboxNoteSectionsKept` (the KEPT_MAX newest) in the same save.
+   */
+  const keep = (next: NotesState | null, aside: Record<string, string> = {}): boolean => {
+    const set = Object.entries(aside);
+    const at = new Date().toISOString();
+    const list = set.length === 0 ? null : [...keptAside().filter((item) => !set.some(([file, text]) => item.file === file && item.text === text)), ...set.map(([file, text]) => ({ file, text, at }))].slice(-KEPT_MAX);
+    host.save({ inboxReviewOnlyNotes: next ?? undefined, ...(list ? { inboxNoteSectionsKept: list } : {}) });
+    if (list && JSON.stringify(keptAside()) !== JSON.stringify(list)) return false;
     const now = state();
     if (next === null) return now === null;
     return JSON.stringify(now) === JSON.stringify({ ...next, edited: next.edited ?? {} });
@@ -108,33 +127,69 @@ export function createAgentNotes(host: AgentNotesHost) {
     return false;
   };
 
+  const drop = (now: NotesState, file: string) => {
+    const { [file]: _gone, ...rest } = now.edited ?? {};
+    now.edited = rest;
+  };
+
   /**
-   * Puts one agent's note back; true once it is. Each edited text saved for one of its files goes back into that file
-   * (its target last, so its record names it); Plannotator's note goes into its target when no edited text did. A text
-   * stays saved while another agent still on the list reads the same file, so whichever comes first, it is the one put
-   * back, and the other only takes its record back.
+   * The text saved for `file` is in `into` now (put back, or there already): it is done, for every agent. Each other
+   * agent on the list that reads `into` takes its record back with it, and leaves the list when nothing else is saved
+   * for its files, so no later put-back ever writes that text again.
    */
-  const putBack = (agent: InboxNoteAgentId, now: NotesState): boolean => {
+  const placed = (agent: InboxNoteAgentId, file: string, into: string, text: string, now: NotesState) => {
+    drop(now, file);
+    for (const id of [...now.back]) {
+      if (id === agent || !isNoteAgent(id) || !agentNoteFiles(id, e).includes(into)) continue;
+      const follow = addInboxNote(id, host.dataDir, e, new Date(), { block: text, path: into });
+      if (follow.ok && follow.action !== "kept-edited" && !agentNoteFiles(id, e).some((other) => now.edited?.[other] !== undefined)) now.back = now.back.filter((other) => other !== id);
+    }
+  };
+
+  /**
+   * Puts one agent's note back; `back` once it is. Each edited text saved for one of its files goes back into that file
+   * (its target last, so its record names it); Plannotator's note goes into its target when no edited text did. A text
+   * that cannot go back is kept aside (`aside`, then `inboxNoteSectionsKept`), never dropped: its file holds another
+   * section now, or it is a file other than the target that the person deleted (never made again; the text goes into
+   * the target instead when the target has no section and no text of its own saved).
+   */
+  const putBack = (agent: InboxNoteAgentId, now: NotesState, aside: Record<string, string>, auto = true): { back: boolean; change: NoteChange | null } => {
     const files = agentNoteFiles(agent, e);
     const target = files[0];
     const mine = files.filter((file) => now.edited?.[file] !== undefined && file !== target);
     if (target !== undefined && now.edited?.[target] !== undefined) mine.push(target);
     let back = true;
+    let last: NoteChange | null = null;
     // Only a note the person pasted by hand without markers counts as back too (never a second, marked copy beside it).
     const landed = (change: NoteChange) => change.ok || change.pasted === true;
     for (const file of mine) {
-      if (!landed(addInboxNote(agent, host.dataDir, e, new Date(), { auto: true, block: now.edited![file]!, path: file }))) {
+      const text = now.edited?.[file];
+      if (text === undefined) continue;
+      let into = file;
+      if (file !== target && !existsSync(file)) {
+        if (target === undefined || now.edited?.[target] !== undefined) {
+          aside[file] = text;
+          drop(now, file);
+          continue;
+        }
+        into = target;
+      }
+      last = addInboxNote(agent, host.dataDir, e, new Date(), { auto, block: text, path: into });
+      if (!landed(last)) {
         back = false;
         continue;
       }
-      const sharedWith = now.back.some((id) => id !== agent && isNoteAgent(id) && agentNoteFiles(id, e).includes(file));
-      if (!sharedWith) {
-        const { [file]: _put, ...rest } = now.edited ?? {};
-        now.edited = rest;
+      if (last.ok && last.action !== "kept-edited") placed(agent, file, into, text, now);
+      else {
+        aside[file] = text;
+        drop(now, file);
       }
     }
-    if (mine.length === 0 && !landed(addInboxNote(agent, host.dataDir, e, new Date(), { auto: true }))) back = false;
-    return back;
+    if (last === null) {
+      last = addInboxNote(agent, host.dataDir, e, new Date(), { auto });
+      if (!landed(last)) back = false;
+    }
+    return { back, change: last };
   };
 
   /** One pass; true when the files match the mode (nothing left to try). */
@@ -172,24 +227,28 @@ export function createAgentNotes(host: AgentNotesHost) {
     let settled = true;
     for (const agent of [...now.back]) {
       if (host.reviewOnly() || !writable()) return false;
+      // Back already: it took its record back with a shared file's text another agent put back (placed).
+      if (!now.back.includes(agent)) continue;
       // Not on this computer now: kept, and put back when it is.
       if (!isNoteAgent(agent) || !agentSpec(agent).detect(e)) {
         settled = false;
         continue;
       }
-      const before = JSON.stringify(now.edited ?? {});
-      const back = putBack(agent, now);
+      const before = JSON.stringify(now);
+      const aside: Record<string, string> = {};
+      const { back } = putBack(agent, now, aside);
       // Not put back (a read-only or hard-linked file, one changed meanwhile): kept on the list and tried again.
       if (!back) {
         settled = false;
-        if (JSON.stringify(now.edited ?? {}) !== before && !keep(now)) return false;
+        if (JSON.stringify(now) !== before && !keep(now, aside)) return false;
         continue;
       }
       now = { ...now, back: now.back.filter((id) => id !== agent) };
-      if (!keep(now)) return false;
+      if (!keep(now, aside)) return false;
     }
     if (now.back.length > 0) return settled;
-    return keep(null);
+    // A text still saved was put back nowhere (no agent reads its file now, a link pointed elsewhere): kept aside.
+    return keep(null, now.edited ?? {});
   };
 
   /** Tries again later: after a minute, then twice as long each time while something is still left, up to an hour. */
@@ -228,15 +287,45 @@ export function createAgentNotes(host: AgentNotesHost) {
           // Tried again at the next start or run.
         }
       }),
-    /** The person's own switch (Settings → Agents, the note dialog), in the queue; the list follows a change that landed. */
+    /**
+     * The person turns a note on (Settings → Agents, the note dialog), in the queue. Where the list saved their own text
+     * for one of its files, that goes back as they left it (not Plannotator's note), and is done for every agent
+     * reading that file; the list follows a change that landed.
+     */
+    add: (agent: InboxNoteAgentId): Promise<NoteChange> =>
+      queued(() => {
+        const now = state();
+        if (!now || !agentNoteFiles(agent, e).some((file) => now.edited?.[file] !== undefined)) {
+          const change = addInboxNote(agent, host.dataDir, e);
+          if (change.ok && now && (now.back.includes(agent) || now.out.includes(agent))) keep({ ...now, back: now.back.filter((id) => id !== agent), out: now.out.filter((id) => id !== agent) });
+          return change;
+        }
+        const before = JSON.stringify(now);
+        const aside: Record<string, string> = {};
+        const { back, change } = putBack(agent, now, aside, false);
+        if (back) Object.assign(now, { back: now.back.filter((id) => id !== agent), out: now.out.filter((id) => id !== agent) });
+        if (JSON.stringify(now) !== before) keep(now, aside);
+        return change!;
+      }),
+    /**
+     * The person turns a note off (Settings → Agents), in the queue; the list follows a change that landed. A text saved
+     * for one of its files stays saved while another agent on the list reads that file, else it is kept aside.
+     */
     person: <T extends NoteChange>(agent: InboxNoteAgentId, write: () => T): Promise<T> =>
       queued(() => {
         const change = write();
         const now = state();
         const files = agentNoteFiles(agent, e);
         if (change.ok && now && (now.back.includes(agent) || now.out.includes(agent) || files.some((file) => now.edited?.[file] !== undefined))) {
-          const edited = Object.fromEntries(Object.entries(now.edited ?? {}).filter(([file]) => !files.includes(file)));
-          keep({ ...now, back: now.back.filter((id) => id !== agent), out: now.out.filter((id) => id !== agent), edited });
+          const back = now.back.filter((id) => id !== agent);
+          const read = (file: string) => back.some((id) => isNoteAgent(id) && agentNoteFiles(id, e).includes(file));
+          const edited: Record<string, string> = {};
+          const aside: Record<string, string> = {};
+          for (const [file, text] of Object.entries(now.edited ?? {})) {
+            if (!files.includes(file) || read(file)) edited[file] = text;
+            else aside[file] = text;
+          }
+          keep({ ...now, back, out: now.out.filter((id) => id !== agent), edited }, aside);
         }
         return change;
       }),

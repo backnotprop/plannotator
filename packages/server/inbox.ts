@@ -459,7 +459,7 @@ import {
   writeInboxAgents,
   type AgentEnvironment,
 } from "./inbox-agents";
-import { addInboxNote, autoAddInboxNotes, INBOX_NOTE_BLOCK, inboxNotesDisabled, markAutoNotesSaid, markNotesAsked, noteCandidateIds, notesAsked, noteStatus, refreshInboxNotes, removeInboxNote, unsaidAutoNotes } from "./inbox-agent-notes";
+import { autoAddInboxNotes, INBOX_NOTE_BLOCK, inboxNotesDisabled, markAutoNotesSaid, markNotesAsked, noteCandidateIds, notesAsked, noteStatus, refreshInboxNotes, removeInboxNote, unsaidAutoNotes } from "./inbox-agent-notes";
 import {
   displayInboxSubject,
   INBOX_AGENT_IDS,
@@ -2788,7 +2788,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         problems.push(`${INBOX_AGENT_LABELS[agent]} was not found on this computer`);
       } else {
         // In the notes' one queue; code review only's list follows the person's choice (inbox-review-only-notes.ts).
-        const change = await agentNotes.person(agent as InboxNoteAgentId, () => (body.note ? addInboxNote(agent as InboxNoteAgentId, dataDir, agentEnvironment) : removeInboxNote(agent as InboxNoteAgentId, dataDir, agentEnvironment)));
+        const change = body.note ? await agentNotes.add(agent as InboxNoteAgentId) : await agentNotes.person(agent as InboxNoteAgentId, () => removeInboxNote(agent as InboxNoteAgentId, dataDir, agentEnvironment));
         if (!change.ok) problems.push(change.reason);
         // Either way the person decided for this agent: a note turned off stays off (never written again by
         // itself, never asked again), and removing one turned on later never asks again.
@@ -2830,7 +2830,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             ? // Cursor keeps its rules in the app: nothing is written, the window shows the note to copy.
               ({ ok: true, agent, action: "manual", path: null } as const)
             : // In the notes' one queue, as the Settings switch.
-              await agentNotes.person(agent, () => addInboxNote(agent, dataDir, agentEnvironment)),
+              await agentNotes.add(agent),
       );
     }
     const failed = new Set(results.filter((result) => !result.ok).map((result) => result.agent));
