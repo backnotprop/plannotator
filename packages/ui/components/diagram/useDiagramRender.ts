@@ -1,6 +1,8 @@
 import { useContext, useEffect, useState } from 'react';
 import { DiagramSvgAcceptContext } from '../diagramSvgAccept';
+import { useDiagramSourceAccepted } from '../diagramSourceAccept';
 import {
+  DIAGRAM_REFUSED_RESULT,
   renderDiagram,
   type DiagramKind,
   type DiagramRenderError,
@@ -29,7 +31,7 @@ export interface DiagramRenderState {
     readonly runtimeUnavailable: boolean;
     /** A diagram-type chunk did not load: the block offers Reload. */
     readonly chunkFailed?: boolean;
-    /** The host's check refused the drawn svg (`DiagramSvgAcceptContext`): the block shows the source. */
+    /** The host's check refused the source (`DiagramSourceAcceptContext`) or the drawn svg (`DiagramSvgAcceptContext`): the block shows the source. */
     readonly refused?: boolean;
   } | null;
   readonly pending: boolean;
@@ -43,6 +45,11 @@ let renderCounter = 0;
  * (`diagram-<documentId>-<n>`): Mermaid removes any existing element with
  * the id it is asked to render into, so reusing one id would tear the
  * displayed svg out of the page mid-render.
+ *
+ * A host's source check (`DiagramSourceAcceptContext`) is asked first, once per
+ * source: a refused source never reaches `renderDiagram`, so no engine is
+ * loaded and nothing is parsed or drawn; the result is the same `refused` an
+ * `accept` refusal gives.
  */
 export function useDiagramRender(
   kind: DiagramKind,
@@ -53,6 +60,7 @@ export function useDiagramRender(
 ): DiagramRenderState {
   const retryToken = options?.retryToken ?? 0;
   const accept = useContext(DiagramSvgAcceptContext);
+  const sourceAccepted = useDiagramSourceAccepted(kind, source);
   const [state, setState] = useState<DiagramRenderState>({
     svgNode: null,
     renderId: null,
@@ -72,7 +80,10 @@ export function useDiagramRender(
       const error = current.error?.runtimeUnavailable ? null : current.error;
       return current.pending && error === current.error ? current : { ...current, error, pending: true };
     });
-    void renderDiagram(kind, renderId, source, theme, accept ? { accept } : undefined).then((result: DiagramRenderResult) => {
+    const rendered = sourceAccepted
+      ? renderDiagram(kind, renderId, source, theme, accept ? { accept } : undefined)
+      : Promise.resolve<DiagramRenderResult>(DIAGRAM_REFUSED_RESULT);
+    void rendered.then((result: DiagramRenderResult) => {
       if (cancelled) return;
       if (isRenderError(result)) {
         const error = {
@@ -97,7 +108,7 @@ export function useDiagramRender(
     return () => {
       cancelled = true;
     };
-  }, [documentId, kind, source, theme, retryToken, accept]);
+  }, [documentId, kind, source, theme, retryToken, accept, sourceAccepted]);
 
   return state;
 }

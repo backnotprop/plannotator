@@ -25,6 +25,7 @@ export {
 } from './useDiagramComments';
 export { useDiagramRender, type DiagramRenderState } from './useDiagramRender';
 export { DiagramSvgAcceptContext } from '../diagramSvgAccept';
+export { DiagramSourceAcceptContext, type DiagramSourceAccept } from '../diagramSourceAccept';
 export { useDiagramSourceDraft, PREVIEW_DEBOUNCE_MS, type DiagramSourceDraft, type SaveResult } from './useDiagramSourceDraft';
 export {
   useDiagramViewport,

@@ -216,7 +216,9 @@ function sanitizeAcceptedDiagramSvg(svg: string, accept: (svg: SVGSVGElement) =>
   return root;
 }
 
-const REFUSED_RESULT: DiagramRenderError = { ok: false, message: 'The diagram is shown as its source.', line: null, runtimeUnavailable: false, refused: true };
+/** A host's refusal (`accept` here, or `DiagramSourceAcceptContext` before any render): the block shows the source. */
+export const DIAGRAM_REFUSED_RESULT: DiagramRenderError = { ok: false, message: 'The diagram is shown as its source.', line: null, runtimeUnavailable: false, refused: true };
+const REFUSED_RESULT = DIAGRAM_REFUSED_RESULT;
 
 /** The sanitized root, through `accept` when the host gave one. */
 function sanitizeFor(svg: string, options: DiagramRenderOptions | undefined): SVGSVGElement | null | typeof REFUSED {

@@ -30,6 +30,11 @@
  *   `accept` check is handed Pele's svg with no outside reference, Mermaid's
  *   with the reference it kept when the option is on, and without a label's
  *   picture when it is off.
+ * - a host's source check (`DiagramSourceAcceptContext`, through
+ *   `useDiagramRender` as the document draws a fence): refusing, every source
+ *   above makes no request and loads no engine, with no CSP, whether Mermaid
+ *   draws every fence or the switch is as shipped; accepting, the sources load
+ *   exactly as with no check.
  *
  * Runs in Chromium and WebKit (playwright.config.ts).
  */
@@ -40,10 +45,15 @@ let bundle = '';
 let splitBundle = '';
 /** The switch as shipped: Pele draws what it can, Mermaid the rest (a picture-only label, say). */
 let shipped = '';
+/** The same two, drawing through `useDiagramRender` under a host's source check (`__d.checked`). */
+let checkedMermaid = '';
+let checkedShipped = '';
 test.beforeAll(() => {
   bundle = buildDiagramUiBundle();
   splitBundle = buildDiagramUiBundle({ splitPurify: true });
   shipped = buildDiagramUiBundle({ engine: 'pele-where-safe' });
+  checkedMermaid = buildDiagramUiBundle({ sourceCheck: true });
+  checkedShipped = buildDiagramUiBundle({ engine: 'pele-where-safe', sourceCheck: true });
 });
 
 /** The page's own origin (fulfilled by the test, nothing leaves the machine). */
@@ -376,6 +386,78 @@ test("as shipped: a host's accept check is handed Pele's svg with no outside ref
         expect([on, name, r.ok, r.refused]).toEqual([on, name, false, true]);
       }
     }
+    await page.close();
+  }
+});
+
+// ------------------------------------------------------------ a host's source check
+// `DiagramSourceAcceptContext`, asked by `useDiagramRender` before either
+// engine runs. What regresses if these fail: a fence the host refused still
+// reaches an engine, so what Mermaid fetches while it draws (above) is
+// fetched again with no CSP; or a check that accepts changes anything.
+
+type Checked = { ok: boolean; refused: boolean; message: string; asked: number };
+const checked = (page: Page, source: string, accept: boolean) =>
+  page.evaluate(([s, a]) => (window as any).__d.checked(s, a) as Promise<Checked>, [source, accept] as const);
+const engines = (page: Page) => page.evaluate(() => (window as any).__d.engines() as { mermaid: boolean; pele: number });
+
+/** Every source in this file: what Mermaid fetches before any sanitizer, the hostile kinds, and the label / style / directive classes. */
+const EVERY_SOURCE: [string, string][] = [
+  ...Object.entries(BEFORE_ANY_SANITIZER).map(([name, { source }]) => [name, source] as [string, string]),
+  ...Object.entries(HOSTILE).map(([name, { source }]) => [name, source] as [string, string]),
+  ...Object.entries(CLOSED),
+];
+
+test("a host's source check that refuses: no engine loads and nothing loads from another host, with no CSP, whether Mermaid draws every fence or as shipped", async ({ browser }) => {
+  for (const [engine, built] of [['mermaid', checkedMermaid], ['pele-where-safe', checkedShipped]] as const) {
+    for (const on of [false, true]) {
+      const page = await browser.newPage();
+      const seen = await open(page, undefined, built);
+      await remoteLoads(page, on);
+      for (const [name, source] of EVERY_SOURCE) {
+        const r = await checked(page, source, false);
+        expect([engine, on, name, r]).toEqual([engine, on, name, { ok: false, refused: true, message: 'The diagram is shown as its source.', asked: 1 }]);
+      }
+      await settle(page);
+      expect([engine, on, seen]).toEqual([engine, on, []]);
+      expect([engine, on, await engines(page)]).toEqual([engine, on, { mermaid: false, pele: 0 }]);
+      expect([engine, on, await page.locator('#host *').count()]).toEqual([engine, on, 0]);
+      await page.close();
+    }
+  }
+});
+
+test("a host's source check that accepts: the sources draw and load exactly as with no check", async ({ browser }) => {
+  // Mermaid draws every fence: what it fetches before any sanitizer still loads with no CSP (so the refusal above is what stopped it).
+  {
+    const page = await browser.newPage();
+    const seen = await open(page, undefined, checkedMermaid);
+    await remoteLoads(page, false);
+    for (const [name, { source, everywhere }] of Object.entries(BEFORE_ANY_SANITIZER)) {
+      seen.length = 0;
+      const r = await checked(page, source, true);
+      expect([name, r.asked, r.refused]).toEqual([name, 1, false]);
+      await settle(page);
+      if (everywhere) expect([name, seen.length > 0]).toEqual([name, true]);
+    }
+    expect((await engines(page)).mermaid).toBe(true);
+    await page.close();
+  }
+  // As shipped: the same engine draws each hostile source as with no check, and what Pele draws loads nothing.
+  {
+    const page = await browser.newPage();
+    const seen = await open(page, undefined, checkedShipped);
+    await remoteLoads(page, false);
+    for (const [name, { source, drawnBy }] of Object.entries(HOSTILE)) {
+      seen.length = 0;
+      const r = await checked(page, source, true);
+      expect([name, r]).toEqual([name, { ok: true, refused: false, message: '', asked: 1 }]);
+      expect([name, await engineInHost(page)]).toEqual([name, drawnBy]);
+      await settle(page);
+      expect([name, await outsideInHost(page)]).toEqual([name, []]);
+      if (drawnBy === 'pele') expect([name, seen]).toEqual([name, []]);
+    }
+    expect((await engines(page)).pele).toBeGreaterThan(0);
     await page.close();
   }
 });
