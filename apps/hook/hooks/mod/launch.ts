@@ -12,6 +12,7 @@
  *   stdout/stderr  the CLI's own output (startup errors land in stderr)
  *   pid          the CLI's pid, for the liveness check
  *   exit         the CLI's exit code, written after it exits
+ *   scope-started  Linux: the CLI's own systemd scope began (a failing systemd-run must not launch it twice)
  *   revision.json / revision.json.ack   plan revisions pushed into an open review
  *   messages.json  PLANNOTATOR_HOST_MESSAGES_FILE: `last`'s recent assistant messages, for the picker
  *   watcher.json   which Claude Code process watches this launch (`{ owner, at, touchedAt }`, a heartbeat)
@@ -37,16 +38,62 @@ const LAUNCH_WORKER = [
 ]
 
 // The scoped shell must keep the waiter with the CLI, so the exit file survives too.
-const SCOPED_WORKER = ['dir=$1; shift', ': > "$dir/scope-started" || exit 1', ...LAUNCH_WORKER].join('\n')
+// systemd-run (254 and later) expands `$NAME`, `${NAME}` and `$$` in the command
+// it runs, so the launch directory and the CLI argv never go on its command
+// line: they travel in PLANNOTATOR_SCOPE_ARG_<n> (environment is passed through
+// unexpanded) and are put back, byte for byte, as "$@" here. This text sits in
+// single quotes in LAUNCH_SCRIPT and systemd-run reads it as a word, so it must
+// never contain a single quote, `${` or `$$` (launch.test.ts checks).
+export const SCOPED_WORKER = [
+  'n=$PLANNOTATOR_SCOPE_ARGC; i=0',
+  'set --',
+  'while [ "$i" -lt "$n" ]; do',
+  '  eval "set -- \\"\\$@\\" \\"\\$PLANNOTATOR_SCOPE_ARG_$i\\""',
+  '  unset "PLANNOTATOR_SCOPE_ARG_$i"',
+  '  i=$((i + 1))',
+  'done',
+  'unset PLANNOTATOR_SCOPE_ARGC',
+  'dir=$1; shift',
+  ': > "$dir/scope-started" || exit 1',
+  ...LAUNCH_WORKER,
+].join('\n')
 
-/** The wrapper. `$1` is the launch directory; the CLI argv follows. */
+/**
+ * The wrapper. `$1` is the launch directory; the CLI argv follows.
+ *
+ * On Linux, when the wrapper runs in some unit other than a login session
+ * (T3 Code's per-thread scope, a user service, a desktop app's scope), a
+ * manager may stop that unit and kill everything in it, so the CLI starts in a
+ * scope of its own through `systemd-run`, falling back to the plain launch when
+ * that fails. In a login session (`session-*.scope`: SSH, a console, screen or
+ * tmux started there) or when /proc/self/cgroup cannot be read, it takes the
+ * plain launch exactly as before: a server there survives logout, which a
+ * scope in the user manager would not without lingering.
+ * PLANNOTATOR_MOD_CGROUP_FILE stands in for /proc/self/cgroup in tests.
+ */
 export const LAUNCH_SCRIPT = [
   'dir=$1; shift',
   '(',
   "  trap '' HUP",
+  '  scoped=',
   '  if [ "$(uname -s 2>/dev/null)" = Linux ] && command -v systemd-run >/dev/null 2>&1; then',
+  '    cg=${PLANNOTATOR_MOD_CGROUP_FILE:-/proc/self/cgroup}',
+  '    if [ -r "$cg" ]; then',
+  '      while IFS= read -r line; do',
+  '        case $line in',
+  '          0::*|*:name=systemd:*) case ${line##*/} in session-*.scope) scoped=; break ;; *) scoped=1 ;; esac ;;',
+  '        esac',
+  '      done < "$cg"',
+  '    fi',
+  '  fi',
+  '  if [ -n "$scoped" ]; then',
   '    rm -f "$dir/scope-started"',
-  `    systemd-run --user --scope --quiet --collect -- /bin/sh -c '${SCOPED_WORKER}' plannotator-scope "$dir" "$@" && exit 0`,
+  '    (',
+  '      n=0',
+  '      for a in "$dir" "$@"; do export "PLANNOTATOR_SCOPE_ARG_$n=$a"; n=$((n + 1)); done',
+  '      export PLANNOTATOR_SCOPE_ARGC=$n',
+  `      exec systemd-run --user --scope --quiet --collect -- /bin/sh -c '${SCOPED_WORKER}' plannotator-scope`,
+  '    ) && exit 0',
   '    { [ -e "$dir/scope-started" ] || [ ! -e "$dir/stdin" ]; } && exit 0',
   '  fi',
   ...LAUNCH_WORKER,

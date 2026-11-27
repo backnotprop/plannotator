@@ -432,11 +432,26 @@ crashed keeps its directory (its `stderr` explains why). Servers outlive the
 terminal on purpose: the wrapper ignores SIGHUP and starts the CLI under
 `nohup` (a closing terminal otherwise took the server with it), so closing the
 terminal does not lose a review; verified live, `claude --continue` reattached
-and delivered it. On Linux, the wrapper first tries a separate systemd user
-scope for both the CLI and its exit waiter, so stopping an agent's scope does
-not kill an open review. If systemd cannot start that scope, it falls back to
-the original detached launch; `scope-started` in the launch directory prevents
-a CLI that already started from being launched a second time. They do not
+and delivered it. On Linux, a systemd unit that is stopped kills every process
+in it, and T3 Code stops each thread's scope
+(`app-t3code.slice/…/t3code-claude-<id>.scope`) minutes after a turn. So when
+the wrapper runs in some unit other than a login session (an agent host's
+scope, a user service, a desktop app's or terminal's scope), it starts the CLI
+and its exit waiter in a scope of their own with
+`systemd-run --user --scope`. It reads that from `/proc/self/cgroup`: a
+`0::` or `name=systemd` line ending in `session-*.scope` (SSH, a console, and
+screen or tmux started there), a file that cannot be read, or no systemd-run
+keeps the plain launch exactly as before. The reason: a server in a login
+session survives logout (with the distribution default
+`KillUserProcesses=no`), while a scope in the user manager is stopped with
+it, about 10 s after the user's last session ends, unless lingering is on
+(`loginctl enable-linger`). If systemd-run cannot start the scope, the wrapper
+falls back to the plain launch; `scope-started` in the launch directory stops
+a CLI that already started from being launched a second time. The launch
+directory and the CLI's words reach the scope in `PLANNOTATOR_SCOPE_ARG_<n>`
+variables, never on systemd-run's command line, because systemd-run 254 and
+later expands `$NAME`, `${NAME}` and `$$` there. macOS, Git Bash and
+PowerShell never take this path. Tests: `launch-systemd.test.ts`. They do not
 outlive the session for long: every lease
 write names the Claude Code process (`pid`, asked once per instance through
 the `host-pid` script, `$PPID` / the PowerShell parent; recorded only when two
