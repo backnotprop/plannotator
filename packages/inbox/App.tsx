@@ -5650,9 +5650,8 @@ function Inbox() {
                 ? void refreshInbox(null, route.thread !== null)
                 : leave({ page: 'inbox', project: null, machine: machineId, thread: null })
             }
-            // The Agents section (approval "inbox-agents-section"): an agent filters the list to its threads, as a
-            // machine does (a second click shows everything again); Add agent is New message with a new session chosen
-            // (plain New message where nothing can be started from here), and Add machine is Settings → Machines.
+            // The Agents section (approval "inbox-agents-section"): an agent filters the list to its threads, as a machine does (a second click shows
+            // everything again); Add agent is New message with a new session chosen (plain New message where nothing can start here); Add machine, Settings → Machines.
             agentRows={windowRows}
             // Picked: its list, as a machine's (no thread open). Cleared: everything, the thread on screen kept.
             onAgentFilter={(agentId) =>
@@ -5661,6 +5660,7 @@ function Inbox() {
                 : leave({ page: 'inbox', project: null, machine: null, agent: null, thread: route.page === 'inbox' ? route.thread : null })
             }
             onMessageAgent={(session, opener) => openCompose({ session }, opener)}
+            agentNewMessage={{ linked: plusOn }}
             onAddAgent={(opener) => openCompose(plusOn ? { launch: { agent: composeLastAgent } } : {}, opener)}
             onAddMachine={machines.self ? () => leave({ page: 'settings', project: null, thread: null, section: 'machines' }) : undefined}
             projectNames={projectNames}
