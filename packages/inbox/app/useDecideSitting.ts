@@ -8,7 +8,7 @@ import type { InboxDecision } from '@plannotator/core/inbox-types';
 import type { SettingsModel } from '../api';
 import type { Route } from './route';
 import { decideEntryShown } from '../decisions/entry';
-import { batchTouches, threadDecisions } from '../decisions/model';
+import { batchTouches, threadDecisions, type DecisionWatch } from '../decisions/model';
 
 /** The sitting: its thread, open or tucked into its pill; `startNonce`: a new start while it is open moves it to that card. */
 export interface DecideSitting {
@@ -28,7 +28,7 @@ export function useDecideSitting({
   decide,
   setDecide,
   decideOpener,
-  decisionModeOnRef,
+  decisionWatch,
   refreshDecisions,
   refreshList,
   route,
@@ -40,13 +40,14 @@ export function useDecideSitting({
   decide: DecideSitting | null;
   setDecide: Dispatch<SetStateAction<DecideSitting | null>>;
   decideOpener: { current: HTMLElement | null };
-  decisionModeOnRef: { current: boolean };
+  /** App's refreshDecisions keeps only the watched threads' decisions (decisions/model.ts `watchedDecisions`). */
+  decisionWatch: { current: DecisionWatch };
   refreshDecisions: () => Promise<unknown>;
   refreshList: (adopt: boolean) => Promise<unknown>;
 }) {
   // Decision mode is on unless Settings → Capabilities turned it off; with it off, nothing of it renders and nothing is read.
   const decisionModeOn = settings?.decision_mode?.on === true;
-  decisionModeOnRef.current = decisionModeOn;
+  decisionWatch.current.on = decisionModeOn;
   useEffect(() => {
     if (decisionModeOn) void refreshDecisions();
     else {
@@ -72,26 +73,28 @@ export function useDecideSitting({
   /**
    * The threads whose decisions this window draws (a pane asked for its "Decide these N", or the sitting's). A batch of
    * records reads the decisions (a scan of every open one) only when it touched one of them (`decisionsTouched`); a
-   * thread asked for the first time reads them once, so its count is never one the window did not keep up with.
+   * thread asked for the first time reads them once, so its count is never one the window did not keep up with. Only
+   * these threads' decisions are held; every other thread has its count only.
    */
-  const watched = useRef(new Set<string>());
+  const watched = decisionWatch.current.threads;
   const watch = (threadId: string) => {
-    if (watched.current.has(threadId)) return;
+    if (watched.has(threadId)) return;
     // Bounded: past 64 the set starts over, and the threads still on screen join again (one read each).
-    if (watched.current.size >= 64) watched.current.clear();
-    watched.current.add(threadId);
+    if (watched.size >= 64) watched.clear();
+    watched.add(threadId);
     queueMicrotask(() => void refreshDecisions());
   };
   const decisionsTouched = useCallback((records: { any: boolean; threads: ReadonlySet<string>; applied: ReadonlySet<string>; own: ReadonlySet<string> }) => {
-    return decisionModeOnRef.current && batchTouches(records, watched.current);
-  }, [decisionModeOnRef]);
+    return decisionWatch.current.on && batchTouches(records, decisionWatch.current.threads);
+  }, [decisionWatch]);
   // The sitting's thread is always one of them.
   if (decisionModeOn && decide) watch(decide.thread);
   /** A thread's "Decide these N": decision mode on, no sitting going, and two or more of its decisions waiting. */
   const decideInThread = (threadId: string) => {
     if (decisionModeOn) watch(threadId);
     if (!decisionModeOn || !decisions || decide) return null;
-    const count = threadDecisions(decisions, threadId).length;
+    // From the last read's counts: a thread just watched has its count at once, before its decisions are held.
+    const count = decisionWatch.current.counts.get(threadId) ?? 0;
     return decideEntryShown(count) ? { count, onDecide: () => openDecide(threadId) } : null;
   };
   /** The sitting's queue: its thread's decisions only. */

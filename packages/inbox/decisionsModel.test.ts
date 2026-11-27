@@ -19,7 +19,9 @@ import {
   groupReady,
   groupSendTargets,
   headLine,
+  keepWatched,
   mergeDecisions,
+  newDecisionWatch,
   nextId,
   previousId,
   putOff,
@@ -131,6 +133,22 @@ describe('the queue', () => {
     expect(batchTouches({ ...batch([]), own: new Set(['msg_t1']) }, watched)).toBe(true);
     // A record naming no thread could be anyone's: read.
     expect(batchTouches(batch([], true), watched)).toBe(true);
+  });
+
+  test("a decisions read holds only the watched threads' decisions, and a count for every thread in the store", () => {
+    // The read lists every open decision in the store (the memory soak's store: 2,610 over 1,722 threads, 4 MB).
+    const all = [decision('msg_a/q-1', 'ses_a'), decision('msg_a/q-2', 'ses_a'), decision('msg_b/q-1', 'ses_b', 'msg_t2'), decision('msg_c/q-1', 'ses_c', 'msg_t3')];
+    const watch = newDecisionWatch();
+    watch.threads.add('msg_t1');
+    expect(keepWatched(all, watch).map((d) => d.id)).toEqual(['msg_a/q-1', 'msg_a/q-2']);
+    // A thread opened later shows its "Decide these N" count at once, before its own read lands.
+    expect([...watch.counts]).toEqual([['msg_t1', 2], ['msg_t2', 1], ['msg_t3', 1]]);
+    // Nothing watched (no thread open): nothing held.
+    watch.threads.clear();
+    expect(keepWatched(all, watch)).toEqual([]);
+    // The next read replaces the counts: a thread whose decisions all went has none.
+    keepWatched(all.slice(2), watch);
+    expect(watch.counts.get('msg_t1')).toBeUndefined();
   });
 
   test('a Send that went in part says how much went, never "Not sent"', () => {
