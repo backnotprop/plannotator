@@ -994,6 +994,32 @@ export const SETTINGS = {
       }
     },
   },
+  /** JSON-serialized array of Quick Label configs, or null for defaults.
+   *  Synced to ~/.plannotator/config.json as a parsed array (not a string),
+   *  so every device reviewing the same machine sees the same labels. */
+  quickLabels: {
+    defaultValue: null as string | null,
+    fromCookie: () => storage.getItem('plannotator-quick-labels') || undefined,
+    toCookie: (v: string | null) => {
+      if (v) storage.setItem('plannotator-quick-labels', v);
+      else storage.removeItem('plannotator-quick-labels');
+    },
+    serverKey: 'quickLabels',
+    fromServer: (sc: Record<string, unknown>) => {
+      const v = sc.quickLabels;
+      if (v === null) return null;
+      if (Array.isArray(v)) return JSON.stringify(v);
+      return undefined;
+    },
+    toServer: (v: string | null) => {
+      if (v === null) return { quickLabels: null };
+      try {
+        return { quickLabels: JSON.parse(v) };
+      } catch {
+        return {};
+      }
+    },
+  },
   /**
    * OpenCode's agent switch after plan approval / review feedback (#1390).
    * null = never chosen: each surface applies its own default (plan approval

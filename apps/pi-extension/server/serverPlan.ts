@@ -489,7 +489,7 @@ export async function startPlanReviewServer(options: {
 				return;
 			}
 			try {
-				const body = (await parseBody(req)) as { agentSwitch?: unknown; displayName?: string; diffOptions?: Record<string, unknown>; displayOptions?: unknown; theme?: Record<string, unknown>; favicon?: FaviconStyle; autoUpdate?: unknown; updateCheck?: unknown; agentTool?: unknown; conventionalComments?: boolean; conventionalLabels?: unknown[] | null; pfmReminder?: boolean };
+				const body = (await parseBody(req)) as { agentSwitch?: unknown; displayName?: string; diffOptions?: Record<string, unknown>; displayOptions?: unknown; theme?: Record<string, unknown>; favicon?: FaviconStyle; autoUpdate?: unknown; updateCheck?: unknown; agentTool?: unknown; conventionalComments?: boolean; conventionalLabels?: unknown[] | null; quickLabels?: unknown[] | null; pfmReminder?: boolean };
 				const toSave: Record<string, unknown> = {};
 				// OpenCode's agent switch (#1390): a known shape or nothing is saved.
 				const agentSwitch = agentSwitchConfigToSave(body);
@@ -511,6 +511,7 @@ export async function startPlanReviewServer(options: {
 				if (typeof body.agentTool === "boolean") toSave.agentTool = body.agentTool;
 				if (body.conventionalComments !== undefined) toSave.conventionalComments = body.conventionalComments;
 				if (body.conventionalLabels !== undefined) toSave.conventionalLabels = body.conventionalLabels;
+				if (body.quickLabels !== undefined) toSave.quickLabels = body.quickLabels;
 				if (body.pfmReminder !== undefined) toSave.pfmReminder = body.pfmReminder;
 				// The cookie switch (#2184): its own write, which never replaces another urlHost;
 				// refused in remote mode.

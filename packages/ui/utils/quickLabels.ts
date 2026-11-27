@@ -1,13 +1,12 @@
 /**
  * Quick Labels — preset annotation labels for one-click feedback
  *
- * Labels are stored in cookies (same pattern as other settings)
- * so they persist across different port-based sessions.
+ * Labels live in the config registry (`quickLabels`): the cookie
+ * `plannotator-quick-labels` keeps them across port-based sessions, and
+ * ~/.plannotator/config.json shares them across browsers and devices.
  */
 
-import { storage } from './storage';
-
-const STORAGE_KEY = 'plannotator-quick-labels';
+import { configStore } from '../config';
 
 export interface QuickLabel {
   id: string;     // kebab-case identifier e.g. "needs-tests"
@@ -58,7 +57,7 @@ export const DEFAULT_QUICK_LABELS: QuickLabel[] = [
 ];
 
 export function getQuickLabels(): QuickLabel[] {
-  const raw = storage.getItem(STORAGE_KEY);
+  const raw = configStore.get('quickLabels');
   if (!raw) return DEFAULT_QUICK_LABELS;
   try {
     const parsed = JSON.parse(raw) as QuickLabel[];
@@ -69,11 +68,11 @@ export function getQuickLabels(): QuickLabel[] {
 }
 
 export function saveQuickLabels(labels: QuickLabel[]): void {
-  storage.setItem(STORAGE_KEY, JSON.stringify(labels));
+  configStore.set('quickLabels', JSON.stringify(labels));
 }
 
 export function resetQuickLabels(): void {
-  storage.removeItem(STORAGE_KEY);
+  configStore.set('quickLabels', null);
 }
 
 /**
