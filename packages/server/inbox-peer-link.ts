@@ -172,6 +172,11 @@ export interface PeerLinkOptions {
   /** Its Board was read again (`cards`): the windows read the merged Board. */
   onCards?: () => void;
   /**
+   * A thread's reply draft changed there (`drafts`, mark `reply-drafts`) and its list was read again for the Draft mark.
+   * `refreshed` false: that read failed, so the list held may predate the change.
+   */
+  onDrafts?: (threadId: string, refreshed: boolean) => void;
+  /**
    * That machine's live sessions moved its rows (a delivery, "Session ended") and its list was read again: the windows
    * read theirs. `sessions`: a session ended or came back there; `agents`: its Agents section moved; `labels`: a
    * session's name changed there.
@@ -228,6 +233,12 @@ export class PeerLink {
   /** Its health's `message_deletions`: its store takes a Delete on a message's words. False until it answered, and for an older Inbox. */
   messageDeletions = false;
   list: PeerList | null = null;
+  /**
+   * Reads of its list started so far (`listAsked`), and which of them made the list held now (`listGen`; it only moves
+   * forward). A list whose read started after something was heard there says what is there now (inbox-machine-drafts.ts).
+   */
+  listAsked = 0;
+  listGen = 0;
   /** Its Board, once a window asked for the merged Board (`wantCards`), and only from a machine whose list takes `cards`. */
   cards: PeerCards | null = null;
   /** That machine's own update answer (its health and its status frames), and whether its door takes `update`. */
@@ -250,7 +261,7 @@ export class PeerLink {
   private running = false;
   private stream: AbortController | null = null;
   private wake: (() => void) | null = null;
-  private listing: Promise<void> | null = null;
+  private listing: Promise<boolean> | null = null;
   private listAgain = false;
   /** The stream is ended on purpose to ask again for what this Inbox wants (Grid turned on or off): dial at once, still online. */
   private redial = false;
@@ -286,6 +297,11 @@ export class PeerLink {
 
   private get token() {
     return this.options.link.token;
+  }
+
+  /** The machine's name as its link says it. */
+  get name(): string {
+    return this.options.link.name;
   }
 
   private auth(extra: Record<string, string> = {}): Record<string, string> {
@@ -435,10 +451,10 @@ export class PeerLink {
     }, this.t.silenceMs);
     let response: Response;
     try {
-      // The reread events and `deliveries=1`: none writes a record, so the stream tells this machine when to read the list again.
+      // The reread events, `deliveries=1` and `drafts=1`: none writes a record, so the stream tells this machine when to read the list again.
       // `grid-seen` only while Grid is on here: off, nothing of Grid is asked for.
       const gridOn = this.options.gridOn?.() === true;
-      const asks = [...PEER_REREAD_EVENTS.filter((event) => event !== "grid-seen" || gridOn), "deliveries"].map((event) => `${event}=1`).join("&");
+      const asks = [...PEER_REREAD_EVENTS.filter((event) => event !== "grid-seen" || gridOn), "deliveries", "drafts"].map((event) => `${event}=1`).join("&");
       response = await this.options.transport.events(headers, this.cursor === null ? `?${asks}` : `?cursor=${this.cursor}&${asks}`, abort.signal);
     } catch (error) {
       if (this.stream === abort) this.stream = null;
@@ -505,6 +521,11 @@ export class PeerLink {
             // The list's cursor does not move, so the windows are told apart from a list that changes it.
             const event = parsed.event;
             void this.refreshList().then(() => this.options.onReread?.(event));
+          } else if (parsed.event === "drafts") {
+            // A thread's reply draft there: its row's Draft mark is in the list. A compose draft there is its own.
+            const change = JSON.parse(parsed.data) as Json;
+            const threadId = typeof change.thread_id === "string" ? change.thread_id : null;
+            if (threadId) void this.refreshList().then((refreshed) => this.options.onDrafts?.(threadId, refreshed));
           } else if (parsed.event === "deliveries") {
             const change = JSON.parse(parsed.data) as Json;
             this.deliveriesMoved(change.sessions === true, change.agents === true, change.labels === true);
@@ -527,34 +548,41 @@ export class PeerLink {
 
   // ── The list: one fetch at a time, never backwards (rule 5). ──
 
-  refreshList(): Promise<void> {
+  /** True when the last read of this run was taken (a failed read, or one older than the list held, is not). */
+  refreshList(): Promise<boolean> {
     if (this.listing) {
       this.listAgain = true;
       return this.listing;
     }
     const run = (async () => {
+      let accepted = false;
       do {
         this.listAgain = false;
+        accepted = false;
+        const asked = ++this.listAsked;
         try {
           // `grid=1` only while Grid is on here: that machine adds Grid's fields to its rows only then.
           const response = await this.options.transport.request("threads", this.options.gridOn?.() === true ? "?grid=1" : "", { method: "GET", headers: this.auth(), signal: AbortSignal.timeout(this.t.requestMs) });
           if (!response.ok) continue;
-          this.acceptList((await response.json()) as Json);
+          accepted = this.acceptList((await response.json()) as Json, asked);
         } catch {
           // The stream's own failure handling marks the line.
         }
       } while (this.listAgain && this.running);
+      return accepted;
     })();
-    this.listing = run.finally(() => {
+    const listing = run.finally(() => {
       this.listing = null;
     });
-    return this.listing;
+    this.listing = listing;
+    return listing;
   }
 
-  /** Rule 5: a list older than the one held is dropped. */
-  acceptList(list: Json): boolean {
+  /** Rule 5: a list older than the one held is dropped. `asked`: which read of the list it is (`listAsked`). */
+  acceptList(list: Json, asked = ++this.listAsked): boolean {
     const cursor = typeof list.cursor === "number" ? list.cursor : -1;
     if (this.list && cursor < this.list.cursor) return false;
+    this.listGen = Math.max(this.listGen, asked);
     const rows = (Array.isArray(list.sections) ? list.sections : []).flatMap((section: Json) => (Array.isArray(section.threads) ? section.threads : []));
     const projects = Array.isArray(list.projects) ? list.projects : [];
     this.list = {

@@ -1,4 +1,5 @@
-import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { QuestionOtherToolsContext } from '../QuestionOtherTools';
+import React, { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   canonicalQuestionAnswer,
   contextWithoutScenarioTable,
@@ -481,6 +482,9 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
         setDraft(sameAnswer(next, savedAnswer) ? null : { answer: next })
     : onLiveAnswer;
   const readOnly = !onAnswer;
+  const OtherTools = useContext(QuestionOtherToolsContext);
+  const [otherRevision, setOtherRevision] = useState(0);
+  const supersedeOther = () => { if (OtherTools) setOtherRevision((n) => n + 1); };
 
   const save = () => {
     if (!onSaveAnswer || !draft || saving) return;
@@ -606,6 +610,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
       nextSelected.sort((a, b) => order.indexOf(a) - order.indexOf(b));
       commit({ ...rest, selected: nextSelected });
     } else if (checked) {
+      supersedeOther();
       const { other: _o, ...single } = rest;
       commit({ ...single, selected: [label] });
     }
@@ -619,6 +624,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   const pickSuggestion = (checked: boolean) => {
     const text = question.suggestedText;
     if (!text) return;
+    supersedeOther();
     lastPickRef.current = { label: SUGGESTION_ROW, before: answer, at: now() };
     const { skipped: _s, other: _o, ...rest } = base;
     if (question.kind === 'multi') {
@@ -658,6 +664,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   };
 
   const toggleSkip = () => {
+    supersedeOther();
     replacedOtherRef.current = null;
     if (base.skipped) {
       const { skipped: _s, ...rest } = base;
@@ -672,6 +679,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
     const recommended = recommendedQuestionAnswer(indexed, base);
     if (!recommended) return;
     const keptOther = acceptBehavior?.keepOther && question.kind === 'multi' && recommended.selected.length > 0 && base.other?.trim() ? base.other : undefined;
+    if (!keptOther) supersedeOther();
     const next = keptOther ? { ...recommended, other: keptOther } : recommended;
     const before = answer;
     replacedOtherRef.current = null;
@@ -767,7 +775,10 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   const otherWidthRef = useRef(-1);
   const fitOther = () => {
     const field = otherRef.current;
-    setOtherGlyphTop(field ? fitOtherField(field) : null);
+    const grown = field ? fitOtherField(field) : null;
+    // With host tools, a line can come under the field (the mic's status): the mark stays beside its first line, where
+    // one line centres it, rather than centring on the taller box.
+    setOtherGlyphTop(grown ?? (field && OtherTools && field.offsetHeight > 15 ? (field.offsetHeight - 15) / 2 : null));
     otherWidthRef.current = field ? field.clientWidth : -1;
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1218,6 +1229,8 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
                 </span>
                 {/* One line tall, as the one-line field it replaced; it grows with its lines (wrapped or typed:
                     Enter makes a new line, as in the note) up to a cap, then scrolls. A read-only card shows it whole. */}
+                {/* The host's tools (the Inbox's mic) draw inside this box: over the field's right edge, and below it. */}
+                <div className="relative flex min-w-0 flex-1 flex-col">
                 <textarea
                   ref={otherRef}
                   rows={1}
@@ -1235,10 +1248,12 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
                   aria-label={number > 0 ? `Other answer to question ${number}` : 'Other answer'}
                   data-question-other=""
                   className={cx(
-                    'annotation-exclude min-w-0 flex-1 resize-none overflow-hidden break-words border-0 border-b border-transparent bg-transparent py-[3px] text-[13.5px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-ring',
+                    'annotation-exclude w-full min-w-0 resize-none overflow-hidden break-words border-0 border-b border-transparent bg-transparent py-[3px] text-[13.5px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-ring',
                     !readOnly && 'max-h-48',
                   )}
                 />
+                {OtherTools && !readOnly && <OtherTools key={`${question.key}:${otherRevision}`} textareaRef={otherRef} />}
+                </div>
               </div>
             )}
           </div>

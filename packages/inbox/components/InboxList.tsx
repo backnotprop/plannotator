@@ -31,7 +31,7 @@ import { attachPullToRefresh } from '../pullRefresh';
 import { RowSwipeLayer, useRowSwipe } from './RowSwipeLayer';
 import { leadEmpty, leadParts } from './rowLead';
 import { TidyMenu, type TidyController } from './Tidy';
-import { ListFilterButton, useTitleFilterList, type ListFilterSource } from './ListFilter';
+import { ListFilterButton, RecentViewBar, RecentViewSaid, useTitleFilterList, type ListFilterSource } from './ListFilter';
 import { awayLine, machineTakes, type MachinesModel } from '../machines';
 import { listLookClasses, useListLook } from '../listLook';
 import { flatRows, useListView, type ListPlaces, type ListSort } from '../listView';
@@ -1134,7 +1134,7 @@ export function InboxList(props: InboxListProps) {
           />
         )}
       </div>
-      {titleField}
+      {props.listFilter && <RecentViewBar place={props.listFilter.place ?? ''} picking={pick.on} />}{titleField}{props.listFilter && <RecentViewSaid place={props.listFilter.place ?? ''} />}
       {starredAbove && props.starred && (
         <StarredPills
           rows={props.starred.rows}

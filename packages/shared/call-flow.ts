@@ -22,6 +22,7 @@ import {
   CALL_FLOW_LANGUAGES,
   getCallFlowLanguage,
   getCallFlowLanguageForPath,
+  getCallFlowPatchFiles,
   getCallFlowPatchLanguageUsage,
 } from "./call-flow-languages";
 import type { CallFlowLanguageDefinition, CallFlowLanguageId } from "./call-flow-languages";
@@ -69,6 +70,8 @@ const CORE_PRUNED_PACKAGES = [
 ] as const;
 
 const WORKER_TIMEOUT_MS = 45_000;
+// Estimate 15 ms per candidate path, leaving headroom for worker startup/output.
+const FULL_REPO_PATH_BUDGET = Math.floor(WORKER_TIMEOUT_MS * 0.75 / 15);
 const GIT_TIMEOUT_MS = 20_000;
 const DEFAULT_OUTPUT_MIB = 12;
 const MAX_PROCESS_OUTPUT_BYTES = DEFAULT_OUTPUT_MIB * 1024 * 1024;
@@ -1322,6 +1325,28 @@ async function gitRaw(cwd: string, args: readonly string[]): Promise<string> {
   return result.stdout;
 }
 
+/** Shown when a large repository is analysed only at its changed files. */
+export const CALL_FLOW_CHANGED_FILES_NOTICE = "This repository is large, so call flow covers only the changed files. Callers elsewhere aren't shown.";
+
+/**
+ * Pick the files CallDiff reads. Up to the budget it reads every supported
+ * file in both snapshots, so callers outside the diff are found; above it the
+ * worker would run out of its 45 seconds, so it reads only the changed files
+ * (both sides of a rename or deletion) and the result carries a notice.
+ */
+export function selectCallFlowPaths(
+  paths: readonly string[],
+  rawPatch: string,
+  budget = FULL_REPO_PATH_BUDGET,
+): { paths: readonly string[]; notice?: string } {
+  if (paths.length <= budget) return { paths };
+  const changed = new Set(getCallFlowPatchFiles(rawPatch));
+  return {
+    paths: paths.filter((filePath) => changed.has(filePath)),
+    notice: CALL_FLOW_CHANGED_FILES_NOTICE,
+  };
+}
+
 async function snapshotPathsForLanguages(
   plan: SnapshotPlan,
   languageIds: ReadonlySet<CallFlowLanguageId>,
@@ -1341,6 +1366,7 @@ async function executeCallFlowAnalysis(
   runtime: CallFlowRuntime,
   input: CallFlowAnalysisInput,
   signal: AbortSignal,
+  pathBudget = FULL_REPO_PATH_BUDGET,
 ): Promise<ParsedCallDiffWorkerResult> {
   let plan: SnapshotPlan | undefined;
   try {
@@ -1374,7 +1400,21 @@ async function executeCallFlowAnalysis(
         diagnostics: [],
       };
     }
-    return await executeWorker(runtime, plan, paths, analyzedLanguageIds, signal);
+    const scope = selectCallFlowPaths(paths, input.rawPatch, pathBudget);
+    if (!scope.notice) return await executeWorker(runtime, plan, paths, analyzedLanguageIds, signal);
+    if (scope.paths.length === 0) {
+      return {
+        version: runtime.version,
+        from: plan.from,
+        to: plan.to,
+        notice: scope.notice,
+        raw: "",
+        trees: [],
+        diagnostics: [],
+      };
+    }
+    const result = await executeWorker(runtime, plan, scope.paths, analyzedLanguageIds, signal);
+    return { ...result, notice: scope.notice };
   } finally {
     plan?.cleanup();
   }
@@ -1390,6 +1430,8 @@ export interface CallFlowServiceOptions {
     input: CallFlowAnalysisInput,
     signal: AbortSignal,
   ) => Promise<ParsedCallDiffWorkerResult>;
+  /** Supported files above which only the changed files are analysed (tests lower it). */
+  readonly fullRepositoryPathBudget?: number;
 }
 
 /** Session-local cache + single execution slot for a review server. */
@@ -1410,7 +1452,9 @@ export class CallFlowService {
     this.now = options.now ?? Date.now;
     this.runtimeProbeTtlMs = options.runtimeProbeTtlMs ?? 30_000;
     this.resolveRuntime = options.resolveRuntime ?? resolveCallFlowRuntime;
-    this.executeAnalysis = options.executeAnalysis ?? executeCallFlowAnalysis;
+    const pathBudget = options.fullRepositoryPathBudget ?? FULL_REPO_PATH_BUDGET;
+    this.executeAnalysis = options.executeAnalysis
+      ?? ((runtime, input, signal) => executeCallFlowAnalysis(runtime, input, signal, pathBudget));
   }
 
   private analysisKey(input: CallFlowAnalysisInput): string {
@@ -1621,6 +1665,7 @@ export class CallFlowService {
         from: parsed.from,
         to: parsed.to,
         ...(parsed.message && { message: parsed.message }),
+        ...(parsed.notice && { notice: parsed.notice }),
         raw: parsed.raw,
         trees: parsed.trees,
         fileImpacts: indexed.fileImpacts,

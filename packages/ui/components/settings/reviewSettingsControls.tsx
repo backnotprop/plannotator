@@ -29,7 +29,8 @@ export const writeReviewSettingToStore: ReviewSettingChange = (key, value) => co
 /**
  * The rows a host can honour. Each defaults to shown; a host turns off a row
  * whose setting it does not apply (the Inbox has no minimap, no whitespace
- * hiding, no hover cards and no local default diff).
+ * hiding, no hover cards, no local default diff, no viewed marks to set by
+ * scrolling and no Call flow).
  */
 export interface ReviewSettingsRows {
   /** Hide whitespace (needs the local repository). */
@@ -40,6 +41,10 @@ export interface ReviewSettingsRows {
   hoverCards: boolean;
   /** Files and defaults' Git and Jujutsu groups: default file grouping and default diff view. */
   defaultDiffViews: boolean;
+  /** Files and defaults' Auto-mark viewed (needs code review's viewed marks). With no default diff views either, the section is not drawn. */
+  autoViewed: boolean;
+  /** The Call flow section (needs code review's server and a local checkout). */
+  callFlow: boolean;
 }
 
 export interface ReviewSettingsSwitchProps {

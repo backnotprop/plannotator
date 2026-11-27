@@ -339,17 +339,21 @@ export function readPiSessionHeader(file: string): { id?: unknown; parentSession
  * header without an id, a session already seen, or PI_HANDOFF_LINE_MAX. Exported for the tests.
  */
 export function piHandoffLine(sessionFile: string | null | undefined, currentSessionId: string): string[] {
+	const parent = sessionFile ? readPiSessionHeader(sessionFile)?.parentSession : undefined;
+	return piHandoffFromParent(parent, currentSessionId);
+}
+
+function piHandoffFromParent(parentSession: unknown, currentSessionId: string): string[] {
 	const line: string[] = [];
 	const seen = new Set<string>([currentSessionId]);
-	let file = sessionFile;
-	while (file && line.length < PI_HANDOFF_LINE_MAX) {
-		const parent = readPiSessionHeader(file)?.parentSession;
-		if (typeof parent !== "string" || !parent) break;
-		const id = readPiSessionHeader(parent)?.id;
+	let parent = parentSession;
+	while (typeof parent === "string" && parent && line.length < PI_HANDOFF_LINE_MAX) {
+		const header = readPiSessionHeader(parent);
+		const id = header?.id;
 		if (typeof id !== "string" || !id || seen.has(id)) break;
 		seen.add(id);
 		line.push(id);
-		file = parent;
+		parent = header?.parentSession;
 	}
 	return line;
 }
@@ -357,6 +361,8 @@ export function piHandoffLine(sessionFile: string | null | undefined, currentSes
 /** The handoff line of the session `ctx` runs; none when Pi cannot say its file (an in-memory session). */
 function piHandoffLineOf(ctx: ExtensionContext, sessionId: string): string[] {
 	try {
+		const parent = ctx.sessionManager.getHeader?.()?.parentSession;
+		if (typeof parent === "string" && parent) return piHandoffFromParent(parent, sessionId);
 		return piHandoffLine(ctx.sessionManager.getSessionFile(), sessionId);
 	} catch {
 		return [];

@@ -626,6 +626,12 @@ export interface PlannotatorConfig {
     canStar?: boolean;
   };
   /**
+   * The launch switch's one-time dialog (packages/shared/launch-switch.ts reads and writes it, nothing else does),
+   * per campaign: `shownAt` once a surface showed it, so none shows it again on this computer; `answer`: `opened`
+   * (the launch link opened) or `dismissed`.
+   */
+  launch?: Record<string, { shownAt?: string; answer?: "opened" | "dismissed"; answeredAt?: string }>;
+  /**
    * Code review in the Inbox (approval "inbox-code-review-direction",
    * 2026-11-03): something the person turns on, off by default. On: the
    * review skills in the reply box's "/" list, the review card and its
@@ -1085,6 +1091,7 @@ const DISPLAY_OPTION_TYPES = {
   planWidth: "string",
   taterMode: "boolean",
   inputMethod: "string",
+  htmlAnnotateOnStartup: "boolean",
 } as const satisfies Record<keyof DisplayOptions, "number" | "string" | "boolean">;
 
 /**
@@ -1100,6 +1107,11 @@ export function parseDisplayOptionsConfig(value: unknown): DisplayOptions | unde
     if (typeof input[key] === type) result[key] = input[key];
   }
   return result as DisplayOptions;
+}
+
+/** Whether HTML pages and live apps start in Interact ("Start in Annotate mode" turned off). */
+export function resolveHtmlStartsInInteract(config: PlannotatorConfig): boolean {
+  return parseDisplayOptionsConfig(config.displayOptions)?.htmlAnnotateOnStartup === false;
 }
 
 /** PLANNOTATOR_PACKAGE_LOOKUP: `0` / `false` / `off` / `disabled` is a hard off; anything else decides nothing. */
@@ -1138,7 +1150,7 @@ function getStatePath(): string {
  */
 const MACHINE_STATE_KEYS = [
   "inboxAgentNotes", "inboxTour", "inboxBoardIntro", "inboxListIntro", "inboxVoiceIntro", "inboxSnoozeIntro",
-  "inboxReveals", "starAsk", "inboxThemeChooser", "inboxPriorityIntro", "inboxReviewWelcome", "inboxReviewOnlyNotes",
+  "inboxReveals", "starAsk", "inboxThemeChooser", "inboxPriorityIntro", "launch", "inboxReviewWelcome", "inboxReviewOnlyNotes",
 ] as const;
 type MachineStateKey = (typeof MACHINE_STATE_KEYS)[number];
 /** Machine-state fields inside a key whose other fields are settings (`inboxSound.enabled` / `volume`). */
@@ -1255,6 +1267,7 @@ const starAskTime = (record: Record<string, unknown>) => String(record.answeredA
  * | inboxSnoozeIntro                        | stamps, earliest `firstUseAt`                                           |
  * | inboxBoardIntro, inboxVoiceIntro,       | stamps: shown, skipped, used or not-needed anywhere stays so            |
  * | inboxThemeChooser, inboxPriorityIntro   |                                                                         |
+ * | launch                                  | stamps per campaign: shown anywhere stays shown                         |
  * | inboxSound dialog fields                | newer `dialogShownFor` and `dialogDueFor`; due only while the due       |
  * |                                         | version is newer than the shown one (soundDialog)                       |
  */
@@ -1727,6 +1740,20 @@ function writeConfigFile(configPath: string, contents: string): void {
  * (or read the value back).
  */
 export function saveConfig(partial: Partial<PlannotatorConfig>): boolean {
+  return saveConfigLocked(partial) === "saved";
+}
+
+/**
+ * saveConfig as a compare-and-set: `decide` runs inside the lock, with the config as both files hold it now, and
+ * returns what to save, or null to save nothing (`declined`). The check and its write are one critical section, so two
+ * processes sharing the data dir cannot both pass the check (the launch switch's one-time stamp). `failed`: decided,
+ * but the save did not land.
+ */
+export function saveConfigIf(decide: (current: PlannotatorConfig) => Partial<PlannotatorConfig> | null): "saved" | "declined" | "failed" {
+  return saveConfigLocked(decide);
+}
+
+function saveConfigLocked(input: Partial<PlannotatorConfig> | ((current: PlannotatorConfig) => Partial<PlannotatorConfig> | null)): "saved" | "declined" | "failed" {
   let lockPath: string | null = null;
   let locked = false;
   let saved = false;
@@ -1747,10 +1774,17 @@ export function saveConfig(partial: Partial<PlannotatorConfig>): boolean {
         `[plannotator] Warning: not saving config.json because ${read.reason}; `
         + `the settings in it are kept. Fix or remove ${getConfigPath()} to save settings again.\n`,
       );
-      return false;
+      return "failed";
     }
     const current = read.config;
     configSaveMergeWindowHook?.();
+    const stateRead = readState();
+    let partial: Partial<PlannotatorConfig>;
+    if (typeof input === "function") {
+      const decided = input(withMachineState(current as Record<string, unknown>, stateRead.state));
+      if (decided === null) return "declined";
+      partial = decided;
+    } else partial = input;
     // The nested settings merge key by key (one experimental switch saved keeps the others), but a
     // hand-edited config.json may hold anything there. A key the write does not name is kept verbatim,
     // whatever it holds; one it names merges only when both sides are plain objects, else the write's
@@ -1775,7 +1809,6 @@ export function saveConfig(partial: Partial<PlannotatorConfig>): boolean {
     for (const key of ["experimental", "diffOptions", "displayOptions", "reviewDefaults", "theme", "reviewAnalysis", "prompts", "packageChanges", "inboxLaunch", "inboxCapabilityFlips"] as const) nested(key);
     // Machine state named by the save goes to state.json only (MACHINE_STATE_KEYS): config.json's copy, if any, is
     // kept as it is, for other machines and older versions that read it.
-    const stateRead = readState();
     const state = { ...stateRead.state };
     let stateNamed = false;
     for (const key of MACHINE_STATE_KEYS) {
@@ -1809,7 +1842,7 @@ export function saveConfig(partial: Partial<PlannotatorConfig>): boolean {
   } finally {
     if (locked && lockPath) releaseConfigLock(lockPath);
   }
-  return saved;
+  return saved ? "saved" : "failed";
 }
 
 /**

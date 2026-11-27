@@ -41,7 +41,8 @@ export const INBOX_PAGE_MAX_BYTES = 8 * 1024 * 1024;
 
 /**
  * The page document's policy: what its srcdoc frame inherited from the window
- * (`WINDOW_CSP` in inbox.ts), plus web pictures (`https:` and plain `http:`,
+ * (`WINDOW_CSP` in inbox.ts) but the Code Font menu's style and font places
+ * (the window's settings need them; a page does not), plus web pictures (`https:` and plain `http:`,
  * local servers included: every picture a page names should show), and
  * sandboxed by the header too, so the page is an opaque origin even opened as
  * a tab of its own. Video and audio as the window's (`'self'`, data: and

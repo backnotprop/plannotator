@@ -12,7 +12,7 @@ public struct ListFolds: Hashable, Sendable {
     case closed(since: Int64)
   }
 
-  static let groups: [InboxListGroupId] = [.priority, .stopped, .holding, .waiting, .new, .sent, .quiet, .snoozed]
+  static let groups: [InboxListGroupId] = [.priority, .stopped, .holding, .waiting, .tagged, .new, .sent, .quiet, .snoozed]
   static let closedByDefault: Set<InboxListGroupId> = [.quiet, .snoozed]
 
   var choices: [InboxListGroupId: State] = [:]

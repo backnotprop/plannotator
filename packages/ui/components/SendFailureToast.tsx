@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { copyTextToClipboard } from '../utils/clipboard';
-import { canRetrySend, describeSendFailure, sendFailureOf } from '../utils/sendFailure';
+import { canRetrySend, describeSendFailure, sendFailureOf, type SendFailure } from '../utils/sendFailure';
 
 /**
  * The one message a review page shows when a decision did not reach the
@@ -24,8 +24,9 @@ import { canRetrySend, describeSendFailure, sendFailureOf } from '../utils/sendF
  * connection fails in milliseconds) would be marked deleted as it appears.
  */
 let failures = 0;
-/** The failure toast on screen, if any. */
+/** The failure toast on screen, if any, and why it failed. */
 let currentId: string | null = null;
+let currentKind: SendFailure['kind'] | null = null;
 /** Decision sends in flight on this page. */
 let inFlight = 0;
 
@@ -40,11 +41,16 @@ export function sendSettled(): void {
   inFlight = Math.max(0, inFlight - 1);
 }
 
-/** The failure no longer applies (a send started, or the review was decided). */
-export function dismissSendFailureToast(): void {
-  if (currentId === null) return;
+/**
+ * The failure no longer applies (a send started, or the review was decided).
+ * With `kind`, only a failure of that kind (the code review page: the agent
+ * is back, so an agent-gone failure no longer says what Send would do).
+ */
+export function dismissSendFailureToast(kind?: SendFailure['kind']): void {
+  if (currentId === null || (kind !== undefined && currentKind !== kind)) return;
   toast.dismiss(currentId);
   currentId = null;
+  currentKind = null;
 }
 
 /**
@@ -54,7 +60,7 @@ export function dismissSendFailureToast(): void {
  * from the theme, since the Toasters run sonner's light theme and its
  * secondary fill disappears on a dark card.
  */
-function CopyFeedbackButton({ getText }: { getText: () => string | undefined }) {
+export function CopyFeedbackButton({ getText }: { getText: () => string | undefined }) {
   const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle');
   return (
     <button
@@ -87,19 +93,25 @@ export function showSendFailureToast(options: {
   /** The text Retry would send now, as the page's Copy feedback copies it.
    *  Omitted when the decision carries no text (a bare approval). */
   copyText?: () => string | undefined;
+  /** The sentence under the title, when the page has its own for this failure
+   *  (code review's agent-gone reasons); else `describeSendFailure`. */
+  reason?: string;
 }): void {
-  const { what, error, onRetry, copyText } = options;
+  const { what, error, onRetry, copyText, reason } = options;
   const failure = sendFailureOf(error);
   dismissSendFailureToast(); // replaced, never stacked
   const id = `plannotator-send-failure-${++failures}`;
   currentId = id;
+  currentKind = failure.kind;
   const forget = () => {
-    if (currentId === id) currentId = null;
+    if (currentId !== id) return;
+    currentId = null;
+    currentKind = null;
   };
   toast.error(what === 'approval' ? 'Approval not sent' : 'Feedback not sent', {
     id,
     onDismiss: forget,
-    description: describeSendFailure(failure),
+    description: reason ?? describeSendFailure(failure),
     duration: Infinity,
     // It stays up, so it sits at the bottom, clear of the header's decision
     // control and the annotation panel the reviewer may want to read.

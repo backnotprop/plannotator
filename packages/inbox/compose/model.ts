@@ -6,7 +6,7 @@
 
 import { parseInboxGitUrl } from '@plannotator/core/inbox-git-url';
 import { derivePersonThreadSubject, suggestPersonThreadName } from '@plannotator/core/inbox-questions';
-import { checkInboxThreadName, INBOX_DRAFT_BODY_MAX, INBOX_HOST_NAMES, type InboxComposeLaunch, type InboxComposeProject, type InboxComposeSession, type InboxLaunchAgent, type InboxDraft, type InboxDraftTo } from '@plannotator/core/inbox-types';
+import { checkInboxThreadName, INBOX_DRAFT_BODY_MAX, inboxHostName, type InboxComposeLaunch, type InboxComposeProject, type InboxComposeSession, type InboxLaunchAgent, type InboxDraft, type InboxDraftTo } from '@plannotator/core/inbox-types';
 import { INBOX_SCRATCH_PICK, inboxScratchSlug } from '@plannotator/core/inbox-scratch';
 import { inboxLaunchNotReadyWords, inboxMachineLaunchWords } from '@plannotator/core/inbox-launch-ready';
 import { whenTime } from '../format';
@@ -23,7 +23,8 @@ export interface ComposeGroup {
   sessions: ComposeTarget[];
 }
 
-export const hostLabel = (host: string): string => INBOX_HOST_NAMES[host] ?? host;
+/** An agent's name from its host, and the app it runs in when a session says (`runtime`: Oh My Pi). */
+export const hostLabel = (host: string, runtime?: unknown): string => inboxHostName(host, runtime);
 
 /**
  * A project's name in its two parts: the folder's own name, and the parent
@@ -79,7 +80,7 @@ export function filterGroups(groups: readonly ComposeGroup[], query: string, mac
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (words.length === 0) return [...groups];
   const matches = (target: ComposeTarget) => {
-    const hay = [hostLabel(target.host), target.host, target.label ?? '', target.project.name, target.project.root, target.last_thread?.subject ?? '', target.place?.line ?? '', machine].join(' ').toLowerCase();
+    const hay = [hostLabel(target.host, target.runtime), target.host, target.label ?? '', target.project.name, target.project.root, target.last_thread?.subject ?? '', target.place?.line ?? '', machine].join(' ').toLowerCase();
     return words.every((word) => hay.includes(word));
   };
   return groups.map((group) => ({ ...group, sessions: group.sessions.filter(matches) })).filter((group) => group.sessions.length > 0);
@@ -346,7 +347,7 @@ export function composeActions(query: string, targets: readonly ComposeTarget[],
   // "New review…" (Settings → Capabilities → Code review): "review", "pull", and "new" as New message's own.
   if (reviews && words.some((word) => callsReview(word) || word === 'new')) out.push({ kind: 'review' });
   const named = targets.filter((target) => {
-    const hay = `${hostLabel(target.host)} ${target.host} ${target.label ?? ''} ${target.project.name}`.toLowerCase();
+    const hay = `${hostLabel(target.host, target.runtime)} ${target.host} ${target.label ?? ''} ${target.project.name}`.toLowerCase();
     return words.every((word) => hay.includes(word) || callsAction(word));
   });
   // Only when a word names the session (not the action words alone).
@@ -360,7 +361,7 @@ export const actionLabel = (action: ComposeAction): string =>
     ? 'New message…'
     : action.kind === 'review'
       ? 'New review…'
-      : `Message ${hostLabel(action.target.host)}${action.target.label ? ` · ${action.target.label}` : ''} in ${action.target.project.name}`;
+      : `Message ${hostLabel(action.target.host, action.target.runtime)}${action.target.label ? ` · ${action.target.label}` : ''} in ${action.target.project.name}`;
 
 // ── Launch: start a new session from To (behind `inboxLaunch.enabled`, on unless false; docs/agent-guides/inbox-launch.md) ──
 
