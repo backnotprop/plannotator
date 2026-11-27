@@ -915,6 +915,8 @@ packages/inbox/scheduled/routineTabs.test.tsx
 packages/inbox/createRoutineWindow.test.tsx
 packages/inbox/plans/plansSidebar.test.tsx
 packages/inbox/plans/plansPage.test.tsx
+packages/inbox/plans/planDecision.test.tsx
+packages/inbox/plans/planHeader.test.tsx
 packages/inbox/plans/spacesHome.test.tsx
 packages/inbox/plans/spaceFaceDiagram.test.tsx
 packages/inbox/plans/planShare.test.tsx

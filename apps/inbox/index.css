@@ -67,6 +67,7 @@
 @import "../../packages/inbox/pulls/ship.css";
 /* Plans (packages/inbox/plans/). */
 @import "../../packages/inbox/plans/plans.css";
+@import "../../packages/inbox/plans/planHeader.css";
 @import "../../packages/inbox/grid/grid.css";
 /* A launched session's permission prompt (components/PermissionCard.tsx). */
 @import "../../packages/inbox/permissionCard.css";
