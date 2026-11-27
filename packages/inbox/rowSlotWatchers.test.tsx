@@ -16,6 +16,7 @@ const hasDom = typeof document !== 'undefined';
 const { createRoot } = (hasDom ? await import('react-dom/client') : {}) as typeof import('react-dom/client');
 const { InboxList } = (hasDom ? await import('./components/InboxList') : {}) as typeof import('./components/InboxList');
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
+const { RowAgentTiles } = (hasDom ? await import('./components/RowAgents') : {}) as typeof import('./components/RowAgents');
 const { setInboxAgents } = (hasDom ? await import('./agentsList') : {}) as typeof import('./agentsList');
 const { setSessionTitles, sessionTitlesWatchersForTests } = (hasDom ? await import('./sessionTitles') : {}) as typeof import('./sessionTitles');
 const { rowSessionsWatchersForTests } = (hasDom ? await import('./severalSessions') : {}) as typeof import('./severalSessions');
@@ -138,4 +139,38 @@ test.skipIf(!hasDom)('a list of 60 rows watches the session labels once; a label
   await act(async () => setSessionLabels({ ses_b: 'Docs pass 2' }));
   expect(tiles().filter((label) => label.includes('Docs pass 2')).length).toBe(30);
   expect(slots().filter((text) => text.includes('Docs pass 2')).length).toBe(30);
+});
+
+test.skipIf(!hasDom)("a phone's rows read the labels from the list too; a label set after it drew shows in their agent tiles", async () => {
+  const labelsBefore = sessionLabelsWatchersForTests();
+  const sections: InboxListSection[] = [{ id: 'new', label: 'New', threads: Array.from({ length: 60 }, (_, i) => listRow(`thr_${i}`, i)) }];
+  host = document.createElement('div');
+  host.className = 'pn-inbox';
+  document.body.append(host);
+  root = createRoot(host);
+  act(() => setInboxAgents(AGENTS as never));
+  await act(async () =>
+    root!.render(
+      <SidebarProvider>
+        <InboxList title="Inbox" path={null} sections={sections} filtered={false} narrow={false} selectedThreadId={null} notice={null} onShowNew={none} onOpen={none} phone={true} onRowAction={none} />
+      </SidebarProvider>,
+    ),
+  );
+  const tiles = () => [...host!.querySelectorAll('[data-row-agents]')].map((el) => el.getAttribute('aria-label') ?? '');
+  expect(tiles().length).toBe(60);
+  expect(sessionLabelsWatchersForTests() - labelsBefore).toBeLessThanOrEqual(1);
+  await act(async () => setSessionLabels({ ses_b: 'Docs pass' }));
+  expect(tiles().filter((label) => label.includes('Docs pass')).length).toBe(30);
+});
+
+test.skipIf(!hasDom)("agent tiles drawn outside a list watch the labels themselves; a label set after they drew shows", async () => {
+  host = document.createElement('div');
+  host.className = 'pn-inbox';
+  document.body.append(host);
+  root = createRoot(host);
+  await act(async () => root!.render(<RowAgentTiles participants={undefined} agent={{ kind: 'agent', host: 'claude-code', session: 'ses_b' }} />));
+  const tiles = () => host!.querySelector('[data-row-agents]')?.getAttribute('aria-label') ?? '';
+  expect(tiles()).not.toContain('Docs pass');
+  await act(async () => setSessionLabels({ ses_b: 'Docs pass' }));
+  expect(tiles()).toContain('Docs pass');
 });
