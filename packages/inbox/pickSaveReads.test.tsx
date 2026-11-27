@@ -44,6 +44,8 @@ let frames: Map<string, (event: MessageEvent<string>) => void>;
 let seq = 1_000_000;
 let saves = 0;
 let reads: string[] = [];
+/** Every request answered, `METHOD /path` in the order the answers came: what the open waits on. */
+let answered: string[] = [];
 /** The agents reads since the window opened, never cleared by a test: the load reads them twice (App.tsx `refreshAgents`). */
 let agentsReads = 0;
 let slow = false;
@@ -119,6 +121,7 @@ beforeEach(() => {
   world = worlds.shift()!;
   saves = 0;
   reads = [];
+  answered = [];
   agentsReads = 0;
   slow = false;
   hang = false;
@@ -132,6 +135,7 @@ beforeEach(() => {
     const path = String(input);
     const method = init?.method ?? 'GET';
     const answer = await loopback(path, method, init?.body ? String(init.body) : undefined);
+    answered.push(`${method} ${path.split('?')[0]}`);
     if (method === 'POST' && path.endsWith('/picks') && answer.status === 200) {
       saves += 1;
       lastPicked = (JSON.parse(answer.text) as { questions: object[] }).questions[0] ?? null;
@@ -199,6 +203,10 @@ async function open() {
   const field = () => host!.querySelector<HTMLTextAreaElement>('textarea[aria-label^="Other answer"]');
   await until(() => field() !== null, 'the question card');
   await until(() => frames.has('record'), 'the stream');
+  // The thread opening records the look and then reads the list (App.tsx `usePaneOpening`). That read belongs to the
+  // load, but on a slow runner it lands after the card shows and was counted as the saves' (2 for 1): wait for it.
+  const seen = `POST ${threadRoute()}/seen`;
+  await until(() => answered.includes(seen) && answered.slice(answered.lastIndexOf(seen) + 1).includes('GET /api/inbox/threads'), "the look's list read");
   await wait(200);
   reads = [];
   return field()!;
