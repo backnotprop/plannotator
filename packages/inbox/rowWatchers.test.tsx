@@ -22,6 +22,7 @@ const { setInboxAgents } = (hasDom ? await import('./agentsList') : {}) as typeo
 const { agentStatusWatchersForTests } = (hasDom ? await import('./agents/agentStatus') : {}) as typeof import('./agents/agentStatus');
 const { setSessionLabels } = (hasDom ? await import('./sessionLabels') : {}) as typeof import('./sessionLabels');
 const { hover, openTooltips, settle, unhover } = await import('./testing/tooltip');
+const { undeliveredLabel } = await import('./deliveryLine');
 
 const realFetch = globalThis.fetch;
 let root: Root | null = null;
@@ -212,4 +213,27 @@ test.skipIf(!hasDom)("a row's tooltips wait with two hooks each and one handler;
   unhover(tiles());
   await settle();
   expect(openTooltips()).toEqual([]);
+});
+
+/**
+ * Every hook a plain wide row holds (no PR, no waiting reply, relative time off): its tooltips waiting (two each),
+ * its focus and menu state, its agent icon's face. Each was paid on every row a list mounts.
+ */
+const PLAIN_ROW_HOOKS = 17;
+
+/** A reply waiting on a busy agent since `minutes` ago (approval "inbox-busy-agent-reply"). */
+const waitingReply = (minutes: number): InboxListRow['delivery'] => ({ kind: 'reply', state: 'queued', reason: 'working', send_now: false, message_id: 'msg_r', at: null, host: 'claude-code', name: null, waiting_since: new Date(Date.now() - minutes * 60_000).toISOString() }) as InboxListRow['delivery'];
+
+test.skipIf(!hasDom)('only a row whose reply waits keeps a minute clock; a wait that starts after the list drew counts its minutes', () => {
+  const el = mount([listRow(0), listRow(1, { section: 'sent', delivery: waitingReply(7.5) })]);
+  const [plain, waiting] = rowEls(el);
+  expect(waiting!.querySelector('[data-count-words]')?.getAttribute('data-count-words')).toBe(undeliveredLabel(new Date(Date.now() - 7.5 * 60_000).toISOString(), Date.now()));
+  // The clock (its state and its timer's effect) is in the waiting row only: a plain row holds what every row needs.
+  expect(rowHooks(plain!)).toBeLessThanOrEqual(PLAIN_ROW_HOOKS);
+  // The next list read: the first row's reply now waits too, the second's went in.
+  draw([listRow(0, { section: 'sent', delivery: waitingReply(12.5) }), listRow(1, { section: 'sent' })]);
+  const [first, second] = rowEls(el);
+  expect(first!.querySelector('[data-undelivered]')).not.toBeNull();
+  expect(first!.querySelector('[data-count-words]')?.getAttribute('data-count-words')).toBe(undeliveredLabel(new Date(Date.now() - 12.5 * 60_000).toISOString(), Date.now()));
+  expect(second!.querySelector('[data-undelivered]')).toBeNull();
 });

@@ -259,9 +259,21 @@ export function liveCount(rows: readonly InboxListRow[]): number {
  * the short form, its full words for a screen reader and, with `tip`, in the tooltip. A wide row (`wide`) draws the
  * full words in its words column; cut there, they are the tooltip too.
  */
-export function CountWords({ row, tip = false, wide = false, status = false }: { row: InboxListRow; tip?: boolean; wide?: boolean; status?: boolean }) {
-  const now = useMinuteClock(rowWait(row.delivery) !== null);
-  const words = useContext(InArchivedGroup) && inboxRowArchived(row) ? null : countWords(row, now, status);
+type CountWordsProps = { row: InboxListRow; tip?: boolean; wide?: boolean; status?: boolean };
+
+export function CountWords(props: CountWordsProps) {
+  const archivedGroup = useContext(InArchivedGroup);
+  // Only a reply waiting on a busy agent counts minutes: the other rows (nearly all of the ~2,200 a large Inbox
+  // mounts) keep no clock. `countWords` reads the time for that wait alone.
+  return rowWait(props.row.delivery) !== null ? <TimedCountWords {...props} archivedGroup={archivedGroup} /> : drawCountWords(props, archivedGroup, 0);
+}
+
+function TimedCountWords({ archivedGroup, ...props }: CountWordsProps & { archivedGroup: boolean }) {
+  return drawCountWords(props, archivedGroup, useMinuteClock(true));
+}
+
+function drawCountWords({ row, tip = false, wide = false, status = false }: CountWordsProps, archivedGroup: boolean, now: number) {
+  const words = archivedGroup && inboxRowArchived(row) ? null : countWords(row, now, status);
   if (!words) return null;
   const quiet = row.section === 'quiet' ? ' ib-qlabel' : '';
   if (wide) {
