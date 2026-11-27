@@ -501,4 +501,15 @@ describe.if(hasDom)('diagram engine: an inline diagram is fitted at most at the 
     // As before: Fit fills the box inside its 24px padding, here twice the drawing's own size.
     expect(await fittedScale(w! * 2 + 48, h! * 2 + 48)).toBeCloseTo(2, 3);
   });
+
+  test('a Pele diagram larger than its box in either direction is still scaled down to fit it whole', async () => {
+    await mount(<MermaidBlock block={fence('flowchart LR\n  A[Start] --> B[Done]')} annotations={[]} onAddAnnotation={noop} />);
+    await waitFor(() => drawn());
+    expect(engineOf(drawn())).toBe('pele');
+    const [, , w, h] = drawn().getAttribute('viewBox')!.split(/[\s,]+/u).map(Number);
+    // Too narrow (a phone): half the drawing's width inside the 24px padding, height to spare.
+    expect(await fittedScale(w! / 2 + 48, h! * 4 + 48)).toBeCloseTo(0.5, 3);
+    // Too short: half its height, width to spare.
+    expect(await fittedScale(w! * 4 + 48, h! / 2 + 48)).toBeCloseTo(0.5, 3);
+  });
 });
