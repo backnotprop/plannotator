@@ -723,6 +723,7 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 		const model = ctx.model ? { provider: ctx.model.provider, id: ctx.model.id } : undefined;
 		const thinkingLevel = pi.getThinkingLevel();
 		phaseThinkingEntries.clear();
+		hostFallbackModel = null;
 		savedState = {
 			model,
 			thinkingLevel,
@@ -772,6 +773,13 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 		persistState();
 	});
 
+	// oh-my-pi moves to a fallback model after a provider error and says so here
+	// (Pi has no such event). Its later return to the primary has no event, but
+	// that is the model Plannotator set, so neither move reads as a user pick.
+	pi.on("retry_fallback_applied" as "session_start", (_event, ctx) => {
+		hostFallbackModel = ctx.model ? { provider: ctx.model.provider, id: ctx.model.id } : null;
+	});
+
 	function setPhaseThinkingLevel(level: ThinkingLevel, ctx: ExtensionContext): void {
 		const before = pi.getThinkingLevel();
 		settingPhaseThinking = true;
@@ -797,7 +805,8 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 		}
 
 		let success: boolean;
-		settingPhaseModel = ref;
+		// The model the registry returned is the one the host reports back.
+		settingPhaseModel = { provider: model.provider, id: model.id };
 		try {
 			success = await pi.setModel(model);
 		} finally {
@@ -808,6 +817,7 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 		} else if (savedState) {
 			savedState.managedModel = { provider: model.provider, id: model.id };
 			savedState.managedThinkingLevel = pi.getThinkingLevel();
+			hostFallbackModel = null;
 		}
 	}
 
@@ -816,7 +826,10 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 
 		const current = ctx.model ? { provider: ctx.model.provider, id: ctx.model.id } : null;
 		const managed = savedState.managedModel;
-		const modelChanged = managed !== undefined && (current?.provider !== managed?.provider || current?.id !== managed?.id);
+		// Without model_select (oh-my-pi) a pick shows only as a model Plannotator
+		// did not set. A fallback the host made after a provider error is not one.
+		const onHostFallback = !!hostFallbackModel && current?.provider === hostFallbackModel.provider && current?.id === hostFallbackModel.id;
+		const modelChanged = managed !== undefined && !onHostFallback && (current?.provider !== managed?.provider || current?.id !== managed?.id);
 		if (modelChanged) {
 			savedState.model = current ?? undefined;
 			savedState.managedModel = current;

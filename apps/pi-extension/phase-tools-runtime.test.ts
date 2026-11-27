@@ -842,3 +842,53 @@ describe("Plannotator counts a thinking level as the user's only when the user s
 		expect([second.host.model, second.host.thinking]).toEqual([LUNA, "high"]);
 	});
 });
+
+describe("Plannotator tells a model pick from a model the host or Plannotator chose", () => {
+	test("oh-my-pi (no model_select): a model picked while planning survives approval and completion", async () => {
+		const cwd = makeWorkspace();
+		writeFileSync(join(cwd, "PLAN.md"), PLAN, "utf-8");
+		const runtime = createModelHost({ cwd, initialModel: SOL, initialThinking: "high", entries: [], omp: true });
+		await runtime.run("session_start");
+		await runtime.command();
+		runtime.userPicks(LUNA);
+		await runtime.submit();
+		expect(runtime.host.model).toEqual(LUNA);
+		await completePlan(runtime);
+		expect([runtime.host.model, runtime.host.thinking]).toEqual([LUNA, "high"]);
+	});
+
+	test("oh-my-pi: a fallback model after a provider error is not a pick, before or after the host returns to the primary", async () => {
+		const config = { phases: { executing: { model: ASTRA } } };
+		const cwd = makeWorkspace(config);
+		writeFileSync(join(cwd, "PLAN.md"), PLAN, "utf-8");
+		const runtime = createModelHost({ cwd, initialModel: SOL, entries: [], omp: true });
+		await runtime.run("session_start");
+		await runtime.command();
+		runtime.hostFallsBack(LUNA);
+		await runtime.submit();
+		expect(runtime.host.model).toEqual(ASTRA);
+		await completePlan(runtime);
+		expect(runtime.host.model).toEqual(SOL);
+
+		const cwd2 = makeWorkspace(config);
+		writeFileSync(join(cwd2, "PLAN.md"), PLAN, "utf-8");
+		const restored = createModelHost({ cwd: cwd2, initialModel: SOL, entries: [], omp: true });
+		await restored.run("session_start");
+		await restored.command();
+		restored.hostFallsBack(LUNA);
+		restored.hostRestoresPrimary(SOL);
+		await restored.submit();
+		expect(restored.host.model).toEqual(ASTRA);
+	});
+
+	test("a configured model the registry resolves to another id is still Plannotator's own, not a pick", async () => {
+		const cwd = makeWorkspace({ phases: { planning: { model: { provider: "openai", id: "gpt-6-luna-latest" } } } });
+		writeFileSync(join(cwd, "PLAN.md"), PLAN, "utf-8");
+		const runtime = createModelHost({ cwd, initialModel: SOL, entries: [], registryIds: { "gpt-6-luna-latest": LUNA.id } });
+		await runtime.run("session_start");
+		await runtime.command();
+		expect(runtime.host.model).toEqual(LUNA);
+		await runtime.submit();
+		expect(runtime.host.model).toEqual(SOL);
+	});
+});
