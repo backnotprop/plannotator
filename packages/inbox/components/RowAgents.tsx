@@ -3,6 +3,7 @@ import { HostMark } from '../icons';
 import { labelOf, shortLabel, useSessionLabels, type SessionLabels } from '../sessionLabels';
 import { agentName } from '../tags';
 import { RowTip } from './RowTip';
+import { useListSessionLabels } from './RowSlot';
 import { rowIsScript, SCRIPT_AUTHOR_NAME } from '../scriptAuthor';
 
 /** A script's row (scriptAuthor.ts `rowIsScript`): the project it posted in, for the tooltip. */
@@ -108,8 +109,24 @@ export function rowAgentWords(groups: readonly RowAgentGroup[]): string {
  * A wide row's tiles and "+N", one image named by every agent. `tip`: the words in a tooltip too (not on a phone,
  * where a hover is a first tap).
  */
-export function RowAgents({ participants, agent, tip = true, script }: { participants: readonly InboxParticipant[] | undefined; agent: { kind: string; host?: string | null; session?: string | null }; tip?: boolean; script?: RowScript }) {
-  const groups = rowAgentGroups(participants, agent, useSessionLabels(), !!script);
+type RowAgentsProps = { participants: readonly InboxParticipant[] | undefined; agent: { kind: string; host?: string | null; session?: string | null }; tip?: boolean; script?: RowScript };
+
+/**
+ * In a list's rows the labels are the list's, read once for every row (RowSlot.tsx `RowSlotNames`): a store
+ * subscription in each of the ~2,200 rows a large Inbox mounts was four closures and a listener per row.
+ */
+export function RowAgents(props: RowAgentsProps) {
+  const labels = useListSessionLabels();
+  return labels ? drawRowAgents(props, labels) : <OwnRowAgents {...props} />;
+}
+
+/** Tiles drawn outside a list (a thread's header, a post's ending): they read the labels themselves. */
+function OwnRowAgents(props: RowAgentsProps) {
+  return drawRowAgents(props, useSessionLabels());
+}
+
+function drawRowAgents({ participants, agent, tip = true, script }: RowAgentsProps, labels: SessionLabels) {
+  const groups = rowAgentGroups(participants, agent, labels, !!script);
   const { shown, more } = shownAgentGroups(groups);
   const words = rowAgentWords(groups);
   const marks = (
@@ -149,8 +166,17 @@ export function rowAgentTiles(groups: readonly RowAgentGroup[]): { shown: readon
  * two tiles, then a "+N" tile; one image named by every agent. `tip`: the words in a tooltip too (not on a phone,
  * where a hover is a first tap).
  */
-export function RowAgentTiles({ participants, agent, tip = true, script }: { participants: readonly InboxParticipant[] | undefined; agent: { kind: string; host?: string | null; session?: string | null }; tip?: boolean; script?: RowScript }) {
-  const groups = rowAgentGroups(participants, agent, useSessionLabels(), !!script);
+export function RowAgentTiles(props: RowAgentsProps) {
+  const labels = useListSessionLabels();
+  return labels ? drawRowAgentTiles(props, labels) : <OwnRowAgentTiles {...props} />;
+}
+
+function OwnRowAgentTiles(props: RowAgentsProps) {
+  return drawRowAgentTiles(props, useSessionLabels());
+}
+
+function drawRowAgentTiles({ participants, agent, tip = true, script }: RowAgentsProps, labels: SessionLabels) {
+  const groups = rowAgentGroups(participants, agent, labels, !!script);
   const words = rowAgentWords(groups);
   const { shown, more } = rowAgentTiles(groups);
   const tiles = (

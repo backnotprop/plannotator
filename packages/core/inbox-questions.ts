@@ -25,6 +25,7 @@
 
 import { resolveReferenceLinks } from "./markdown-structure";
 import { cutText } from "./text-cut";
+import { inboxInlineMediaKind } from "./inbox-inline-media";
 // The grapheme-safe cuts, re-exported here: core's export map is checked against the published package, and the Inbox is what uses them.
 export { cutText, sliceText } from "./text-cut";
 // The subject of a thread the person starts: beside deriveInboxSubject, so the store and compose's preview share it.
@@ -55,6 +56,7 @@ import {
   type QuestionExportItem,
   type QuestionKind,
   type ParsedQuestion,
+  type QuestionChangeValue,
   questionLabelWithoutImage,
   questionChoiceWithoutRecommendedMarker,
   parseQuestionChoiceText,
@@ -152,8 +154,28 @@ export function prototypeTargets(markdown: string): PrototypeTarget[] {
   return out;
 }
 
+/**
+ * The sounds and videos a body's questions show where the card draws only pictures (a picture choice, `Shows:`,
+ * `Before:` / `After:`), each with the question it is in, in block order. The card draws them as text, so the send
+ * result says so. Pure; never throws.
+ */
+export function inboxQuestionMedia(markdown: string): { key: string; prompt: string; src: string }[] {
+  const out: { key: string; prompt: string; src: string }[] = [];
+  const side = (value: QuestionChangeValue | undefined) => (value?.kind === "image" ? [value.src] : []);
+  const sides = (group: { before?: QuestionChangeValue; after?: QuestionChangeValue }) => [...side(group.before), ...side(group.after)];
+  for (const { key, parsed } of questionBlocksOf(markdown, false, true)) {
+    const sources = [
+      ...(parsed.shows?.kind === "image" ? [parsed.shows.src] : []),
+      ...(parsed.change?.groups ?? []).flatMap(sides),
+      ...parsed.choices.flatMap((choice) => [...(choice.image ? [choice.image.src] : []), ...sides(choice), ...(choice.places ?? []).flatMap(sides)]),
+    ];
+    for (const src of new Set(sources)) if (inboxInlineMediaKind(src.replace(/[?#].*$/s, ""))) out.push({ key, prompt: parsed.prompt, src });
+  }
+  return out;
+}
+
 /** Each question block of a body (or an attached file, `frontmatter` as its viewer reads it), parsed as the Inbox reads it. */
-function questionBlocksOf(markdown: string, frontmatter = false): { key: string; startLine: number; parsed: ParsedQuestion }[] {
+function questionBlocksOf(markdown: string, frontmatter = false, changeLines = false): { key: string; startLine: number; parsed: ParsedQuestion }[] {
   if (typeof markdown !== "string" || !markdown.includes(":::question")) return [];
   // Each block is read over the markdown with reference links resolved, as
   // the renderer reads it, so a prompt written with a reference link keeps
@@ -169,7 +191,7 @@ function questionBlocksOf(markdown: string, frontmatter = false): { key: string;
     const inner = lines.slice(1, CLOSE_RE.test(lines.at(-1) ?? "") && lines.length > 1 ? -1 : undefined);
     // The Inbox records no decisions: a `Decision:` line is context. It reads the option lines
     // (`Pros:`, `Cons:`, `Prototype:`; approval "inbox-question-tradeoffs").
-    const parsed = parseQuestionBlock(location.directiveKind, inner.join("\n"), { decisionLines: false, optionLines: true });
+    const parsed = parseQuestionBlock(location.directiveKind, inner.join("\n"), { decisionLines: false, optionLines: true, ...(changeLines ? { changeLines: true } : {}) });
     if (parsed !== null) out.push({ key: location.key, startLine: location.startLine, parsed });
   }
   return out;

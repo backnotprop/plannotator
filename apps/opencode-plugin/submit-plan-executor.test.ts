@@ -24,6 +24,33 @@ function prepareDataDir(): void {
 }
 
 describe("executeSubmitPlan", () => {
+  test.each([false, true])("keeps a session's plan when another session's review has approved=%s", async (approved) => {
+    prepareDataDir();
+    const reviewed: string[] = [];
+    const run = (sessionId: string, edits: { start: number; end?: number; content: string }[], approved = false) => executeSubmitPlan({
+      edits,
+      invokingAgent: "plan",
+      sessionId,
+      directory: "/workspace/example",
+      workflowOptions: normalizeWorkflowOptions(undefined),
+    }, {
+      reviewPlan: async ({ planContent }) => {
+        reviewed.push(planContent);
+        return { approved };
+      },
+      resolveTargetAgent: async () => undefined,
+      sendApprovalHandoff: async () => {},
+    });
+
+    await run("session-a", [{ start: 1, content: "# Plan A\nOriginal A" }]);
+    await run("session-b", [{ start: 1, content: "# Plan B\nOriginal B" }], approved);
+    const result = await run("session-a", [{ start: 2, end: 2, content: "Revised A" }]);
+
+    expect(reviewed).toEqual(["# Plan A\nOriginal A", "# Plan B\nOriginal B", "# Plan A\nRevised A"]);
+    expect(result).toContain("1| # Plan A\n2| Revised A");
+    expect(result).not.toContain("Plan B");
+  });
+
   test.each([{ edits: undefined }, { edits: [] }])("rejects absent or empty edits without creating a plan or opening review (%j)", async ({ edits }) => {
     prepareDataDir();
     const reviewPlan = mock(async () => ({ approved: true }));
@@ -41,7 +68,7 @@ describe("executeSubmitPlan", () => {
 
     expect(result).toContain("Error: No edits provided");
     expect(reviewPlan).not.toHaveBeenCalled();
-    expect(existsSync(getPlanBackingPath("example"))).toBe(false);
+    expect(existsSync(getPlanBackingPath("example", "/workspace/example", "session-invalid"))).toBe(false);
   });
 
   test("supports hosts without cancellation signals", async () => {
@@ -60,7 +87,7 @@ describe("executeSubmitPlan", () => {
       sendApprovalHandoff: async () => {},
     });
 
-    const backingPath = getPlanBackingPath("example");
+    const backingPath = getPlanBackingPath("example", "/workspace/example", "session-1");
     expect(readFileSync(backingPath, "utf-8")).toBe("# Plan\n\nShip it");
     expect(result).toContain("Add tests");
     expect(result).toContain("1| # Plan\n2| \n3| Ship it");
@@ -123,7 +150,7 @@ describe("executeSubmitPlan", () => {
       sendApprovalHandoff,
     });
 
-    expect(existsSync(getPlanBackingPath("example"))).toBe(false);
+    expect(existsSync(getPlanBackingPath("example", "/workspace/example", "session-2"))).toBe(false);
     expect(sendApprovalHandoff).toHaveBeenCalledWith({
       sessionId: "session-2",
       targetAgent: "build",
@@ -149,7 +176,7 @@ describe("executeSubmitPlan", () => {
     });
 
     expect(result).toBe("[Plannotator] Failed to open plan review: browser unavailable");
-    expect(readFileSync(getPlanBackingPath("example"), "utf-8")).toBe("# Retry later");
+    expect(readFileSync(getPlanBackingPath("example", "/workspace/example", "session-3"), "utf-8")).toBe("# Retry later");
   });
 
   test("rethrows the host abort reason instead of formatting it as startup failure", async () => {

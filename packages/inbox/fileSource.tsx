@@ -106,6 +106,8 @@ export const INBOX_FILE_SOURCE: InboxFileSource = {
   writes: true,
 };
 
+export { pageFrameTooLarge } from './pageFrameTooLarge';
+
 const FileSourceContext = createContext<InboxFileSource>(INBOX_FILE_SOURCE);
 
 export function InboxFileSourceProvider({ source, children }: { source: InboxFileSource; children: ReactNode }) {

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import type { Block } from '@plannotator/ui/types';
 import { isGraphvizLanguage, isMermaidLanguage } from '@plannotator/ui/components/diagramLanguages';
+import { useDiagramSourceAccepted } from '@plannotator/ui/components/diagramSourceAccept';
 import { loadDiagramEngine, peekDiagramEngine, type DiagramEngineImporter } from '../utils/diagramEngine';
 import type { DiagramEngineKind, DiagramEngineModule, DiagramEngineUrls } from '../utils/diagramEngineContract';
 
@@ -17,13 +18,14 @@ type EngineState =
   | { status: 'ready'; engine: DiagramEngineModule }
   | { status: 'failed' };
 
-function useDiagramEngine(urls: DiagramEngineUrls, importer?: DiagramEngineImporter): [EngineState, () => void] {
+function useDiagramEngine(urls: DiagramEngineUrls, importer: DiagramEngineImporter | undefined, enabled: boolean): [EngineState, () => void] {
   const [state, setState] = useState<EngineState>(() => {
     const engine = peekDiagramEngine(urls);
     return engine ? { status: 'ready', engine } : { status: 'loading' };
   });
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
+    if (!enabled) return;
     const ready = peekDiagramEngine(urls);
     if (ready) {
       setState((prev) => (prev.status === 'ready' && prev.engine === ready ? prev : { status: 'ready', engine: ready }));
@@ -42,7 +44,7 @@ function useDiagramEngine(urls: DiagramEngineUrls, importer?: DiagramEngineImpor
     return () => {
       live = false;
     };
-  }, [urls.engine, urls.mermaid, urls.graphviz, importer, attempt]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [urls.engine, urls.mermaid, urls.graphviz, importer, attempt, enabled]); // eslint-disable-line react-hooks/exhaustive-deps
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
   return [state, retry];
 }
@@ -63,10 +65,14 @@ export interface ReviewDiagramFenceProps {
  * A Mermaid or Graphviz fence in code review, drawn by the diagram engine the
  * review server serves on demand (see ../utils/diagramEngine). The first
  * fence on the page starts the import; until it lands the fence is code, and
- * if it fails the fence stays code with a quiet note and a Retry.
+ * if it fails the fence stays code with a quiet note and a Retry. A fence a
+ * host's source check refuses (`DiagramSourceAcceptContext`) stays code and
+ * never starts the import.
  */
 export const ReviewDiagramFence: React.FC<ReviewDiagramFenceProps> = ({ block, kind, urls, fallback, importer }) => {
-  const [state, retry] = useDiagramEngine(urls, importer);
+  const accepted = useDiagramSourceAccepted(kind, block.content);
+  const [state, retry] = useDiagramEngine(urls, importer, accepted);
+  if (!accepted) return <>{fallback}</>;
   if (state.status === 'ready') {
     const { DiagramFence } = state.engine;
     return <DiagramFence kind={kind} block={block} />;
