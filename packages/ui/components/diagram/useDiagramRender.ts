@@ -1,6 +1,8 @@
 import { useContext, useEffect, useState } from 'react';
 import { DiagramSvgAcceptContext } from '../diagramSvgAccept';
+import { useDiagramSourceAccepted } from '../diagramSourceAccept';
 import {
+  DIAGRAM_REFUSED_RESULT,
   renderDiagram,
   type DiagramKind,
   type DiagramRenderError,
@@ -29,7 +31,7 @@ export interface DiagramRenderState {
     readonly runtimeUnavailable: boolean;
     /** A diagram-type chunk did not load: the block offers Reload. */
     readonly chunkFailed?: boolean;
-    /** The host's check refused the drawn svg (`DiagramSvgAcceptContext`): the block shows the source. */
+    /** The host's check refused the source (`DiagramSourceAcceptContext`) or the drawn svg (`DiagramSvgAcceptContext`): the block shows the source. */
     readonly refused?: boolean;
   } | null;
   readonly pending: boolean;
@@ -37,12 +39,28 @@ export interface DiagramRenderState {
 
 let renderCounter = 0;
 
+/** What a refused source shows, whatever was drawn before: no drawing, nothing pending, the `refused` error. */
+const SOURCE_REFUSED_STATE: DiagramRenderState = Object.freeze({
+  svgNode: null,
+  renderId: null,
+  renderVersion: 0,
+  error: Object.freeze({ message: DIAGRAM_REFUSED_RESULT.message, line: null, runtimeUnavailable: false, refused: true }),
+  pending: false,
+});
+
 /**
  * Render `source` through the renderer slot whenever it, the kind, the
  * theme or `retryToken` changes. Each render gets its own id
  * (`diagram-<documentId>-<n>`): Mermaid removes any existing element with
  * the id it is asked to render into, so reusing one id would tear the
  * displayed svg out of the page mid-render.
+ *
+ * A host's source check (`DiagramSourceAcceptContext`) is asked first, once per
+ * source: a refused source never reaches `renderDiagram`, so no engine is
+ * loaded and nothing is parsed or drawn; the result is the same `refused` an
+ * `accept` refusal gives. A source refused after an accepted one (edited in
+ * place, or a stricter check) drops the previous drawing at once rather than
+ * keeping it as a parse error does: the state is exactly a fresh refusal's.
  */
 export function useDiagramRender(
   kind: DiagramKind,
@@ -53,6 +71,7 @@ export function useDiagramRender(
 ): DiagramRenderState {
   const retryToken = options?.retryToken ?? 0;
   const accept = useContext(DiagramSvgAcceptContext);
+  const sourceAccepted = useDiagramSourceAccepted(kind, source);
   const [state, setState] = useState<DiagramRenderState>({
     svgNode: null,
     renderId: null,
@@ -62,6 +81,15 @@ export function useDiagramRender(
   });
 
   useEffect(() => {
+    if (!sourceAccepted) {
+      // The previous drawing goes: accepted again later, the fence starts over as on a first render.
+      setState((current) =>
+        current.svgNode === null && current.error === null && current.pending
+          ? current
+          : { svgNode: null, renderId: null, renderVersion: current.renderVersion, error: null, pending: true },
+      );
+      return;
+    }
     let cancelled = false;
     renderCounter += 1;
     const renderId = `diagram-${documentId.replace(/[^\w-]/gu, '')}-${renderCounter}`;
@@ -97,7 +125,8 @@ export function useDiagramRender(
     return () => {
       cancelled = true;
     };
-  }, [documentId, kind, source, theme, retryToken, accept]);
+  }, [documentId, kind, source, theme, retryToken, accept, sourceAccepted]);
 
-  return state;
+  // Synchronous, so not one frame shows the previous drawing under a refusal.
+  return sourceAccepted ? state : SOURCE_REFUSED_STATE;
 }
