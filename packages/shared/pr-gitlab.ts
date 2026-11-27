@@ -63,20 +63,22 @@ import { parsePaginatedArray } from "./cli-pagination";
  */
 export function reconstructPatch(diffs: GitLabDiffEntry[]): string {
   const parts: string[] = [];
+  // As git quotes it, only for a path a parser would cut short (a tab or a line break in its name); others stay as they are.
+  const token = (prefix: string, file: string) => (/[\x00-\x1f\x7f]/.test(file) ? JSON.stringify(`${prefix}${file}`) : `${prefix}${file}`);
 
   for (const d of diffs) {
-    const aPath = d.new_file ? "/dev/null" : `a/${d.old_path}`;
-    const bPath = d.deleted_file ? "/dev/null" : `b/${d.new_path}`;
+    const aPath = d.new_file ? "/dev/null" : token("a/", d.old_path);
+    const bPath = d.deleted_file ? "/dev/null" : token("b/", d.new_path);
     const displayOld = d.new_file ? d.new_path : d.old_path;
     const displayNew = d.deleted_file ? d.old_path : d.new_path;
 
-    let header = `diff --git a/${displayOld} b/${displayNew}`;
+    let header = `diff --git ${token("a/", displayOld)} ${token("b/", displayNew)}`;
     if (d.renamed_file) {
       // Diff parsers (e.g. Pierre's) key rename classification off the
       // similarity line; the API doesn't expose the score, so emit 100% for
       // pure renames (empty diff) and a synthetic <100% otherwise.
       header += d.diff.trim() === "" ? "\nsimilarity index 100%" : "\nsimilarity index 99%";
-      header += `\nrename from ${d.old_path}\nrename to ${d.new_path}`;
+      header += `\nrename from ${token("", d.old_path)}\nrename to ${token("", d.new_path)}`;
     }
     if (d.new_file) {
       header += "\nnew file mode 100644";
@@ -85,7 +87,10 @@ export function reconstructPatch(diffs: GitLabDiffEntry[]): string {
       header += "\ndeleted file mode 100644";
     }
 
-    parts.push(`${header}\n--- ${aPath}\n+++ ${bPath}\n${d.diff}`);
+    // Each file's last line ends its line: else the next file's `diff --git` joins it and that file is lost to parsers.
+    // (Only the line break; git's "\ No newline at end of file" marker, when GitLab sends it, is a line of its own.)
+    const body = d.diff && !d.diff.endsWith("\n") ? `${d.diff}\n` : d.diff;
+    parts.push(`${header}\n--- ${aPath}\n+++ ${bPath}\n${body}`);
   }
 
   return parts.join("");
