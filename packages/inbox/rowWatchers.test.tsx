@@ -20,6 +20,8 @@ const { adoptSavedRows, listLookWatchersForTests, resetListLookForTests } = awai
 const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
 const { setInboxAgents } = (hasDom ? await import('./agentsList') : {}) as typeof import('./agentsList');
 const { agentStatusWatchersForTests } = (hasDom ? await import('./agents/agentStatus') : {}) as typeof import('./agents/agentStatus');
+const { setSessionLabels } = (hasDom ? await import('./sessionLabels') : {}) as typeof import('./sessionLabels');
+const { hover, openTooltips, settle, unhover } = await import('./testing/tooltip');
 
 const realFetch = globalThis.fetch;
 let root: Root | null = null;
@@ -44,6 +46,7 @@ afterEach(() => {
   act(() => {
     resetListLookForTests();
     setInboxAgents(null);
+    setSessionLabels({});
   });
 });
 
@@ -141,16 +144,30 @@ test.skipIf(!hasDom)("the rows' agent icons watch the agents' Rex marks once for
   expect(rows.filter((row, i) => i % 3 !== 1 && rexOf(row) !== null).length).toBe(0);
 });
 
+type Fiber = { tag: number; elementType: unknown; memoizedState: { next: unknown } | null; child: Fiber | null; sibling: Fiber | null; return: Fiber | null };
+const fiberOf = (el: Element) => (el as unknown as Record<string, Fiber>)[Object.keys(el).find((k) => k.startsWith('__reactFiber$'))!]!;
+const isComponent = (f: Fiber) => f.tag === 0 || f.tag === 11 || f.tag === 15;
+const hooksOf = (f: Fiber) => {
+  let n = 0;
+  for (let h = f.memoizedState as { next: unknown } | null; h; h = h.next as typeof h) n++;
+  return n;
+};
+
+/** Hooks of the component that draws `el` (the nearest one above its element in React's tree). */
+function ownerHooks(el: Element): number {
+  let f = fiberOf(el).return!;
+  while (!isComponent(f)) f = f.return!;
+  return hooksOf(f);
+}
+
 /** Hooks a row holds: every hook of every component under its `ListRow` (React's own tree, read from the row's element). */
 function rowHooks(row: HTMLElement): number {
-  const key = Object.keys(row).find((k) => k.startsWith('__reactFiber$'))!;
-  type Fiber = { tag: number; elementType: unknown; memoizedState: { next: unknown } | null; child: Fiber | null; sibling: Fiber | null; return: Fiber | null };
-  let top = (row as unknown as Record<string, Fiber>)[key]!;
+  let top = fiberOf(row);
   while (top.elementType !== ListRow) top = top.return!;
   let hooks = 0;
   const walk = (fiber: Fiber | null) => {
     for (let f = fiber; f; f = f.sibling) {
-      if (f.tag === 0 || f.tag === 11 || f.tag === 15) for (let h = f.memoizedState as { next: unknown } | null; h; h = h.next as typeof h) hooks++;
+      if (isComponent(f)) hooks += hooksOf(f);
       walk(f.child);
     }
   };
@@ -171,4 +188,28 @@ test.skipIf(!hasDom)('a row with no pull request sets up no PR card; a PR that c
   const [first, second] = rowEls(el);
   expect(second!.querySelector('[data-pr-mark="merged"]')?.getAttribute('data-pr-n')).toBe('2');
   expect(first!.querySelector('[data-pr-mark]')).toBeNull();
+});
+
+test.skipIf(!hasDom)("a row's tooltips wait with two hooks each and one handler; one hovered after the list drew opens with the words it has now", async () => {
+  const el = mount([listRow(0), listRow(1)]);
+  const plain = rowEls(el)[1]!;
+  const waiting = [...plain.querySelectorAll<HTMLElement>('[data-base-ui-tooltip-trigger]')];
+  expect(waiting.length).toBeGreaterThanOrEqual(3);
+  // Each waiting tooltip's own component holds two hooks (it held six, with nine closures and an effect).
+  expect(waiting.map(ownerHooks)).toEqual(waiting.map(() => 2));
+  // And one handler for the seven events it waits on.
+  const handlers = (node: HTMLElement) => {
+    const props = (node as unknown as Record<string, Record<string, unknown>>)[Object.keys(node).find((k) => k.startsWith('__reactProps$'))!]!;
+    return new Set(['onPointerEnter', 'onPointerOver', 'onMouseOver', 'onMouseMove', 'onPointerLeave', 'onPointerDown', 'onFocus'].map((name) => props[name])).size;
+  };
+  expect(waiting.map(handlers)).toEqual(waiting.map(() => 1));
+  // The session gets its label after the list drew: its tiles' tooltip, first hovered now, says it.
+  await act(async () => setSessionLabels({ ses_1: 'Docs pass' }));
+  const tiles = () => rowEls(el)[1]!.querySelector<HTMLElement>('[data-row-agents]')!;
+  hover(tiles());
+  await settle();
+  expect(openTooltips()).toEqual(['Docs pass (Claude Code)']);
+  unhover(tiles());
+  await settle();
+  expect(openTooltips()).toEqual([]);
 });
