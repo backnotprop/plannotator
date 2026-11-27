@@ -843,6 +843,7 @@ packages/inbox/agents/setAgentIcons.test.tsx
 packages/inbox/agents/animateAnyIcon.test.tsx
 packages/inbox/agents/agentRename.test.tsx
 packages/inbox/agents/agentMenuLaunch.test.tsx
+packages/inbox/agents/agentMenuNewMessage.test.tsx
 packages/inbox/agents/agentRexPlace.test.tsx
 packages/inbox/agents/rexMark.test.tsx
 packages/inbox/agents/agentStatusMark.test.tsx

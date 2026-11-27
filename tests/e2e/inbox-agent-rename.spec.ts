@@ -7,6 +7,8 @@
  *  2. The name shows on the row at once, in a second window without a reload (`event: agent-faces`), and after a
  *     reload (the Inbox keeps it in agent-faces.json, beside the agent's face).
  *  3. ⋯ opens the same menu; Reset name goes back to the agent's own name, everywhere.
+ *  4. New message…, first on the menu of a live agent: New message opens with that agent in To and the cursor in the
+ *     message.
  *
  * Build the binary first (see inbox.spec.ts).
  */
@@ -85,10 +87,10 @@ test('a right-click renames an agent with the project field; the name shows in a
   const own = await open(page);
   expect(own.trim().length).toBeGreaterThan(0);
 
-  // The menu at the pointer: Rename… alone, as a project with no name of its own.
+  // The menu at the pointer: New message… (a live agent), then Rename… alone, as a project with no name of its own.
   await agentRow(page).locator('.ib-proj').click({ button: 'right' });
-  await expect(menuItems(page)).toHaveText(['Rename…']);
-  await menuItems(page).first().click();
+  await expect(menuItems(page)).toHaveText(['New message…', 'Rename…']);
+  await page.locator('[data-agent-menu] [data-agent-action="rename"]').click();
   const field = agentRow(page).locator('input.ib-proj-rename');
   await expect(field).toBeFocused();
   await expect(field).toHaveValue(own);
@@ -101,7 +103,7 @@ test('a right-click renames an agent with the project field; the name shows in a
 
   // Enter keeps it.
   await agentRow(page).locator('.ib-proj').click({ button: 'right' });
-  await menuItems(page).first().click();
+  await page.locator('[data-agent-menu] [data-agent-action="rename"]').click();
   await agentRow(page).locator('input.ib-proj-rename').fill('Retry worker');
   const other = await world.context.newPage();
   await open(other);
@@ -119,10 +121,26 @@ test('a right-click renames an agent with the project field; the name shows in a
   // ⋯ opens the same menu, now with Reset name.
   await agentRow(page).hover();
   await agentRow(page).locator('[data-agent-more]').click();
-  await expect(menuItems(page)).toHaveText(['Rename…', 'Reset name']);
-  await menuItems(page).nth(1).click();
+  await expect(menuItems(page)).toHaveText(['New message…', 'Rename…', 'Reset name']);
+  await page.locator('[data-agent-menu] [data-agent-action="reset"]').click();
   await expect(rowName(page)).toHaveText(own);
   await expect(rowName(other)).toHaveText(own);
   await other.close();
+  await page.close();
+});
+
+test("a right-click's New message… opens New message with that agent in To and the cursor in the message", async () => {
+  const page = await world.context.newPage();
+  await open(page);
+  const session = await agentRow(page).getAttribute('data-sidebar-agent');
+  await agentRow(page).locator('.ib-proj').click({ button: 'right' });
+  await expect(menuItems(page).first()).toHaveText('New message…');
+  await page.locator('[data-agent-menu] [data-agent-action="message"]').click();
+  const dialog = page.locator('dialog[data-compose]');
+  await expect(dialog.locator(`[data-compose-to="${session}"]`)).toBeVisible();
+  await expect(dialog.locator('textarea').first()).toBeFocused();
+  // Empty: Escape keeps nothing.
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
   await page.close();
 });
