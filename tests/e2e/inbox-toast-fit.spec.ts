@@ -245,9 +245,11 @@ for (const vp of VIEWPORTS) {
       if (!vp.phone) {
         // A row's Mark read while another thread is open names the row's thread: its 120 characters held to two lines.
         await openThread(page, world.threads.merged, /Merged the payouts table/);
+        // The stopped thread was opened above, so its hover action is Mark unread (the owner, 2026-11-25): its row
+        // menu's Mark read.
         const row = page.locator(`.ib-lbody [data-row="${world.threads.stopped}"]`);
-        await row.hover();
-        await row.locator('[data-row-mark-read]').click();
+        await row.locator('[data-thread-id]').click({ button: 'right' });
+        await page.locator(`[data-row-menu="${world.threads.stopped}"] [data-row-action="read"]`).click();
         await expect(toast.locator('.ib-tdetail')).toContainText('Fix flaky tests');
         await expectFits(page, toast, 'row Mark read');
         // Two lines are as tall as before (54 px).

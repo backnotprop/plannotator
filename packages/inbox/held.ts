@@ -6,7 +6,7 @@
  * closes (`settleOwn`; when that happens and how it moves: settle.ts). Pure.
  */
 
-import { INBOX_PRIORITY_GROUP, inboxRowInPriority, type InboxListGroupId, type InboxListRow, type InboxListSection } from '@plannotator/core/inbox-types';
+import { INBOX_PRIORITY_GROUP, inboxGroupWaitsOnPerson, inboxRowInPriority, type InboxListGroupId, type InboxListRow, type InboxListSection } from '@plannotator/core/inbox-types';
 import { INBOX_SNOOZED_BAND } from '@plannotator/core/inbox-snooze';
 
 /**
@@ -92,9 +92,10 @@ function hasNewAgentActivity(old: InboxListRow | undefined, row: InboxListRow, o
 
 /**
  * The thread's row now (`current`) carries agent activity the row drawn on screen (`drawn`) does not show: that news
- * waits behind "N new · Show". Mark all as read (markAllRead.ts) leaves such a thread out, so it stays new.
+ * waits behind "N new · Show". Mark all as read (markAllRead.ts) leaves such a thread out, so it stays new. `drawn`
+ * undefined: the list on screen has no row for the thread (one an agent wrote in is news).
  */
-export function waitsBehindShow(drawn: InboxListRow, current: InboxListRow): boolean {
+export function waitsBehindShow(drawn: InboxListRow | undefined, current: InboxListRow): boolean {
   return hasNewAgentActivity(drawn, current);
 }
 
@@ -393,16 +394,20 @@ export function priorityChangedRows(shown: readonly InboxListSection[], latest: 
  * seen or not) and is drawn in another group, so it is never left folded in
  * Quiet with questions open. A thread only read stays where it was left. A
  * thread snoozed or unsnoozed, or added to or removed from Priority, while it
- * was open goes to its place: that is what the person just asked for.
+ * was open goes to its place: that is what the person just asked for. A
+ * routine's run that started while it was open (`scheduled_running`) and is
+ * drawn in Quiet or Sent comes up under New, as `routineRunsEnter` brings it in
+ * for a closed thread; else a phone's Back left it folded for the whole run.
  */
 export function settlesOnBack(shown: readonly InboxListSection[], row: InboxListRow): boolean {
   const drawn = shown.find((section) => section.threads.some((other) => other.thread_id === row.thread_id));
   if (drawn && (drawn.id === INBOX_SNOOZED_BAND.id) !== !!row.snoozed) return true;
   if (row.snoozed) return false;
   if (drawn && (drawn.id === INBOX_PRIORITY_GROUP.id) !== inboxRowInPriority(row)) return true;
+  if (row.scheduled_running === true && (drawn?.id === 'quiet' || drawn?.id === 'sent')) return true;
   if (row.unseen > 0) return true;
   if (drawn?.id === INBOX_PRIORITY_GROUP.id) return false;
-  const onYou = (section: string | undefined) => section === 'stopped' || section === 'holding' || section === 'waiting';
+  const onYou = inboxGroupWaitsOnPerson;
   if (!onYou(row.section)) return onYou(drawn?.id);
   return drawn?.id !== row.section;
 }
@@ -424,7 +429,7 @@ export function addOwnThreads(shown: readonly InboxListSection[], latest: readon
   const fresh = rowsById(latest);
   const onScreen = rowsById(shown);
   const adding = threadIds.map((id) => fresh.get(id)).filter((row): row is InboxListRow => row !== undefined && !onScreen.has(row.thread_id));
-  // The list always carries all six sections (empty ones included), so the row's section is on screen.
+  // The list always carries every section its server places rows in (empty ones included), so the row's section is on screen.
   return shown.map((section) => {
     const threads = [...section.threads];
     for (const row of adding) {
@@ -510,11 +515,12 @@ export function putReadRowBack(shown: readonly InboxListSection[], before: reado
  * reads as looked at until the server has taken the look and the list has
  * been read again (App.tsx `looking`), which then gives the server's row. Its
  * news is seen (`unseen` 0), so the row is no longer bold (shared/inbox/list.ts
- * `inboxRowUnread`), in the group it is drawn in. A row in New for that news
- * alone offers Mark unread at once, on its hover action and the header's
- * button (markRead.ts `canMarkUnread`). A row in Stopped, Holding up work or
- * Waiting on you keeps Mark read (its questions still wait). Only picks not
- * sent ("Answered, not sent") keep a row bold: it waits on the person's Send.
+ * `inboxRowUnread`), in the group it is drawn in, and it offers Mark unread at
+ * once, on its hover action, the header's ⋯ and a phone's swipe (markRead.ts
+ * `canMarkUnread`): a row in Stopped, Holding up work or Waiting on you too
+ * (the owner, 2026-11-25), whose Mark read stays in the row menu, the ⋯ and
+ * on `E` while its questions wait. Only picks not sent ("Answered, not sent")
+ * keep a row in New bold: it waits on the person's Send, and keeps Mark read.
  */
 export function lookedRow(row: InboxListRow): InboxListRow {
   if (row.unseen === 0) return row;
@@ -565,11 +571,11 @@ export function filterSections(sections: readonly InboxListSection[], projectId:
   return sections.map((s) => ({ ...s, threads: s.threads.filter((row) => row.project.id === projectId) }));
 }
 
-/** The rows that wait on the person (Stopped, Holding, Waiting): the sidebar counts. */
+/** The rows that wait on the person (core's `inboxSectionWaitsOnPerson`: Stopped, Holding, Waiting, Tagged you): the sidebar counts. */
 export function waitingCount(sections: readonly InboxListSection[], projectId?: string): number {
   let n = 0;
   for (const section of sections) {
-    if (section.id !== 'stopped' && section.id !== 'holding' && section.id !== 'waiting') continue;
+    if (!inboxGroupWaitsOnPerson(section.id)) continue;
     for (const row of section.threads) if (!projectId || row.project.id === projectId) n += 1;
   }
   return n;
@@ -583,5 +589,35 @@ export function waitingCount(sections: readonly InboxListSection[], projectId?: 
 export function shownAfter(shown: InboxListSection[] | null, latest: InboxListSection[], how: { adopt: boolean; keep: string | null; open: OpenThread | null; gone: ReadonlySet<string> }): InboxListSection[] {
   if (shown === null || !hasRows(shown)) return latest;
   if (how.adopt) return how.keep ? adoptKeepingOpen(shown, latest, how.keep) : latest;
-  return withoutRows(refreshHeldRows(shown, latest, how.open), how.gone);
+  return routineRunsEnter(withoutRows(refreshHeldRows(shown, latest, how.open), how.gone), latest, how.open);
+}
+
+/**
+ * A routine's run that starts comes into the held list at once, under New with its Running mark (the owner,
+ * 2026-11-24: while a routine's run is going, its thread sits under New until the run ends). Its divider is the
+ * person's message, not agent activity, so the held rules would leave it out (a thread not on screen) or folded where
+ * it was (Quiet, Sent) until a reload; a run going is shown, not news held back. Only a row the read places in New
+ * for its run (`scheduled_running`, shared/inbox/list.ts) moves, and only from Quiet or Sent or from off screen: a row
+ * the person put in Priority or snoozed, or one drawn in New or above, stays; the open thread's row never moves under
+ * the reader (it settles when it closes); and a row with agent words the list on screen does not show still waits
+ * behind "N new", so nothing else comes out of hold this way. When the run ends the row stays where it is on screen
+ * until the list settles, as every row does.
+ */
+export function routineRunsEnter(shown: readonly InboxListSection[], latest: readonly InboxListSection[], open?: OpenThread | null): InboxListSection[] {
+  const newRows = latest.find((section) => section.id === 'new')?.threads ?? [];
+  if (!newRows.some((row) => row.scheduled_running === true)) return shown as InboxListSection[];
+  const drawn = rowsById(shown);
+  const entering = new Set<string>();
+  for (const section of latest) {
+    if (section.id !== 'new') continue;
+    for (const row of section.threads) {
+      if (row.scheduled_running !== true || row.thread_id === open?.threadId) continue;
+      const at = drawnSection(shown, row.thread_id);
+      if (at !== null && at !== 'quiet' && at !== 'sent') continue;
+      if (waitsBehindShow(drawn.get(row.thread_id), row)) continue;
+      entering.add(row.thread_id);
+    }
+  }
+  if (entering.size === 0) return shown as InboxListSection[];
+  return addOwnThreads(withoutRows(shown, entering), latest, [...entering]);
 }

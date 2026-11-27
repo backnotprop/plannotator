@@ -422,6 +422,54 @@ describe("the list (rule 5)", () => {
     expect(pinsAtTold).toEqual(["msg_a"]);
   });
 
+  test("a reply draft there moves no record: the stream asks for `drafts`, and a thread's frame reads the list (its Draft mark) before the windows hear it; a compose draft there is not this Inbox's", async () => {
+    const told: string[] = [];
+    let readsAtTold = 0;
+    const d = door({
+      cursor: 3,
+      frames: ['event: drafts\ndata: {"compose":true}\n\n', 'event: drafts\ndata: {"thread_id":"msg_a"}\n\n'],
+      threads: () => Response.json({ cursor: 3, sections: [{ threads: [{ thread_id: "msg_a" }] }], marks: ["reply-drafts"] }),
+    });
+    let listGenAtTold = 0;
+    const { peer } = link(d.url, {
+      onDrafts: (threadId, refreshed) => {
+        told.push(`${threadId} ${refreshed}`);
+        readsAtTold = d.stats.threads;
+        listGenAtTold = peer.listGen;
+      },
+    });
+    peer.start();
+    await until("told", () => told.length === 1);
+    expect(new URLSearchParams(d.stats.eventAsks[0]).get("drafts")).toBe("1");
+    expect(told).toEqual(["msg_a true"]);
+    expect(readsAtTold).toBeGreaterThan(1);
+    // The list held is the read the frame started (inbox-machine-drafts.ts drops a draft heard before it).
+    expect(listGenAtTold).toBe(peer.listAsked);
+  });
+
+  test("a reply draft's frame whose list could not be read again tells the windows so: the list held is still the older read", async () => {
+    const told: string[] = [];
+    let listGenAtTold = -1;
+    let listAskedAtTold = -1;
+    const d = door({
+      cursor: 3,
+      frames: ['event: drafts\ndata: {"thread_id":"msg_a"}\n\n'],
+      threads: () => (d.stats.threads > 1 ? Response.json({ error: "Busy." }, { status: 500 }) : Response.json({ cursor: 3, sections: [{ threads: [{ thread_id: "msg_a" }] }], marks: ["reply-drafts"] })),
+    });
+    const { peer } = link(d.url, {
+      onDrafts: (threadId, refreshed) => {
+        told.push(`${threadId} ${refreshed}`);
+        listGenAtTold = peer.listGen;
+        listAskedAtTold = peer.listAsked;
+      },
+    });
+    peer.start();
+    await until("told", () => told.length === 1);
+    expect(told).toEqual(["msg_a false"]);
+    expect(d.stats.threads).toBeGreaterThan(1);
+    expect(listGenAtTold).toBeLessThan(listAskedAtTold);
+  });
+
   test("Grid off asks that machine for nothing of Grid; turned on, the list and the stream ask again with it, and the line stays online", async () => {
     let gridOn = false;
     const d = door({ cursor: 3 });
@@ -543,6 +591,24 @@ describe("the list (rule 5)", () => {
     expect(peer.list!.reactions).toBeNull();
     peer.acceptList({ cursor: 5, sections: [], reactions: { reactions: "🧪", rev: 6 } });
     expect(peer.list!.reactions).toBeNull();
+  });
+
+  test("the computers it is linked to come from its list, and a `links` frame reads the list again", async () => {
+    const told: string[] = [];
+    const MINI = `ibx_${"0".repeat(25)}M`;
+    const d = door({
+      cursor: 3,
+      frames: ["event: links\ndata: {}\n\n"],
+      threads: () => Response.json({ cursor: 3, sections: [], marks: ["link-through"], link_through: { links: d.stats.threads > 1 ? [{ id: MINI, name: "Mini", through: true, away: false }] : [], pending: [] } }),
+    });
+    const { peer } = link(d.url, { onReread: (event) => void told.push(`${event}:${peer.list!.link_through?.links.length}`) });
+    peer.start();
+    await until("told", () => told.length === 1);
+    expect(new URLSearchParams(d.stats.eventAsks[0]).get("links")).toBe("1");
+    expect(told).toEqual(["links:1"]);
+    // An older Inbox's list names none.
+    peer.acceptList({ cursor: 4, sections: [] });
+    expect(peer.list!.link_through).toBeNull();
   });
 
   test("a machine's stars and the marks it takes come from its list; an older Inbox's list says no marks", () => {

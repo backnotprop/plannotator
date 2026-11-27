@@ -78,7 +78,7 @@ export function inboxWallEntries(store: InboxStore, includeArchived: boolean): W
     const archived = inboxRowArchived(row);
     if (archived && !includeArchived) continue;
     for (const ref of store.threadArtifactRefs(threadId)) {
-      const type = inboxArtifactTypeOf(ref.attachment ? ref.attachment.kind : "guide");
+      const type = inboxArtifactTypeOf(ref.attachment ? ref.attachment.kind : ref.html ? "html" : "guide");
       out.push({ entry: { ref, row, type, archived, pinnedAt: pinned.get(ref.key) ?? null }, at: ref.message.created_at, order: order++ });
     }
   }
@@ -135,6 +135,8 @@ async function wallRow({ ref, row, type, archived, pinnedAt }: WallEntry): Promi
     attachment: ref.attachment ? await inboxAttachmentState(ref.attachment, ref.message.id, { hash: "small" }) : null,
     inline: ref.inline,
     guide: ref.guide,
+    // An html block: its heading and size only (the tile is a quiet card; the block opens in its thread).
+    ...(ref.html ? { html: { title: ref.html.title, size: ref.html.size } } : {}),
     archived,
     pinned_at: pinnedAt,
   };

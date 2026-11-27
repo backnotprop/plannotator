@@ -3,16 +3,16 @@
  * computer's routines beside this computer's, each naming its computer; Run and Turn off on one go to that computer
  * through the forward (`/api/inbox/m/<machine>/scheduled/…`, keyed); a write held for a computer that is away shows the
  * waiting toast; with Routines off here and on there, the page still lists and makes theirs; a new routine's computer
- * is picked in the editor, and its create goes there. Settings → Capabilities shows a linked computer's switches and
- * turns one there.
+ * is picked in the editor, and its create goes there. Settings → Capabilities is one set for every linked computer: no
+ * group per computer.
  *
  * What regresses: a far routine missing or unnamed, a far press going to this computer's routes (or without a key), a
  * far run's 202 answer read as a failure, a held write silent, the page hidden while only a linked computer has
- * Routines, the create made here when the person picked another computer, a far switch not offered or not sent there;
- * an away computer's rows claiming a run going or a next run, or not said away; a Run while it is away held (or said
- * as waiting) instead of refused in plain words; a Stop without the run it was pressed for; Starting agents off there
- * unsaid; a far computer's switches gone after a reload while it is away, or a held turn not shown as waiting; a first
- * read of a far computer's routines that failed never tried again until a reconnect.
+ * Routines, the create made here when the person picked another computer; a group per linked computer back in
+ * Settings → Capabilities, or a switch there read or turned through the forward; an away computer's rows claiming a
+ * run going or a next run, or not said away; a Run while it is away held (or said as waiting) instead of refused in
+ * plain words; a Stop without the run it was pressed for; Starting agents off there unsaid; a first read of a far
+ * computer's routines that failed never tried again until a reconnect.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -27,7 +27,6 @@ const hasDom = typeof document !== 'undefined';
 const { ScheduledPage } = (hasDom ? await import('./ScheduledPage') : {}) as typeof import('./ScheduledPage');
 const { resetScheduledForTests, useScheduled, useScheduledOn } = (hasDom ? await import('./store') : {}) as typeof import('./store');
 const { SidebarProvider } = (hasDom ? await import('../shell/sidebar') : {}) as typeof import('../shell/sidebar');
-const { LinkedCapabilities } = (hasDom ? await import('../components/LinkedCapabilities') : {}) as typeof import('../components/LinkedCapabilities');
 const { resetMachineRoutes, setLinkedMachines } = await import('../inboxUrl');
 
 const STUDIO = 'ibx_01HZZZZZZZZZZZZZZZZZZZZZZZ';
@@ -259,61 +258,80 @@ test.skipIf(!hasDom)("a new routine's computer is picked in the editor, and it i
   expect(creates[0]!.body?.name).toBe('Weekly cleanup');
 });
 
-test.skipIf(!hasDom)("Settings → Capabilities: a linked computer's switches by name, turned there; away, its group stays (a reload too), said away, a held turn shown turned and waiting; an older one has none", async () => {
+test.skipIf(!hasDom)("Settings → Capabilities is one set for every linked computer: no group per computer, nothing read or turned on another one, and a switch turns here", async () => {
   const calls: Call[] = [];
-  let away = false;
-  // The Inbox's forward (inbox-capabilities-machines.ts): Studio's switches, away the last it gave, held turns laid on.
-  const there: Record<string, { on: boolean }> = { board: { on: true }, steps: { on: false }, scheduled_threads: { on: false }, code_review: { on: false }, system: { on: false }, bro: { on: false }, float_drafts: { on: false } };
-  const held: Record<string, { on: boolean }> = {};
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
     const method = init?.method ?? 'GET';
-    const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, any>) : null;
-    calls.push({ method, path, body });
-    if (path === `${FAR}/capabilities` && method === 'GET') return json({ capabilities: { ...there, ...held }, away, read_at: '2026-11-24T14:10:00.000Z', held: Object.keys(held) });
-    if (path === `${FAR}/capabilities` && away) {
-      Object.assign(held, { scheduled_threads: body!.scheduled_threads });
-      return HELD(String(body?.idempotency_key));
-    }
-    if (path === `${FAR}/capabilities`) {
-      Object.assign(there, body);
-      return json({ scheduled_threads: there.scheduled_threads });
-    }
+    calls.push({ method, path, body: init?.body ? (JSON.parse(String(init.body)) as Record<string, any>) : null });
+    // What a linked computer's switches read through the forward answered before the one set.
+    if (path.endsWith('/capabilities')) return json({ capabilities: { board: { on: true }, steps: { on: false } }, away: false, read_at: '2026-11-24T14:10:00.000Z', held: [] });
     return json({ scheduled: [], launch_on: true, computers: [] });
   }) as typeof fetch;
+  const { SettingsPage } = await import('../components/Settings');
   const host = document.createElement('div');
   host.className = 'pn-inbox';
   document.body.appendChild(host);
   root = createRoot(host);
-  const machine = (id: string, name: string, marks: string[], state = 'online') => ({ id, name, self: false, state, marks }) as never;
-  const draw = (state: string) => act(() => root!.render(<LinkedCapabilities machines={[machine(STUDIO, 'Studio', ['capabilities'], state), machine('ibx_01HOLDERXXXXXXXXXXXXXXXXX', 'Old laptop', [])]} />));
-  draw('online');
+  const turned: [string, boolean][] = [];
+  const settings = {
+    serverSession: 's',
+    version: '0.29.9',
+    port: 1,
+    url: 'http://localhost:1/',
+    mcp_url: 'http://127.0.0.1:1/mcp',
+    mcp_command: ['plannotator', 'inbox', 'mcp'],
+    home: '/home/u',
+    data_dir: '/home/u/.plannotator',
+    inbox_tool: { hosts: { 'claude-code': true, pi: false, opencode: false }, env: null },
+    notifications: { enabled: true, dismissed: false, allowed_origin: null },
+    phones: false,
+    store_dir: '/home/u/.plannotator/inbox',
+    board: { on: false },
+    steps: { on: true },
+    bro: { on: false },
+    experimental: { decision_mode: { on: false, env: null }, grid: { on: false, env: null } },
+  };
+  // Studio keeps the one set; an older Plannotator there still says `capabilities` (its own window's group of this one).
+  const machines = [
+    { id: 'ibx_01HSELFXXXXXXXXXXXXXXXXXXX', name: 'Laptop', self: true, state: 'online', marks: [] },
+    { id: STUDIO, name: 'Studio', self: false, state: 'online', marks: ['capabilities', 'capability-note', 'capability-set'] },
+    { id: 'ibx_01HOLDERXXXXXXXXXXXXXXXXX', name: 'Old laptop', self: false, state: 'offline', marks: ['capabilities'] },
+  ];
+  const noop = () => {};
+  act(() =>
+    root!.render(
+      <SidebarProvider>
+        <SettingsPage
+          settings={settings as never}
+          machines={machines as never}
+          context={null}
+          error={null}
+          onToggleTool={noop}
+          onToggleExperimental={noop}
+          onToggleBoard={(on: boolean) => turned.push(['board', on])}
+          onToggleSteps={(on: boolean) => turned.push(['steps', on])}
+          onToggleBro={noop}
+          onToggleTailscale={noop}
+          tailscaleBusy={false}
+          permission="granted"
+          onToggleNotifications={noop}
+          onDeleteThread={async () => {}}
+          onDeleteProject={async () => {}}
+          section="capabilities"
+          phone={false}
+        />
+      </SidebarProvider>,
+    ),
+  );
   await settle();
-  const group = () => host.querySelector(`[data-settings-linked-capabilities="${STUDIO}"]`)!;
-  expect(group().querySelector('h2')?.textContent).toBe('Studio');
-  // System is off there (and Code review too): no row, as on this computer.
-  expect([...group().querySelectorAll('[data-settings-linked-switch]')].map((r) => r.getAttribute('data-settings-linked-switch'))).toEqual(['board', 'steps', 'scheduled_threads', 'code_review', 'bro', 'float_drafts']);
-  expect(host.querySelectorAll('[data-settings-linked-capabilities]').length).toBe(1);
-  expect(group().querySelector('[data-settings-linked-away]')).toBeNull();
-  const routines = () => group().querySelector<HTMLButtonElement>('[data-settings-linked-switch="scheduled_threads"] [role="switch"]')!;
-  await click(routines());
-  await settle();
-  const sent = calls.filter((c) => c.method === 'POST');
-  expect(sent.map((c) => [c.path, c.body?.scheduled_threads])).toEqual([[`${FAR}/capabilities`, { on: true }]]);
-  expect(routines().getAttribute('aria-checked')).toBe('true');
-  away = true;
-  draw('offline');
-  await settle();
-  await click(routines());
-  await settle();
-  const shownHeld = () => [routines().getAttribute('aria-checked'), group().querySelector('[data-settings-linked-switch="scheduled_threads"]')!.hasAttribute('data-held'), group().querySelector('[data-settings-linked-switch="scheduled_threads"] .ib-desc')?.textContent];
-  expect(shownHeld()).toEqual(['false', true, 'Waiting for Studio: this applies when Studio is back.']);
-  // A reload of the page: the group is there, said away, its held turn still shown.
-  act(() => root!.unmount());
-  root = createRoot(host);
-  draw('offline');
-  await settle();
-  expect(group().querySelector('[data-settings-linked-away]')!.textContent).toMatch(/^ Studio has been away since .+\. These switches are as it last said\.$/);
-  expect(shownHeld()).toEqual(['false', true, 'Waiting for Studio: this applies when Studio is back.']);
-  expect(group().querySelector('[data-settings-linked-switch="board"]')!.hasAttribute('data-held')).toBe(false);
+  expect(host.querySelector('[data-settings-capabilities]')).not.toBeNull();
+  // No group for Studio or for the older computer, and none of their names heads anything here.
+  expect(host.querySelectorAll('[data-settings-linked-capabilities], [data-settings-linked-switch]').length).toBe(0);
+  expect([...host.querySelectorAll('h2')].map((h) => h.textContent)).not.toContain('Studio');
+  expect([...host.querySelectorAll('h2')].map((h) => h.textContent)).not.toContain('Old laptop');
+  // This computer's switches turn here (the Inbox gives the flip to every linked computer); nothing goes through the forward.
+  await click(host.querySelector('[data-settings-board] [role="switch"]'));
+  expect(turned).toEqual([['board', true]]);
+  expect(calls.filter((c) => c.path.startsWith('/api/inbox/m/'))).toEqual([]);
 });

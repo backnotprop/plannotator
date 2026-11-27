@@ -6,8 +6,7 @@
  * (it is refused at the press, said in plain words, and never sent); a Stop that waited for it ending whatever run is
  * going when it lands (it names the run it was pressed for, also after this Inbox restarts); a held edit that looks
  * undone on the next read or a reload (the merged read lays it on the rows from the outbox until that computer takes it);
- * a computer's Capabilities group gone after a reload while it is away, or its held turn not shown; a turn off pressed
- * while it is away lost, sent without the window's mark, or sent again on a later reconnect.
+ * a turn off pressed while it is away lost, sent without the window's mark, or sent again on a later reconnect.
  */
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
@@ -39,10 +38,10 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
-/** Studio's door: its list takes routines and the switches; `away()` drops its line and answers nothing until `back()`. */
-function studioDoor(marks: string[] = [ROUTINES_MARK, "capabilities"]) {
+/** Studio's door: its list takes routines; `away()` drops its line and answers nothing until `back()`. */
+function studioDoor(marks: string[] = [ROUTINES_MARK]) {
   /** `running`: a run of sch_1 is going there, so its row says "running" whether it is on or off (as rowOf does). */
-  const state = { down: false, name: "Morning digest", enabled: true, running: false, writes: [] as { route: string; body: Record<string, unknown>; window: boolean }[], board: { on: true } };
+  const state = { down: false, name: "Morning digest", enabled: true, running: false, writes: [] as { route: string; body: Record<string, unknown>; window: boolean }[] };
   const streams = new Set<ReadableStreamDefaultController<Uint8Array>>();
   const server = Bun.serve({
     hostname: "127.0.0.1",
@@ -68,13 +67,11 @@ function studioDoor(marks: string[] = [ROUTINES_MARK, "capabilities"]) {
         const row = { id: "sch_1", name: state.name, enabled: state.enabled, state: state.running ? "running" : state.enabled ? "on" : "off", updated_at: "2026-11-24T08:00:00.000Z" };
         return Response.json({ scheduled: [row], launch_on: true });
       }
-      if (req.method === "GET" && route === "capabilities") return Response.json({ capabilities: { board: state.board } });
       if (req.method === "POST") {
         const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
         state.writes.push({ route, body, window: req.headers.get(MACHINE_WINDOW_HEADER) === "1" });
         if (route === "scheduled/sch_1" && typeof body.name === "string") state.name = body.name;
         if (route === "scheduled/sch_1/on" || route === "scheduled/sch_1/off") state.enabled = route.endsWith("/on");
-        if (route === "capabilities" && body.board) state.board = body.board as { on: boolean };
         // A run's answer, as Studio's window route gives it: 202, the run's divider.
         if (route === "scheduled/sch_1/run") return Response.json({ scheduled: { id: "sch_1", name: state.name, state: "running" }, message_id: "msg_run_1" }, { status: 202 });
         return Response.json({ scheduled: { id: "sch_1", name: state.name } });
@@ -108,6 +105,10 @@ function inbox(dataDir: string) {
       openMachineOffer: () => ({ secret: "s", code: "000000", expires_at: "" }),
       offerDevice: () => null,
       closeMachineOffer: () => null,
+      openIntroductionOffer: () => ({ secret: "s", expires_at: "" }),
+      introduction: () => null,
+      settleIntroduction: noop,
+      dropIntroductions: noop,
       revokeDevice: noop,
       tailnetAddress: () => null,
       tailnetError: () => null,
@@ -212,41 +213,25 @@ test("a turn off pressed while Studio is away, its run still going there: held, 
   expect([now!.away, now!.rows.map((r) => [r.enabled, r.state])]).toEqual([false, [[false, "running"]]]);
 });
 
-test("a held edit stays on Studio's last-known row on every read (a reload too) until Studio takes it; a held switch the same", async () => {
+test("a held edit stays on Studio's last-known row on every read (a reload too) until Studio takes it", async () => {
   const door = studioDoor();
   const { machines, call, studio } = inbox(linked(door.url));
   await until(() => studio()?.state === "online" && studio()?.list_cursor === 1, "Studio online");
   expect((await machines.farRoutines.read()).map((one) => [one.away, one.rows.map((r) => r.name)])).toEqual([[false, ["Morning digest"]]]);
-  expect((await call("GET", `/api/inbox/m/${FAR}/capabilities`)).body).toMatchObject({ capabilities: { board: { on: true } }, away: false, held: [] });
 
   door.away();
   await until(() => studio()?.state !== "online", "Studio away");
   expect((await call("POST", `/api/inbox/m/${FAR}/scheduled/sch_1`, { idempotency_key: "edit-1", name: "Evening digest" })).status).toBe(202);
-  expect((await call("POST", `/api/inbox/m/${FAR}/capabilities`, { idempotency_key: "cap-1", board: { on: false } })).status).toBe(202);
   // Read again, and again as a reloaded page does: the edit shows, Studio marked away with when it last said.
   for (let i = 0; i < 2; i++) {
     const [one] = await machines.farRoutines.read();
     expect([one!.away, one!.rows.map((r) => r.name), typeof one!.read_at]).toEqual([true, ["Evening digest"], "string"]);
-    const caps = await call("GET", `/api/inbox/m/${FAR}/capabilities`);
-    expect([caps.status, caps.body.away, caps.body.capabilities, caps.body.held]).toEqual([200, true, { board: { on: false } }, ["board"]]);
   }
 
   door.back();
-  await until(() => door.state.writes.length === 2, "the held writes delivered");
+  await until(() => door.state.writes.length === 1, "the held write delivered");
   await until(() => studio()?.state === "online", "Studio back");
   const [now] = await machines.farRoutines.read();
   expect([now!.away, now!.rows.map((r) => r.name)]).toEqual([false, ["Evening digest"]]);
-  expect((await call("GET", `/api/inbox/m/${FAR}/capabilities`)).body).toMatchObject({ capabilities: { board: { on: false } }, away: false, held: [] });
 });
 
-test.each([
-  ["a Studio that takes the note", [ROUTINES_MARK, "capabilities", "capability-note"], { agent: "Claude Code", host: "claude-code" }],
-  ["an older Studio", [ROUTINES_MARK, "capabilities"], undefined],
-] as const)("an agent's turn tells Studio who turned it, so Studio posts its own line: %s", async (_what, marks, expected) => {
-  const door = studioDoor([...marks]);
-  const { machines, studio } = inbox(linked(door.url));
-  await until(() => studio()?.state === "online" && studio()?.list_cursor === 1, "Studio online");
-  expect(await machines.capabilitiesOn("Studio", { key: "board", on: false }, { name: "Claude Code", host: "claude-code" })).toMatchObject({ name: "Studio", held: null });
-  // Only the switch and who turned it; an older Studio (its door refuses a field it does not know) gets the write alone.
-  expect(door.state.writes.map((w) => [w.route, w.body.board, w.body.capability_note])).toEqual([["capabilities", { on: false }, expected]]);
-});

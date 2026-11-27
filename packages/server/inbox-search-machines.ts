@@ -1,4 +1,4 @@
-import { isInboxId } from "@plannotator/core/inbox-types";
+import { INBOX_LINKED_READS_MARK, isInboxId } from "@plannotator/core/inbox-types";
 import {
   INBOX_SEARCH_BROWSE_LIMIT,
   INBOX_SEARCH_CAPS,
@@ -16,6 +16,8 @@ export interface InboxSearchMachine {
   id: string;
   name: string;
   online: boolean;
+  /** The marks its list says (`INBOX_LINKED_MARKS`): a Tag filter asks only a machine that takes `linked-reads`. */
+  marks?: readonly string[];
 }
 
 export interface InboxSearchMachines {
@@ -54,6 +56,11 @@ export async function searchAcrossMachines(input: SearchAcrossInput): Promise<An
   const own = new URL(url);
   own.searchParams.delete("machines");
   const linked = machines.linked();
+  // A Tag filter names every machine's id of each tag; each machine filters by its own. An older machine is not asked
+  // with one, as before: it may not know the filter.
+  const tagged = own.searchParams.has("tag");
+  // `linked` never holds this machine: its own answer is `answerOf`, asked with every id whatever its marks.
+  const merged = linked.filter((machine) => !tagged || (machine.marks ?? []).includes(INBOX_LINKED_READS_MARK));
   const nameOf = (id: string) => linked.find((machine) => machine.id === id)?.name ?? id;
 
   const ask = async (machine: string, params: URLSearchParams): Promise<InboxSearchAnswer | null> => {
@@ -82,7 +89,7 @@ export async function searchAcrossMachines(input: SearchAcrossInput): Promise<An
     }
     return params;
   };
-  const tagged = <T extends InboxSearchRow>(rows: readonly T[] | null | undefined, machine: string): T[] => (rows ?? []).map((row) => ({ ...row, project: { ...row.project, machine } }));
+  const theirRows = <T extends InboxSearchRow>(rows: readonly T[] | null | undefined, machine: string): T[] => (rows ?? []).map((row) => ({ ...row, project: { ...row.project, machine } }));
 
   const project = own.searchParams.get("project");
   if (project && isInboxId("prj", project) && !input.hasProject(project)) {
@@ -90,7 +97,7 @@ export async function searchAcrossMachines(input: SearchAcrossInput): Promise<An
     if (owner) {
       const share = linked.some((machine) => machine.id === owner && machine.online) ? await ask(owner, paramsAt(null)) : null;
       const totals = share?.totals ?? Object.fromEntries(INBOX_SEARCH_GROUPS.map((id) => [id, 0]));
-      const groups = share?.groups ? Object.fromEntries(Object.entries(share.groups).map(([id, rows]) => [id, tagged(rows, owner)])) : { threads: [] };
+      const groups = share?.groups ? Object.fromEntries(Object.entries(share.groups).map(([id, rows]) => [id, theirRows(rows, owner)])) : { threads: [] };
       return {
         serverSession,
         q: share?.q ?? own.searchParams.get("q") ?? "",
@@ -107,7 +114,7 @@ export async function searchAcrossMachines(input: SearchAcrossInput): Promise<An
   }
 
   const answer = await input.answerOf(own);
-  if (project || own.searchParams.has("tag") || answer.indexing || linked.length === 0) return answer;
+  if (project || answer.indexing || merged.length === 0) return answer;
 
   const group = own.searchParams.get("group") as InboxSearchGroupId | null;
   const offset = Number(own.searchParams.get("offset")) || 0;
@@ -116,7 +123,7 @@ export async function searchAcrossMachines(input: SearchAcrossInput): Promise<An
   const [mine, theirs] = await Promise.all([
     group ? Promise.all(pages.map((page) => input.answerOf(new URL(`${own.pathname}?${paramsAt(page)}`, own)))) : Promise.resolve([answer]),
     Promise.all(
-      linked.map(async (machine) => {
+      merged.map(async (machine) => {
         const shares = machine.online ? await Promise.all(pages.map((page) => ask(machine.id, paramsAt(page)))) : [null];
         return { machine, shares: shares.every(Boolean) ? (shares as InboxSearchAnswer[]) : null };
       }),
@@ -127,7 +134,7 @@ export async function searchAcrossMachines(input: SearchAcrossInput): Promise<An
   const unanswered = missing.length > 0 ? { unanswered: missing } : {};
 
   if (answer.recent) {
-    const rows = [...answer.recent, ...answered.flatMap(({ machine, shares }) => tagged(shares[0]!.recent, machine.id))];
+    const rows = [...answer.recent, ...answered.flatMap(({ machine, shares }) => theirRows(shares[0]!.recent, machine.id))];
     return { ...answer, recent: byTime(rows).slice(0, INBOX_SEARCH_RECENT_THREADS), ...unanswered };
   }
   if (!answer.totals || !answer.groups) return { ...answer, ...unanswered };
@@ -137,7 +144,7 @@ export async function searchAcrossMachines(input: SearchAcrossInput): Promise<An
   const groups = { ...answer.groups };
   const rowsOf = (id: InboxSearchGroupId) => [
     ...mine.flatMap((one) => one.groups?.[id] ?? []),
-    ...answered.flatMap(({ machine, shares }) => shares.flatMap((share) => tagged(share.groups?.[id], machine.id))),
+    ...answered.flatMap(({ machine, shares }) => shares.flatMap((share) => theirRows(share.groups?.[id], machine.id))),
   ];
   if (group) groups[group] = byScore(rowsOf(group)).slice(offset, offset + (limit ?? INBOX_SEARCH_LIMIT_MAX));
   else {

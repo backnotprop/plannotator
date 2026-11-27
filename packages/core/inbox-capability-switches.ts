@@ -1,12 +1,13 @@
 /**
- * Settings → Capabilities' switches that a linked computer's window shows and turns for this computer
- * (docs/agent-guides/inbox-machines.md, "Capabilities on a linked computer"). Each is the settings key the window's own
- * row writes (`POST /api/inbox/settings { <key>: { on } }`) and the row's name there. Plans (config and its command
- * only) is not one of them.
+ * Settings → Capabilities' switches that `plannotator inbox capability` lists and turns, and that an older linked
+ * computer's window still shows and turns for this computer (its group, mark `capabilities`). Each is the settings key
+ * the window's own row writes (`POST /api/inbox/settings { <key>: { on } }`) and the row's name there. Plans (config
+ * and its command only) is not one of them.
  */
 export const INBOX_CAPABILITY_SWITCHES = [
   { key: "board", name: "Board", agent: "board" },
   { key: "steps", name: "Checklist", agent: "checklist" },
+  { key: "decision_mode", name: "Decision mode", agent: "decision_mode" },
   { key: "scheduled_threads", name: "Routines", agent: "routines" },
   { key: "code_review", name: "Code review", agent: "code_review" },
   { key: "chapter_diagrams", name: "Chapter diagrams", agent: "chapter_diagrams" },
@@ -40,6 +41,27 @@ export const INBOX_CAPABILITY_AGENT_IDS = INBOX_CAPABILITY_AGENT_SWITCHES.map((s
 export type InboxCapabilitySwitches = Partial<Record<InboxCapabilitySwitchKey, { on: boolean }>>;
 
 export const INBOX_CAPABILITY_SWITCH_KEYS: readonly string[] = INBOX_CAPABILITY_SWITCHES.map((s) => s.key);
+
+/**
+ * The switches that are one set across linked computers (docs/agent-guides/inbox-machines.md, "One set of
+ * capabilities"): every switch a person sees in Settings → Capabilities, Experimental included (`grid` is the settings'
+ * `experimental` one; `decision_mode` is its own setting, on by default). A flip on any linked computer applies on all of them, the newer flip
+ * winning. System is not among them while its row is hidden (`INBOX_SYSTEM_SWITCH_SHOWN`). A new switch is one line
+ * here and one in the server's host (packages/server/inbox-capability-set.ts).
+ */
+export const INBOX_CAPABILITY_SET_KEYS = [
+  "board",
+  "steps",
+  "scheduled_threads",
+  "code_review",
+  "chapter_diagrams",
+  "bro",
+  "float_drafts",
+  "decision_mode",
+  "grid",
+] as const;
+
+export type InboxCapabilitySetKey = (typeof INBOX_CAPABILITY_SET_KEYS)[number];
 
 /** The switches of a settings answer (any object): each one it carries as `{ on: boolean }`. */
 export function inboxCapabilitySwitchesOf(settings: unknown): InboxCapabilitySwitches {

@@ -6,7 +6,7 @@
  */
 import { expect, test } from 'bun:test';
 import type { InboxSearchRow } from '@plannotator/core/inbox-search';
-import { countWords, markedRuns, moreLabel, projectNames, resultTarget, scopeWords, searchGroups, searchRowMark, searchTime, typeCountWords } from './search/model';
+import { countWords, markedRuns, moreLabel, projectMarks, projectNames, resultTarget, scopeWords, searchGroups, searchRowMark, searchTime, termMarks, typeCountWords } from './search/model';
 
 const project = { id: 'prj_a', name: 'api' };
 const base = { project, section: 'quiet' as const, archived: false, at: '2026-10-09T14:03:00Z' };
@@ -15,6 +15,17 @@ const message: InboxSearchRow = { type: 'message', id: 'msg_m', thread_id: 'msg_
 const file: InboxSearchRow = { type: 'file', id: 'att_f', thread_id: 'msg_t', message_id: 'msg_m', ...base, name: 'a.md', name_marks: [], folder: 'docs', kind: 'md', title: 'T' };
 const guide: InboxSearchRow = { ...file, type: 'guide', id: 'msg_g', message_id: 'msg_g', folder: null, kind: 'guide' };
 const projectRow: InboxSearchRow = { type: 'project', id: 'prj_a', project, name: 'api', name_marks: [], root: '/w/api', at: base.at };
+
+test("a quoted query's marks in a field the answer carries none for: the phrase as one run, a quoted word whole", () => {
+  const text = 'file viewer notes · files viewer';
+  const shown = (terms: string[]) => termMarks(text, terms).map(([a, l]) => text.slice(a, a + l));
+  expect(shown(['"file viewer"'])).toEqual(['file viewer']);
+  expect(shown(['file', 'viewer'])).toEqual(['file', 'viewer', 'viewer']);
+  expect(shown(['"file"'])).toEqual(['file']);
+  expect(shown(['"file view'])).toEqual(['file view']);
+  // A renamed project shows its indexed name inside: the phrase is placed there.
+  expect(projectMarks('file viewer · work', 'file viewer', ['"file viewer"'])).toEqual([[0, 11]]);
+});
 
 test('groups in the fixed order, empty ones left out, "Show all" while a group holds more', () => {
   const totals = { threads: 1, messages: 23, files: 1, projects: 0 };

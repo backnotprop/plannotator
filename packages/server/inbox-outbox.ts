@@ -241,10 +241,20 @@ export function replyIsStale(messages: readonly InboxMessage[], seenThroughSeq: 
  *   later run for nobody, perhaps on bytes the person never saw. A second copy
  *   at the door mints a second id; nothing names that upload, and the 24-hour
  *   sweep takes it (the blob stays while anything else uses it).
+ * - `draft`: its body or its answer carries draft text, words a person is still typing (a reply draft's save, its
+ *   Discard). It is never written to a durable record of finished commands: `submit` below throws for it and writes
+ *   nothing, and the door's entry for it (inbox-devices.ts, `carries: "draft"`) is never put in its command log. The
+ *   forward hands it to the reply-draft module (inbox-machine-drafts.ts), which keeps one file per thread while that
+ *   machine cannot take it. A second copy is safe without a record: a save is a compare-and-set, and the owner's store
+ *   answers the key it last applied to the draft (`last_key`) without writing again; a Discard names the version it
+ *   throws away (`base`, which that door requires). A new route that carries draft text must be `draft`:
+ *   inbox-draft-routes.test.ts fails for a route with a `draft` word in its path that is not.
  *
  * inbox-outbox.test.ts fails when a door write has no entry here.
  */
-export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "forge" | "now" | "local">> = {
+export type DoorWriteKind = "append" | "set" | "file" | "forge" | "now" | "draft" | "local";
+
+export const DOOR_WRITES: Readonly<Record<string, DoorWriteKind>> = {
   "POST threads/:id/seen": "set",
   // Grid's look (inbox-grid-seen.ts): each field keeps its larger value, so a held look lands as of then.
   "POST grid/seen": "set",
@@ -310,10 +320,16 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "f
   "POST messages/:id/run": "now",
   "POST messages/:id/secret": "now",
   "POST threads/:id/delete": "set",
+  // A reply draft of the machine's thread (mark `reply-drafts`): draft text, so never in this outbox or the door's log.
+  "POST threads/:id/draft": "draft",
+  "POST threads/:id/draft/delete": "draft",
   "POST annotations": "set",
   "POST annotations/:id/remove": "set",
   "POST messages/:id/guide/reviewed": "set",
   "POST messages/:id/guide/annotations": "set",
+  // A file ticked or unticked Viewed in a review on a linked machine's thread (mark `linked-reads`): `{ path, viewed }`,
+  // laid over the list kept there (an older window's whole list is still taken). One file's state: a copy sets it again.
+  "POST messages/:id/guide/viewed": "set",
   "POST messages/:id/annotations": "set",
   "POST threads/:id/message": "append",
   "POST messages": "append",
@@ -365,6 +381,12 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "f
   "POST capabilities": "set",
   "POST link-back": "set",
   "POST unlink": "set",
+  // Link two computers through a third (inbox-link-through.ts), each sent by the Inbox itself, never through the
+  // forward. An ask is held until the broker is back (one job per pair there, so a second copy changes nothing); a
+  // link code and the introduction carrying it are wanted now or not at all (a code lives 10 minutes).
+  "POST link-through-ask": "set",
+  "POST link-through-offer": "now",
+  "POST link-through-introduce": "now",
   // On this table so rule 8 knows it. The forward refuses it before this is read: an Update is never held to run days later.
   "POST update": "set",
 };
@@ -375,12 +397,12 @@ const DOOR_WRITE_ROUTES = Object.entries(DOOR_WRITES).flatMap(([name, kind]) =>
 
 /**
  * The forward's one decision, by route and never by Content-Type: a `file`,
- * a `forge` or a `now` write goes straight through while the machine is online; every other write is
- * held in the outbox. Null: no forwarded door write has that route, so it is
+ * a `forge` or a `now` write goes straight through while the machine is online; a `draft` goes to the reply-draft
+ * module; every other write is held in the outbox. Null: no forwarded door write has that route, so it is
  * never forwarded (a write rule 8 has not classified, or calls `local`, cannot
  * reach another machine).
  */
-export function doorWriteKind(route: string): "append" | "set" | "file" | "forge" | "now" | null {
+export function doorWriteKind(route: string): Exclude<DoorWriteKind, "local"> | null {
   return DOOR_WRITE_ROUTES.find((entry) => entry.route.test(route))?.kind ?? null;
 }
 
@@ -544,7 +566,8 @@ export class InboxOutbox {
    * Rule 1: queue the window's write under its own key. The same key again
    * (a retried Send, a page that lost the answer) answers the entry it made,
    * whatever state it is in, and queues nothing. The same key on another
-   * route or machine is refused, as the door refuses it.
+   * route or machine is refused, as the door refuses it. A `draft` route is
+   * refused before anything is written: draft text is never held here.
    */
   submit(
     machine: string,
@@ -556,6 +579,7 @@ export class InboxOutbox {
     auto = false,
     own: { follows?: string; send_by?: string; notify?: boolean; files?: readonly OutboxFile[] } = {},
   ): { entry: OutboxEntry; fresh: boolean } {
+    if (doorWriteKind(route) === "draft") throw new InboxError("draft_not_held", "A draft is never held in the outbox.", { field: "route" });
     if (!MACHINE_FILE.test(machine)) throw new InboxError("validation_error", "machine: an ibx_ id.", { field: "machine" });
     const key = typeof body.idempotency_key === "string" ? body.idempotency_key.trim() : "";
     if (!key) throw new InboxError("validation_error", "idempotency_key: required on a write to another machine.", { field: "idempotency_key" });
@@ -596,6 +620,36 @@ export class InboxOutbox {
       ...(auto && own.files && own.files.length > 0 ? { files: own.files.map((file) => ({ ...file })) } : {}),
     });
     return { entry, fresh: true };
+  }
+
+  /**
+   * A reply draft's words held for a machine whose link went (inbox-machine-drafts.ts `forget`): one line of the
+   * "Not sent" list, written already `dropped` with its notice, so it is shown and dismissed as any write that was
+   * waiting for that machine. Never queued and never sent: `submit` refuses a draft route.
+   */
+  recordLostDraft(machine: string, thread: string, words: string, machineName: string | null): OutboxEntry {
+    if (!MACHINE_FILE.test(machine)) throw new InboxError("validation_error", "machine: an ibx_ id.", { field: "machine" });
+    const key = crypto.randomUUID();
+    const at = this.now().toISOString();
+    return this.save({
+      v: 1,
+      key,
+      machine,
+      route: `threads/${thread}/draft`,
+      body: { idempotency_key: key, body: words },
+      n: Math.max(0, ...this.list(machine).map((e) => e.n)) + 1,
+      queued_at: at,
+      state: "dropped",
+      left: false,
+      errors: 0,
+      status: null,
+      answer: null,
+      settled_at: at,
+      notice: { kind: "not_delivered", at },
+      dismissed: false,
+      thread,
+      ...(machineName ? { machine_name: machineName } : {}),
+    });
   }
 
   /**

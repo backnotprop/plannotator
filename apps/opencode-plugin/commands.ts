@@ -306,6 +306,10 @@ export async function handleReviewCommand(
     // Approve-time notes are delivered below only when there is a session to
     // prompt into — same per-session gating as the annotate command's advert.
     approvalNotesSupported: Boolean(sessionId),
+    // The decision is delivered below into the command's session, and this
+    // server runs inside OpenCode, so it never outlives it. With no session
+    // nothing could receive it: Send says so and keeps the draft.
+    agentPresence: sessionId ? undefined : () => "no-session" as const,
     htmlContent: reviewHtmlContent,
     diagramEngine: deps.reviewDiagramEngineDir ? diagramEngineSourcesFromDir(deps.reviewDiagramEngineDir) : undefined,
     opencodeClient: client,

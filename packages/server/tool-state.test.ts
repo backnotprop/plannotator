@@ -163,6 +163,42 @@ describe("what a CLI says about its hosts", () => {
     const hosts = await readCliHosts(runner({ "glab auth status": { stdout: "", stderr, exitCode: 1 } }), "glab");
     expect([[...hosts.signedIn], [...hosts.configured].sort(), hosts.missing]).toEqual([["gitlab.com"], ["gitlab.acme.dev", "gitlab.com"], false]);
   });
+  test("glab: every signed-in host (`--all`), not only the current context's", async () => {
+    const asked: string[] = [];
+    const answers: Record<string, RefCommandResult> = {
+      // A newer glab: without `--all` it checks only the host of the current context.
+      "glab auth status": { stdout: "gitlab.com\n  ✓ Logged in to gitlab.com as dana\n", stderr: "", exitCode: 0 },
+      "glab auth status --all": { stdout: "gitlab.com\n  ✓ Logged in to gitlab.com as dana\ngit.northwind.example\n  ✓ Logged in to git.northwind.example as dana\n", stderr: "", exitCode: 0 },
+    };
+    const run = async (cli: string, args: string[]) => (asked.push(`${cli} ${args.join(" ")}`), answers[`${cli} ${args.join(" ")}`] ?? { stdout: "", stderr: "unknown command", exitCode: 1 });
+    const hosts = await readCliHosts(run, "glab");
+    expect([...hosts.signedIn].sort()).toEqual(["git.northwind.example", "gitlab.com"]);
+    expect(asked).toEqual(["glab auth status --all"]);
+  });
+  test("glab `--all` exiting 1 while it names hosts (one host failed) is read as it is: no fallback to plain `auth status`", async () => {
+    const asked: string[] = [];
+    const answers: Record<string, RefCommandResult> = {
+      // Plain `auth status` on a newer glab: only the current context's host, which would lose git.northwind.example.
+      "glab auth status": { stdout: "", stderr: "gitlab.com\n  ✓ Logged in to gitlab.com as dana\n", exitCode: 0 },
+      "glab auth status --all": {
+        stdout: "",
+        stderr: "gitlab.com\n  x gitlab.com: api call failed: 401 Unauthorized\ngit.northwind.example\n  ✓ Logged in to git.northwind.example as dana\n",
+        exitCode: 1,
+      },
+    };
+    const run = async (cli: string, args: string[]) => (asked.push(`${cli} ${args.join(" ")}`), answers[`${cli} ${args.join(" ")}`] ?? { stdout: "", stderr: "unknown command", exitCode: 1 });
+    const hosts = await readCliHosts(run, "glab");
+    expect(asked).toEqual(["glab auth status --all"]);
+    expect([[...hosts.signedIn], [...hosts.configured].sort()]).toEqual([["git.northwind.example"], ["git.northwind.example", "gitlab.com"]]);
+  });
+  test("glab without `--all`: it refuses the flag, and its plain `auth status` (every host) is read", async () => {
+    const stderr = "gitlab.com\n  ✓ Logged in to gitlab.com as dana\ngit.northwind.example\n  ✓ Logged in to git.northwind.example as dana\n";
+    const hosts = await readCliHosts(
+      runner({ "glab auth status --all": { stdout: "", stderr: "Error: unknown flag: --all\nUsage:\n  glab auth status [flags]\n", exitCode: 1 }, "glab auth status": { stdout: "", stderr, exitCode: 0 } }),
+      "glab",
+    );
+    expect([...hosts.signedIn].sort()).toEqual(["git.northwind.example", "gitlab.com"]);
+  });
   test("not installed says so", async () => {
     expect((await readCliHosts(runner({ "glab auth status": { stdout: "", stderr: "glab: not found", exitCode: 127 } }), "glab")).missing).toBe(true);
     expect((await readCliHosts(runner({ "gh auth status --json hosts": { stdout: "", stderr: "", exitCode: 127 } }), "gh")).missing).toBe(true);

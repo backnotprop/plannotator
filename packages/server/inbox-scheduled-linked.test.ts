@@ -8,7 +8,8 @@
  * all; A's merged list without B's routine or its computer; an on, a run or an edit from A not taking effect on B; a bare
  * call through the forward changing a routine (only a window's press does, as here); B asleep: its routine dropped from
  * A's list instead of kept as last known, or a turn off lost instead of held and applied when B is back; a linked
- * computer's switch read exposing other settings.
+ * computer's switch read (an older computer's group) exposing other settings; an agent's `computer`, gone with the one
+ * set, still taken.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -99,16 +100,15 @@ describe("routines and capability switches across linked computers", () => {
       const far = `/api/inbox/m/${bId}`;
       await waitFor("B's list on A", async () => ((await get(a.port, "/api/inbox/machines")).machines as Json[]).find((m) => m.id === bId)?.marks?.includes("routines") === true, 15_000);
 
-      // B's switches, read from A: the capability switches alone, no other setting.
+      // B's switches, read from A as an older computer's group of B still reads them: the capability switches alone, no
+      // other setting (this Inbox's own window no longer reads them: the switches are one set).
       const switches = await get(a.port, `${far}/capabilities`);
       expect(switches.capabilities.scheduled_threads).toEqual({ on: false });
-      // With the forward's own words: nothing held for B, B not away, when it was read.
-      expect(Object.keys(switches)).toEqual(["capabilities", "held", "away", "read_at"]);
-      expect([switches.held, switches.away, typeof switches.read_at]).toEqual([[], false, "string"]);
-      // Routines on B, turned from A; A's stay off. The answer carries the switches only.
+      expect(Object.keys(switches)).toEqual(["capabilities"]);
+      // Routines on B, turned from A as that older group turns them; A's stay off (held off here). The answer carries the switches only.
       const turned = await press(a.port, `${far}/capabilities`, { scheduled_threads: { on: true } });
       expect(turned.status).toBe(200);
-      expect(Object.keys((await turned.json()) as Json).every((key) => ["board", "steps", "scheduled_threads", "code_review", "chapter_diagrams", "system", "bro", "float_drafts"].includes(key))).toBe(true);
+      expect(Object.keys((await turned.json()) as Json).every((key) => ["board", "steps", "decision_mode", "scheduled_threads", "code_review", "chapter_diagrams", "system", "bro", "float_drafts"].includes(key))).toBe(true);
       expect((await get(b.port, "/api/inbox/settings")).scheduled_threads.on).toBe(true);
       // The turn went through B's door (its command log), not to A's own settings.
       const doorLines = readFileSync(join(dataB, "inbox", "device-commands.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line) as Json);
@@ -154,22 +154,28 @@ describe("routines and capability switches across linked computers", () => {
       // row says "running" until that run ends, turned off or not.
       await waitFor("the held turn off on B", async () => ((await get(b.port, `/api/inbox/scheduled/${id}`)).scheduled as Json).enabled === false, 45_000);
 
-      // An agent on A, asked by the person, turns B's Routines off by B's name (`plannotator inbox capability`): B's
-      // switch, not A's; one line for the person on A, naming B.
+      // An agent on A, asked by the person (`plannotator inbox capability checklist on`): the switch turns on A, which
+      // every linked computer then takes (both Inboxes read one config.json here, so the e2e proves that part); one
+      // line for the person, on A. A `computer` (gone with the one set) is refused.
       await waitFor("B back on A", async () => ((await get(a.port, "/api/inbox/machines")).machines as Json[]).find((m) => m.id === bId)?.state === "online", 30_000);
       const bName = ((await get(a.port, "/api/inbox/machines")).machines as Json[]).find((m) => m.id === bId)!.name as string;
       const folder = join(root, "work");
       mkdirSync(folder, { recursive: true });
-      const agentTurn = await fetch(`${at(a.port)}/api/inbox/capability`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ by: { session: "ses_ada", host: "claude-code", name: "Claude Code" }, project_path: folder, capability: "routines", on: false, computer: bName }),
-      });
-      const result = { content: [{ text: ((await agentTurn.json()) as { text: string }).text }] };
-      expect(result.content[0]!.text).toStartWith(`Turned off Routines on ${bName}. The person sees it in thread `);
-      expect([(await get(b.port, "/api/inbox/settings")).scheduled_threads.on, (await get(a.port, "/api/inbox/settings")).scheduled_threads.on]).toEqual([false, false]);
-      const lineId = /thread (msg_\S+)\.$/.exec(result.content[0]!.text)![1]!;
-      expect((a.store.message(lineId)?.body ?? "")).toBe(`Turned off Routines on ${bName}.`);
+      const agentAsk = (extra: Json) =>
+        fetch(`${at(a.port)}/api/inbox/capability`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ by: { session: "ses_ada", host: "claude-code", name: "Claude Code" }, project_path: folder, capability: "checklist", on: true, ...extra }),
+        });
+      expect((await agentAsk({ computer: bName })).status).toBe(422);
+      expect((await get(a.port, "/api/inbox/settings")).steps.on).toBe(false);
+      const agentTurn = await agentAsk({});
+      expect(agentTurn.status).toBe(200);
+      const text = ((await agentTurn.json()) as { text: string }).text;
+      expect(text).toStartWith("Turned on Checklist. The person sees it in thread ");
+      expect((await get(a.port, "/api/inbox/settings")).steps.on).toBe(true);
+      const lineId = /thread (msg_[^\s.]+)\./.exec(text)![1]!;
+      expect((a.store.message(lineId)?.body ?? "")).toBe("Turned on Checklist.");
       expect(a.store.threadMessageIds(a.store.message(lineId)!.thread_id)).toHaveLength(1);
     } finally {
       a.stop();

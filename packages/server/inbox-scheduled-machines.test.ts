@@ -16,7 +16,6 @@ import type { InboxScheduled } from "./inbox-scheduled";
 import { doorRouteOf } from "./inbox-devices";
 import { startsAgentThere } from "./inbox-machines";
 import { withHeld, type HeldRoutineWrite } from "./inbox-scheduled-machines";
-import { capabilitiesWithHeld } from "./inbox-capabilities-machines";
 
 const row = (id: string, name = id): InboxScheduledRow => ({ id, name }) as unknown as InboxScheduledRow;
 
@@ -112,13 +111,6 @@ describe("the person's held writes on a linked computer's rows", () => {
     expect((await far.read()).map((one) => [one.away, one.rows.map((r) => r.name)])).toEqual([[true, ["Evening digest"]]]);
     held = [];
     expect((await far.read())[0]!.rows.map((r) => r.name)).toEqual(["Morning digest"]);
-  });
-
-  test("a held switch: shown as turned and named as waiting; other routes left alone", () => {
-    expect(capabilitiesWithHeld({ board: { on: true }, steps: { on: false } }, [write("capabilities", { board: { on: false }, idempotency_key: "k" }), write("scheduled/sch_1/off")])).toEqual({
-      capabilities: { board: { on: false }, steps: { on: false } },
-      held: ["board"],
-    });
   });
 });
 

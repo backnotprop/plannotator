@@ -11,6 +11,7 @@
  * learned from what that machine sent (its list rows, its projects, its
  * thread reads): every id is a ULID, so an id names one machine's record.
  */
+import { inboxMarksHave, type InboxLinkedMark } from '@plannotator/core/inbox-types';
 
 /** This Inbox's own machine id (`ibx_…`), from the merged list; null before it (or from an Inbox that cannot link). */
 let selfMachine: string | null = null;
@@ -102,6 +103,22 @@ export function linkedMachineFacts(id: string): LinkedMachineFacts | null {
   return linkedFacts.get(id) ?? null;
 }
 
+/**
+ * Whether a machine takes `mark`: this Inbox itself always does (null, its own id, or no machine at all); a linked one
+ * (its id, or its view) when its list says so; one not heard of yet, or an older one, does not.
+ */
+export function hasMachineMark(machineOrId: string | { id: string; marks?: readonly string[] } | null | undefined, mark: InboxLinkedMark): boolean {
+  if (!machineOrId) return true;
+  const id = typeof machineOrId === 'string' ? machineOrId : machineOrId.id;
+  if (id === selfMachine) return true;
+  return inboxMarksHave(typeof machineOrId === 'string' ? linkedFacts.get(id)?.marks : machineOrId.marks, mark);
+}
+
+/** Every linked machine the merged list last named that can be read (not one too old to link, nor revoked), by id. */
+export function linkedMachineIds(): string[] {
+  return [...linkedFacts].filter(([, facts]) => facts.state !== 'needs_update' && facts.state !== 'revoked').map(([id]) => id).sort();
+}
+
 /** The linked machines the merged list last said take `mark`, by id (an older one, or one not listed yet, does not). */
 export function linkedMachinesWith(mark: string): string[] {
   return [...linkedFacts].filter(([, facts]) => facts.marks.includes(mark) && facts.state !== 'needs_update' && facts.state !== 'revoked').map(([id]) => id).sort();
@@ -156,7 +173,7 @@ export function rememberArtifactMachines<T extends { pins?: readonly ArtifactIds
   const list = (value: unknown): readonly ArtifactIds[] => (Array.isArray(value) ? value : []);
   for (const entry of [...list(model?.pins), ...list(model?.artifacts)]) {
     if (!entry || typeof entry.machine !== 'string' || !entry.machine || typeof entry.key !== 'string' || typeof entry.thread_id !== 'string') continue;
-    const file = entry.key.startsWith('guide:') ? '' : entry.key;
+    const file = entry.key.startsWith('guide:') || entry.key.startsWith('html:') ? '' : entry.key;
     rememberMachine([entry.thread_id, entry.message_id ?? '', entry.project?.id ?? '', entry.attachment?.id ?? '', file], entry.machine);
   }
   return model;

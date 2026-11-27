@@ -16,7 +16,8 @@
  * The view, raw and attach routes (approval "inbox-file-refs-open-viewer") are not behind Code review and not held to
  * the project: any file on this computer the Inbox can read, but never a secret (`secretOrSystem`, the dotenv family).
  *
- * The last only reads, so it also answers the owner through the tailnet (a phone's tap). A thread that owns a pull
+ * The code route and the file route's GET only read, so they also answer the owner through the tailnet (a phone's
+ * tap, a window's Copy path); a linked machine's window reads both through the door, held to its thread. A thread that owns a pull
  * request, and a PR page (`pull`), read the file at that PR's head commit from the forge (`InboxPulls.file`), so it needs
  * no checkout; otherwise, and when the PR has no such file, it is the file on this computer, under the rules below.
  *
@@ -312,15 +313,28 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
     });
   };
 
+  /**
+   * A read's scope from its query. A linked machine's window (through the door) asks about its thread only: that
+   * thread's folders and PRs, never every clone of a repository (`repo`) or a PR it names (`pull`), so its window
+   * cannot read the rest of this computer through a hover or a Copy path.
+   */
+  const scopeFor = (req: Request, params: URLSearchParams): { scope: FileScope; door: boolean } => {
+    const door = !!context.doorOf?.(req);
+    const own = { thread: params.get("thread"), message: params.get("message"), from: params.get("from") };
+    return { door, scope: door ? own : { ...own, repo: params.get("repo"), pull: params.get("pull") } };
+  };
+
   /** Open in for a file a reference names: its project-relative path, in a scope; never a root from the request. */
   const fileRoute = async (req: Request): Promise<Response> => {
     if (!codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
     if (req.method === "GET") {
       const url = new URL(req.url);
       if (!isSameOriginOrNoOrigin(req.headers.get("origin"), url.host, req.headers.get("sec-fetch-site"))) return json(crossOriginRefusalBody(), 403);
-      const params = url.searchParams;
-      const scope = { thread: params.get("thread"), message: params.get("message"), repo: params.get("repo"), from: params.get("from") };
-      const file = await checkInboxProjectFile(placesOf(scope, params.get("path") ?? ""));
+      if (notFromWindow(req)) return json(INBOX_MACHINE_FILE_WINDOW_ONLY_BODY, 403);
+      const { scope, door } = scopeFor(req, url.searchParams);
+      const file = await checkInboxProjectFile(placesOf(scope, url.searchParams.get("path") ?? ""));
+      // A linked machine's window is never told a secret is there, as its hover never shows one.
+      if (file.ok && door && (holdsCredentials(file.path) || isPlannotatorState(file.path, dataDirs))) return json({ found: false });
       return json(file.ok ? { found: true, path: file.path, kind: file.kind } : { found: false });
     }
     if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
@@ -347,9 +361,9 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
     if (req.method !== "GET") return json({ error: "Use GET." }, 405);
     const url = new URL(req.url);
     if (!isSameOriginOrNoOrigin(req.headers.get("origin"), url.host, req.headers.get("sec-fetch-site"))) return json(crossOriginRefusalBody(), 403);
-    const params = url.searchParams;
-    const scope: FileScope = { thread: params.get("thread"), message: params.get("message"), repo: params.get("repo"), pull: params.get("pull"), from: params.get("from") };
-    const named = params.get("path") ?? "";
+    if (notFromWindow(req)) return json(INBOX_MACHINE_FILE_WINDOW_ONLY_BODY, 403);
+    const { scope } = scopeFor(req, url.searchParams);
+    const named = url.searchParams.get("path") ?? "";
     const places = placesOf(scope, named);
     const pulls = typeof scope.pull === "string" ? [scope.pull] : typeof scope.thread === "string" ? threadPulls(scope.thread) : [];
     if (pulls.length > 0) {
@@ -619,6 +633,9 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
     if (path === INBOX_OPEN_IN_RAW_PATH) return rawRoute(req);
     if (path === INBOX_OPEN_IN_ATTACH_PATH) return attachRoute(req);
     if (path !== INBOX_OPEN_IN_PATH && path !== INBOX_OPEN_IN_APPS_PATH && path !== INBOX_OPEN_IN_FILE_PATH) return null;
+    // Whether a referenced file is here, and its path: only a read, so the owner's window over the tailnet asks it too
+    // (its Copy path), and a linked machine's window through the door (held to the thread's folders in `fileRoute`).
+    if (path === INBOX_OPEN_IN_FILE_PATH && req.method === "GET") return fileRoute(req);
     // Launching an app changes this computer: never through the tailnet.
     if (via === "tailnet") return localOnly();
 

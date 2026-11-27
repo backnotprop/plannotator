@@ -1,4 +1,5 @@
-import React, { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { LineFeedbackToolsContext } from './LineFeedbackTools';
+import React, { useContext, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { useMentionAutocomplete } from '@plannotator/ui/hooks/useMentionAutocomplete';
 import { MentionAutocompleteMenu, mentionActiveOptionId } from '@plannotator/ui/components/MentionAutocomplete';
 import { holdCommentTags, tagsFromIds, useLiveCommentSource } from '../live/commentTags';
@@ -21,6 +22,7 @@ import {
 } from '@plannotator/ui/hooks/useViewportEnvironment';
 
 interface AnnotationToolbarProps {
+  voiceTarget?: string;
   toolbarState: ToolbarState;
   toolbarRef: React.RefObject<HTMLDivElement | null>;
   commentText: string;
@@ -106,6 +108,7 @@ function computeToolbarVerticalPlacement(
 /** Floating comment input form that appears after line selection */
 export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   toolbarState,
+  voiceTarget,
   toolbarRef,
   commentText,
   setCommentText,
@@ -135,6 +138,8 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   aiHistoryMessages = [],
   askOnly = false,
 }) => {
+  const FeedbackTools = useContext(LineFeedbackToolsContext);
+  const [voiceBusy, setVoiceBusy] = useState(false);
   const coarsePointer = hasPrimaryCoarsePointer();
   const visibleBounds = useVisibleViewportBounds(coarsePointer ? 16 : 0);
   const toolbarWidth = Math.min(TOOLBAR_MAX_WIDTH, visibleBounds.width);
@@ -145,6 +150,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   const mention = useMentionAutocomplete({ text: commentText, setText: setCommentText, textareaRef: commentRef, source: liveSource });
   const mentionListbox = useId();
   const submitWithTags = () => {
+    if (voiceBusy) return;
     holdCommentTags(tagsFromIds(mention.mentionIds, liveSource));
     onSubmit();
   };
@@ -296,6 +302,8 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
             />
           )}
 
+          {/* The host's tools (the Inbox's mic) draw inside this box: over the field's right edge, and below it. */}
+          <div className="relative">
           <textarea
             ref={commentRef}
             data-pn-mobile-editable="true"
@@ -327,6 +335,8 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
               }
             }}
           />
+          {FeedbackTools && <FeedbackTools key={voiceTarget} textareaRef={commentRef} onBusyChange={setVoiceBusy} />}
+          </div>
           <MentionAutocompleteMenu id={mentionListbox} menu={mention.menu} onSelect={mention.select} />
 
           {/* Optional suggested code section */}
@@ -410,7 +420,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
             {/* Add Comment button — right side */}
             <button
               onClick={submitWithTags}
-              disabled={!commentText.trim() && !suggestedCode.trim()}
+              disabled={voiceBusy || (!commentText.trim() && !suggestedCode.trim())}
               className="review-toolbar-btn primary disabled:opacity-50 disabled:cursor-not-allowed ml-auto"
             >
               {isEditing ? 'Update' : 'Add Comment'}

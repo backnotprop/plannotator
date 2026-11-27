@@ -8,6 +8,7 @@
     "./annotatable": "./annotatable.ts",
     "./annotate-bundle": "./annotate-bundle.ts",
     "./diff-files": "./diff-files.ts",
+    "./diff-fonts": "./diff-fonts.ts",
     "./direct-edits": "./direct-edits.ts",
     "./stack-layers": "./stack-layers.ts",
     "./file-browser-files": "./file-browser-files.ts",
@@ -80,6 +81,7 @@
     "./update-check": "./update-check.ts",
     "./daily-ping": "./daily-ping.ts",
     "./star-ask": "./star-ask.ts",
+    "./launch-switch": "./launch-switch.ts",
     "./prompts": "./prompts.ts",
     "./improvement-hooks": "./improvement-hooks.ts",
     "./pfm-reminder": "./pfm-reminder.ts",
@@ -218,6 +220,7 @@
     "./inbox/message-images": "./inbox/message-images.ts",
     "./inbox/message-media": "./inbox/message-media.ts",
     "./inbox/inline-images": "./inbox/inline-images.ts",
+    "./inbox/inline-media-capture": "./inbox/inline-media-capture.ts",
     "./inbox/attached-images": "./inbox/attached-images.ts",
     "./inbox/attachment-questions": "./inbox/attachment-questions.ts",
     "./inbox/picture-it-page": "./inbox/picture-it-page.ts",
@@ -226,6 +229,7 @@
     "./inbox/markups": "./inbox/markups.ts",
     "./inbox/uploads": "./inbox/uploads.ts",
     "./inbox/drafts": "./inbox/drafts.ts",
+    "./inbox/reply-drafts": "./inbox/reply-drafts.ts",
     "./inbox/connection": "./inbox/connection.ts",
     "./inbox/antigravity-links": "./inbox/antigravity-links.ts",
     "./inbox/claims": "./inbox/claims.ts",
@@ -237,7 +241,9 @@
     "./inbox/door-base-shim": "./inbox/door-base-shim.ts",
     "./inbox/tailnet-refusal": "./inbox/tailnet-refusal.ts",
     "./inbox/agent-link": "./inbox/agent-link.ts",
-    "./review-live": "./review-live.ts"
+    "./review-live": "./review-live.ts",
+    "./review-agent-gone": "./review-agent-gone.ts",
+    "./review-agent-gone-words": "./review-agent-gone-words.ts"
   },
   "dependencies": {
     "@joplin/turndown-plugin-gfm": "^1.0.68",

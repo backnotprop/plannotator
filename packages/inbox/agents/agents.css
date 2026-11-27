@@ -15,8 +15,7 @@
 /* The phone's sheet lays the heading's buttons out in a row: Add agent first there, and none on a closed heading. */
 .pn-inbox .ib-sb-sheet-in .ib-agentsec .ib-agents-add[data-agents-add="machine"] { order: 1; }
 .pn-inbox .ib-sb-sheet-in .ib-agentsec[data-closed] .ib-agents-add { display: none; }
-.pn-inbox .ib-agents-body { margin-top: 2px; }
-.pn-inbox .ib-agents-body[data-closed] { margin-top: 0; }
+/* Its rows sit right under the heading, as Tags' and Projects' do; its empty line is theirs too (.ib-side-empty). */
 .pn-inbox .ib-agents-group + .ib-agents-group { margin-top: 10px; }
 
 /* A machine: a small quiet grey caption, flush left, no icon. Still the machine's filter (its old Machines row). */
@@ -49,10 +48,7 @@
   .pn-inbox .ib-sbagent .ib-pmore { opacity: 1; }
   .pn-inbox .ib-sbagent:has(> .ib-pmore) .ib-proj { padding-right: 32px; }
 }
-/* The one spacing rule of the sidebar's sections (inbox.css, by .ib-sidescroll): the heading after a closed Agents sits
-   2 px under it (closed, it draws no row at all). A phone's sheet keeps its own 8 px. */
-.ib-side:not(.ib-sb-sheet-in > .ib-side) .ib-sidescroll > .ib-agentsec[data-closed] + .ib-sheet-sec > .ib-secrow { margin-top: 2px; }
-.pn-inbox .ib-agents-empty { padding: 2px 9px 4px; }
+/* The heading after a closed Agents: the sections' one spacing rule (inbox.css, by .ib-sidescroll). */
 
 /* The hover card: who, where and when, calm. */
 .ib-agtip { display: flex; flex-direction: column; gap: 2px; min-width: 200px; }

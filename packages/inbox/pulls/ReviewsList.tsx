@@ -21,7 +21,7 @@ import { ReviewGroup, type ReviewGroupFold } from './ReviewGroup';
 import type { InboxPullRiskAutoRun } from '@plannotator/core/inbox-types';
 import { useContextMenuTrigger } from '../components/useContextMenuTrigger';
 import { focusWhenGone, hiddenInProject, hiddenLabel, hiddenRepo, itemsBy, repoChangeKey } from './hiddenPulls';
-import { shipActive, type InboxShipView } from '@plannotator/core/inbox-pull-handoff';
+import { shipActive, shipLook, type InboxShipView } from '@plannotator/core/inbox-pull-handoff';
 import { shipTarget, useShipAgents, type ShipOption, type ShipTarget } from './shipStart';
 import { ShipAgentSheet, ShipMenuItems } from './ShipMenu';
 
@@ -299,14 +299,20 @@ export interface ShipHandlers {
 const NO_PROJECTS: Readonly<Record<string, string[]>> = {};
 const noProjects = () => NO_PROJECTS;
 
-/** The ship a row draws: its one PR's; a folded stack's, any layer's (an unfolded one's layers draw their own). */
-function rowShip(row: InboxReviewRow, ships: ReadonlyMap<string, InboxShipView> | undefined, unfolded: boolean): InboxShipView | null {
+/**
+ * The ship a row draws: its one PR's; a folded stack's, any layer's (an unfolded one's layers draw their own); a
+ * landed PR's (its Merged words). One that still draws first: a thread's older ship, long over, never hides a fresh one.
+ */
+function rowShip(row: InboxReviewRow, ships: ReadonlyMap<string, InboxShipView> | undefined, unfolded: boolean, now: number): InboxShipView | null {
   if (!ships || ships.size === 0 || unfolded) return null;
-  for (const key of row.pull_keys) {
+  let quiet: InboxShipView | null = null;
+  for (const key of [...row.pull_keys, ...row.landed.map((landing) => landing.key)]) {
     const ship = ships.get(key);
-    if (ship) return ship;
+    if (!ship) continue;
+    if (shipLook(ship, now) !== null) return ship;
+    quiet ??= ship;
   }
-  return null;
+  return quiet;
 }
 
 export function ReviewsList({
@@ -456,7 +462,7 @@ export function ReviewsList({
     const stack = row.stacks[0];
     const many = !!stack && stack.layers.length > 1;
     const unfolded = many && stackUnfolded(row);
-    const props = { row, links, place: placeOf(row), selected: isOpenRow(row), phone, now, judgments, riskFailed, autoRuns, menu: menuRow === row.id, ship: rowShip(row, ships, unfolded), ships, onOpen: () => onOpen(row) };
+    const props = { row, links, place: placeOf(row), selected: isOpenRow(row), phone, now, judgments, riskFailed, autoRuns, menu: menuRow === row.id, ship: rowShip(row, ships, unfolded, now), ships, onOpen: () => onOpen(row) };
     // A stack of several PRs unfolds its layers under its row; the choice lasts while the list is shown.
     if (many) {
       // An open layer shown on its own row takes the selection from the stack's row.

@@ -18,8 +18,9 @@
 import type { InboxAttachment, InboxAttachmentKind, InboxAttachmentState, InboxInlineImage } from "./inbox-attachments";
 import { readInboxAttachmentKind } from "./inbox-attachments";
 import type { InboxAuthor, InboxGuideRef } from "./inbox-types";
+import { inboxHtmlArtifactKey, inboxMessageHtmlBlocks, type InboxHtmlBlock } from "./inbox-html-blocks";
 
-/** One pinned artifact: its key (an attachment id, or `guide:<message id>`), its thread, and when it was pinned. */
+/** One pinned artifact: its key (an attachment id, `guide:<message id>`, or `html:<message id>:<hash>`), its thread, and when it was pinned. */
 export interface InboxArtifactPin {
   key: string;
   thread_id: string;
@@ -51,40 +52,63 @@ export function inboxGuideArtifactKey(messageId: string): string {
 export interface InboxArtifactRef<M> {
   key: string;
   message: M;
-  /** A file (an attachment or an image the text shows); null for a guided review. */
+  /** A file (an attachment or an image the text shows); null for a guided review and an html block. */
   attachment: InboxAttachment | null;
-  /** An image the message's text shows (`inline_images`). */
+  /** An image the message's text shows (`inline_images`), or an html block (always in the text). */
   inline: boolean;
   guide: InboxGuideRef | null;
+  /** A live html block of an agent's text (inbox-html-blocks.ts): not a file. */
+  html: InboxHtmlBlock | null;
+  /** The attached twin's id when the same file is also shown in the text (one artifact): a pin under it is this one's. */
+  also: readonly string[];
+}
+
+/** The messages whose html blocks are artifacts: an agent's (the person's own text is theirs, and quotes what it answers). */
+export function inboxHtmlBlocksOf(message: { body?: string | null; author?: { kind: string } | null }): readonly InboxHtmlBlock[] {
+  return message.author?.kind === "agent" && typeof message.body === "string" ? inboxMessageHtmlBlocks(message.body) : [];
 }
 
 /**
  * A thread's artifacts in reading order, as the window's Artifacts grid counts
  * them (packages/inbox/artifacts.ts `threadArtifacts`): message by message,
- * the images its text shows, then its attached files, then its guided review.
+ * the images its text shows, then the live html blocks of an agent's text,
+ * then its attached files, then its guided review.
  * An image both shown and attached (the same path, the same message) is one
- * artifact under the shown image's id. A key that appears twice is kept once.
+ * artifact under the shown image's id, the attached record's id in `also`: a
+ * pin made under that id (before a read captured the shown copy) is this
+ * artifact's pin (the store moves it to `key`). A key that appears twice is kept once.
  */
-export function inboxThreadArtifactRefs<M extends { id: string; attachments?: readonly InboxAttachment[] | null; inline_images?: readonly InboxInlineImage[] | null; guide?: InboxGuideRef | null }>(
-  messages: readonly M[],
-): InboxArtifactRef<M>[] {
+export function inboxThreadArtifactRefs<
+  M extends { id: string; body?: string | null; author?: { kind: string } | null; attachments?: readonly InboxAttachment[] | null; inline_images?: readonly InboxInlineImage[] | null; guide?: InboxGuideRef | null },
+>(messages: readonly M[]): InboxArtifactRef<M>[] {
   const out: InboxArtifactRef<M>[] = [];
   const placed = new Set<string>();
   for (const message of messages) {
-    const shown: InboxAttachment[] = [];
+    const shown: { path: string; also: string[] }[] = [];
     for (const image of message.inline_images ?? []) {
       if (placed.has(image.id)) continue;
       placed.add(image.id);
-      shown.push(image);
-      out.push({ key: image.id, message, attachment: image, inline: true, guide: null });
+      const also: string[] = [];
+      shown.push({ path: image.path, also });
+      out.push({ key: image.id, message, attachment: image, inline: true, guide: null, html: null, also });
+    }
+    for (const html of inboxHtmlBlocksOf(message)) {
+      const key = inboxHtmlArtifactKey(message.id, html.hash);
+      if (placed.has(key)) continue;
+      placed.add(key);
+      out.push({ key, message, attachment: null, inline: true, guide: null, html, also: [] });
     }
     for (const attachment of message.attachments ?? []) {
       if (placed.has(attachment.id)) continue;
       placed.add(attachment.id);
-      if (shown.some((image) => image.path === attachment.path)) continue;
-      out.push({ key: attachment.id, message, attachment, inline: false, guide: null });
+      const twin = shown.find((image) => image.path === attachment.path);
+      if (twin) {
+        twin.also.push(attachment.id);
+        continue;
+      }
+      out.push({ key: attachment.id, message, attachment, inline: false, guide: null, html: null, also: [] });
     }
-    if (message.guide) out.push({ key: inboxGuideArtifactKey(message.id), message, attachment: null, inline: false, guide: message.guide });
+    if (message.guide) out.push({ key: inboxGuideArtifactKey(message.id), message, attachment: null, inline: false, guide: message.guide, html: null, also: [] });
   }
   return out;
 }
@@ -105,12 +129,20 @@ export interface InboxArtifactRow {
   attachment: InboxAttachmentState | null;
   inline: boolean;
   guide: InboxGuideRef | null;
+  /** A live html block of the message's text (`attachment` and `guide` null): its heading and size. Absent from an older Inbox. */
+  html?: InboxArtifactHtml | null;
   /** Archived thread (resolved, no agent message since). */
   archived: boolean;
   /** When the person pinned it, or null. */
   pinned_at: string | null;
   /** The linked machine its thread lives on, in the merged read (`?machines=1`); absent for this Inbox's own. */
   machine?: string;
+}
+
+/** What the Wall's row says of an html block: the page's first heading (null: none) and its source's size in bytes. */
+export interface InboxArtifactHtml {
+  title: string | null;
+  size: number;
 }
 
 /** The Wall's page (`GET /api/inbox/artifacts`). */

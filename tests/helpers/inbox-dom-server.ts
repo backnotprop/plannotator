@@ -96,8 +96,8 @@
  * guide }`: the inline image's id under `before.png`, the attached copy's under
  * `before.png (attached)`).
  *
- * With `decisions` (decision mode, experimental; approval "inbox-decision-mode"):
- * config.json turns decision mode on, and each project gets only this seed in
+ * With `decisions` (decision mode, on by default; approval "inbox-decision-mode"):
+ * no config.json is written (the default holds), and each project gets only this seed in
  * place of the one above: Claude Code (`ses_da<i>`) asks two questions in one
  * message (a Stopped pick-one of three, recommended, then a two-way), and
  * Codex (`ses_db<i>`) asks one two-way question in the same thread (`reply_to`
@@ -276,11 +276,7 @@ if (pullsMode) {
   const config = existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>) : {};
   writeFileSync(file, JSON.stringify({ ...config, inboxCodeReview: true }));
 }
-// Decision mode is experimental and off by default: this mode turns it on in the scratch config.json.
-if (decisionsMode) {
-  mkdirSync(dataDir, { recursive: true });
-  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ experimental: { decisionMode: true } }));
-}
+// Decision mode is on by default: this mode writes no config.json, so its tests prove the default.
 // The Bro mode offer (approval "bro-mode"; its place in the line, approval "inbox-one-time-dialogs"): first use 3 days
 // ago, Snooze, the switches and the update-day dialogs behind the person, so only it can be next; heavy use (10 threads
 // read, on 2 days), seeded before the Inbox opens the store; and one thread whose last agent message is long (its moment).

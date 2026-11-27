@@ -34,6 +34,7 @@ import { useInboxTheme } from '../theme';
 import { TaterMark } from './TaterMark';
 import { ProjectTip } from './ProjectRow';
 import { Tip } from './Tip';
+import { SectionSortToggle } from './SectionSortToggle';
 import { CheckFailingRow, UpdateButton } from './Updates';
 import { UsageRow } from './Usage';
 import type { UpdateCheckFailing } from '../api';
@@ -97,7 +98,7 @@ export interface SidebarProps {
    * The Tags section (approval "inbox-thread-tags", TagsSection.tsx), under Starred: drawn while `shown` (a tag holds
    * a thread, or the person made one). Absent (an Inbox that keeps no tags, the tour): no section.
    */
-  tags?: Pick<TagsSectionProps, 'tags' | 'waiting' | 'tagId' | 'onOpen' | 'onCreate' | 'onRename' | 'onDelete' | 'colours'> & { shown: boolean };
+  tags?: Pick<TagsSectionProps, 'tags' | 'waiting' | 'tagId' | 'onOpen' | 'onCreate' | 'onRename' | 'onDelete' | 'colours' | 'activity'> & { shown: boolean };
   onAgentFilter?: (agentId: string | null) => void;
   onMessageAgent?: (session: string, opener: HTMLElement) => void;
   onAddAgent?: (opener: HTMLElement) => void;
@@ -764,6 +765,8 @@ export function Sidebar(props: SidebarProps) {
             onRename={props.tags.onRename}
             onDelete={props.tags.onDelete}
             colours={props.tags.colours}
+            activity={props.tags.activity}
+            announce={props.announce}
           />,
         )}
         {agentsShown && (
@@ -777,7 +780,7 @@ export function Sidebar(props: SidebarProps) {
             onToggle={() => fold('agents')}
             labelId={agentsLabelId}
             bodyId={agentsBodyId}
-            header={(icon) => (
+            header={(icon, waitingCount) => (
               <SectionHeader
                 section="agents"
                 id={agentsLabelId}
@@ -785,7 +788,7 @@ export function Sidebar(props: SidebarProps) {
                 label="Agents"
                 iconNode={icon}
                 open={!agentsClosed}
-                count={0}
+                count={waitingCount}
                 onToggle={() => fold('agents')}
               />
             )}
@@ -1004,40 +1007,10 @@ function SectionHeader(props: {
   );
 }
 
-/**
- * The order of Projects, one quiet icon beside the header's chevron: the icon
- * is the order on screen, a press goes to the next. It shows on the header's
- * hover and keyboard focus; where nothing hovers (a phone, a tablet) it always
- * shows. Only with two projects or more, and only while the section is open.
- * Not navigation: the phone sheet stays open. Going while it holds focus (the
- * list fell to one project), it hands focus to the header, never the page.
- */
+/** The order of Projects (projectSort.ts), in the sections' one sort toggle. */
 function ProjectSortToggle({ sort, announce }: { sort: ProjectSort; announce?: (text: string) => void }) {
-  const { icon, label, next, said } = projectSortControl(sort);
-  const button = useRef<HTMLButtonElement>(null);
-  useLayoutEffect(() => {
-    const node = button.current;
-    return () => {
-      if (node && node === document.activeElement) node.closest('.ib-secrow')?.querySelector<HTMLElement>('[data-sidebar-section]')?.focus({ preventScroll: true });
-    };
-  }, []);
-  return (
-    <Tip content={label}>
-      <button
-        ref={button}
-        type="button"
-        className="ib-proj-sort"
-        aria-label={label}
-        data-projects-sort={sort}
-        onClick={() => {
-          setProjectSort(next);
-          announce?.(said);
-        }}
-      >
-        <Icon name={icon} />
-      </button>
-    </Tip>
-  );
+  const control = projectSortControl(sort);
+  return <SectionSortToggle control={control} onPress={() => setProjectSort(control.next)} announce={announce} data={{ 'data-projects-sort': sort }} />;
 }
 
 /**

@@ -75,6 +75,7 @@ export function hashOf(route: Route): string {
       params.set('in', route.ref.messageId);
       if (route.ref.line) params.set('line', String(route.ref.line));
       if (route.ref.lineEnd) params.set('to', String(route.ref.lineEnd));
+      if (route.ref.skill) params.set('skill', '');
     }
     if (route.thread && route.guide) params.set('guide', route.guide);
     if (route.thread && route.guide) writeReviewAt(params, route.guideAt);

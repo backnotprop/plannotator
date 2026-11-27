@@ -32,6 +32,7 @@ import { facesOnce } from './words';
 import { pullAvatarUrl } from './pullUrls';
 import { shipLook, type InboxShipView } from '@plannotator/core/inbox-pull-handoff';
 import { ShipMark, ShipWater, ShipWords } from './ShipRow';
+import { PULL_STATE_WORD } from './stateWord';
 
 /**
  * The PR author's profile picture (the person's own PRs too; a stack's bottom layer's author), read through the
@@ -167,7 +168,7 @@ function titleWhenCut(event: React.PointerEvent<HTMLElement>, title: string) {
   else shown.removeAttribute('title');
 }
 
-const STATE_WORD: Record<InboxPull['state'], string> = { open: 'Open', draft: 'Draft', merged: 'Merged', closed: 'Closed' };
+const STATE_WORD = PULL_STATE_WORD;
 
 /** What a PR's mark says by its colour and shape, in words: "Open pull request", "Merged merge request". */
 function prStateWords(state: InboxPull['state'], platform: InboxPull['platform']): string {
@@ -199,18 +200,20 @@ export interface ReviewRowProps {
 export function ReviewRowItem({ row, links, place, selected, phone, now, judgments, riskFailed, autoRuns, menu = false, ship = null, onOpen, count }: ReviewRowProps & { count?: number }) {
   const stack = row.stacks[0] ?? null;
   const look = shipLook(ship, now);
+  // The row's words are of the PR whose ship it draws.
+  const shown = look ? ship!.key : null;
   // A thread's row is judged by the PRs it owns, a reported branch by its report; a local review has neither, so no mark.
   const judged = rowRisk(row, judgments);
   const riskFailure = rowRiskFailure(row, judgments, riskFailed);
-  const line = reviewRowLine(row, autoRuns);
+  const line = reviewRowLine(row, autoRuns, shown);
   const layers = stack?.layers.length ?? 0;
   const focusPull = stack?.layers.find((pull) => pull.state === 'open' || pull.state === 'draft') ?? stack?.layers[0] ?? null;
-  const title = reviewRowTitle(row, (s) => stackTitle(s, links));
+  const title = reviewRowTitle(row, (s) => stackTitle(s, links), shown);
   const high = judged?.level === 'high';
   // What the open row's second line says of the risk; High stays on the line itself.
   const quietRisk = judged && !high ? judged : null;
   const level = judged?.level ?? (riskFailure ? 'failed' : undefined);
-  const landing = reviewRowLanding(row);
+  const landing = reviewRowLanding(row, shown);
   const prState = focusPull?.state ?? landing?.state ?? 'open';
   const platform = stack?.platform ?? landing?.platform ?? 'github';
   const failing = rowChecksFailing(row);

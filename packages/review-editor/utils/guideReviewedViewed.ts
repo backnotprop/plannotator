@@ -41,3 +41,18 @@ export function filesViewedByTickingSection(
   }
   return paths;
 }
+
+export function sectionsWithAllFilesViewed(
+  sections: readonly GuideSection[],
+  filesInDiff: ReadonlySet<string>,
+  viewedFiles: ReadonlySet<string>,
+): Set<number> {
+  const complete = new Set<number>();
+  sections.forEach((section, index) => {
+    const currentRefs = section.diffs.filter(({ file }) => filesInDiff.has(file));
+    if (currentRefs.length > 0 && currentRefs.every(({ file }) => viewedFiles.has(file))) {
+      complete.add(index);
+    }
+  });
+  return complete;
+}

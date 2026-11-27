@@ -6,10 +6,14 @@ import type { SearchFilters, SearchOption } from './model';
 
 export type SearchPasses = 'local' | 'merged' | 'both';
 
+/**
+ * Which passes a search asks. A Tag filter asks both, as words alone do: the merged pass asks every linked machine
+ * that takes the filter (`linked-reads`) with each machine's id of the tag (`searchTagIds`).
+ */
 export function searchPasses(filters: Pick<SearchFilters, 'project' | 'tags'>): SearchPasses {
   if (!selfMachineId()) return 'local';
   if (filters.project) return machineOf(filters.project) ? 'merged' : 'local';
-  return filters.tags.length > 0 ? 'local' : 'both';
+  return 'both';
 }
 
 export function optionKey(option: SearchOption): string {

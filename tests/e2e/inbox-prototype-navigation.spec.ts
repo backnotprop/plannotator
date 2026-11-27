@@ -19,8 +19,8 @@
  * page with its fields; a `#` link fires the page's hashchange; a link to
  * another option's page steps the window to that option. In the attached
  * page's own viewer and in an `html` fence a `?variant=2` link does the same; in the
- * viewer's full screen with the tools gathered, the page ends above the corner control,
- * so its bottom-right switcher stays clickable.
+ * viewer's full screen on a desktop with the tools gathered, the page runs to the
+ * window's foot under the small corner control (no strip under the page).
  *
  * One attached file several options show at different queries
  * (`Prototype: proto/mock.html?variant=1`, `…?variant=2`): each option opens
@@ -185,25 +185,27 @@ test("an attached page's ?query link, in the file viewer and in an html fence, l
     await expect(viewer.locator('#search')).toHaveText('?variant=2');
     await shot(page, '4-viewer-variant-2');
 
-    // Hide gathers the tools into the corner control at the bottom right: the page ends above it, so the
-    // switcher there is still the page's to click.
+    // Hide gathers the tools into the corner control at the bottom right: the page runs to the window's foot
+    // under it (no strip of the window's own colour under the page), the corner control a small button over it.
     await page.locator('[data-full-view-hide]').click();
     const handle = page.locator('[data-full-view-handle]');
     await expect(handle).toBeVisible();
     await expect
       .poll(async () => {
-        const [frameBox, handleBox] = await Promise.all([page.locator('.ib-htmlframe iframe').boundingBox(), handle.boundingBox()]);
-        return frameBox!.y + frameBox!.height <= handleBox!.y;
+        const frameBox = (await page.locator('.ib-htmlframe iframe').boundingBox())!;
+        return Math.round(frameBox.y + frameBox.height);
       })
-      .toBe(true);
+      .toBe(900);
+    expect(await page.evaluate(() => document.elementFromPoint(20, innerHeight - 4)?.tagName)).toBe('IFRAME');
+    await shot(page, '4b-viewer-gathered');
+    // The corner control brings the tools back to the top right, and the switcher is the page's to click.
+    await handle.click();
     const three = viewer.getByRole('link', { name: '3', exact: true });
     const at = (await three.boundingBox())!;
     expect(await page.evaluate(([x, y]) => document.elementFromPoint(x!, y!)?.tagName, [at.x + at.width / 2, at.y + at.height / 2])).toBe('IFRAME');
     await three.click();
     await expect(viewer.locator('#title')).toHaveText('Unfold: variant 3');
     await expect(viewer.locator('#search')).toHaveText('?variant=3');
-    await shot(page, '4b-viewer-gathered');
-    await handle.click();
 
     // The html fence in a message.
     await page.goto(`${url}#thread=${fenceThread}`);

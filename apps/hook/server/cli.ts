@@ -808,7 +808,7 @@ export const INBOX_COMMAND_USAGE = [
   INBOX_ROWS_USAGE_LINE,
   "  plannotator inbox icon set <file> --request <id> [--json]",
   "  plannotator inbox call [--session <id>] <action> [<json> | -]",
-  "  plannotator inbox capability [<capability> on|off] [--computer <name>] [--thread <id>]",
+  "  plannotator inbox capability [<capability> on|off] [--thread <id>]",
   "  plannotator inbox pulls ls|add|rm [--session <id>] <thread> [<ref>... | --all]",
   "  plannotator inbox export-decisions --thread <id> [--format md|html] [--out <file>] [--pr <ref>]",
   "  plannotator inbox link --offer [--tailscale] | link <code> | link --list",

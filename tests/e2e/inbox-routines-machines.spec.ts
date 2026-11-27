@@ -1,11 +1,14 @@
 /**
  * Routines and capability switches across linked computers (the owner: "If I'm connected somehow to all my machines,
- * I need to see routines from each... I need to be able to run routines from each if I'm connected."), proved in a real
- * browser against compiled Inboxes on loopback, linked through the real CLI pairing. Laptop is the window's; Studio is
- * the linked computer. A routine lives and runs on the computer that made it. The only fakes are the programs a run
+ * I need to see routines from each... I need to be able to run routines from each if I'm connected."; and on the
+ * switches, "One set for all: flip a switch once and it applies on every linked computer"), proved in a real browser
+ * against compiled Inboxes on loopback, linked through the real CLI pairing. Laptop is the window's; Studio is the
+ * linked computer. A routine lives and runs on the computer that made it. The only fakes are the programs a run
  * starts (tests/helpers/fake-claude/) on each computer's own PATH.
  *
- *  1. Settings → Capabilities on Laptop: Studio's switches under Laptop's; Routines turned on for Studio from here.
+ *  1. Settings → Capabilities is one set: Routines on on Laptop is on on Studio at first contact; no group per
+ *     computer; the Checklist flipped in one computer's window shows in the other's, light and dark, desktop and phone
+ *     (pictures in PLANNOTATOR_CAPABILITIES_ONE_SET_SHOTS, else .local/proof/capabilities-one-set).
  *  2. A new routine's computer picked in the editor ("Runs on Studio"): it is made on Studio's disk, not Laptop's.
  *  3. The Routines page lists Laptop's routine and Studio's, Studio's named "· Studio".
  *  4. Run on Studio's routine from Laptop: Studio starts it, and its row says Running.
@@ -27,6 +30,8 @@ import { installFakeClaude } from '../helpers/fake-claude';
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
 const shots = resolve(process.env.PLANNOTATOR_ROUTINES_MACHINES_SHOTS ?? join(repo, '.local/proof/routines-across-computers'));
+/** Settings → Capabilities on both computers, one set (test 1). */
+const oneSetShots = resolve(process.env.PLANNOTATOR_CAPABILITIES_ONE_SET_SHOTS ?? join(repo, '.local/proof/capabilities-one-set'));
 const CLOSED = 'http://127.0.0.1:9';
 
 interface Machine {
@@ -123,6 +128,7 @@ test.describe.configure({ mode: 'serial' });
 test.beforeAll(async ({ browser }: { browser: Browser }) => {
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
   mkdirSync(shots, { recursive: true });
+  mkdirSync(oneSetShots, { recursive: true });
   laptop = machine('Laptop', { inboxScheduledThreads: true });
   studio = machine('Studio', {});
   await start(laptop);
@@ -144,19 +150,50 @@ test.afterAll(async () => {
   }
 });
 
-test("1. Settings → Capabilities: Studio's switches under Laptop's, and Routines turned on for Studio from here", async () => {
-  await page.goto(`${laptop.url}#settings/capabilities`);
-  const group = page.locator(`[data-settings-linked-capabilities="${studio.id}"]`);
-  await expect(group.locator('h2')).toHaveText('Studio', { timeout: 20_000 });
-  const routines = group.locator('[data-settings-linked-switch="scheduled_threads"] [role="switch"]');
-  await expect(routines).toHaveAttribute('aria-checked', 'false');
-  await routines.click();
-  await expect(routines).toHaveAttribute('aria-checked', 'true');
-  await expect.poll(async () => (await read<{ scheduled_threads?: { on: boolean } }>(studio, '/api/inbox/settings')).scheduled_threads?.on).toBe(true);
-  // Laptop's own switch is its own.
-  expect((await read<{ scheduled_threads?: { on: boolean } }>(laptop, '/api/inbox/settings')).scheduled_threads?.on).toBe(true);
-  await group.scrollIntoViewIfNeeded();
-  await shot('01-settings-linked-capabilities.png');
+test('1. Settings → Capabilities is one set: no group per computer, and a flip on either computer shows on the other', async () => {
+  type Switches = { scheduled_threads?: { on: boolean }; steps?: { on: boolean } };
+  // First contact: Routines on on Laptop and never flipped on either, so on wins and Studio's are on too (2–4 use them).
+  await expect.poll(async () => (await read<Switches>(studio, '/api/inbox/settings')).scheduled_threads?.on, { timeout: 20_000 }).toBe(true);
+  const there = await context.newPage();
+  there.on('pageerror', (error) => errors.push(error.message));
+  const windows = [
+    { name: 'laptop', on: page, m: laptop },
+    { name: 'studio', on: there, m: studio },
+  ] as const;
+  for (const w of windows) await w.on.goto(`${w.m.url}#settings/capabilities`);
+  const checklist = (on: Page) => on.locator('[data-settings-steps] [role="switch"]');
+  for (const w of windows) {
+    await expect(checklist(w.on)).toHaveAttribute('aria-checked', 'false', { timeout: 20_000 });
+    // The groups of each linked computer's switches are gone.
+    await expect(w.on.locator('[data-settings-linked-capabilities]')).toHaveCount(0);
+  }
+  // Each flip on one window shows on the other's without a reload: light and dark, desktop and phone.
+  const looks = [
+    { look: 'desktop-light', from: 0, on: true, colorScheme: 'light', width: 1440, height: 900 },
+    { look: 'desktop-dark', from: 1, on: false, colorScheme: 'dark', width: 1440, height: 900 },
+    { look: 'phone-light', from: 1, on: true, colorScheme: 'light', width: 390, height: 844 },
+    { look: 'phone-dark', from: 0, on: false, colorScheme: 'dark', width: 390, height: 844 },
+  ] as const;
+  for (const look of looks) {
+    for (const w of windows) {
+      await w.on.setViewportSize({ width: look.width, height: look.height });
+      await w.on.emulateMedia({ colorScheme: look.colorScheme });
+    }
+    const from = windows[look.from];
+    const to = windows[1 - look.from]!;
+    await checklist(from.on).click();
+    await expect(checklist(from.on)).toHaveAttribute('aria-checked', String(look.on));
+    await expect(checklist(to.on)).toHaveAttribute('aria-checked', String(look.on), { timeout: 20_000 });
+    await expect.poll(async () => (await read<Switches>(to.m, '/api/inbox/settings')).steps?.on).toBe(look.on);
+    for (const w of windows) {
+      await checklist(w.on).scrollIntoViewIfNeeded();
+      await settled(w.on);
+      await w.on.screenshot({ path: join(oneSetShots, `${look.look}-${w.name}-after-flip-on-${from.name}.png`) });
+    }
+  }
+  await there.close();
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.emulateMedia({ colorScheme: 'light' });
 });
 
 test('2. A new routine on Studio, picked in the editor: made on Studio, not Laptop', async () => {

@@ -8,7 +8,7 @@ import { inboxAppShortcuts } from '../shortcuts/app.shortcuts';
 import type { InboxListGroupId, InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
 import { formatCount } from '../format';
 import { RowTagName, rowTintOf, tintProps, type ListTagColours, type RowTintProps } from '../parts/RowTint';
-import { RowAgents, RowAgentTiles } from './RowAgents';
+import { RowAgents, RowAgentTiles, rowScriptOf } from './RowAgents';
 import { RowPullsMark } from '../threadPulls/ThreadPulls';
 import { isTextCut, ProjectTipText, Tip } from './Tip';
 import { RowTip } from './RowTip';
@@ -31,7 +31,7 @@ import { attachPullToRefresh } from '../pullRefresh';
 import { RowSwipeLayer, useRowSwipe } from './RowSwipeLayer';
 import { leadEmpty, leadParts } from './rowLead';
 import { TidyMenu, type TidyController } from './Tidy';
-import { ListFilterButton, useTitleFilterList, type ListFilterSource } from './ListFilter';
+import { ListFilterButton, RecentViewBar, RecentViewSaid, useTitleFilterList, type ListFilterSource } from './ListFilter';
 import { awayLine, machineTakes, type MachinesModel } from '../machines';
 import { listLookClasses, useListLook } from '../listLook';
 import { flatRows, useListView, type ListPlaces, type ListSort } from '../listView';
@@ -286,7 +286,7 @@ function FromLine({ row, project, filtered }: { row: InboxListRow; project: stri
       <RowAvatar row={row} size={24} />
       {!filtered && <RowProjectMark row={row} />}
       {(!filtered || !!scheduledOf(row)) && <RowSlot row={row} session={slotSession(row)} project={project} />}
-      {scheduledOf(row) ? <ScheduledTile /> : <RowAgents participants={row.participants} agent={rowAgent(row)} />}
+      {scheduledOf(row) ? <ScheduledTile /> : <RowAgents participants={row.participants} agent={rowAgent(row)} script={rowScriptOf(row, rowAgent(row), project)} />}
     </span>
   );
 }
@@ -307,7 +307,7 @@ function LeadLine({ row, project, filtered, tip = true }: { row: InboxListRow; p
     <span className="ib-from ib-lead">
       {withProject && <RowProjectMark row={row} />}
       {(withProject || !!scheduledOf(row)) && <RowSlot row={row} session={slotSession(row)} project={project} tip={tip} />}
-      {scheduledOf(row) ? <ScheduledTile /> : <RowAgentTiles participants={row.participants} agent={rowAgent(row)} tip={tip} />}
+      {scheduledOf(row) ? <ScheduledTile /> : <RowAgentTiles participants={row.participants} agent={rowAgent(row)} tip={tip} script={rowScriptOf(row, rowAgent(row), project)} />}
     </span>
   );
 }
@@ -1134,7 +1134,7 @@ export function InboxList(props: InboxListProps) {
           />
         )}
       </div>
-      {titleField}
+      {props.listFilter && <RecentViewBar place={props.listFilter.place ?? ''} picking={pick.on} />}{titleField}{props.listFilter && <RecentViewSaid place={props.listFilter.place ?? ''} />}
       {starredAbove && props.starred && (
         <StarredPills
           rows={props.starred.rows}

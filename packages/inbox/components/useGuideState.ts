@@ -19,6 +19,7 @@ import type { InboxAnnotationRecord, InboxMessageWire, InboxThread } from '@plan
 import type { CodeAnnotation } from '@plannotator/ui/types';
 import { InboxApiError, inboxApi } from '../api';
 import { guideCommentOf } from '../attachments';
+import { readsServedFor } from '../linkedReads';
 
 /**
  * The review's state: the snapshot, the reviewed ticks, and the person's comments on its diffs as the store keeps
@@ -26,6 +27,8 @@ import { guideCommentOf } from '../attachments';
  */
 export function useGuideState(thread: InboxThread, message: InboxMessageWire) {
   const [snapshot, setSnapshot] = useState<GuideSnapshot | null>(null);
+  /** The Code review switch of the Inbox that holds the message, as it answered with the snapshot (null: not said). */
+  const [codeReviewThere, setCodeReviewThere] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reviewed, setReviewed] = useState<boolean[]>(() => message.guide_reviewed ?? []);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -48,6 +51,7 @@ export function useGuideState(thread: InboxThread, message: InboxMessageWire) {
   useEffect(() => {
     let cancelled = false;
     setSnapshot(null);
+    setCodeReviewThere(null);
     setError(null);
     setReviewed(message.guide_reviewed ?? []);
     setSaveError(null);
@@ -57,6 +61,7 @@ export function useGuideState(thread: InboxThread, message: InboxMessageWire) {
       .then((answer) => {
         if (cancelled) return;
         const parsed = parseGuideSnapshot(answer.snapshot);
+        setCodeReviewThere(typeof answer.code_review === 'boolean' ? answer.code_review : null);
         if (parsed.ok) setSnapshot(parsed.value);
         else setError(`This guided review could not be read (${parsed.error.path}: ${parsed.error.message}).`);
       })
@@ -146,7 +151,9 @@ export function useGuideState(thread: InboxThread, message: InboxMessageWire) {
     [readOnly, comments, selectedId, save, remove, scrollTarget, message.id],
   );
 
-  // The expand arrows' whole files, as the guide's patch names them.
-  const fileContents = useCallback((path: string, signal: AbortSignal) => inboxApi.guideFile(message.id, path, signal), [message.id]);
-  return { snapshot, error, reviewed, saveError, setSaveError, records, setRecords, commentsRead, comments, selectedId, setSelectedId, scrollTarget, readOnly, changeReviewed, save, remove, edit, showComment, readerComments, localWrites, fileContents };
+  // The expand arrows' whole files, as the guide's patch names them, read on the message's own machine (none from a
+  // linked machine too old to serve them: no arrows, as before).
+  const readFile = useCallback((path: string, signal: AbortSignal) => inboxApi.guideFile(message.id, path, signal), [message.id]);
+  const fileContents = readsServedFor(message.id) ? readFile : undefined;
+  return { snapshot, codeReviewThere, error, reviewed, saveError, setSaveError, records, setRecords, commentsRead, comments, selectedId, setSelectedId, scrollTarget, readOnly, changeReviewed, save, remove, edit, showComment, readerComments, localWrites, fileContents };
 }
