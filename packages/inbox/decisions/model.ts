@@ -45,22 +45,24 @@ export function threadDecisions(decisions: readonly InboxDecision[], threadId: s
 
 /**
  * The threads the window draws decisions for (`threads`: a pane's "Decide these N", the sitting's) and, from the last
- * read, how many each thread in the store has (`counts`). `on`: decision mode is on.
+ * read, how many each thread in the store has (`counts`) and which threads it kept the decisions of (`readFor`).
+ * `on`: decision mode is on.
  */
 export interface DecisionWatch {
   on: boolean;
   threads: Set<string>;
   counts: ReadonlyMap<string, number>;
+  readFor: ReadonlySet<string>;
 }
 
 export function newDecisionWatch(): DecisionWatch {
-  return { on: false, threads: new Set(), counts: new Map() };
+  return { on: false, threads: new Set(), counts: new Map(), readFor: new Set() };
 }
 
 /**
  * What the window keeps of a decisions read: the decisions of the watched threads (returned), and a count for every
- * thread (`watch.counts`, replaced). The read lists every open decision in the store (a large store: thousands,
- * megabytes); held whole, it was memory every window paid all day, decision mode opened or not.
+ * thread (`watch.counts` and `watch.readFor`, replaced). The read lists every open decision in the store (a large
+ * store: thousands, megabytes); held whole, it was memory every window paid all day, decision mode opened or not.
  */
 export function keepWatched(all: readonly InboxDecision[], watch: DecisionWatch): InboxDecision[] {
   const kept: InboxDecision[] = [];
@@ -70,6 +72,7 @@ export function keepWatched(all: readonly InboxDecision[], watch: DecisionWatch)
     if (watch.threads.has(decision.thread.id)) kept.push(decision);
   }
   watch.counts = counts;
+  watch.readFor = new Set(watch.threads);
   return kept;
 }
 

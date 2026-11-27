@@ -143,6 +143,11 @@ describe('the queue', () => {
     expect(keepWatched(all, watch).map((d) => d.id)).toEqual(['msg_a/q-1', 'msg_a/q-2']);
     // A thread opened later shows its "Decide these N" count at once, before its own read lands.
     expect([...watch.counts]).toEqual([['msg_t1', 2], ['msg_t2', 1], ['msg_t3', 1]]);
+    // A thread watched after the read has its count but not its decisions until the next read (a sitting waits for it).
+    watch.threads.add('msg_t2');
+    expect([...watch.readFor]).toEqual(['msg_t1']);
+    expect(keepWatched(all, watch).map((d) => d.id)).toEqual(['msg_a/q-1', 'msg_a/q-2', 'msg_b/q-1']);
+    expect(watch.readFor.has('msg_t2')).toBe(true);
     // Nothing watched (no thread open): nothing held.
     watch.threads.clear();
     expect(keepWatched(all, watch)).toEqual([]);

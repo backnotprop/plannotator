@@ -97,8 +97,9 @@ export function useDecideSitting({
     const count = decisionWatch.current.counts.get(threadId) ?? 0;
     return decideEntryShown(count) ? { count, onDecide: () => openDecide(threadId) } : null;
   };
-  /** The sitting's queue: its thread's decisions only. */
-  const sittingDecisions = useMemo(() => (decisions && decide ? threadDecisions(decisions, decide.thread) : null), [decisions, decide?.thread]);
+  /** The sitting's queue: its thread's decisions only; null (loading) until a read has kept that thread's. */
+  const sittingHeld = useMemo(() => (decisions && decide ? threadDecisions(decisions, decide.thread) : null), [decisions, decide?.thread]);
+  const sittingDecisions = decide && !decisionWatch.current.readFor.has(decide.thread) ? null : sittingHeld;
   const openDecide = (threadId: string) => {
     // Opened from the open-questions list, whose row goes with the list: focus comes back to its button.
     decideOpener.current = document.querySelector<HTMLElement>('section.ib-pane [data-open-questions]');
