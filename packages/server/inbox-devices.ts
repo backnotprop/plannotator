@@ -223,6 +223,15 @@ interface DoorRoute {
   only?: readonly string[];
   /** A field the door takes besides `only` and never hands to the window route: the caller's note, told after it applies. */
   note?: string;
+  /**
+   * `draft`: its body or answer carries draft text (words a person is still typing). Such a command is never written
+   * to the command log (inbox/device-commands.jsonl, appended to and never compacted) nor kept in memory as a
+   * command, whatever its answer: a replay is answered by the window route again, a compare-and-set. DOOR_WRITES calls
+   * it `draft` (inbox-outbox.ts; inbox-draft-routes.test.ts holds the two tables together).
+   */
+  carries?: "draft";
+  /** Body fields it must name (`422` without; null counts): a Discard names the version it throws away, `base`. */
+  requires?: readonly string[];
 }
 
 const ALLOWLIST: readonly DoorRoute[] = [
@@ -320,6 +329,12 @@ const ALLOWLIST: readonly DoorRoute[] = [
   { method: "POST", route: /^threads\/([^/]+)\/delete$/, window: (m) => `/api/inbox/threads/${m[1]}/delete` },
   // The thread's reply draft (the words typed on the computer and not sent), read only: contract 7.62.
   { method: "GET", route: /^threads\/([^/]+)\/draft$/, window: (m) => `/api/inbox/threads/${m[1]}/draft` },
+  // A linked machine's window saves and discards the reply draft of this Inbox's thread here (mark `reply-drafts`), so
+  // the draft is one on every window of both machines. A phone writes none (7.62): the unknown-route 404, as before.
+  // Draft text: never in the command log. A save replayed under its key is answered by the store (`last_key`); a
+  // Discard always names the version it throws away (`base`), so a replay never deletes words typed after it.
+  { method: "POST", route: /^threads\/([^/]+)\/draft$/, window: (m) => `/api/inbox/threads/${m[1]}/draft`, machineOnly: true, carries: "draft" },
+  { method: "POST", route: /^threads\/([^/]+)\/draft\/delete$/, window: (m) => `/api/inbox/threads/${m[1]}/draft/delete`, machineOnly: true, carries: "draft", requires: ["base"] },
   { method: "GET", route: /^threads\/([^/]+)\/attachments$/, window: (m) => `/api/inbox/threads/${m[1]}/attachments` },
   // Export decisions: the thread's decisions as a download (`?format=md|html|json&tz=`), read only, from what the thread read serves.
   { method: "GET", route: /^threads\/([^/]+)\/decisions$/, window: (m) => `/api/inbox/threads/${m[1]}/decisions` },
@@ -507,9 +522,9 @@ export function doorRouteNames(): string[] {
   return [...ALLOWLIST.map((entry) => `${entry.method} ${words(entry.route)}`), ...own];
 }
 
-/** For rule 8's test: the door's POST routes, and which take a raw body (a file). */
-export function doorWriteRoutes(): { route: string; raw: boolean }[] {
-  return ALLOWLIST.filter((entry) => entry.method === "POST").map((entry) => ({ route: entry.route.source, raw: entry.raw !== undefined }));
+/** For rule 8's test: the door's POST routes, which take a raw body (a file), and which carry draft text. */
+export function doorWriteRoutes(): { route: string; raw: boolean; carries: "draft" | null }[] {
+  return ALLOWLIST.filter((entry) => entry.method === "POST").map((entry) => ({ route: entry.route.source, raw: entry.raw !== undefined, carries: entry.carries ?? null }));
 }
 
 /**
@@ -1220,7 +1235,7 @@ export function createInboxDevices(context: InboxDevicesContext) {
       const missing = rawCommandKeyRefusal(url.searchParams);
       if (missing) return finish(missing);
       const key = url.searchParams.get("idempotency_key")!;
-      return claim(req, device, doorPath, key, finish, async () => {
+      return claim(req, device, doorPath, key, entry.carries, finish, async () => {
         const response = await toWindow(req, device, windowPath, url.search, metered?.stream ?? null, req.signal, true);
         const answer = await response.text();
         // Past the bound: the door's own refusal (nothing kept, nothing recorded), whatever the window made of the cut stream.
@@ -1247,13 +1262,15 @@ export function createInboxDevices(context: InboxDevicesContext) {
     }
     const outside = entry.only ? Object.keys(fields).find((field) => field !== "idempotency_key" && field !== entry.note && !entry.only!.includes(field)) : undefined;
     if (outside !== undefined) throw new InboxError("validation_error", `${outside}: not taken here; only ${entry.only!.join(", ")}.`, { field: outside });
+    const missing = entry.requires?.find((field) => !(field in fields));
+    if (missing !== undefined) throw new InboxError("validation_error", `${missing}: required here.`, { field: missing });
     // The caller's note goes no further than here: the window route gets the write alone.
     const note = entry.note && fields[entry.note] !== undefined ? fields[entry.note] : undefined;
     if (entry.note && note !== undefined) {
       const { [entry.note]: _note, ...rest } = fields;
       text = JSON.stringify(rest);
     }
-    return claim(req, device, doorPath, key, async (response) => response, async () => {
+    return claim(req, device, doorPath, key, entry.carries, async (response) => response, async () => {
       const response = await toWindow(req, device, windowPath, device.platform === MACHINE_PLATFORM ? (entry.fromMachine ?? "") : "", text, req.signal);
       if (note !== undefined && response.ok) context.noted?.(device, note, JSON.parse(text) as Record<string, unknown>);
       // A route that takes only some fields answers only those: the settings route's answer says every setting.
@@ -1268,13 +1285,15 @@ export function createInboxDevices(context: InboxDevicesContext) {
    * One command under its key: a replay answers the recorded status and body
    * (`finish` settles a raw body first); otherwise `apply` runs once, and an
    * answer under 500 is recorded. Replays match on method and door path, never
-   * on the query or the body.
+   * on the query or the body. A route that carries draft text (`carries`) is
+   * never recorded, on disk or in memory, whatever it answered.
    */
   const claim = async (
     req: Request,
     device: InboxDevice,
     doorPath: string,
     key: string,
+    carries: DoorRoute["carries"],
     finish: (response: Response) => Promise<Response>,
     apply: () => Promise<{ response: Response; answer?: string; status?: number; record: boolean }>,
   ): Promise<Response> => {
@@ -1295,7 +1314,7 @@ export function createInboxDevices(context: InboxDevicesContext) {
     if (late) return finish(json(late.body, late.status));
     const run = (async () => {
       const result = await apply();
-      if (result.record && result.status !== undefined && result.status < 500) {
+      if (carries !== "draft" && result.record && result.status !== undefined && result.status < 500) {
         let parsed: unknown = null;
         try {
           parsed = JSON.parse(result.answer ?? "");

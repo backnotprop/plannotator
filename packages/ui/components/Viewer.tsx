@@ -579,9 +579,11 @@ export interface ViewerHandle {
    * the host can keep the words some other way. Markdown `Viewer`: a text
    * selection, a global comment, a diagram part. `HtmlViewer`: a pin or a
    * text selection (with `onHostDraft`, the draft is handed to the host,
-   * which keeps the words itself).
+   * which keeps the words itself). `globalAnchor`: where a global comment's
+   * box opens, for a host that hides the Viewer's own Global comment button
+   * and offers its own (absent: that button, as before).
    */
-  reopenComment?: (annotation: Annotation, onMissing?: () => void) => boolean;
+  reopenComment?: (annotation: Annotation, onMissing?: () => void, globalAnchor?: HTMLElement | null) => boolean;
   /**
    * The comment being written in the viewer's own composer, as the comment
    * its submit would add, with empty words (the host reads them from the
@@ -593,6 +595,15 @@ export interface ViewerHandle {
    * selection's comment.
    */
   peekComment?: () => Annotation | null;
+  /**
+   * Markdown `Viewer` only, for a host that offers the document actions from
+   * its own controls (a menu) and hides the Viewer's own: open the global
+   * comment box at `anchor`, as the Global comment button does. Returns false
+   * when authoring is off. The DOM is unchanged.
+   */
+  openGlobalComment?: (anchor: HTMLElement) => boolean;
+  /** Markdown `Viewer` only: copy the document's Markdown, as Copy does. Resolves false when the clipboard refused. */
+  copyDocument?: () => Promise<boolean>;
 }
 
 interface CodeBlockToolbarTarget {
@@ -1036,14 +1047,18 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   const fenceThemeRef = useRef(fenceTheme);
   fenceThemeRef.current = fenceTheme;
 
-  const handleCopyPlan = async () => {
+  const handleCopyPlan = async (): Promise<boolean> => {
     if (await copyTextToClipboard(markdown)) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } else {
-      console.error('Failed to copy');
+      return true;
     }
+    console.error('Failed to copy');
+    return false;
   };
+  // The handle's Copy reads the text on screen now, so a new text does not make the handle again.
+  const copyPlanRef = useRef(handleCopyPlan);
+  copyPlanRef.current = handleCopyPlan;
   const containerRef = useRef<HTMLDivElement>(null);
   // "Open in" opens the document's file at the picked comment's line, else the
   // selected text's, read at the click (documentOpenInLine). A plan diff view's
@@ -1588,7 +1603,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   // that block, a diagram part's in its diagram (once drawn), a text
   // selection's through the highlighter. Kinds with no composer here say no.
   const [diagramReopen, setDiagramReopen] = useState<{ blockId: string; request: DiagramReopenRequest } | null>(null);
-  const reopenComment = useCallback((annotation: Annotation, onMissing?: () => void): boolean => {
+  const reopenComment = useCallback((annotation: Annotation, onMissing?: () => void, globalAnchor?: HTMLElement | null): boolean => {
     const words = annotation.text ?? '';
     if (annotation.imageRegion != null || annotation.questionAnswer || annotation.mathTargets?.length) return false;
     if (annotation.type !== AnnotationType.COMMENT && annotation.type !== AnnotationType.GLOBAL_COMMENT) return false;
@@ -1600,7 +1615,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     };
     if (annotation.type === AnnotationType.GLOBAL_COMMENT) {
       if (readOnlyRef.current) return false;
-      const anchorEl = globalCommentButtonRef.current;
+      const anchorEl = globalAnchor ?? globalCommentButtonRef.current;
       if (!anchorEl) return false;
       setViewerCommentPopover({ anchorEl, contextText: '', isGlobal: true, initialText: words });
       return true;
@@ -1686,7 +1701,13 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     takeSelection,
     reopenComment,
     peekComment,
-  }), [hookRemoveHighlight, clearAllHighlights, applyAnnotations, blocks, takeSelection, scrollToAnchor, reopenComment, peekComment]);
+    openGlobalComment: (anchorEl: HTMLElement) => {
+      if (authoringOff) return false;
+      setViewerCommentPopover({ anchorEl, contextText: '', isGlobal: true });
+      return true;
+    },
+    copyDocument: () => copyPlanRef.current(),
+  }), [hookRemoveHighlight, clearAllHighlights, applyAnnotations, blocks, takeSelection, scrollToAnchor, reopenComment, peekComment, authoringOff]);
 
   // --- Viewer-specific: code block annotation ---
 
@@ -1908,7 +1929,14 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
 
   // The highlighter skips region comments; one whose image is no longer in
   // the document (or whose region is malformed) is unanchored, and says so.
+  // The host's callback is read through a ref (as the highlighter and the
+  // diagram blocks read it): a host passing a new function each render that
+  // stores the report as state would otherwise re-run this without end.
+  const onRestoreReportRef = useRef(onRestoreReport);
+  onRestoreReportRef.current = onRestoreReport;
+  const reportsRestore = onRestoreReport !== undefined;
   useEffect(() => {
+    const onRestoreReport = onRestoreReportRef.current;
     if (onRestoreReport === undefined) return;
     const rows = annotations.filter((ann) => ann.imageRegion != null);
     if (rows.length === 0) return;
@@ -1920,7 +1948,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
       })
       .map((ann) => ann.id);
     onRestoreReport({ attempted: rows.map((ann) => ann.id), unanchored });
-  }, [annotations, blocks, onRestoreReport]);
+  }, [annotations, blocks, reportsRestore]);
 
   // The document's diagram blocks, in order: a diagram comment that names
   // none of them (an external POST, a deleted fence) is resolved by anchor
@@ -1935,14 +1963,16 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   );
   // With no diagram in the document nobody can resolve a diagram comment:
   // it is unanchored, and the highlighter (which skips it) will not say so.
+  // The host's callback through the ref above, for the same reason.
   useEffect(() => {
+    const onRestoreReport = onRestoreReportRef.current;
     if (diagramBlockKey !== '' || onRestoreReport === undefined) return;
     // `!= null`, not `!== undefined`: a nullish anchor is no anchor at all —
     // the highlighter restores such a row by text, so it must not be counted
     // here as a diagram comment nothing could resolve.
     const ids = annotations.filter((ann) => ann.diagramAnchor != null).map((ann) => ann.id);
     if (ids.length > 0) onRestoreReport({ attempted: ids, unanchored: ids });
-  }, [annotations, diagramBlockKey, onRestoreReport]);
+  }, [annotations, diagramBlockKey, reportsRestore]);
 
   // The host's `belowTitle` slot (see the prop). Absent → the block list is
   // returned as is, so the DOM is the one without the prop. The wrapper's

@@ -156,7 +156,7 @@ import { openPackedApp, packedAppResponse, PACKED_ASSET_ROUTE_PREFIX, PACKED_ASS
 import { encodeInboxResponse } from "./inbox-encoding";
 import type { InboxSearchIndex, InboxSearchIndexOptions } from "@plannotator/shared/inbox/search";
 import { DecisionDataAborted, decisionDataCsv, decisionDataSummary, readDecisionLines } from "@plannotator/shared/inbox/decision-data";
-import { createInboxSearchRoutes } from "./inbox-search";
+import { createInboxSearchRoutes, recentSearchesQuotedReader } from "./inbox-search";
 import { createInboxCombine } from "./inbox-combine";
 import { createInboxCombineFar, type InboxCombineFar } from "./inbox-combine-far";
 import { combineArchiveAgain, combineArchiveSkip } from "./inbox-combine-guard";
@@ -251,7 +251,8 @@ import { INBOX_DECISION_POST_ROUTE, postThreadDecisions } from "./inbox-decision
 import { DECISION_POST_DESTINATIONS, decisionPostDestinationOf } from "@plannotator/shared/inbox/decision-post";
 import { createInboxAccountsFor, switchTarget } from "./inbox-accounts";
 import { INBOX_ACCOUNT_SWITCHING, INBOX_ACTIVITY_MAX_DAYS, type InboxNoteAutoAdd, type InboxPullRiskAnswer } from "@plannotator/core/inbox-types";
-import { createInboxOpenInRoute, systemOpenInLauncher, type InboxOpenInLauncher } from "./inbox-open-in";
+import { createInboxOpenInRoute, systemOpenInLauncher, type InboxLinkPulls, type InboxOpenInLauncher } from "./inbox-open-in";
+import type { InboxSendLinkPulls } from "./inbox-links-not-found";
 import { recordInboxAttachments, sweepStaleInboxSendTemps } from "@plannotator/shared/inbox/attachments";
 import { assertInboxUploadsPending, inboxBodyForAgent, inboxDiskFullError, inboxUploadAttachments, removeInboxAttachmentFiles, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
 import { createInboxLiveSessions, takesOver, thereInThread } from "./inbox-sessions";
@@ -267,6 +268,7 @@ import { createInboxT3Wake, createT3ModOwner, type InboxT3Wake, type T3Connect }
 import { createInboxAntigravityWake, type InboxAntigravityWake } from "./inbox-antigravity-wake";
 import { CloudAgentError, createInboxCloudAgents, hasCloudWake } from "./inbox-cloud-agents";
 import { PERSONAL_AGENTS_BANNER_BASE } from "@plannotator/core/inbox-personal-agents";
+import { DIFF_FONT_SOURCES } from "@plannotator/shared/diff-fonts";
 import { personalAgentConnectedHere } from "./inbox-personal-agents";
 import { createInboxAgentDoor, INBOX_AGENT_DOOR_PATH } from "./inbox-agent-door";
 import { createInboxCloudWake, type InboxCloudWaker } from "./inbox-cloud-wake";
@@ -340,17 +342,21 @@ import {
   revealStamp,
   revealStampNotNow,
   revealWaitStarts,
+  revealsWithCodeReviewOffer,
   type RevealId,
   type RevealState,
 } from "@plannotator/shared/inbox/reveals";
 import { launchTipClaim, launchTipDue, launchTipLaunched, type LaunchTipState } from "@plannotator/shared/inbox/launch-tip";
 import { sidebarTipClaim, sidebarTipDue, type SidebarTipState } from "@plannotator/shared/inbox/sidebar-tip";
 import { bandTipClaim, bandTipDue, bandTipUsed, type BandTipState } from "@plannotator/shared/inbox/band-tip";
+import { searchTipClaim, searchTipDue, type SearchTipState } from "@plannotator/shared/inbox/search-tip";
 import { revealGrillMeGap, type GrillMeTipQuestion } from "@plannotator/shared/inbox/grill-me-tip";
 import { routinesIntroGoodDaysOnce, routinesIntroOpen, routinesIntroSend, routinesIntroWaits } from "@plannotator/shared/inbox/routines-intro";
 import { splitInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
 import { configStarAskStore, createStarAsk, readStarAskRecord, runGh, starAskEnabled, starAskOpen, type StarAskClaim } from "@plannotator/shared/star-ask";
 import { claimInboxStar, inboxStarAction } from "./inbox-star-ask";
+import { configLaunchShownStore, createLaunchSwitch, launchSwitchEndpointNow } from "@plannotator/shared/launch-switch";
+import { createInboxLaunchQueue } from "./inbox-launch-queue";
 import { createInboxEmbedPages, createInboxEmbeds } from "./inbox-embeds";
 import { createInboxPages } from "./inbox-pages";
 import { createInboxFeedback, INBOX_FEEDBACK_PATH } from "./inbox-feedback";
@@ -674,6 +680,11 @@ export interface InboxServerOptions {
   scheduled?: boolean;
   /** Code review, decided here instead of config.json `inboxCodeReview` (tests). Absent: config.json decides on every request. */
   codeReview?: boolean;
+  /**
+   * Tests: Code review's one-time offer shown or not, over `CODE_REVIEW_OFFER.enabled` (packages/shared/inbox/reveals.ts,
+   * `CODE_REVIEW_OFFER_SHOWN`), so either state can be tested whichever way the release has it. Absent: the entry decides.
+   */
+  codeReviewOffer?: boolean;
   /** Branch reviews, decided here instead of config.json `inboxBranchReviews` (tests). Absent: config.json decides on every request. Only with Code review on. */
   branchReviews?: boolean;
   /** System, decided here instead of config.json `inboxSystem` (tests). Absent: config.json decides on every request. Shown only while Code review is on. */
@@ -1021,25 +1032,37 @@ const ERROR_STATUS: Record<string, number> = {
  * policy allows inline code and code from this origin only. Nothing may frame
  * it (but the apps config.json `inboxFrameAncestors` lists, on this
  * computer's port: inbox-framing.ts), and it may only talk to this server.
+ *
+ * One more place for styles and fonts: Settings → Reviews → Code Font offers
+ * web fonts, and picking one loads its stylesheet and font files from Google
+ * Fonts (`fonts.googleapis.com`, `fonts.gstatic.com`) or, for Hack, from its
+ * one folder on jsDelivr (`DIFF_FONT_SOURCES`, shared/diff-fonts.ts; the menu's
+ * table, ui/utils/diffFonts.ts, is checked against it by
+ * inbox-code-fonts.test.ts). Only stylesheets and font files: no script, picture, media or
+ * request comes from there. A srcdoc frame under this policy (an agent page's
+ * small preview) inherits them, so such a page can make the browser fetch a
+ * stylesheet or font from those two places when it is drawn (Google or
+ * jsDelivr see the request), never from anywhere else.
  */
 export const WINDOW_CSP = [
   "default-src 'self'",
   // 'wasm-unsafe-eval' lets the Graphviz engine (@viz-js/viz) compile its
   // WebAssembly; it does not allow eval() or new Function().
   "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'",
-  "style-src 'self' 'unsafe-inline'",
+  `style-src 'self' 'unsafe-inline' ${DIFF_FONT_SOURCES.stylesheets.join(" ")}`,
   // Never a picture from the web: an agent's text (a markdown image, a
   // diagram's) must not make the browser call a site when the person reads it.
   // An attached HTML page shows its web pictures from a document of its own,
   // under its own policy (inbox-pages.ts), never as a srcdoc under this one.
-  // The one exception is the project's own hosted folder, for the one-time
-  // dialogs' banners (core/inbox-personal-agents.ts).
-  `img-src 'self' data: blob: ${PERSONAL_AGENTS_BANNER_BASE}`,
+  // The exceptions are two folders of the project's own site: the hosted
+  // folder, for the one-time dialogs' banners (core/inbox-personal-agents.ts),
+  // and the launch dialog's art (ui utils/launchDialogWords.ts LAUNCH_ART_BASE).
+  `img-src 'self' data: blob: ${PERSONAL_AGENTS_BANNER_BASE} https://plannotator.ai/launch/`,
   // Video and audio as the pictures: an attached HTML page drawn as a srcdoc
   // inherits this policy, so its `<video src="data:…">` (or a blob:) plays.
   // Never from the web, for the same reason.
   "media-src 'self' data: blob:",
-  "font-src 'self' data:",
+  `font-src 'self' data: ${DIFF_FONT_SOURCES.files.join(" ")}`,
   "connect-src 'self'",
   "worker-src 'self' blob:",
   "frame-ancestors 'none'",
@@ -1403,6 +1426,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const binaryPath = options.binaryPath !== undefined ? options.binaryPath : version !== "dev" ? process.execPath : null;
   // The sidebar's Update button (packages/server/inbox-updates.ts): the release
   // check, the binary on disk, Update now, Remind me tomorrow.
+  // The launch switch (packages/shared/launch-switch.ts): its reader runs in the background from the start, at most
+  // every 3 hours while no launch is on (launchRefreshMs); the window's claim answers from the kept copy only.
+  const launchSwitch = createLaunchSwitch({ dataDir: () => dataDir, endpoint: () => launchSwitchEndpointNow(), shown: configLaunchShownStore });
+  launchSwitch.start();
+  // Its place in the line of one-time dialogs: first, until a claim is answered (inbox-launch-queue.ts).
+  const launchQueue = createInboxLaunchQueue(launchSwitch, () => dataDir);
   let lastDailyPingCheck = 0;
   const updates = createInboxUpdates({
     dataDir,
@@ -1792,6 +1821,22 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     await pulls.list(wanted, { refresh: false });
   };
 
+  // A thread's PRs and a file's text at one: the referenced-file view reads them first.
+  const linkPulls: InboxLinkPulls = {
+    threadPulls: (thread) => pullOwners.keys(thread).reverse(),
+    // An Inbox just started has no list yet: read it for a PR it does not know.
+    pullFile: async (pull, path) => {
+      const { wanted } = await pullProjects();
+      if (!pulls.find(pull)) await findPulls([pull], wanted);
+      return pulls.file(pull, path, wanted);
+    },
+  };
+  // The send's `links_not_found` asks the same PRs only what is kept in memory: a send never waits on the forge.
+  const sendLinkPulls: InboxSendLinkPulls = {
+    threadPulls: linkPulls.threadPulls,
+    cachedFile: (pull, path) => pulls.cachedFile(pull, path),
+  };
+
   // Where a path an agent named files its messages: its repository (a linked
   // worktree folds into its main repository's project) or the folder, cached
   // per folder (packages/server/inbox-project-root.ts). One cache for sends
@@ -1867,6 +1912,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     projectRootOf: (path) => projectRoots.resolve(path),
     recordAttachments: (paths, project, base) =>
       recordInboxAttachments(store.dir, paths, { base, at: new Date().toISOString() }),
+    linkPulls: sendLinkPulls,
     // A question's running-app prototypes, checked and probed before anything is written (inbox-live.ts).
     checkPrototypeApps: (apps, probing) => liveSites.checkPrototypeApps(apps, probing),
     // The agents' read-only search reads the window's own ⌘K index, and finds projects without making one.
@@ -3740,9 +3786,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const config = loadConfig();
     return INBOX_PROMPT_HOSTS.every((host) => inboxReminderRulesText(config, host) === null);
   };
+  // Code review's one-time offer shown at all (`CODE_REVIEW_OFFER_SHOWN`, off since 0.29.6; a test may decide it), and
+  // the line's queue with the offer as that says: every reveal rule below reads this queue.
+  const codeReviewOfferShown = options.codeReviewOffer ?? CODE_REVIEW_OFFER_SHOWN;
+  const revealTable = revealsWithCodeReviewOffer(codeReviewOfferShown);
   // Who Code review's offer is for, decided at the first release start that shows it, as the tab icon's is
   // (inbox-code-review-offer.ts): someone who used an earlier Inbox is marked due; a fresh install never sees it.
-  if (CODE_REVIEW_OFFER_SHOWN && normalizeStableVersion(version) !== null) {
+  if (codeReviewOfferShown && normalizeStableVersion(version) !== null) {
     const mark = codeReviewOfferAtStart(loadConfig().inboxReveals?.code_review, loadConfig().inboxCodeReview !== undefined, usedBefore, new Date().toISOString());
     if (mark) saveConfig({ inboxReveals: { ...loadConfig().inboxReveals, code_review: mark } });
   }
@@ -3751,10 +3801,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * shared/inbox/reveals.ts): only for someone who used an earlier Inbox (marked due at a release start, above), only
    * while config.json `inboxCodeReview` is unset (nobody decided; `false` is the person's own off; `true` is theirs
    * too), and only while the offer is shown at all: `CODE_REVIEW_OFFER_SHOWN` (held from 2026-11-17, shown again from
-   * the release after 2026-11-23, approval "inbox-code-review-offer": "for people who already use the Inbox").
+   * the release after 2026-11-23, approval "inbox-code-review-offer": "for people who already use the Inbox"; off again
+   * from 0.29.6, when it is never open and nothing is marked at a release start).
    */
   const codeReviewUndecided = () =>
-    CODE_REVIEW_OFFER_SHOWN && options.codeReview === undefined && loadConfig().inboxCodeReview === undefined && codeReviewOfferDue(loadConfig().inboxReveals?.code_review);
+    codeReviewOfferShown && options.codeReview === undefined && loadConfig().inboxCodeReview === undefined && codeReviewOfferDue(loadConfig().inboxReveals?.code_review);
   /**
    * The offers the line claims for itself (approval "inbox-one-time-dialogs"): each one's "undecided" (the person never
    * set its switch). The claim stamps `inboxReveals[id]` with the page's key and turns nothing on; its dialog's "Turn it
@@ -3892,17 +3943,19 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // The star ask's show (aside): the grill-me tip (`lastResort`) never goes on its day.
       // The grill-me tip's too: the gap counts from either (`revealGapFree`).
       asideShownAt: revealLastShown([reveals?.star?.shownAt, reveals?.grill_me_tip?.shownAt]),
-      // The tips outside the line (the Sidebar tip, the Launch tip): they start the gap too.
-      tipShownAt: revealLastShown([reveals?.sidebar_tip?.shownAt, reveals?.launch_tip?.shownAt]),
+      // The tips outside the line (the Sidebar tip, the Launch tip, the Search tip) and the launch dialog: they start the gap too.
+      tipShownAt: revealLastShown([reveals?.sidebar_tip?.shownAt, reveals?.launch_tip?.shownAt, reveals?.search_tip?.shownAt, ...Object.values(config.launch ?? {}).map((record) => record?.shownAt)]),
+      // The launch dialog (launch-switch.ts), due here: ahead of everything, so the line holds until it is shown.
+      launchDue: launchQueue.holdsLine(),
     };
     // The offers, each one's "undecided" while unshown. They read the state above (Routines' walk waits while the line
     // would refuse it anyway), so they come after it.
     for (const [id, undecided] of Object.entries(lineOffers)) open[id as RevealId] = !lineOfferSaved(id as RevealId)?.shownAt && undecided!(state, now);
     // Read only while an entry that asks for heavy use is still open (a walk of every thread; a release build).
-    state.heavy = snoozeIntroRelease && INBOX_REVEALS.some((entry) => entry.heavyUse && entry.enabled && open[entry.id] === true) && revealHeavyUse(seenAgentMessages(), now);
+    state.heavy = snoozeIntroRelease && revealTable.some((entry) => entry.heavyUse && entry.enabled && open[entry.id] === true) && revealHeavyUse(seenAgentMessages(), now);
     // The grill-me tip (reveals.ts `lastResort`): its gap (a walk of the store) is read only while it is unshown, in a
     // release build, and the line has nothing else for this moment; otherwise it could not be claimed anyway.
-    if (open.grill_me_tip) open.grill_me_tip = snoozeIntroRelease && revealMayClaim("grill_me_tip", state, now) && revealGrillMeGap(grillMeUse());
+    if (open.grill_me_tip) open.grill_me_tip = snoozeIntroRelease && revealMayClaim("grill_me_tip", state, now, revealTable) && revealGrillMeGap(grillMeUse());
     return state;
   };
   /** The line's stamps to save with a claim at `at` (a release build only): the day, the load and, unless `spaced` is false, the spacing clock. */
@@ -3918,12 +3971,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (!snoozeIntroRelease) return null;
     const now = read?.now ?? new Date();
     const state = read?.state ?? revealState(now, load);
-    const starts = revealWaitStarts(state, now);
+    const starts = revealWaitStarts(state, now, revealTable);
     if (starts.length > 0) {
       const reveals = loadConfig().inboxReveals;
       saveConfig({ inboxReveals: { ...reveals, waitingSince: { ...reveals?.waitingSince, ...Object.fromEntries(starts.map((id) => [id, now.toISOString()])) } } });
     }
-    return revealNext(state, now);
+    return revealNext(state, now, revealTable);
   };
   /**
    * The page about to show a reveal claims it: a compare-and-set over the whole queue (no await between the read and
@@ -3952,7 +4005,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const now = new Date();
     // A theme picked elsewhere (plan review, code review) since the last look: marked now, so the claim is refused for good.
     if (id === "theme_chooser") themeChooserLookNow();
-    if (!revealMayClaim(id, revealState(now, load), now) || !undecided()) return false;
+    if (!revealMayClaim(id, revealState(now, load), now, revealTable) || !undecided()) return false;
     const at = now.toISOString();
     // An `aside` card (the grill-me tip) stamps only its own record: no other dialog's day moves.
     const aside = INBOX_REVEALS.some((entry) => entry.id === id && entry.aside);
@@ -3975,7 +4028,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         release: snoozeIntroRelease,
         mayClaim: () => {
           const now = new Date();
-          return revealMayClaim("star", revealState(now, load), now);
+          return revealMayClaim("star", revealState(now, load), now, revealTable);
         },
       },
       key,
@@ -4075,13 +4128,38 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return loadConfig().inboxReveals?.band_tip?.shownAt === at;
   };
   /**
+   * The Search tip (packages/shared/inbox/search-tip.ts): at the search palette's box, a day or more after first use,
+   * until it was shown once, and never for someone whose recent searches already hold a quote. Outside the line's
+   * order, as the Sidebar tip: its claim stamps only `inboxReveals.search_tip`, and it keeps the gap both ways.
+   */
+  const recentSearchesQuoted = recentSearchesQuotedReader(store.dir);
+  const searchTipState = (): SearchTipState => ({
+    // Asked only while it could still be due (never once stamped, nor before the person's first day is over); the file
+    // is read again only when it changed.
+    quoted: recentSearchesQuoted,
+    firstUseAt: snoozeIntroSaved()?.firstUseAt ?? null,
+    tenure: snoozeIntroRelease,
+    saved: loadConfig().inboxReveals?.search_tip,
+  });
+  const claimSearchTip = (key: string | null): boolean => {
+    const at = new Date().toISOString();
+    const claim = searchTipClaim(searchTipState(), key, at);
+    if (!claim.save) return claim.show;
+    // Inside the gap after a dialog or another tip: not now (nothing is spent; the next open asks again).
+    if (!tipFree()) return false;
+    saveConfig({ inboxReveals: { ...loadConfig().inboxReveals, search_tip: claim.save } });
+    // Not written (a read-only data dir): showing it anyway would show it at every open.
+    return loadConfig().inboxReveals?.search_tip?.shownAt === at;
+  };
+  /**
    * What a settings read reports of the line (`reveal`), from one read of its state (one walk of the threads for heavy
    * use): the dialog this page may arm, the `ahead` offers it may also arm at their moment, and the agent note's `setup`.
    */
   const againIn = (at: number | null, now: Date): number | null => (at === null ? null : at - now.getTime());
+  const soonest = (a: number | null, b: number | null): number | null => (a === null ? b : b === null ? a : Math.min(a, b));
   /** `state` with the waits `revealNow` starts at `now` (reveals.ts `revealWaitStarts`) kept. */
   const waitingFrom = (state: RevealState, now: Date): RevealState => {
-    const starts = revealWaitStarts(state, now);
+    const starts = revealWaitStarts(state, now, revealTable);
     return starts.length === 0 ? state : { ...state, waitingSince: { ...state.waitingSince, ...Object.fromEntries(starts.map((id) => [id, now.toISOString()])) } };
   };
   const lineReport = (load: string | null) => {
@@ -4090,9 +4168,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const next = revealNow(load, { now, state });
     return {
       next,
-      ahead: snoozeIntroRelease ? revealAhead(state, now) : [],
+      ahead: snoozeIntroRelease ? revealAhead(state, now, revealTable) : [],
       // The star ask (reveals.ts `aside`): armed beside `next` while the line is free; it moves no one.
-      aside: snoozeIntroRelease ? revealAsideNow(state, now) : [],
+      aside: snoozeIntroRelease ? revealAsideNow(state, now, revealTable) : [],
       // Day 0's setup asks: this computer's, and its owner's on their other devices (owner ruling 2026-11-11).
       setup: revealLineFree("setup", state, now),
       line: snoozeIntroRelease,
@@ -4100,13 +4178,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // null when none can: a page left loaded asks again once, then, and keeps no other timer for the line.
       // With `next` and the `ahead` offers waiting from this read on (`revealNow` has just kept them), so the end of
       // their patience and their 14 days is named too.
-      again_in: snoozeIntroRelease ? againIn(revealAgainAt(waitingFrom(state, now), now), now) : null,
+      // A kept launch that starts later names its start too (inbox-launch-queue.ts `startsIn`).
+      again_in: soonest(snoozeIntroRelease ? againIn(revealAgainAt(waitingFrom(state, now), now, revealTable), now) : null, launchQueue.startsIn(now.getTime())),
       // The Launch tip (outside the line): compose may claim it at the first plain New message.
       launch_tip: launchTipDue(launchTipState()) && revealLineFree("setup", state, now),
       // The Sidebar tip (outside the line): the page may claim it at a calm moment beside the open sidebar.
       sidebar_tip: sidebarTipDue(sidebarTipState(), now.toISOString()) && revealLineFree("setup", state, now),
       // The Group tip (outside the line): the page may claim it at the first hover of a band with a menu.
       band_tip: bandTipDue(bandTipState(), now.toISOString()) && revealLineFree("setup", state, now),
+      // The Search tip (outside the line): the search palette may claim it as it opens.
+      search_tip: searchTipDue(searchTipState(), now.toISOString()) && revealLineFree("setup", state, now),
+      // The launch dialog (launch-switch.ts): due on this computer, so the page claims it now (`/api/inbox/launch-switch`).
+      launch: launchQueue.due(),
     };
   };
   /** An offer closed with Not now (Escape, a click outside): the next dialog waits three days. A release build. */
@@ -4415,10 +4498,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // Windows only: the phone's door (contract 7.9) gets hello, record, status and the heartbeat.
         const sendReach = () => send(`event: reach\ndata: ${JSON.stringify(windows.reach(notificationsState().enabled))}\n\n`);
         const stopReach = windowId ? windows.subscribe(sendReach) : () => {};
-        // A reply draft changed (any window's, or this one's): the list reads the rows' `unsent` again. Windows only.
+        // A reply draft changed (any window's, or this one's): the list reads the rows' `unsent` again. Windows, and a
+        // linked machine that asks (`drafts=1`, mark `reply-drafts`: its windows show this Inbox's threads' drafts).
         // A compose draft has no thread: `{ compose: true }` (additive; a window that predates it skips the frame).
         const onDraft = (threadId: string | null) => send(`event: drafts\ndata: ${JSON.stringify(threadId === null ? { compose: true } : { thread_id: threadId })}\n\n`);
-        if (windowId) draftListeners.add(onDraft);
+        if (windowId || url.searchParams.get("drafts") === "1") draftListeners.add(onDraft);
         // An Ask AI conversation changed: the window reads it again. Only the owner's own window hears of it.
         const onAsk = (threadId: string) => send(`event: ask\ndata: ${JSON.stringify({ thread_id: threadId })}\n\n`);
         if (windowId && ask.allowed(req, via)) askListeners.add(onAsk);
@@ -5743,6 +5827,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     onDraftsChange: () => {
       for (const listener of draftListeners) listener(null);
     },
+    farReplies: () => machines.replyDraftRows(),
     onSent: noteSend,
   });
   compose.sweep();
@@ -6011,13 +6096,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           return origin?.host && inboxPullRepoKey(origin.host, origin.display) === repo;
         })
         .map((project) => project.root),
-    threadPulls: (thread) => pullOwners.keys(thread).reverse(),
-    // An Inbox just started has no list yet: read it for a PR it does not know.
-    pullFile: async (pull, path) => {
-      const { wanted } = await pullProjects();
-      if (!pulls.find(pull)) await findPulls([pull], wanted);
-      return pulls.file(pull, path, wanted);
-    },
+    ...linkPulls,
   });
 
   // Run and Secret (`:::run`, `:::secret`; inbox-run-setup.ts): the person's press runs a command here, as them; a
@@ -7791,8 +7870,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // Not now keeps the usual day, approval "inbox-one-time-dialogs").
         if (body.answer === "not_now") {
           if (!revealNotNowAllowed(id)) throw new InboxError("validation_error", `id: ${INBOX_REVEALS.filter((entry) => entry.kind === "offer").map((entry) => entry.id).join(", ")}.`, { field: "id" });
-        } else if (!(id === "snooze" || id === "agent_note" || id === "launch_tip" || id === "sidebar_tip" || id === "band_tip" || (typeof id === "string" && id in lineOffers))) {
-          throw new InboxError("validation_error", `id: snooze, agent_note, launch_tip, sidebar_tip, band_tip or ${Object.keys(lineOffers).join(", ")}.`, { field: "id" });
+        } else if (!(id === "snooze" || id === "agent_note" || id === "launch_tip" || id === "sidebar_tip" || id === "band_tip" || id === "search_tip" || (typeof id === "string" && id in lineOffers))) {
+          throw new InboxError("validation_error", `id: snooze, agent_note, launch_tip, sidebar_tip, band_tip, search_tip or ${Object.keys(lineOffers).join(", ")}.`, { field: "id" });
         }
         // The agent note's agents (the ones it would ask about): it shows once for each. Optional (an older page).
         const agents = id === "agent_note" ? revealAgentNoteAgents(body.agents) : null;
@@ -7820,6 +7899,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (id === "band_tip") {
           return json({ show: claimBandTip(key ?? null, body.used === true), reveal: { next: revealNow(load) }, board: { on: boardOn() }, steps: { on: stepsOn() } });
         }
+        // The Search tip: outside the line, its own stamp only (packages/shared/inbox/search-tip.ts).
+        if (id === "search_tip") {
+          return json({ show: claimSearchTip(key ?? null), reveal: { next: revealNow(load) }, board: { on: boardOn() }, steps: { on: stepsOn() } });
+        }
         // The star ask: its claim waits on the already-starred check (gh, up to 3 s) and says how the button works.
         if (id === "star") {
           const star = await claimStarReveal(key ?? null, load);
@@ -7837,6 +7920,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         return json(await inboxStarAction(starAsk, body));
+      }
+
+      // The launch switch's one-time dialog (packages/shared/launch-switch.ts): `action` claim (the kept copy only),
+      // shown (stamps it shown on this computer, once across every surface) or answer (`opened` | `dismissed`).
+      if (path === "/api/inbox/launch-switch") {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        const action = body.action;
+        if (action !== "claim" && action !== "shown" && action !== "answer") return json({ error: "action: claim, shown or answer." }, 400);
+        const answered = launchQueue.action(action, body);
+        return json(answered.body, answered.status);
       }
 
       // The Board's first-visit dialog (approval "inbox-board", intro amendment): the first page on this
@@ -8985,6 +9080,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     machines = createInboxMachines({
       dataDir,
       serverSession,
+      follows,
       computerName: devices.machineDoor.computerName,
       door: devices.machineDoor,
       readBody,

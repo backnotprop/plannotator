@@ -38,6 +38,7 @@ import {
   revealStamp,
   revealStampNotNow,
   revealWaitStarts,
+  revealsWithCodeReviewOffer,
   type RevealEntry,
   type RevealId,
   type RevealState,
@@ -54,6 +55,10 @@ const BRO: RevealId = "bro";
 const VIEW_CHOICE: RevealId = "view_choice";
 const GRILL_ME: RevealId = "grill_me_tip";
 const TABLE: readonly RevealEntry[] = INBOX_REVEALS;
+/** The queue with Code review's offer shown, whichever way the release has it (`CODE_REVIEW_OFFER.enabled`). */
+const OFFER_ON = revealsWithCodeReviewOffer(true);
+/** The queue with it off, as from 0.29.6. */
+const OFFER_OFF = revealsWithCodeReviewOffer(false);
 
 test("Bro mode is registered in the real queue as the owner's order places it (2026-11-10): right after the Checklist, an offer for heavy use, never on day 0 or 1", () => {
   const after = INBOX_REVEALS.findIndex((entry) => entry.id === "steps") + 1;
@@ -131,8 +136,8 @@ interface Shown {
   at: Date;
 }
 
-/** 30 days of one person: every dialog shown, in order. */
-function simulate(user: User, days = 30): Shown[] {
+/** 30 days of one person: every dialog shown, in order. `table`: the queue (the real one by default). */
+function simulate(user: User, days = 30, table: readonly RevealEntry[] = TABLE): Shown[] {
   let saved: RevealsSaved = user.update ? { lastShownAt: at(-20, 10).toISOString() } : {};
   const firstUseAt = at(-user.usedSinceDays, user.loads(0)[0] ?? 9).toISOString();
   const shown: Shown[] = [];
@@ -156,7 +161,7 @@ function simulate(user: User, days = 30): Shown[] {
         heavy: revealHeavyUse(reads, now),
         threads: user.threads(day),
         open: Object.fromEntries(
-          TABLE.map((entry) => [
+          table.map((entry) => [
             entry.id,
             !done.has(entry.id) && (entry.id === "theme_chooser" ? user.defaultTheme === true : entry.id === CODE_REVIEW_OFFER.id ? user.codeReviewOff === true && user.update : entry.id === GRILL_ME ? user.grillMeGap !== undefined && day >= user.grillMeGap : entry.id === AGENT_RULES ? user.noRules === true : entry.id === "personal_agents" ? user.noPersonalAgent === true : entry.id === "priority" ? user.neverPriority === true : entry.id === "routines" ? user.goodDays !== undefined && day >= user.goodDays : entry.kind === "offer" || user.update),
           ]),
@@ -173,17 +178,17 @@ function simulate(user: User, days = 30): Shown[] {
       // The page: the sound first (it opens at load), then the agent note (an agent with no note: on day 0 for
       // everyone, after the tour screen), then an `ahead` offer whose moment has come (the view choice), then whatever the
       // line has next, at its moment.
-      const next = revealNext(state(), now, TABLE);
-      const ahead = revealAhead(state(), now, TABLE);
+      const next = revealNext(state(), now, table);
+      const ahead = revealAhead(state(), now, table);
       // The server keeps when `next` and each `ahead` offer first waited (patience, retirement).
-      for (const id of revealWaitStarts(state(), now, TABLE)) saved = { ...saved, waitingSince: { ...saved.waitingSince, [id]: now.toISOString() } };
+      for (const id of revealWaitStarts(state(), now, table)) saved = { ...saved, waitingSince: { ...saved.waitingSince, [id]: now.toISOString() } };
       if (next === "sound") {
         show("sound", true);
         continue;
       }
       // Code review's day-0 offer: at once, once the tour screen is gone and before the agent note, which waits for it
       // (codeReviewOffer.ts `settled`).
-      if (next === CODE_REVIEW_OFFER.id && revealMayClaim(next, state(), now, TABLE)) {
+      if (next === CODE_REVIEW_OFFER.id && revealMayClaim(next, state(), now, table)) {
         show(next, true);
         continue;
       }
@@ -191,17 +196,17 @@ function simulate(user: User, days = 30): Shown[] {
         show("agent_note", false);
         continue;
       }
-      const early = ahead.find((id) => user.moment(id, day) && revealMayClaim(id, state(), now, TABLE));
+      const early = ahead.find((id) => user.moment(id, day) && revealMayClaim(id, state(), now, table));
       if (early) {
         show(early, true);
         continue;
       }
-      if (next && user.moment(next, day) && revealMayClaim(next, state(), now, TABLE)) {
+      if (next && user.moment(next, day) && revealMayClaim(next, state(), now, table)) {
         show(next, true);
         continue;
       }
       // An `aside` entry (the star ask) at a calm moment the line left free: it stamps nothing of the line.
-      const aside = revealAsideNow(state(), now, TABLE).find((id) => user.moment(id, day));
+      const aside = revealAsideNow(state(), now, table).find((id) => user.moment(id, day));
       if (aside) {
         done.add(aside);
         shown.push({ id: aside, day, at: now });
@@ -418,25 +423,25 @@ describe("the grill-me tip (the owner: \"Sooner: after 3 answered questions, wha
   });
 });
 
-// Its slot, shown again from the release after 2026-11-23 (`CODE_REVIEW_OFFER_SHOWN`, approval "inbox-code-review-offer":
-// "for people who already use the Inbox"). packages/server/inbox-reveal.test.ts proves the server opens it only for
-// someone who used an earlier Inbox, while Code review was never decided.
+// Its slot (`CODE_REVIEW_OFFER`), shown while `CODE_REVIEW_OFFER.enabled` (off since 0.29.6): these cases run the
+// queue with it shown (`OFFER_ON`), whichever way the release has it. packages/server/inbox-reveal.test.ts proves the
+// server opens it only for someone who used an earlier Inbox, while Code review was never decided.
 describe("Code review's offer (approval \"code-review-offer-card\": show up about immediately)", () => {
   test("a new user with Code review never decided: never offered, and every other dialog keeps its day and hour", () => {
-    const shown = simulate({ ...HEAVY, codeReviewOff: true });
+    const shown = simulate({ ...HEAVY, codeReviewOff: true }, 30, OFFER_ON);
     expect(shown.some((s) => s.id === "code_review")).toBe(false);
-    expect(when(shown)).toEqual(when(simulate(HEAVY)));
+    expect(when(shown)).toEqual(when(simulate(HEAVY, 30, OFFER_ON)));
   });
 
   test("Not now on it is final, and the next offer waits three days", () => {
-    const shown = simulate({ ...UPGRADER, codeReviewOff: true, notNow: ["code_review"] });
+    const shown = simulate({ ...UPGRADER, codeReviewOff: true, notNow: ["code_review"] }, 30, OFFER_ON);
     expect(shown.filter((s) => s.id === "code_review")).toHaveLength(1);
     // The agent note is setup: it does not wait for the Not now. The next dialog of the line (the tab icon) does.
     expect(days(shown)).toMatchObject({ code_review: 0, agent_note: 0, tab_icon: 3 });
   });
 
   test("an update day with Code review off: the offer first, on the first load, then the same-day group in its order, one on each load after it", () => {
-    const shown = simulate({ ...UPGRADER, codeReviewOff: true });
+    const shown = simulate({ ...UPGRADER, codeReviewOff: true }, 30, OFFER_ON);
     expect(when(shown.slice(0, 6))).toEqual([
       ["code_review", 0, 9],
       ["agent_note", 0, 11],
@@ -451,8 +456,45 @@ describe("Code review's offer (approval \"code-review-offer-card\": show up abou
   });
 
   test("Code review decided (on, or switched off by the person) or the offer not shown: never offered", () => {
-    expect(simulate(HEAVY).some((s) => s.id === "code_review")).toBe(false);
-    expect(simulate(UPGRADER).some((s) => s.id === "code_review")).toBe(false);
+    expect(simulate(HEAVY, 30, OFFER_ON).some((s) => s.id === "code_review")).toBe(false);
+    expect(simulate(UPGRADER, 30, OFFER_ON).some((s) => s.id === "code_review")).toBe(false);
+  });
+});
+
+// Off since 0.29.6 (the owner: "I will eventually, just not yet"): `CODE_REVIEW_OFFER.enabled` false. What regresses:
+// the offer shown to someone it was due for, or the line waiting on an offer that never comes (every other dialog must
+// keep the day and hour it has for someone who answered the offer long ago), or a dialog stacking where the offer was.
+describe("Code review's offer switched off (as from 0.29.6)", () => {
+  test("someone who already uses the Inbox, Code review never decided: never offered, and every other dialog goes as for someone who answered it long ago", () => {
+    for (const user of [{ ...UPGRADER, codeReviewOff: true }, { ...HEAVY, codeReviewOff: true }]) {
+      const shown = simulate(user, 30, OFFER_OFF);
+      expect(shown.some((s) => s.id === "code_review")).toBe(false);
+      const answered = simulate({ ...user, seen: [...(user.seen ?? []), "code_review"] }, 30, OFFER_ON);
+      expect(when(shown)).toEqual(when(answered));
+      expectSpaced(shown);
+    }
+  });
+
+  test("the update day starts at once with the next dialog in line: the agent note on the first load, then the same-day group, one on each load", () => {
+    const shown = simulate({ ...UPGRADER, codeReviewOff: true }, 30, OFFER_OFF);
+    expect(when(shown.slice(0, 5))).toEqual([
+      ["agent_note", 0, 9],
+      ["tab_icon", 0, 11],
+      [VIEW_CHOICE, 0, 13],
+      ["list_intro", 0, 15],
+      ["sound", 0, 17],
+    ]);
+  });
+
+  test("never next and never claimable, even when open; what was next behind it is next at once", () => {
+    const state: RevealState = { release: true, firstUseAt: null, threads: 0, open: { code_review: true, sound: true } };
+    expect(revealNext(state, at(0, 9), OFFER_OFF)).toBe("sound");
+    expect(revealMayClaim("code_review", state, at(0, 9), OFFER_OFF)).toBe(false);
+    expect(revealWaitStarts(state, at(0, 9), OFFER_OFF)).toEqual(["sound"]);
+    // It adds no moment of its own for a loaded page to wake at.
+    expect(revealAgainAt({ ...state, open: { code_review: true } }, at(0, 9), OFFER_OFF)).toBeNull();
+    // On, the same state has it next: the switch alone decides.
+    expect(revealNext(state, at(0, 9), OFFER_ON)).toBe("code_review");
   });
 });
 
@@ -580,8 +622,8 @@ describe("the line's rules", () => {
 
   test("Code review's offer is next on day 0, with first use not known yet, ahead of the sound; its Not now is an offer's", () => {
     const fresh = base({ firstUseAt: null, threads: 0, open: { code_review: true, sound: true, snooze: true } });
-    expect(revealNext(fresh, at(0, 9))).toBe("code_review");
-    expect(revealMayClaim("code_review", fresh, at(0, 9))).toBe(true);
+    expect(revealNext(fresh, at(0, 9), OFFER_ON)).toBe("code_review");
+    expect(revealMayClaim("code_review", fresh, at(0, 9), OFFER_ON)).toBe(true);
     // Shown: the agent note and the sound wait out the gap, then go the same day.
     const after = base({ ...fresh, lastShownAt: at(0, 9).toISOString(), dayShownAt: at(0, 9).toISOString(), open: { sound: true } });
     const later = (ms: number) => new Date(at(0, 9).getTime() + ms);

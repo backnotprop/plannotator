@@ -705,7 +705,7 @@ test('Stop while it starts again for a reply: "You stopped", never a failure, an
   }
 });
 
-test("the sidebar agent's ⋯: Rename…, Stop and Delete … session…; Stop is the thread's Stop, then Delete only, asked in a dialog over the page as it was", async () => {
+test("the sidebar agent's ⋯: New message…, Rename…, Stop and Delete … session…; Stop is the thread's Stop, then Delete only, asked in a dialog over the page as it was", async () => {
   const { page, fake } = world;
   fake.configure({ startDelayMs: 0, hold: false });
   await page.goto(world.url);
@@ -720,7 +720,8 @@ test("the sidebar agent's ⋯: Rename…, Stop and Delete … session…; Stop i
   const items = page.locator(`[data-agent-menu="${launchId}"] [role="menuitem"]`);
   await row.hover();
   await row.locator('[data-agent-more]').click();
-  await expect(items).toHaveText(['Rename…', 'Stop Claude Code', 'Delete Claude Code session…']);
+  // Its session polls in its project: New message… first.
+  await expect(items).toHaveText(['New message…', 'Rename…', 'Stop Claude Code', 'Delete Claude Code session…']);
   await shot(page, '20-sidebar-agent-menu');
   await page.locator(`[data-agent-menu="${launchId}"] [data-agent-action="stop"]`).click();
   await expect(p.locator('[data-run="stopped"]')).toHaveText(/^You stopped Claude Code at \d{1,2}:\d{2} [AP]M\. Your reply starts it again\.$/);

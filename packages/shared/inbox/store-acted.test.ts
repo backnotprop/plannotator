@@ -3,16 +3,19 @@
  * real store in a temp dir on a clock the test moves (acted.ts, `InboxStore.personActedAt`), and the file for what
  * the log does not hold (acted.json). Failures to catch: a kind of the person's doing that leaves no time (a reply,
  * a pick, Done, a Re-ask, a comment); tidying or an agent's message that sets one; a time lost on reload; a note
- * written per save instead of once; the file growing without bound.
+ * written per save instead of once; the file growing without bound; the file kept only as far back as the view shows,
+ * so a wider view later would find the older acts gone.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InboxAuthor, InboxMessage, InboxQuestionRecord } from "@plannotator/core/inbox-types";
-import { INBOX_RECENT_ACTIVITY_DAYS } from "@plannotator/core/inbox-types";
+import { INBOX_ACTED_KEPT_DAYS } from "@plannotator/core/inbox-types";
 import { INBOX_ACTED_FILE, INBOX_ACTED_MAX, createInboxActed, personActOfMessage, personActOfQuestion, readInboxActed } from "./acted";
 import { InboxStore } from "./store";
+// The window's rule for which rows Recent activity shows (its reach is narrower than what the file keeps).
+import { rowRecentlyActed } from "../../inbox/listFilterRecent";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -38,7 +41,8 @@ function setup() {
 }
 
 const at = (ms: number) => new Date(ms).toISOString();
-const DAY = 86_400_000;
+const HOUR = 3_600_000;
+const DAY = 24 * HOUR;
 
 describe("the store's record of what the person did in a thread", () => {
   test("an agent's message alone sets nothing; each kind of the person's doing sets the time it happened", () => {
@@ -247,7 +251,7 @@ describe("acted.json: what the log does not hold", () => {
     expect(acted.at(T1)).toBe(at(START));
   });
 
-  test("each write drops what the filter no longer reaches (past 30 days) and the threads this store deleted; a linked machine's thread stays", () => {
+  test("each write drops what is kept no longer (past 30 days) and the threads this store deleted; a linked machine's thread stays", () => {
     const dir = dirOf();
     const OLD = "msg_01ARZ3NDEKTSV4RRFFQ69G5FAX";
     const LINKED = "msg_01ARZ3NDEKTSV4RRFFQ69G5FAY";
@@ -256,7 +260,7 @@ describe("acted.json: what the log does not hold", () => {
     const acted = createInboxActed(dir, { flushMs: 60_000, now: () => new Date(now), held: (id) => held.has(id) });
     acted.note(T1, at(now - 2 * DAY));
     acted.note(T2, at(now - DAY));
-    acted.note(OLD, at(now - (INBOX_RECENT_ACTIVITY_DAYS + 1) * DAY));
+    acted.note(OLD, at(now - (INBOX_ACTED_KEPT_DAYS + 1) * DAY));
     acted.note(LINKED, at(now - 3 * DAY));
     acted.flush();
     expect(readInboxActed(dir)).toEqual(new Map([[T2, at(now - DAY)], [T1, at(now - 2 * DAY)], [LINKED, at(now - 3 * DAY)]]));
@@ -271,6 +275,21 @@ describe("acted.json: what the log does not hold", () => {
     again.sweep();
     again.flush();
     expect([...readInboxActed(dir).keys()]).toEqual([LINKED]);
+  });
+
+  test("an act 5 hours old stays in the file (kept 30 days) though the Recent activity view (3 hours) no longer shows it", () => {
+    const dir = dirOf();
+    const now = START + 40 * DAY;
+    const acted = createInboxActed(dir, { flushMs: 60_000, now: () => new Date(now), held: () => true });
+    acted.note(T1, at(now - 5 * HOUR));
+    acted.note(T2, at(now - HOUR));
+    acted.flush();
+    const again = createInboxActed(dir, { now: () => new Date(now), held: () => true });
+    expect(again.at(T1)).toBe(at(now - 5 * HOUR));
+    // The list row carries the file's time as `acted_at`: the view keeps T2's and not T1's.
+    const row = (id: string) => ({ thread_id: id, acted_at: again.at(id) ?? undefined });
+    expect(rowRecentlyActed(row(T1), now)).toBe(false);
+    expect(rowRecentlyActed(row(T2), now)).toBe(true);
   });
 
   test("a time ahead of the clock (the clock set back since) is never read, gives way to the next note, and the next write drops it", () => {

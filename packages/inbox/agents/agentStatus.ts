@@ -78,6 +78,11 @@ export async function setAgentStatus(on: boolean): Promise<void> {
   }
 }
 
+/** How many draws watch the marks (a list's icons watch once for the list: rexMark.tsx `ListRexMarksScope`). */
+export function agentStatusWatchersForTests(): number {
+  return listeners.size;
+}
+
 /** Tests only: no press waiting. */
 export function resetAgentStatusForTests(): void {
   pending = null;

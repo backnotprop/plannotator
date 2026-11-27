@@ -23784,6 +23784,63 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-door-post-threads-id-draft",
+      "title": "door:POST threads/:id/draft",
+      "surface": [
+        "door:POST threads/:id/draft"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-threads-id-draft-delete",
+      "title": "door:POST threads/:id/draft/delete",
+      "surface": [
+        "door:POST threads/:id/draft/delete"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-machineview-drafts-held",
+      "title": "field:MachineView.drafts_held",
+      "surface": [
+        "field:MachineView.drafts_held"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-launch-switch",
+      "title": "Launch switch: the one-time launch dialog's claim, shown and answer",
+      "surface": [
+        "window:/api/inbox/launch-switch"
+      ],
+      "flows": [],
+      "mobile": "later",
+      "why": "L-size: a one-time launch dialog. The web Inbox draws it at every width, the phone-width page and a session opened from another device included; only the native phone app leaves it out (the owner, 2026-11-25)",
+      "reason": "L-size",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }

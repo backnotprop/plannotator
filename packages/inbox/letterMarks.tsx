@@ -13,7 +13,7 @@
  *   no project before) the project's name is in the mark's tooltip.
  * - Agent icons off (`hideAgents`) also takes the agent mark off the row's hover card (InboxList.tsx `RowMark`).
  */
-import { createContext, useContext, useState, type ReactNode } from 'react';
+import { createContext, useContext, useMemo, useState, type ReactNode } from 'react';
 import { lookMarks, useListLook, type ListLook, type MarksChoice, type MarksWhat } from './listLook';
 import { projectPictureUrl, useKnownProjects } from './projectPictures';
 
@@ -60,6 +60,23 @@ export function useRowMarks(): RowMarksLook {
   const given = useContext(RowMarksContext);
   const [look] = useListLook(given === null);
   return given ?? rowMarksOf(look);
+}
+
+/**
+ * Around a list's rows (rowParts.tsx `ListRows`): the marks every row would read (`useRowMarks`), read once and given
+ * to the rows as a scope gives its own. A list mounts every row of its open groups (about 2,200 on a large Inbox),
+ * and each row read the person's look in four places: four store listeners per row for one value.
+ */
+export function ListRowMarks({ children }: { children: ReactNode }) {
+  const given = useContext(RowMarksContext);
+  const [look] = useListLook(given === null);
+  const marks = useMemo(() => given ?? rowMarksOf(look), [given, look]);
+  return <RowMarksContext.Provider value={marks}>{children}</RowMarksContext.Provider>;
+}
+
+/** The marks a list or a scope gives here; null: none given, and the caller reads the person's look (`useRowMarks`). */
+export function useGivenRowMarks(): RowMarksLook | null {
+  return useContext(RowMarksContext);
 }
 
 // ── letters ──

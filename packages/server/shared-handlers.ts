@@ -27,6 +27,7 @@ import { checkServerSession, serverSessionMismatchBody } from "@plannotator/shar
 import { localImageContentType, localImageResponseHeaders } from "@plannotator/shared/local-image";
 import { annotateMediaAnswer } from "@plannotator/shared/html-assets-node";
 import { starAskRoute, starAskService, type StarAskSurface } from "@plannotator/shared/star-ask";
+import { launchSwitchRoute, launchSwitchService } from "@plannotator/shared/launch-switch";
 
 function normalizeDraftGeneration(value: unknown): number | undefined {
   if (typeof value !== "number") return undefined;
@@ -488,5 +489,18 @@ export async function handleStarAsk(req: Request, url: URL, surface: StarAskSurf
   if (!url.pathname.startsWith("/api/star-ask/")) return null;
   const body = req.method === "POST" ? await req.json().catch(() => ({})) : undefined;
   const answered = await starAskRoute(starAskService(), surface, req.method, url.pathname, body, { remote: options.remote });
+  return answered ? Response.json(answered.body, { status: answered.status }) : null;
+}
+
+/**
+ * The launch switch's one-time dialog (packages/shared/launch-switch.ts): `POST /api/launch-switch/claim` (from the
+ * kept copy only: `{ show: false }` or `{ show: true, campaign, url }`), `/shown` (stamps it shown on this computer,
+ * `{ show }`) and `/answer` (`{ answer: "opened" | "dismissed" }`). Null for any other path. Nothing
+ * here waits on the site: the reader runs in the background (`launchSwitchService().start()` at the server's start).
+ */
+export async function handleLaunchSwitch(req: Request, url: URL): Promise<Response | null> {
+  if (!url.pathname.startsWith("/api/launch-switch/")) return null;
+  const body = req.method === "POST" ? await req.json().catch(() => ({})) : undefined;
+  const answered = launchSwitchRoute(launchSwitchService(), req.method, url.pathname, body);
   return answered ? Response.json(answered.body, { status: answered.status }) : null;
 }

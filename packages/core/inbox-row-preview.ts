@@ -14,12 +14,16 @@
 
 import { answerWords, cleanInline, cutAtWord, firstWords, replyWords } from './inbox-folding';
 import type { InboxMessage, InboxQuestion } from './inbox-types';
+import { skillReactionText } from './inbox-skill-reaction';
 
 /** The longest the row's line is (characters, before its "…"): two lines of a three-line row, one wide row. */
 export const INBOX_ROW_PREVIEW_MAX = 160;
 
 /** A message's words for its row (`firstWords`, of the person's own words on a reply). The store keeps these per record. */
-export function inboxRowPreviewWords(message: Pick<InboxMessage, 'author' | 'body'>): string {
+export function inboxRowPreviewWords(message: Pick<InboxMessage, 'author' | 'body' | 'skill_reaction'>): string {
+  // A skill emoji's reply: its words "🦃 /bro" (inbox-skill-reaction.ts).
+  const reaction = skillReactionText(message);
+  if (reaction) return reaction;
   // Twice the cut of kept text is plenty: the rest of a long body is never read.
   return firstWords(message.author.kind === 'person' ? replyWords(message.body) : message.body, INBOX_ROW_PREVIEW_MAX, INBOX_ROW_PREVIEW_MAX * 2);
 }
@@ -38,7 +42,7 @@ function filesLine(names: readonly string[]): string {
 }
 
 export interface InboxRowPreviewInput {
-  message: Pick<InboxMessage, 'author' | 'body' | 'attachments' | 'guide' | 'reask'>;
+  message: Pick<InboxMessage, 'author' | 'body' | 'attachments' | 'guide' | 'reask' | 'skill_reaction'>;
   /** `inboxRowPreviewWords(message)`, when the caller keeps it. */
   words?: string;
   /** An agent message's own questions and action items. */
