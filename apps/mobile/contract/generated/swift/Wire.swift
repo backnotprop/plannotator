@@ -2487,8 +2487,6 @@ public struct InboxAgent: Codable, Hashable, Sendable {
   public var live: Bool
   public var startedAt: String?
   public var lastSeenAt: String?
-  public var stateSince: String?
-  public var turnState: InboxAgentTurnState?
   public var model: String?
   public var effort: String?
   public var context: Double?
@@ -2500,9 +2498,9 @@ public struct InboxAgent: Codable, Hashable, Sendable {
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
-  static let knownKeys: Set<String> = ["id", "session", "continues", "launch", "host", "runtime", "label", "title", "first_thread", "project", "state", "waiting", "live", "started_at", "last_seen_at", "state_since", "turn_state", "model", "effort", "context", "place", "rex_status", "rex_mark", "status_mark", "turns_unknown"]
+  static let knownKeys: Set<String> = ["id", "session", "continues", "launch", "host", "runtime", "label", "title", "first_thread", "project", "state", "waiting", "live", "started_at", "last_seen_at", "model", "effort", "context", "place", "rex_status", "rex_mark", "status_mark", "turns_unknown"]
 
-  public init(id: String, session: String, continues: [String]? = nil, launch: InboxAgentLaunch? = nil, host: String? = nil, runtime: InboxAgentRuntime? = nil, label: String? = nil, title: String? = nil, firstThread: InboxAgentFirstThread? = nil, project: InboxAgentProject? = nil, state: InboxAgentState, waiting: Double, live: Bool, startedAt: String? = nil, lastSeenAt: String? = nil, stateSince: String? = nil, turnState: InboxAgentTurnState? = nil, model: String? = nil, effort: String? = nil, context: Double? = nil, place: InboxAgentPlace? = nil, rexStatus: InboxAgentRexStatus? = nil, rexMark: InboxRexMark? = nil, statusMark: InboxAgentMark? = nil, turnsUnknown: Bool? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(id: String, session: String, continues: [String]? = nil, launch: InboxAgentLaunch? = nil, host: String? = nil, runtime: InboxAgentRuntime? = nil, label: String? = nil, title: String? = nil, firstThread: InboxAgentFirstThread? = nil, project: InboxAgentProject? = nil, state: InboxAgentState, waiting: Double, live: Bool, startedAt: String? = nil, lastSeenAt: String? = nil, model: String? = nil, effort: String? = nil, context: Double? = nil, place: InboxAgentPlace? = nil, rexStatus: InboxAgentRexStatus? = nil, rexMark: InboxRexMark? = nil, statusMark: InboxAgentMark? = nil, turnsUnknown: Bool? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.id = id
     self.session = session
     self.continues = continues
@@ -2518,8 +2516,6 @@ public struct InboxAgent: Codable, Hashable, Sendable {
     self.live = live
     self.startedAt = startedAt
     self.lastSeenAt = lastSeenAt
-    self.stateSince = stateSince
-    self.turnState = turnState
     self.model = model
     self.effort = effort
     self.context = context
@@ -2548,8 +2544,6 @@ public struct InboxAgent: Codable, Hashable, Sendable {
     self.live = try c.decode(Bool.self, forKey: WireKey("live"))
     self.startedAt = try c.decodeIfPresent(String.self, forKey: WireKey("started_at"))
     self.lastSeenAt = try c.decodeIfPresent(String.self, forKey: WireKey("last_seen_at"))
-    self.stateSince = try c.decodeIfPresent(String.self, forKey: WireKey("state_since"))
-    self.turnState = try c.decodeIfPresent(InboxAgentTurnState.self, forKey: WireKey("turn_state"))
     self.model = try c.decodeIfPresent(String.self, forKey: WireKey("model"))
     self.effort = try c.decodeIfPresent(String.self, forKey: WireKey("effort"))
     self.context = try c.decodeIfPresent(Double.self, forKey: WireKey("context"))
@@ -2578,8 +2572,6 @@ public struct InboxAgent: Codable, Hashable, Sendable {
     try c.encode(self.live, forKey: WireKey("live"))
     try c.encode(self.startedAt, forKey: WireKey("started_at"))
     try c.encode(self.lastSeenAt, forKey: WireKey("last_seen_at"))
-    try c.encodeIfPresent(self.stateSince, forKey: WireKey("state_since"))
-    try c.encodeIfPresent(self.turnState, forKey: WireKey("turn_state"))
     try c.encodeIfPresent(self.model, forKey: WireKey("model"))
     try c.encodeIfPresent(self.effort, forKey: WireKey("effort"))
     try c.encodeIfPresent(self.context, forKey: WireKey("context"))
@@ -3108,37 +3100,6 @@ public enum InboxAgentState: Codable, Hashable, Sendable, RawRepresentable {
     case .ended: return "ended"
     case .idle: return "idle"
     case .waiting: return "waiting"
-    case .working: return "working"
-    case .unknown(let value): return value
-    }
-  }
-
-  public init(from decoder: Decoder) throws { self.init(rawValue: try decoder.singleValueContainer().decode(String.self)) }
-  public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
-}
-
-public enum InboxAgentTurnState: Codable, Hashable, Sendable, RawRepresentable {
-  case ended
-  case idle
-  case working
-  /// A value this app does not know (a newer Inbox).
-  case unknown(String)
-
-  public static let known: [InboxAgentTurnState] = [.ended, .idle, .working]
-
-  public init(rawValue: String) {
-    switch rawValue {
-    case "ended": self = .ended
-    case "idle": self = .idle
-    case "working": self = .working
-    default: self = .unknown(rawValue)
-    }
-  }
-
-  public var rawValue: String {
-    switch self {
-    case .ended: return "ended"
-    case .idle: return "idle"
     case .working: return "working"
     case .unknown(let value): return value
     }

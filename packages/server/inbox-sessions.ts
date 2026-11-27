@@ -99,8 +99,6 @@ export interface InboxAgentSession {
   live: boolean;
   /** A turn runs now (live only); null when the connection does not say, or it is not live. */
   busy: boolean | null;
-  /** When `busy` last became what it is (the turn's start, or its end); null when not known. Optional: absent is not known. */
-  since?: number | null;
   /**
    * What it waits on in its terminal now (INBOX_BLOCKED_FIELD: a permission prompt or a question), as its connection
    * said it in the last INBOX_BLOCKED_STALE_MS (live only); null when none, stale, or not said. Optional: absent is none.
@@ -1023,7 +1021,6 @@ export function createInboxLiveSessions(options: {
         lastSeen: heard,
         live,
         busy: live ? entry.busy : null,
-        since: !live ? null : entry.busy === true ? (entry.busySince ?? null) : entry.busy === false ? entry.idleSince : null,
         blocked: live ? blockedOf(entry) : null,
         label: entry.label ?? null,
         model: live ? entry.model : null,

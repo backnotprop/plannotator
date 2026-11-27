@@ -43,8 +43,8 @@ export const FOLD_STEP = 20;
 export const stillHidden = (ids: readonly string[], shown = 0): readonly string[] => (shown >= ids.length ? [] : ids.slice(0, ids.length - shown));
 
 /** "Today, 9:12 AM": a moment in the thread's meta line. */
-export function momentWords(iso: string, now: Date = new Date()): string {
-  const day = dayWords(iso, now);
+export function momentWords(iso: string): string {
+  const day = dayWords(iso);
   return day ? `${day.charAt(0).toUpperCase()}${day.slice(1)}, ${clockTime(iso)}` : '';
 }
 

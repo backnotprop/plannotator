@@ -36,7 +36,6 @@ import { agentHostName, agentRowName, agentSessions, namedAgents } from '../agen
 import type { MachinesModel } from '../machines';
 import type { ListSort } from '../listView';
 import { rowTimeIso } from '../rowDelivery';
-import { lineFactsOf, type AgentLineFacts } from '../agentProfile/line';
 
 /** The list's urgency order: a row's group, most urgent first; anything else after. It orders the agents, never the rows under one. */
 export const AGENT_ROW_ORDER: readonly InboxListGroupId[] = inboxEverySection(['priority', 'stopped', 'holding', 'waiting', 'tagged', 'new', 'sent', 'quiet']);
@@ -72,10 +71,6 @@ export interface ViewAgent {
   turnsUnknown: boolean;
   /** When it was last heard, for an ended one ("Ended 4:10 PM"); null when not known. */
   endedAt: string | null;
-  /** What it does (its state, or a waiting one's `turn_state`), what it asks the person in its terminal now, and when its turn started or ended: its row's line (agentProfile/line.ts). */
-  run: AgentLineFacts['run'];
-  asking: AgentLineFacts['asking'];
-  since: string | null;
   /** The list names it (else it was rebuilt from a row's session). */
   listed: boolean;
 }
@@ -156,7 +151,9 @@ export function agentFinder({ groups, machines, labels = {}, chains }: AgentsInp
         name: agentRowName(agent),
         project: agent.project?.name ?? null,
         machine: machines.all.length === 0 ? null : machine,
-        ...lineFactsOf(agent),
+        state: agent.state,
+        turnsUnknown: agent.turns_unknown === true,
+        endedAt: agent.state === 'ended' ? agent.last_seen_at : null,
         listed: true,
       };
       if (agent.launch) byLaunch.set(at(machine, agent.launch.thread_id), view);
@@ -189,11 +186,8 @@ export function agentFinder({ groups, machines, labels = {}, chains }: AgentsInp
       project: row.project?.name ?? null,
       machine,
       state: (known.get(machine) ?? false) ? 'ended' : null,
-      run: (known.get(machine) ?? false) ? 'ended' : null,
       turnsUnknown: false,
       endedAt: null,
-      asking: null,
-      since: null,
       listed: false,
     };
     rebuilt.set(key, view);

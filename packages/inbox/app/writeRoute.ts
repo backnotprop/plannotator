@@ -54,7 +54,6 @@ export function hashOf(route: Route): string {
     }
     if (route.machine) params.set('machine', route.machine);
     if (route.agent) params.set('agent', route.agent);
-    if (route.profile && !route.thread && !route.reviews) params.set('profile', route.profile);
     if (route.tag) params.set('tag', route.tag);
     if (route.project) params.set('project', route.project);
     if (route.thread) params.set('thread', route.thread);
