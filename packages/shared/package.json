@@ -247,17 +247,17 @@
     "./review-agent-gone-words": "./review-agent-gone-words.ts"
   },
   "dependencies": {
-    "@joplin/turndown-plugin-gfm": "^1.0.68",
+    "@joplin/turndown-plugin-gfm": "^1.0.71",
     "@plannotator/core": "workspace:*",
     "@plannotator/sem-jiff": "0.2.0",
     "chokidar": "^5.0.0",
     "diff": "^8.0.4",
     "parse5": "^7.3.0",
     "picomatch": "4.0.7",
-    "turndown": "^7.2.4"
+    "turndown": "^7.2.5"
   },
   "devDependencies": {
     "@types/picomatch": "^4.0.2",
-    "fast-check": "4.10.2"
+    "fast-check": "4.10.3"
   }
 }
