@@ -226,7 +226,8 @@ export function useLaunchAnnouncement({
   }, [campaign, prep]);
 
   const prepared = typeof prep === 'object' ? prep : null;
-  const mayOpen = due !== null && prepared !== null && eligible && !blocked && stage === 'none';
+  // Only while the page is still ready: a gate that closed after the claim (another dialog drew meanwhile) holds it.
+  const mayOpen = ready && due !== null && prepared !== null && eligible && !blocked && stage === 'none';
   const windowOpen = useFirstRunAnnouncementWindow({
     // Pending from the start, so the reader's first move before the claim answers still closes the window.
     pending: firstRunWindow && claim !== 'no' && claim !== 'late' && prep !== 'failed',

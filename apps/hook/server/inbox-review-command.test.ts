@@ -4,7 +4,8 @@
  * What regresses: a first run starting the Inbox (or turning it on) before code review only and the welcome are saved,
  * so an agent session could begin with the full Inbox's words; an existing full-Inbox person switched to code review
  * only without asking; Code review left off for them; the window not shown Reviews; the URL not printed; a save that
- * failed reported as done.
+ * failed reported as done; a first-run save that landed in part (config.json written, state.json not) leaving the mode
+ * on with no welcome while it says nothing changed.
  */
 import { describe, expect, test } from "bun:test";
 import type { PlannotatorConfig } from "@plannotator/shared/config";
@@ -59,12 +60,15 @@ describe("a first run (the Inbox was never on here)", () => {
     expect(await runInboxReviewCommand(w.deps)).toBe(0);
     // Code review's flip stamped too, so a linked computer's older flip never turns it back.
     const at = Date.parse("2026-11-25T10:00:00.000Z");
-    expect(w.log[0]).toBe(`save ${JSON.stringify({ inboxCodeReview: true, inboxReviewOnly: true, inboxReviewWelcome: { dueAt: "2026-11-25T10:00:00.000Z" }, inboxCapabilityFlips: { code_review: { at, by: null } } })}`);
+    expect(w.log.slice(0, 2)).toEqual([
+      `save ${JSON.stringify({ inboxReviewWelcome: { dueAt: "2026-11-25T10:00:00.000Z" } })}`,
+      `save ${JSON.stringify({ inboxCodeReview: true, inboxReviewOnly: true, inboxCapabilityFlips: { code_review: { at, by: null } } })}`,
+    ]);
     // Turned on and started only after: both see code review only.
-    expect(w.log[1]).toStartWith("markOn ");
-    expect(JSON.parse(w.log[1]!.slice("markOn ".length))).toMatchObject({ inboxCodeReview: true, inboxReviewOnly: true });
-    expect(JSON.parse(w.log[2]!.slice("ensureInbox ".length))).toMatchObject({ inboxReviewOnly: true });
-    expect(w.log.slice(3)).toEqual([`open ${ENTRY.url}#reviews`, "connect"]);
+    expect(w.log[2]).toStartWith("markOn ");
+    expect(JSON.parse(w.log[2]!.slice("markOn ".length))).toMatchObject({ inboxCodeReview: true, inboxReviewOnly: true });
+    expect(JSON.parse(w.log[3]!.slice("ensureInbox ".length))).toMatchObject({ inboxReviewOnly: true });
+    expect(w.log.slice(4)).toEqual([`open ${ENTRY.url}#reviews`, "connect"]);
     expect(w.out).toEqual([`${ENTRY.url}#reviews`]);
     expect(w.err).toEqual([REVIEW_CODE_REVIEW_ON]);
   });
@@ -76,6 +80,32 @@ describe("a first run (the Inbox was never on here)", () => {
     expect(w.err[0]).toStartWith("config_not_saved:");
     expect(w.out).toEqual([]);
   });
+
+  /** saveConfig's split (packages/shared/config.ts): the welcome to state.json, the rest to config.json; either file may fail on its own. */
+  function splitFiles(fails: "state" | "config") {
+    const w = world({ firstRun: true, config: { inboxBoard: true } });
+    const files = { state: {} as PlannotatorConfig, config: { inboxBoard: true } as PlannotatorConfig };
+    w.deps.load = () => ({ ...structuredClone(files.config), ...structuredClone(files.state) });
+    w.deps.save = (patch) => {
+      const { inboxReviewWelcome, ...rest } = patch;
+      // As saveConfig: state.json first, then config.json whatever state.json did.
+      if ("inboxReviewWelcome" in patch && fails !== "state") files.state = { ...files.state, inboxReviewWelcome };
+      if (Object.keys(rest).length > 0 && fails !== "config") files.config = { ...files.config, ...rest };
+    };
+    return { w, files };
+  }
+
+  for (const fails of ["state", "config"] as const) {
+    test(`a first-run save where ${fails === "state" ? "state.json" : "config.json"} alone cannot be written: the computer is left exactly as it was, and it says so`, async () => {
+      const { w, files } = splitFiles(fails);
+      expect(await runInboxReviewCommand(w.deps)).toBe(1);
+      expect(files.config).toEqual({ inboxBoard: true });
+      expect(files.state.inboxReviewWelcome).toBeUndefined();
+      expect(w.deps.load()).toEqual({ inboxBoard: true });
+      expect(w.err[0]).toStartWith("config_not_saved:");
+      expect(w.log.some((line) => line.startsWith("markOn") || line.startsWith("ensureInbox"))).toBe(false);
+    });
+  }
 
   test("the Inbox's mark cannot be written: nothing started, and it says so", async () => {
     const w = world({ firstRun: true, marks: false });

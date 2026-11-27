@@ -17,6 +17,7 @@
 import type { InboxCapabilitySetKey } from "@plannotator/core/inbox-types";
 import type { PlannotatorConfig } from "@plannotator/shared/config";
 import { inboxAgentWords, type InboxAgentWords } from "@plannotator/shared/inbox/connection";
+import { REVEAL_PATIENCE_MS } from "@plannotator/shared/inbox/reveals";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 
 export interface ReviewOnlyHost {
@@ -24,10 +25,19 @@ export interface ReviewOnlyHost {
   save: (patch: Partial<PlannotatorConfig>) => unknown;
   /** Decided here instead of config.json (tests). Absent: config.json decides on every request. */
   fixed?: boolean;
+  /** A release build: the Inbox keeps a line of one-time dialogs (a dev build shows none of them, the welcome included). */
+  release?: boolean;
+  now?: () => number;
   /** The notes follow the mode (inbox-review-only-notes.ts `sync`). */
   syncNotes: () => Promise<void>;
   /** Every window follows (`event: capabilities`). */
   changed: () => void;
+  /**
+   * Code review's flip is stamped as the person's (inbox-capability-set.ts `flipped`), called once the switch back to
+   * the full Inbox has landed: Code review is shared again from then on, and a linked computer's flip of it made while
+   * this one was code review only is older, so it never turns Code review off here afterwards.
+   */
+  codeReviewFlipped?: () => void;
 }
 
 /**
@@ -56,6 +66,19 @@ export function createReviewOnly(host: ReviewOnlyHost) {
     wire: (): { full_inbox: { on: boolean; chosen?: true } } => ({ full_inbox: { on: !on(), ...(chosen() ? { chosen: true as const } : {}) } }),
     /** The welcome is open for the line (`review_welcome`): code review only, and `--review` asked for it. */
     welcomeOpen: (): boolean => on() && typeof host.load().inboxReviewWelcome?.dueAt === "string",
+    /**
+     * The welcome goes before the launch dialog (inbox-launch-queue.ts `after`) only while it is due and can still
+     * show: open for the line, unshown, in a build that keeps the line, and not yet past the line's patience as its
+     * next dialog (someone who only ever opens thread links never reaches Reviews, where it opens). Past that, the
+     * launch is not held behind it any longer.
+     */
+    welcomeAhead: (): boolean => {
+      const config = host.load();
+      if (host.release !== true || !on() || typeof config.inboxReviewWelcome?.dueAt !== "string" || config.inboxReveals?.review_welcome?.shownAt) return false;
+      const reveals = config.inboxReveals;
+      const since = Date.parse(reveals?.waitingSince?.review_welcome ?? "");
+      return !Number.isFinite(since) || (host.now ?? Date.now)() - since < REVEAL_PATIENCE_MS;
+    },
     /** `POST /api/inbox/settings { full_inbox: { on } }`: on = the full Inbox (Code review stays on), off = code review only. */
     save: async (input: unknown, validateOnly = false): Promise<{ on: boolean; chosen: true }> => {
       if (!input || typeof input !== "object" || Array.isArray(input) || typeof (input as { on?: unknown }).on !== "boolean" || Object.keys(input).some((key) => key !== "on")) {
@@ -70,6 +93,7 @@ export function createReviewOnly(host: ReviewOnlyHost) {
         const saved = host.load();
         if (saved.inboxReviewOnly !== !full || saved.inboxCodeReview !== true) throw new InboxError("config_not_saved", NOT_SAVED);
       }
+      if (was && !on()) host.codeReviewFlipped?.();
       if (was !== on()) host.changed();
       await host.syncNotes();
       return { on: !on(), chosen: true };

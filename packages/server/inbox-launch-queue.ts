@@ -12,9 +12,11 @@
  * `startsIn`: the time until a kept "on" launch starts, so a page left open reads its settings again then and claims
  * it from the kept copy, with no request to the site.
  *
- * `after`: a dialog that goes before it (the welcome to the code review Inbox, inbox-review-only.ts, still unshown).
- * While it waits, the launch is neither due nor holding the line, so that dialog comes first and the two never draw
- * at once; once it is shown, the launch is next.
+ * `after`: a dialog that goes before it (the welcome to the code review Inbox while it is due and can still show,
+ * inbox-review-only.ts `welcomeAhead`). While it waits, the launch is neither due nor holding the line, so that dialog
+ * comes first and the two never draw at once. Once it has had its turn (shown, or no longer ahead), the launch is due
+ * again but holds the line no more on this run: a tab left open shows it after the line's usual gap (the page waits
+ * for that, reviewOnly.ts `launchMay`), and meanwhile the other dialogs, the agent note and the tips go on as usual.
  */
 import { launchInstant, launchSwitchAction, readLaunchKept, type LaunchSwitchAction, type LaunchSwitchService } from "@plannotator/shared/launch-switch";
 
@@ -31,8 +33,13 @@ export interface InboxLaunchQueue {
 
 export function createInboxLaunchQueue(service: LaunchSwitchService, dataDir: () => string, after: () => boolean = () => false): InboxLaunchQueue {
   let released = false;
+  /** `after` held it on this run: from when it lets go, the launch holds the line no more. */
+  let followed = false;
   const due = () => {
-    if (after()) return false;
+    if (after()) {
+      followed = true;
+      return false;
+    }
     try {
       return service.claim().show;
     } catch {
@@ -41,7 +48,11 @@ export function createInboxLaunchQueue(service: LaunchSwitchService, dataDir: ()
   };
   return {
     due,
-    holdsLine: () => !released && due(),
+    holdsLine: () => {
+      if (released) return false;
+      const now = due();
+      return now && !followed;
+    },
     startsIn(now) {
       try {
         const { doc } = readLaunchKept(dataDir());

@@ -657,7 +657,8 @@ export interface PlannotatorConfig {
    * (packages/server/inbox-review-only-notes.ts). Saved before any file or record changes, so a pass that stops halfway
    * is finished by the next one. `for`: the mode the files are being made to match; `back`: the agents whose note goes
    * back with the full Inbox (the person's last choice: a note they turn on or off meanwhile leaves the list); `out`:
-   * those whose note is still to come out; `edited`: the section a person edited, put back as they left it.
+   * those whose note is still to come out; `edited`: each section a person edited, by the file it came out of
+   * (resolved through links), put back there as they left it.
    */
   inboxReviewOnlyNotes?: { for: "review_only" | "full"; back: string[]; out: string[]; edited?: Record<string, string> };
   /** Machine state: the welcome dialog `plannotator inbox --review` asked for on a first run (`dueAt`); its one showing is the line's (`inboxReveals.review_welcome`). */

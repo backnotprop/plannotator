@@ -10,13 +10,16 @@
  *    the way back (a failed add never tried again); the automatic add writing a note after code review only began
  *    (two writers racing); a concurrent edit (a Gemini memory saved) lost to a removal; a write while
  *    PLANNOTATOR_INBOX_NOTES=0; a second, marked note beside one pasted by hand; the person's own switch during the
- *    mode not followed on the way back; an edited section lost instead of put back as they left it.
+ *    mode not followed on the way back; an edited section lost instead of put back as they left it (also in a file
+ *    two agents share, whichever agent comes first, and with two edited files for one agent, each back where it came
+ *    from); a file left read-only retried every minute forever instead of less and less often.
  *  - the switch: code review only needing a second switch (Code review) to hold, or switching back leaving Code
  *    review off; the Settings row's `chosen` lost; the welcome open outside the mode.
- *  - linked computers: the mode, or Code review while in it, given to or taken from a linked computer.
+ *  - linked computers: the mode, or Code review while in it, given to or taken from a linked computer; a linked
+ *    computer's flip of Code review made while in the mode turning it off here after the switch back.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { INBOX_CAPABILITY_AGENT_IDS, INBOX_CAPABILITY_SET_KEYS, INBOX_CAPABILITY_SWITCH_KEYS, type InboxCapabilitySetKey, type InboxNoteAgentId } from "@plannotator/core/inbox-types";
 import type { PlannotatorConfig } from "@plannotator/shared/config";
@@ -25,7 +28,7 @@ import { addInboxNote, INBOX_NOTE_BLOCK, noteStatus, noteTarget, removeInboxNote
 import { createAgentEnvironmentFor, type AgentEnvironment } from "./inbox-agents";
 import { createCapabilitySet } from "./inbox-capability-set";
 import { createReviewOnly, reviewOnlyShares } from "./inbox-review-only";
-import { createAgentNotes } from "./inbox-review-only-notes";
+import { createAgentNotes, RETRY_MAX_MS } from "./inbox-review-only-notes";
 
 let fake: FakeAgents;
 let dataDir: string;
@@ -69,7 +72,7 @@ function withNotes(): Record<(typeof AGENTS)[number], string> {
 }
 
 /** One computer: config.json in memory, the real notes in the scratch home, the notes' queue and the switch. */
-function computer(start: PlannotatorConfig = {}, options: { env?: Record<string, string> } = {}) {
+function computer(start: PlannotatorConfig = {}, options: { env?: Record<string, string>; timer?: (run: () => void, ms: number) => { cancel: () => void } } = {}) {
   let config: PlannotatorConfig = structuredClone(start);
   const said = { changed: 0, auto: 0, asked: [] as string[] };
   /** A save that does not land (config.json unwritable): the notes' list is dropped. */
@@ -90,7 +93,8 @@ function computer(start: PlannotatorConfig = {}, options: { env?: Record<string,
     markAsked: async (ids) => void said.asked.push(...ids),
     autoAdd: (mayWrite) => autoAdd(mayWrite),
     stopped: () => false,
-    retryMs: 60 * 60_000,
+    retryMs: options.timer ? 60_000 : 60 * 60_000,
+    ...(options.timer ? { timer: options.timer } : {}),
   });
   const reviewOnly = createReviewOnly({
     load: () => structuredClone(config),
@@ -195,10 +199,123 @@ describe("the notes, out with code review only and back with the full Inbox", ()
     const one = computer({ inboxCodeReview: true });
     await one.reviewOnly.save({ on: false });
     expect(read(files.gemini)).toBe(MINE_BEFORE);
-    expect(one.config().inboxReviewOnlyNotes?.edited?.gemini).toContain("## Plannotator Inbox (mine now)");
+    expect(one.config().inboxReviewOnlyNotes?.edited?.[realpathSync(files.gemini)]).toContain("## Plannotator Inbox (mine now)");
     await one.reviewOnly.save({ on: true });
     expect(read(files.gemini)).toBe(edited);
     expect(noteStatus("gemini", dataDir, e).state).toBe("edited");
+  });
+
+  /**
+   * Codex and Pi reading one real file: Pi's AGENTS.md a link to Codex's (`link`), or both homes the same folder (the
+   * same path). `piFirst`: Pi is put back first (a switch back that had not finished for Pi listed it first).
+   */
+  function sharedFile(how: "link" | "same path") {
+    fake.install("codex", "pi");
+    const codexHome = join(fake.home, ".codex");
+    mkdirSync(codexHome, { recursive: true });
+    const real = join(codexHome, "AGENTS.md");
+    writeFileSync(real, MINE_BEFORE);
+    written.push(real);
+    const env = how === "same path" ? { PI_CODING_AGENT_DIR: codexHome } : undefined;
+    const here = env ? createAgentEnvironmentFor({ platform: "linux", homeDir: fake.home, env: { ...fake.env, ...env } }) : e;
+    if (how === "link") {
+      mkdirSync(join(fake.home, ".pi", "agent"), { recursive: true });
+      symlinkSync(real, join(fake.home, ".pi", "agent", "AGENTS.md"));
+    }
+    expect(addInboxNote("codex", dataDir, here)).toMatchObject({ ok: true, action: "added" });
+    expect(addInboxNote("pi", dataDir, here)).toMatchObject({ ok: true, action: "shared" });
+    return { real, env, here };
+  }
+
+  for (const how of ["link", "same path"] as const) {
+    for (const piFirst of [false, true]) {
+      const order = piFirst ? "Pi put back first" : "Codex put back first";
+      test(`one file two agents share (${how}), edited: it goes back exactly as the person left it, ${order}; both agents have it again`, async () => {
+        const { real, env, here } = sharedFile(how);
+        writeFileSync(real, read(real).replace("## Plannotator Inbox", "## Plannotator Inbox (ours)"));
+        const edited = read(real);
+        for (const id of ["codex", "pi"] as const) expect(noteStatus(id, dataDir, here).state).toBe("edited");
+        const one = computer({ inboxCodeReview: true, ...(piFirst ? { inboxReviewOnlyNotes: { for: "full", back: ["pi"], out: [] } } : {}) }, env ? { env } : {});
+        await one.reviewOnly.save({ on: false });
+        expect(read(real)).toBe(MINE_BEFORE);
+        expect(one.config().inboxReviewOnlyNotes?.back).toEqual(piFirst ? ["pi", "codex"] : ["codex", "pi"]);
+        await one.reviewOnly.save({ on: true });
+        expect(read(real)).toBe(edited);
+        for (const id of ["codex", "pi"] as const) expect(noteStatus(id, dataDir, here).state).toBe("edited");
+        expect(one.config().inboxReviewOnlyNotes).toBeUndefined();
+      });
+    }
+    for (const piFirst of [false, true]) {
+      test(`one file two agents share (${how}), not edited: Plannotator's note goes back once, ${piFirst ? "Pi" : "Codex"} put back first`, async () => {
+        const { real, env, here } = sharedFile(how);
+        const one = computer({ inboxCodeReview: true, ...(piFirst ? { inboxReviewOnlyNotes: { for: "full", back: ["pi"], out: [] } } : {}) }, env ? { env } : {});
+        await one.reviewOnly.save({ on: false });
+        expect(read(real)).toBe(MINE_BEFORE);
+        await one.reviewOnly.save({ on: true });
+        expect(read(real).split(INBOX_NOTE_BLOCK).length).toBe(2);
+        expect(read(real).startsWith(MINE_BEFORE)).toBe(true);
+        for (const id of ["codex", "pi"] as const) expect(noteStatus(id, dataDir, here).state).toBe("added");
+      });
+    }
+  }
+
+  test("one agent with two files that both hold an edited section (AGENTS.md and AGENTS.override.md): each goes back into its own file", async () => {
+    fake.install("codex");
+    const codexHome = join(fake.home, ".codex");
+    mkdirSync(codexHome, { recursive: true });
+    const main = join(codexHome, "AGENTS.md");
+    const override = join(codexHome, "AGENTS.override.md");
+    writeFileSync(main, MINE_BEFORE);
+    written.push(main, override);
+    expect(addInboxNote("codex", dataDir, e)).toMatchObject({ ok: true, path: "~/.codex/AGENTS.md" });
+    writeFileSync(override, "# Override\n");
+    expect(addInboxNote("codex", dataDir, e)).toMatchObject({ ok: true, path: "~/.codex/AGENTS.override.md" });
+    writeFileSync(main, read(main).replace("## Plannotator Inbox", "## Plannotator Inbox (main)"));
+    writeFileSync(override, read(override).replace("## Plannotator Inbox", "## Plannotator Inbox (override)"));
+    const mainEdited = read(main);
+    const overrideEdited = read(override);
+    const one = computer({ inboxCodeReview: true });
+    await one.reviewOnly.save({ on: false });
+    expect([read(main), read(override)]).toEqual([MINE_BEFORE, "# Override\n"]);
+    await one.reviewOnly.save({ on: true });
+    expect([read(main), read(override)]).toEqual([mainEdited, overrideEdited]);
+    expect(one.config().inboxReviewOnlyNotes).toBeUndefined();
+  });
+
+  test("a file left read-only: tried again less and less often, up to an hour, with nothing logged; at once again once it matches", async () => {
+    const files = withNotes();
+    chmodSync(files.qwen, 0o444);
+    const waits: number[] = [];
+    let pending: (() => void) | null = null;
+    const one = computer({ inboxCodeReview: true }, { timer: (run, ms) => (waits.push(ms), (pending = run), { cancel: () => void (pending = null) }) });
+    const said: unknown[] = [];
+    const saved = { error: console.error, warn: console.warn, log: console.log, write: process.stderr.write };
+    console.error = console.warn = console.log = (...args: unknown[]) => void said.push(args);
+    process.stderr.write = ((chunk: unknown) => (said.push(chunk), true)) as typeof process.stderr.write;
+    try {
+      await one.reviewOnly.save({ on: false });
+      for (let i = 0; i < 8; i++) {
+        const run = pending as (() => void) | null;
+        pending = null;
+        run?.();
+        await one.notes.idle();
+      }
+    } finally {
+      Object.assign(console, { error: saved.error, warn: saved.warn, log: saved.log });
+      process.stderr.write = saved.write;
+    }
+    expect(waits).toEqual([60_000, 120_000, 240_000, 480_000, 960_000, 1_920_000, RETRY_MAX_MS, RETRY_MAX_MS, RETRY_MAX_MS]);
+    expect(said).toEqual([]);
+    expect(read(files.qwen)).toContain(INBOX_NOTE_BLOCK);
+    chmodSync(files.qwen, 0o644);
+    (pending as (() => void) | null)?.();
+    await one.notes.idle();
+    expect(read(files.qwen)).toBe(MINE_BEFORE);
+    expect(waits.length).toBe(9);
+    // Something left again later (the put-back, the same file read-only again): a minute first, as before.
+    chmodSync(files.qwen, 0o444);
+    await one.reviewOnly.save({ on: true });
+    expect(waits.slice(9)).toEqual([60_000]);
   });
 
   test("the person's own switch while code review only: the list follows, so switching back gives what they last chose", async () => {
@@ -353,6 +470,44 @@ describe("linked computers: the mode is this computer's own", () => {
       },
     };
   }
+
+  test("switching back to the full Inbox: a linked computer's flip of Code review made meanwhile never turns it off here", async () => {
+    let clock = 9_000;
+    // The laptop: `--review` stamped Code review on.
+    let config: PlannotatorConfig = { inboxCodeReview: true, inboxReviewOnly: true, inboxCapabilityFlips: { code_review: { at: 9_000, by: null } } };
+    const save = (patch: Partial<PlannotatorConfig>) => void (config = { ...config, ...structuredClone(patch) });
+    const reviewOnly = createReviewOnly({
+      load: () => structuredClone(config),
+      save,
+      syncNotes: async () => {},
+      changed: () => {},
+      codeReviewFlipped: () => laptop.flipped(["code_review"]),
+    });
+    const laptop = createCapabilitySet({
+      switches: Object.fromEntries(
+        INBOX_CAPABILITY_SET_KEYS.map((key) => [
+          key,
+          key === "code_review"
+            ? { on: () => config.inboxCodeReview === true || reviewOnly.on(), chosen: () => config.inboxCodeReview !== undefined, shared: () => reviewOnlyShares(key, reviewOnly.on()), apply: (on: boolean) => save({ inboxCodeReview: on }) }
+            : { on: () => false, chosen: () => false, shared: () => true, apply: () => {} },
+        ]),
+      ) as never,
+      times: () => config.inboxCapabilityFlips,
+      saveTimes: (times) => save({ inboxCapabilityFlips: { ...config.inboxCapabilityFlips, ...times } }),
+      self: () => "ibx_01JZ0000000000000000000001",
+      now: () => clock,
+    });
+    // The desktop turns Code review off while the laptop is code review only: not taken there.
+    const desktop = linked("ibx_01JZ0000000000000000000002", false, { code_review: true });
+    desktop.flip("code_review", false, 20_000);
+    await laptop.take(desktop.set.wire());
+    expect(config.inboxCodeReview).toBe(true);
+    // The person switches the laptop back to the full Inbox, later; then the two meet again.
+    clock = 30_000;
+    await reviewOnly.save({ on: true });
+    await laptop.take(desktop.set.wire());
+    expect(config).toMatchObject({ inboxReviewOnly: false, inboxCodeReview: true });
+  });
 
   test("a `--review` laptop linked to a full-Inbox desktop changes nothing there, and nothing there ends the mode, either order", async () => {
     for (const laptopFirst of [true, false]) {

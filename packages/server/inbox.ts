@@ -1427,8 +1427,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const launchSwitch = createLaunchSwitch({ dataDir: () => dataDir, endpoint: () => launchSwitchEndpointNow(), shown: configLaunchShownStore });
   launchSwitch.start();
   // Its place in the line of one-time dialogs: first, until a claim is answered (inbox-launch-queue.ts), after only the
-  // welcome to the code review Inbox while that is unshown (`reviewWelcomeAhead`).
-  const launchQueue = createInboxLaunchQueue(launchSwitch, () => dataDir, () => reviewWelcomeAhead());
+  // welcome to the code review Inbox while that is due and can still show (`reviewOnly.welcomeAhead`).
+  const launchQueue = createInboxLaunchQueue(launchSwitch, () => dataDir, () => reviewOnly.welcomeAhead());
   let lastDailyPingCheck = 0;
   const updates = createInboxUpdates({
     dataDir,
@@ -3761,6 +3761,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     load: () => loadConfig(),
     save: (patch) => saveConfig(patch),
     fixed: options.reviewOnly,
+    release: snoozeIntroRelease,
     // Every flip: the notes are made to match (retried until they do), then the automatic add a full Inbox runs.
     syncNotes: async () => {
       await agentNotes.sync();
@@ -3769,6 +3770,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     changed: () => {
       for (const listener of capabilityListeners) listener();
     },
+    // Back to the full Inbox: Code review, on, is the person's newest flip of it (shared again from now on).
+    codeReviewFlipped: () => capabilitySet.flipped(["code_review"]),
   });
 
   /** Capabilities on the seam (inbox-capability.ts; Plans): routed, answered in the settings and started through the list only. */
@@ -3859,8 +3862,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
   type LineOfferSaved = { shownAt?: string; key?: string };
   const lineOfferSaved = (id: RevealId): LineOfferSaved | undefined => (loadConfig().inboxReveals as Record<string, LineOfferSaved | undefined> | undefined)?.[id];
-  /** The welcome to the code review Inbox is due and not yet shown: it goes before the launch dialog (inbox-launch-queue.ts `after`). */
-  const reviewWelcomeAhead = (): boolean => reviewOnly.welcomeOpen() && !lineOfferSaved("review_welcome")?.shownAt;
   /** The agent messages the person has looked at (up to each thread's `person_seen_seq`): heavy use reads their dates. */
   const seenAgentMessages = function* (): Generator<{ threadId: string; at: string }> {
     for (const threadId of store.threadIds()) {

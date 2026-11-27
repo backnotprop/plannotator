@@ -73,6 +73,24 @@ function codeReviewFlip(deps: Pick<InboxReviewDeps, "now">): Partial<Plannotator
   return { inboxCapabilityFlips: { code_review: { at: (deps.now?.() ?? new Date()).getTime(), by: null } } };
 }
 
+/**
+ * A first run's save, all or nothing: the welcome (machine state, state.json) first, then the mode, Code review and its
+ * flip (config.json), each read back. A save of both at once could land in config.json alone (state.json unwritable),
+ * leaving the mode on with no welcome. When the second does not land, the welcome is put back as it was, so a failure
+ * leaves the computer as it was ("nothing changed").
+ */
+function saveFirstRun(deps: Pick<InboxReviewDeps, "load" | "save" | "now">): boolean {
+  const before = deps.load();
+  const dueAt = (deps.now?.() ?? new Date()).toISOString();
+  deps.save({ inboxReviewWelcome: { ...before.inboxReviewWelcome, dueAt } });
+  if (deps.load().inboxReviewWelcome?.dueAt !== dueAt) return false;
+  deps.save({ inboxCodeReview: true, inboxReviewOnly: true, ...codeReviewFlip(deps) });
+  const saved = deps.load();
+  if (saved.inboxCodeReview === true && saved.inboxReviewOnly === true && saved.inboxReviewWelcome?.dueAt === dueAt) return true;
+  deps.save({ inboxReviewWelcome: before.inboxReviewWelcome });
+  return false;
+}
+
 /** The Inbox could not be turned on here (its mark not written). */
 export const REVIEW_NOT_TURNED_ON = "inbox_not_turned_on: the Inbox could not be turned on here (its data folder could not be written); nothing started.";
 
@@ -101,10 +119,7 @@ export async function runInboxReviewCommand<E extends InboxReviewEntry>(deps: In
   const firstRun = deps.firstRun && deps.load().inboxReviewOnly === undefined;
   if (firstRun) {
     // Before the Inbox is on, before anything starts: no session ever starts with the full Inbox's words.
-    const dueAt = (deps.now?.() ?? new Date()).toISOString();
-    deps.save({ inboxCodeReview: true, inboxReviewOnly: true, inboxReviewWelcome: { dueAt }, ...codeReviewFlip(deps) });
-    const saved = deps.load();
-    if (saved.inboxCodeReview !== true || saved.inboxReviewOnly !== true || saved.inboxReviewWelcome?.dueAt !== dueAt) {
+    if (!saveFirstRun(deps)) {
       err(NOT_SAVED);
       return 1;
     }

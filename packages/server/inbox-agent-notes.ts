@@ -635,7 +635,7 @@ export function noteStatus(agent: InboxNoteAgentId, dataDir: string, e: AgentEnv
 export type NoteChange =
   | { ok: true; agent: InboxNoteAgentId; action: "added" | "created" | "updated" | "unchanged" | "shared" | "removed" | "deleted" | "kept-edited" | "kept-shared"; path: string }
   /** `skipped` (only with `auto`): left alone on purpose, never to be tried again by itself (read-only, hard-linked, the note pasted without markers). */
-  | { ok: false; agent: InboxNoteAgentId; reason: string; path: string | null; skipped?: true; edited?: string; pasted?: true };
+  | { ok: false; agent: InboxNoteAgentId; reason: string; path: string | null; skipped?: true; edited?: string; editedIn?: string; pasted?: true };
 
 /** How an add may write. */
 export interface AddNoteOptions {
@@ -647,9 +647,16 @@ export interface AddNoteOptions {
   auto?: boolean;
   /**
    * The person's own edited section, put back as they left it (code review only took it out,
-   * inbox-review-only-notes.ts) in place of Plannotator's note. A file that holds a section already keeps it.
+   * inbox-review-only-notes.ts) in place of Plannotator's note. A file that holds a section already keeps it; when
+   * that section is this very text (put back by another agent sharing the file), this agent's record follows it.
    */
   block?: string;
+  /**
+   * With `block`: the file the section came out of (resolved; one of `agentNoteFiles`), in place of the agent's target.
+   * Missing, it is made again (it held the section when the section came out), except where the target's own rule says
+   * no file may be made.
+   */
+  path?: string;
   /** Tests: runs between the read and the write, to change the file under the add. */
   beforeWrite?: (target: string) => void;
 }
@@ -676,9 +683,32 @@ function recordNote(dataDir: string, agent: InboxNoteAgentId, record: InboxAgent
   writeInboxAgentNotes(dataDir, file);
 }
 
+/**
+ * Every file an agent's note can be in, resolved through links, its target first: where code review only takes a
+ * section out of, and puts one back into (inbox-review-only-notes.ts keys the person's edited text by these).
+ */
+export function agentNoteFiles(agent: InboxNoteAgentId, e: AgentEnvironment): string[] {
+  const files: string[] = [];
+  for (const file of [noteTarget(agent, e).path, ...candidatePaths(agent, e)]) {
+    if (file && !files.includes(resolved(file))) files.push(resolved(file));
+  }
+  return files;
+}
+
+/** Where an add writes: the agent's target, or with `block` and `path` the file the section came out of (null: not one of the agent's). */
+function putBackTarget(agent: InboxNoteAgentId, e: AgentEnvironment, options: AddNoteOptions): NoteTarget | null {
+  const target = noteTarget(agent, e);
+  if (options.path === undefined || options.block === undefined) return target;
+  const files = agentNoteFiles(agent, e);
+  if (!files.includes(options.path)) return null;
+  if (options.path === files[0]) return target;
+  return { path: options.path, create: !existsSync(options.path), reason: null };
+}
+
 /** Add (or bring up to date) the note for one agent. Never overwrites a block the person edited. */
 export function addInboxNote(agent: InboxNoteAgentId, dataDir: string, e: AgentEnvironment, now = new Date(), options: AddNoteOptions = {}): NoteChange {
-  const target = noteTarget(agent, e);
+  const target = putBackTarget(agent, e, options);
+  if (!target) return { ok: false, agent, reason: "not one of this agent's instructions files", path: displayPath(options.path ?? null, e) };
   const shown = displayPath(target.path, e);
   if (!agentHomeAllowed(e)) return { ok: false, agent, reason: "not in a test's scratch home", path: shown };
   if (!target.path) return { ok: false, agent, reason: target.reason ?? "no file to add the note to", path: null };
@@ -698,8 +728,15 @@ export function addInboxNote(agent: InboxNoteAgentId, dataDir: string, e: AgentE
   let action: "added" | "created" | "updated" | "unchanged" | "shared";
   /** The block's hash before this add (null: there was none), for the other records naming the same file. */
   let before: string | null = null;
-  // Putting the person's section back where a section is already: theirs or Plannotator's, it stays as it is.
-  if (found.kind === "one" && options.block !== undefined) return { ok: true, agent, action: "unchanged", path: shown! };
+  // Putting the person's section back where a section is already: theirs or Plannotator's, it stays as it is. When it
+  // is this very text (another agent sharing the file put it back first), this agent's record names it again.
+  if (found.kind === "one" && options.block !== undefined) {
+    if (found.block.replace(/\r\n/g, "\n") !== options.block.replace(/\r\n/g, "\n") || notes[agent]?.path === real) return { ok: true, agent, action: "unchanged", path: shown! };
+    const file = readInboxAgentNotes(dataDir);
+    file.notes[agent] = { path: real, created: owner?.created === true, version: INBOX_NOTE_VERSION, block_sha256: sha256(INBOX_NOTE_BLOCK), at: now.toISOString() };
+    writeInboxAgentNotes(dataDir, file);
+    return { ok: true, agent, action: "shared", path: shown! };
+  }
   if (found.kind === "one") {
     const hash = sha256(found.block);
     before = hash;
@@ -1001,8 +1038,11 @@ export interface RemoveNoteOptions {
    * AddNoteOptions `auto` (a read-only or hard-linked file is skipped; a file changed since it was read is not written).
    */
   auto?: boolean;
-  /** Only a section this says may go is taken out; any other fails with `edited` (its text), so the caller can keep it first. */
-  removable?: (block: string) => boolean;
+  /**
+   * Only a section this says may go (`file`: where it is, resolved through links) is taken out; any other fails with
+   * `edited` (its text) and `editedIn` (that file), so the caller can keep it first.
+   */
+  removable?: (block: string, file: string) => boolean;
   /** Tests: runs between the read and the write, to change the file under the removal. */
   beforeWrite?: (target: string) => void;
 }
@@ -1031,8 +1071,8 @@ function removeNoteFrom(agent: InboxNoteAgentId, dataDir: string, e: AgentEnviro
     recordNote(dataDir, agent, null);
     return { ok: true, agent, action: "unchanged", path: shown! };
   }
-  if (options.removable && !options.removable(found.block)) {
-    return { ok: false, agent, reason: `the Plannotator section in ${shown} was edited`, path: shown, edited: found.block };
+  if (options.removable && !options.removable(found.block, resolved(read.target))) {
+    return { ok: false, agent, reason: `the Plannotator section in ${shown} was edited`, path: shown, edited: found.block, editedIn: resolved(read.target) };
   }
   const rest = stripBlock(read.text, found.start, found.end);
   const created = (record?.created && record.path === resolved(read.target)) || resolved(read.target) === resolved(claudeRulesFile(e));

@@ -8,10 +8,10 @@
  * switch (no reminder is sent while code review only). The welcome `plannotator inbox --review` asks for is a dialog
  * of the line (`review_welcome`, `useReviewWelcome`).
  */
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Route } from './app/route';
 import { writeRoute } from './app/writeRoute';
-import { useLineReveal } from './reveal';
+import { REVEAL_TIMES, useLineReveal, type RevealStage } from './reveal';
 import type { CodeReviewOfferInput, CodeReviewOfferState } from './codeReviewOffer';
 
 declare module './api' {
@@ -81,9 +81,9 @@ export function reviewWelcomeClear(route: Pick<Route, 'page'>, over: { search: b
  * once (`atOnce`) once Reviews is clear and settled, and it opens only after its claim (`POST /api/inbox/reveal`)
  * answers that this is the first showing ever, so two tabs never both show it; the claim keeps the line's gap after
  * it. `on`: still code review only (switched to the full Inbox meanwhile, it no longer opens). Closing it only closes
- * it: the welcome has no Not now.
+ * it: the welcome has no Not now. `launchMay`: the launch dialog may follow it on this load (`useLaunchAfterWelcome`).
  */
-export function useReviewWelcome(input: CodeReviewOfferInput): CodeReviewOfferState {
+export function useReviewWelcome(input: CodeReviewOfferInput): CodeReviewOfferState & { launchMay: boolean } {
   const latest = useRef(input);
   latest.current = input;
   const reveal = useLineReveal({
@@ -102,5 +102,21 @@ export function useReviewWelcome(input: CodeReviewOfferInput): CodeReviewOfferSt
     atOnce: true,
   });
   const settled = !input.due || input.blocked || !input.on || reveal.stage === 'shown';
-  return { stage: reveal.stage, close: reveal.close, settled };
+  return { stage: reveal.stage, close: reveal.close, settled, launchMay: useLaunchAfterWelcome(reveal.stage) };
+}
+
+/**
+ * The launch dialog may go on this load (App's `ready` for it): never while the welcome is claimed or open, and once
+ * the welcome is done on this load (closed, or its claim answered no), after the line's usual gap
+ * (`REVEAL_TIMES.otherDialogMs`), so a tab left open shows it then and the two never draw together. A load where the
+ * welcome never came: at once.
+ */
+export function useLaunchAfterWelcome(stage: RevealStage): boolean {
+  const [gapPassed, setGapPassed] = useState(false);
+  useEffect(() => {
+    if (stage !== 'shown') return;
+    const timer = setTimeout(() => setGapPassed(true), REVEAL_TIMES.otherDialogMs);
+    return () => clearTimeout(timer);
+  }, [stage]);
+  return stage === 'none' || (stage === 'shown' && gapPassed);
 }
