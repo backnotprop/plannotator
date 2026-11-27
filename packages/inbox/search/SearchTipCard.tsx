@@ -3,55 +3,73 @@
  * drawn inside the palette's `<dialog>` (a portal to the body would sit under the backdrop, inert): beside the palette
  * level with the box, or under the box in the palette's flow. Under the box, its height (with its margins) is set on
  * the dialog as `--ib-sp-tip-h`, which the results list gives up (inbox.css `.ib-sp-list`), so the palette still ends
- * inside the window. Placed and measured before the first paint. It never takes focus: Got it keeps focus in the box
+ * inside the window; when that would leave the list fewer than three rows of room it tells the palette (`onPlaced`)
+ * and is not shown at this open. Placed and measured before the first paint, from layout sizes the palette's
+ * entrance animation does not scale. It never takes focus: Got it keeps focus in the box
  * on a press, and on a keyboard press sends it back there.
  */
 import { useLayoutEffect, useRef, useState, type RefObject } from 'react';
-import { SEARCH_TIP_WORDS, searchTipPlace, type SearchTipPlace } from './searchTip';
+import { SEARCH_TIP_WORDS, searchTipFits, searchTipPlace, type SearchTipPlace } from './searchTip';
 
 export function SearchTipCard(props: {
   phone: boolean;
   leaving: boolean;
   dialogRef: RefObject<HTMLDialogElement | null>;
   rowRef: RefObject<HTMLDivElement | null>;
+  listRef: RefObject<HTMLDivElement | null>;
   titleId: string;
   lineId: string;
+  /** Before the first paint, once placed: whether the results list keeps its room (searchTip.ts `searchTipFits`). */
+  onPlaced: (fits: boolean) => void;
   /** Got it. `keyboard`: the button had focus (it was pressed from the keyboard). */
   onOk: (keyboard: boolean) => void;
 }) {
-  const { leaving, phone, dialogRef, rowRef } = props;
+  const { leaving, phone, dialogRef, rowRef, listRef } = props;
   const okRef = useRef<HTMLButtonElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
+  const onPlaced = useRef(props.onPlaced);
+  onPlaced.current = props.onPlaced;
   const [place, setPlace] = useState<SearchTipPlace | null>(null);
+  // Layout sizes only (offset*): the palette's entrance scales it to 0.98 in this very frame, which a box from
+  // getBoundingClientRect would carry into where the card stays.
   useLayoutEffect(() => {
     const measure = () => {
       const dialog = dialogRef.current;
       const row = rowRef.current;
       if (!dialog || !row) return;
-      setPlace(searchTipPlace({ phone, viewportWidth: window.innerWidth, dialog: dialog.getBoundingClientRect(), row: row.getBoundingClientRect() }));
+      setPlace(searchTipPlace({ phone, viewportWidth: window.innerWidth, dialog: { left: dialog.offsetLeft, width: dialog.offsetWidth }, row: { top: row.offsetTop, height: row.offsetHeight } }));
     };
     measure();
     window.addEventListener('resize', measure);
     return () => window.removeEventListener('resize', measure);
   }, [phone, dialogRef, rowRef]);
   const side = place?.side ?? 'below';
-  // Under the box: the room it takes in the palette, which the results list gives up. Beside it: none.
+  // Under the box: the room it takes in the palette, which the results list gives up. Beside it: none. Then, still
+  // before the first paint, whether the list keeps its rows (the first answer is the one that counts).
   useLayoutEffect(() => {
     const dialog = dialogRef.current;
     const card = cardRef.current;
-    if (!dialog || !card || place?.side !== 'below') return;
+    if (!dialog || !card || !place) return;
+    if (place.side !== 'below') {
+      onPlaced.current(true);
+      return;
+    }
+    let height = 0;
     const room = () => {
       const style = getComputedStyle(card);
-      const height = card.getBoundingClientRect().height + (parseFloat(style.marginTop) || 0) + (parseFloat(style.marginBottom) || 0);
+      height = card.offsetHeight + (parseFloat(style.marginTop) || 0) + (parseFloat(style.marginBottom) || 0);
       dialog.style.setProperty('--ib-sp-tip-h', `${Math.ceil(height)}px`);
     };
     room();
+    const list = listRef.current;
+    const row = list?.querySelector<HTMLElement>('.ib-sp-row');
+    onPlaced.current(searchTipFits({ place, phone, viewportHeight: window.innerHeight, cardHeight: height, listHeight: list?.offsetHeight ?? 0, rowHeight: row?.offsetHeight ?? 0 }));
     window.addEventListener('resize', room);
     return () => {
       window.removeEventListener('resize', room);
       dialog.style.removeProperty('--ib-sp-tip-h');
     };
-  }, [place, dialogRef]);
+  }, [place, phone, dialogRef, listRef]);
   return (
     <div
       ref={cardRef}

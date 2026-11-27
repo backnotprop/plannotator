@@ -6149,7 +6149,7 @@ function Inbox() {
       {toast && !toast.hidden && soundDialog !== 'open' && !agentNoteOpen && <InboxToast toast={toast} phone={phone} onDismiss={dismissToast} onHold={holdToast} />}
       <SearchHost
         mounted={searchMounted} open={searchOpen}
-        phone={phone}
+        phone={phone} onSettingsStale={refreshSettings}
         searchTip={settings?.reveal?.search_tip === true && !tourOn && !firstRun && !revealBlocked && !lineBusy}
         tintOf={listColours?.tintOfThread}
         currentProject={route.page === 'inbox' ? route.project : null}

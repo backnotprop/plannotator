@@ -488,7 +488,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
   const [live, setLive] = useState('');
   const rowRef = useRef<HTMLDivElement>(null);
   const tip = useSearchTip({ open, offered: props.searchTip, q, say: setLive });
-  const tipUp = tip.stage === 'shown' || tip.stage === 'leaving';
+  const tipUp = tip.stage === 'trying' || tip.stage === 'shown' || tip.stage === 'leaving';
   /** Best match or Newest: this browser's pick, kept across opens (searchSort.ts). */
   const sort = useSearchSort();
   const [fades, setFades] = useState({ top: false, bottom: false });
@@ -1280,6 +1280,8 @@ export default function SearchPalette(props: SearchPaletteProps) {
           leaving={tip.stage === 'leaving'}
           dialogRef={dialogRef}
           rowRef={rowRef}
+          listRef={listRef}
+          onPlaced={tip.placed}
           titleId={`ib-sp-tipt-${uid}`}
           lineId={`ib-sp-tipl-${uid}`}
           onOk={(keyboard) => {

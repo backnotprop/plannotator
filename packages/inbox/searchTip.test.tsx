@@ -6,12 +6,17 @@
  * taking focus from the box, or a keyboard Got it not sending it back; Got it, Escape or a typed quote not taking it
  * away; the first Escape closing the palette under it; it shown while another one-time dialog showed on this load, or
  * when the window withholds it; under the box, placed against a closed dialog, or the results list not giving up its
- * height (the palette then runs past the window's bottom); its side either side of the breakpoint.
+ * height (the palette then runs past the window's bottom); its side either side of the breakpoint. Once per browser: it
+ * shown again on a new page load of the same browser after a refused or a lost claim (a read-only data folder would
+ * bring it back at every load), or storage that cannot be used throwing; a tab whose settings went stale (shown and
+ * stamped on another device) not reading them again when shown or focused; placed from the palette's box scaled by
+ * its entrance animation (the card then sits 2 px from the palette, not 16); under the box when the results list
+ * would keep fewer than three rows (then not shown, not claimed, not kept: a roomier open shows it).
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { act } from 'react';
+import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
 const hasDom = typeof document !== 'undefined';
@@ -22,9 +27,28 @@ const reveal = (hasDom ? await import('./reveal') : {}) as typeof import('./reve
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
-let savedTimes: { leaveMs: number };
+let savedTimes: { leaveMs: number; freshGapMs: number };
 let savedRevealTimes: typeof reveal.REVEAL_TIMES;
 let savedRect: typeof Element.prototype.getBoundingClientRect;
+let savedSeen: string | null = null;
+let savedStorage: { getItem: Storage['getItem']; setItem: Storage['setItem'] };
+let savedHeight: PropertyDescriptor | undefined;
+let savedWidth: PropertyDescriptor | undefined;
+const OFFSETS = { offsetLeft: 'left', offsetTop: 'top', offsetWidth: 'width', offsetHeight: 'height' } as const;
+let savedOffsets: Partial<Record<keyof typeof OFFSETS, PropertyDescriptor>> = {};
+type Layout = { left?: number; top?: number; width?: number; height?: number };
+/** Layout sizes (offset*) for the elements `of` names, as a browser lays them out; every other element 0. */
+function layout(of: (el: HTMLElement) => Layout | null): void {
+  for (const [name, key] of Object.entries(OFFSETS) as [keyof typeof OFFSETS, keyof Layout][]) {
+    Object.defineProperty(HTMLElement.prototype, name, { configurable: true, get(this: HTMLElement) { return of(this)?.[key] ?? 0; } });
+  }
+}
+function windowHeight(px: number): void {
+  Object.defineProperty(window, 'innerHeight', { configurable: true, value: px });
+}
+function windowWidth(px: number): void {
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: px });
+}
 let claims: string[] = [];
 /** The Inbox's answer to a claim: yes, no, a lost answer (the request fails), or held until `answerClaim` runs. */
 let claimAnswer: 'show' | 'refuse' | 'lost' | 'hold' = 'show';
@@ -41,9 +65,21 @@ beforeEach(() => {
   closed = [];
   savedTimes = { ...tipModule.SEARCH_TIP_TIMES };
   tipModule.SEARCH_TIP_TIMES.leaveMs = 0;
+  tipModule.SEARCH_TIP_TIMES.freshGapMs = 0;
   savedRevealTimes = { ...reveal.REVEAL_TIMES };
   reveal.REVEAL_TIMES.claimRetryMs = 5;
   savedRect = Element.prototype.getBoundingClientRect;
+  // Each case is a browser that has not drawn the tip yet.
+  savedSeen = localStorage.getItem(tipModule.SEARCH_TIP_SEEN_KEY);
+  localStorage.removeItem(tipModule.SEARCH_TIP_SEEN_KEY);
+  savedStorage = { getItem: Storage.prototype.getItem, setItem: Storage.prototype.setItem };
+  savedHeight = Object.getOwnPropertyDescriptor(window, 'innerHeight');
+  savedWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth');
+  savedOffsets = {};
+  for (const name of Object.keys(OFFSETS) as (keyof typeof OFFSETS)[]) {
+    const own = Object.getOwnPropertyDescriptor(HTMLElement.prototype, name);
+    if (own) savedOffsets[name] = own;
+  }
   tipModule.resetSearchTipForTests();
   reveal.resetOneTimeDialogShownForTests();
   savedFetch = globalThis.fetch;
@@ -72,6 +108,19 @@ afterEach(() => {
   Object.assign(tipModule.SEARCH_TIP_TIMES, savedTimes);
   Object.assign(reveal.REVEAL_TIMES, savedRevealTimes);
   Element.prototype.getBoundingClientRect = savedRect;
+  Storage.prototype.getItem = savedStorage.getItem;
+  Storage.prototype.setItem = savedStorage.setItem;
+  if (savedSeen === null) localStorage.removeItem(tipModule.SEARCH_TIP_SEEN_KEY);
+  else localStorage.setItem(tipModule.SEARCH_TIP_SEEN_KEY, savedSeen);
+  if (savedHeight) Object.defineProperty(window, 'innerHeight', savedHeight);
+  else delete (window as { innerHeight?: number }).innerHeight;
+  if (savedWidth) Object.defineProperty(window, 'innerWidth', savedWidth);
+  else delete (window as { innerWidth?: number }).innerWidth;
+  for (const name of Object.keys(OFFSETS) as (keyof typeof OFFSETS)[]) {
+    const own = savedOffsets[name];
+    if (own) Object.defineProperty(HTMLElement.prototype, name, own);
+    else delete (HTMLElement.prototype as unknown as Record<string, unknown>)[name];
+  }
   tipModule.resetSearchTipForTests();
   reveal.resetOneTimeDialogShownForTests();
 });
@@ -252,16 +301,15 @@ test.skipIf(!hasDom)('not shown, and not claimed, while another one-time dialog 
 test.skipIf(!hasDom)('under the box (a window narrower than the breakpoint): placed against the open dialog, and the results list gives up the card\'s measured height until it goes', () => {
   // A 1024 px window: the 680 px palette leaves 172 px at its right, short of the card and its gaps. Nothing is
   // measured while the dialog is closed (a closed dialog has no box), as in a browser.
-  const zero = { left: 0, right: 0, top: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) };
-  const box = (left: number, top: number, width: number, height: number) => ({ left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) });
-  Element.prototype.getBoundingClientRect = function (this: Element) {
-    const dialog = this.closest('dialog');
-    if (!dialog?.open) return zero as DOMRect;
-    if (this === dialog) return box(172, 92, 680, 600) as DOMRect;
-    if (this.matches('.ib-sp-inrow')) return box(172, 92, 680, 49) as DOMRect;
-    if (this.matches('[data-search-tip]')) return box(184, 151, 656, 124) as DOMRect;
-    return zero as DOMRect;
-  } as typeof Element.prototype.getBoundingClientRect;
+  windowHeight(768);
+  layout((el) => {
+    const dialog = el.closest('dialog');
+    if (!dialog?.open) return null;
+    if (el === dialog) return { left: 172, top: 92, width: 680, height: 600 };
+    if (el.matches('.ib-sp-inrow')) return { top: 0, width: 680, height: 49 };
+    if (el.matches('[data-search-tip]')) return { width: 656, height: 124 };
+    return null;
+  });
   act(() => root!.render(palette(true, true)));
   const dialog = host!.querySelector('dialog')!;
   expect(card()!.getAttribute('data-side')).toBe('below');
@@ -277,17 +325,196 @@ describe('searchTipPlace: beside the palette from the width where the card and i
   // The palette is 680 px wide and centred: the room at its right is (width - 680) / 2; the card needs 284 + 16 + 12.
   const at = (viewportWidth: number, phone = false) => {
     const left = (viewportWidth - 680) / 2;
-    const dialog = { left, right: left + 680, top: 100, bottom: 700, width: 680, height: 600 };
-    const row = { left, right: left + 680, top: 100, bottom: 149, width: 680, height: 49 };
-    return tipModule.searchTipPlace({ phone, viewportWidth, dialog, row });
+    return tipModule.searchTipPlace({ phone, viewportWidth, dialog: { left, width: 680 }, row: { top: 0, height: 49 } });
   };
-  test.skipIf(!hasDom)('1304 px and wider: beside, level with the box', () => {
+  test.skipIf(!hasDom)('1304 px and wider: beside, level with the box, 16 px from the palette\'s laid-out edge', () => {
     expect(at(1304)).toEqual({ side: 'right', left: 696, top: -1 });
-    expect(at(1440).side).toBe('right');
+    expect(at(1440)).toEqual({ side: 'right', left: 696, top: -1 });
   });
   test.skipIf(!hasDom)('narrower than 1304 px, or a phone at any width: under the box', () => {
     expect(at(1303)).toEqual({ side: 'below' });
+    expect(at(1295)).toEqual({ side: 'below' });
     expect(at(1024)).toEqual({ side: 'below' });
     expect(at(1440, true)).toEqual({ side: 'below' });
+  });
+});
+
+/** A box as getBoundingClientRect gives it. */
+const rect = (left: number, top: number, width: number, height: number) => ({ left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) }) as DOMRect;
+
+test.skipIf(!hasDom)('placed from the palette\'s laid-out size, not the box its entrance animation shrinks to 0.98 in the frame it is placed in', () => {
+  // A 1440 px window: the palette is laid out at 380..1060. In the open's first frame its entrance has it at scale
+  // 0.98 about its centre: 393.6..1046.4 on screen, 666.4 px wide. The card must end 16 px from 1060, at left 696.
+  windowWidth(1440);
+  windowHeight(900);
+  layout((el) => {
+    const dialog = el.closest('dialog');
+    if (!dialog?.open) return null;
+    if (el === dialog) return { left: 380, top: 108, width: 680, height: 690 };
+    if (el.matches('.ib-sp-inrow')) return { top: 0, width: 680, height: 49 };
+    return null;
+  });
+  Element.prototype.getBoundingClientRect = function (this: Element) {
+    const dialog = this.closest('dialog');
+    if (!dialog?.open) return rect(0, 0, 0, 0);
+    if (this === dialog) return rect(393.6, 114.9, 666.4, 676.2);
+    if (this.matches('.ib-sp-inrow')) return rect(393.6, 114.9, 666.4, 48);
+    return rect(0, 0, 0, 0);
+  } as typeof Element.prototype.getBoundingClientRect;
+  act(() => root!.render(palette(true, true)));
+  expect(card()!.getAttribute('data-side')).toBe('right');
+  expect(card()!.style.left).toBe('696px');
+  expect(card()!.style.top).toBe('-1px');
+});
+
+test.skipIf(!hasDom)('once per browser: after a refused claim, a new page load of this browser shows it no more', async () => {
+  claimAnswer = 'refuse';
+  await render(true);
+  await settle();
+  expect(shown()).toBe(true);
+  // A new page load: the page's own memory is gone, the Inbox still reports it due (its stamp never landed).
+  act(() => root!.unmount());
+  tipModule.resetSearchTipForTests();
+  root = createRoot(host!);
+  await render(true);
+  await settle();
+  expect(shown()).toBe(false);
+  expect(claims).toEqual(['search_tip']);
+});
+
+test.skipIf(!hasDom)('once per browser: after a lost answer, a new page load of this browser shows it no more', async () => {
+  claimAnswer = 'lost';
+  await render(true);
+  await settle(80);
+  expect(shown()).toBe(true);
+  act(() => root!.unmount());
+  tipModule.resetSearchTipForTests();
+  root = createRoot(host!);
+  await render(true);
+  await settle(80);
+  expect(shown()).toBe(false);
+  expect(claims).toEqual(['search_tip', 'search_tip']);
+});
+
+test.skipIf(!hasDom)('storage that cannot be used (private mode, quota) throws nothing: it shows and is claimed as usual', async () => {
+  // A browser that blocks site data throws on reaching localStorage at all.
+  const own = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    get() {
+      throw new DOMException('denied', 'SecurityError');
+    },
+  });
+  try {
+    await render(true);
+    await settle();
+    expect(shown()).toBe(true);
+    expect(claims).toEqual(['search_tip']);
+  } finally {
+    if (own) Object.defineProperty(globalThis, 'localStorage', own);
+    else delete (globalThis as { localStorage?: Storage }).localStorage;
+  }
+  // One that reaches it but refuses every read and write (quota, private mode).
+  Storage.prototype.getItem = () => {
+    throw new DOMException('denied', 'SecurityError');
+  };
+  Storage.prototype.setItem = () => {
+    throw new DOMException('full', 'QuotaExceededError');
+  };
+  // A new page load (the Inbox's yes above held this load's other one-time things back).
+  act(() => root!.unmount());
+  tipModule.resetSearchTipForTests();
+  reveal.resetOneTimeDialogShownForTests();
+  root = createRoot(host!);
+  await render(true);
+  await settle();
+  expect(shown()).toBe(true);
+  expect(claims).toEqual(['search_tip', 'search_tip']);
+});
+
+test.skipIf(!hasDom)('a tab shown again or focused reads the settings again: shown and stamped elsewhere, it is not drawn at the next open', async () => {
+  let reads = 0;
+  // The window: its settings say due until a read says the tip was stamped (another device showed it).
+  function Window(props: { open: boolean }) {
+    const [due, setDue] = useState(true);
+    tipModule.useSearchTipFresh(due, () => {
+      reads += 1;
+      setDue(false);
+    });
+    return <SearchPalette open={props.open} phone={false} currentProject={null} projects={[]} searchTip={due} onClose={() => {}} onOpenResult={() => {}} />;
+  }
+  await act(async () => root!.render(<Window open={false} />));
+  await act(async () => {
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  expect(reads).toBe(1);
+  await act(async () => root!.render(<Window open />));
+  await settle();
+  expect(shown()).toBe(false);
+  expect(claims).toEqual([]);
+  // Not offered any more: a focus reads nothing.
+  await act(async () => {
+    window.dispatchEvent(new Event('focus'));
+  });
+  expect(reads).toBe(1);
+});
+
+test.skipIf(!hasDom)('a focus reads the settings again too, while it is offered', async () => {
+  let reads = 0;
+  function Host() {
+    tipModule.useSearchTipFresh(true, () => (reads += 1));
+    return null;
+  }
+  await act(async () => root!.render(<Host />));
+  await act(async () => {
+    window.dispatchEvent(new Event('focus'));
+  });
+  expect(reads).toBe(1);
+});
+
+test.skipIf(!hasDom)('under the box, a window too short to keep three result rows below it: not shown, not claimed, not kept; a taller window\'s open shows it', async () => {
+  // A 1024 px window (the card goes under the box), 400 px tall: the list keeps min(560, 352 - 160 - 124) = 68 px,
+  // under three 34 px rows.
+  windowHeight(400);
+  layout((el) => {
+    const dialog = el.closest('dialog');
+    if (!dialog?.open) return null;
+    if (el === dialog) return { left: 172, top: 48, width: 680, height: 300 };
+    if (el.matches('.ib-sp-inrow')) return { top: 0, width: 680, height: 49 };
+    if (el.matches('[data-search-tip]')) return { width: 656, height: 124 };
+    if (el.matches('.ib-sp-row')) return { height: 34 };
+    return null;
+  });
+  await render(true);
+  await settle();
+  expect(shown()).toBe(false);
+  expect(claims).toEqual([]);
+  expect(localStorage.getItem(tipModule.SEARCH_TIP_SEEN_KEY)).toBe(null);
+  expect(host!.querySelector('dialog')!.style.getPropertyValue('--ib-sp-tip-h')).toBe('');
+  await render(false);
+  windowHeight(800);
+  await render(true);
+  await settle();
+  expect(shown()).toBe(true);
+  expect(claims).toEqual(['search_tip']);
+  expect(localStorage.getItem(tipModule.SEARCH_TIP_SEEN_KEY)).toBe('1');
+});
+
+describe('searchTipFits: under the box only with three result rows of room left', () => {
+  const below = { side: 'below' } as const;
+  test.skipIf(!hasDom)('a desktop: the list\'s cap less the card, against three measured rows', () => {
+    // 720 px tall: min(560, 633.6 - 160 - 140) = 333.6 px.
+    expect(tipModule.searchTipFits({ place: below, phone: false, viewportHeight: 720, cardHeight: 140, listHeight: 0, rowHeight: 50 })).toBe(true);
+    // 480 px tall: 422.4 - 160 - 140 = 122.4 px, under three 50 px rows.
+    expect(tipModule.searchTipFits({ place: below, phone: false, viewportHeight: 480, cardHeight: 140, listHeight: 0, rowHeight: 50 })).toBe(false);
+  });
+  test.skipIf(!hasDom)('a phone: the list\'s own height with the card in place', () => {
+    expect(tipModule.searchTipFits({ place: below, phone: true, viewportHeight: 480, cardHeight: 150, listHeight: 120, rowHeight: 56 })).toBe(false);
+    expect(tipModule.searchTipFits({ place: below, phone: true, viewportHeight: 844, cardHeight: 150, listHeight: 480, rowHeight: 56 })).toBe(true);
+    // No row to measure yet: a phone row's least height (56 px).
+    expect(tipModule.searchTipFits({ place: below, phone: true, viewportHeight: 480, cardHeight: 150, listHeight: 160, rowHeight: 0 })).toBe(false);
+  });
+  test.skipIf(!hasDom)('beside the palette it takes no room from the list', () => {
+    expect(tipModule.searchTipFits({ place: { side: 'right', left: 696, top: -1 }, phone: false, viewportHeight: 300, cardHeight: 140, listHeight: 0, rowHeight: 50 })).toBe(true);
   });
 });

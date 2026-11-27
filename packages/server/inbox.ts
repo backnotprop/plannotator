@@ -156,7 +156,7 @@ import { openPackedApp, packedAppResponse, PACKED_ASSET_ROUTE_PREFIX, PACKED_ASS
 import { encodeInboxResponse } from "./inbox-encoding";
 import type { InboxSearchIndex, InboxSearchIndexOptions } from "@plannotator/shared/inbox/search";
 import { DecisionDataAborted, decisionDataCsv, decisionDataSummary, readDecisionLines } from "@plannotator/shared/inbox/decision-data";
-import { createInboxSearchRoutes, readRecentSearches } from "./inbox-search";
+import { createInboxSearchRoutes, recentSearchesQuotedReader } from "./inbox-search";
 import { createInboxCombine } from "./inbox-combine";
 import { createInboxCombineFar, type InboxCombineFar } from "./inbox-combine-far";
 import { combineArchiveAgain, combineArchiveSkip } from "./inbox-combine-guard";
@@ -348,7 +348,6 @@ import { launchTipClaim, launchTipDue, launchTipLaunched, type LaunchTipState } 
 import { sidebarTipClaim, sidebarTipDue, type SidebarTipState } from "@plannotator/shared/inbox/sidebar-tip";
 import { bandTipClaim, bandTipDue, bandTipUsed, type BandTipState } from "@plannotator/shared/inbox/band-tip";
 import { searchTipClaim, searchTipDue, type SearchTipState } from "@plannotator/shared/inbox/search-tip";
-import { inboxSearchQuoted } from "@plannotator/core/inbox-search";
 import { revealGrillMeGap, type GrillMeTipQuestion } from "@plannotator/shared/inbox/grill-me-tip";
 import { routinesIntroGoodDaysOnce, routinesIntroOpen, routinesIntroSend, routinesIntroWaits } from "@plannotator/shared/inbox/routines-intro";
 import { splitInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
@@ -4104,9 +4103,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * until it was shown once, and never for someone whose recent searches already hold a quote. Outside the line's
    * order, as the Sidebar tip: its claim stamps only `inboxReveals.search_tip`, and it keeps the gap both ways.
    */
+  const recentSearchesQuoted = recentSearchesQuotedReader(store.dir);
   const searchTipState = (): SearchTipState => ({
-    // Read from disk only while it could still be due (never once stamped, nor before the person's first day is over).
-    quoted: () => readRecentSearches(store.dir).some(inboxSearchQuoted),
+    // Asked only while it could still be due (never once stamped, nor before the person's first day is over); the file
+    // is read again only when it changed.
+    quoted: recentSearchesQuoted,
     firstUseAt: snoozeIntroSaved()?.firstUseAt ?? null,
     tenure: snoozeIntroRelease,
     saved: loadConfig().inboxReveals?.search_tip,
