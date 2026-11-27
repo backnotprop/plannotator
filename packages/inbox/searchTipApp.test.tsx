@@ -10,12 +10,13 @@
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 import { NO_BROWSER } from '../../tests/helpers/no-browser';
+import { savedConfig } from '../../tests/helpers/saved-config';
 
 const hasDom = typeof document !== 'undefined';
 const { InboxApp } = (hasDom ? await import('./App') : {}) as typeof import('./App');
@@ -127,7 +128,8 @@ async function until(check: () => boolean, what: string) {
   throw new Error(`timed out waiting for ${what}`);
 }
 
-const saved = () => JSON.parse(readFileSync(join(dir!, 'data', 'config.json'), 'utf8')) as { inboxReveals?: { search_tip?: { shownAt?: string } } };
+// `inboxReveals` is this computer's state: the Inbox keeps it in state.json, over config.json (savedConfig merges both).
+const saved = () => savedConfig(join(dir!, 'data')) as { inboxReveals?: { search_tip?: { shownAt?: string } } };
 
 test.skipIf(!hasDom)('the window hands the palette the Inbox\'s Search tip: the first open shows it and the Inbox stamps it', async () => {
   // The Inbox has it for this page.
@@ -146,5 +148,5 @@ test.skipIf(!hasDom)('the window hands the palette the Inbox\'s Search tip: the 
   act(() => (host!.querySelector('.ib-sp-entry') as HTMLButtonElement).click());
   await until(() => document.querySelector('dialog[data-search-palette]') !== null, 'the palette');
   await until(() => document.querySelector('dialog[data-search-palette] [data-search-tip]') !== null, 'the Search tip');
-  await until(() => typeof saved().inboxReveals?.search_tip?.shownAt === 'string', 'config.json inboxReveals.search_tip stamped');
+  await until(() => typeof saved().inboxReveals?.search_tip?.shownAt === 'string', 'inboxReveals.search_tip stamped');
 }, 30_000);
