@@ -251,7 +251,8 @@ import { INBOX_DECISION_POST_ROUTE, postThreadDecisions } from "./inbox-decision
 import { DECISION_POST_DESTINATIONS, decisionPostDestinationOf } from "@plannotator/shared/inbox/decision-post";
 import { createInboxAccountsFor, switchTarget } from "./inbox-accounts";
 import { INBOX_ACCOUNT_SWITCHING, INBOX_ACTIVITY_MAX_DAYS, type InboxNoteAutoAdd, type InboxPullRiskAnswer } from "@plannotator/core/inbox-types";
-import { createInboxOpenInRoute, systemOpenInLauncher, type InboxOpenInLauncher } from "./inbox-open-in";
+import { createInboxOpenInRoute, systemOpenInLauncher, type InboxLinkPulls, type InboxOpenInLauncher } from "./inbox-open-in";
+import type { InboxSendLinkPulls } from "./inbox-links-not-found";
 import { recordInboxAttachments, sweepStaleInboxSendTemps } from "@plannotator/shared/inbox/attachments";
 import { assertInboxUploadsPending, inboxBodyForAgent, inboxDiskFullError, inboxUploadAttachments, removeInboxAttachmentFiles, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
 import { createInboxLiveSessions, takesOver, thereInThread } from "./inbox-sessions";
@@ -1820,6 +1821,22 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     await pulls.list(wanted, { refresh: false });
   };
 
+  // A thread's PRs and a file's text at one: the referenced-file view reads them first.
+  const linkPulls: InboxLinkPulls = {
+    threadPulls: (thread) => pullOwners.keys(thread).reverse(),
+    // An Inbox just started has no list yet: read it for a PR it does not know.
+    pullFile: async (pull, path) => {
+      const { wanted } = await pullProjects();
+      if (!pulls.find(pull)) await findPulls([pull], wanted);
+      return pulls.file(pull, path, wanted);
+    },
+  };
+  // The send's `links_not_found` asks the same PRs only what is kept in memory: a send never waits on the forge.
+  const sendLinkPulls: InboxSendLinkPulls = {
+    threadPulls: linkPulls.threadPulls,
+    cachedFile: (pull, path) => pulls.cachedFile(pull, path),
+  };
+
   // Where a path an agent named files its messages: its repository (a linked
   // worktree folds into its main repository's project) or the folder, cached
   // per folder (packages/server/inbox-project-root.ts). One cache for sends
@@ -1895,6 +1912,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     projectRootOf: (path) => projectRoots.resolve(path),
     recordAttachments: (paths, project, base) =>
       recordInboxAttachments(store.dir, paths, { base, at: new Date().toISOString() }),
+    linkPulls: sendLinkPulls,
     // A question's running-app prototypes, checked and probed before anything is written (inbox-live.ts).
     checkPrototypeApps: (apps, probing) => liveSites.checkPrototypeApps(apps, probing),
     // The agents' read-only search reads the window's own ⌘K index, and finds projects without making one.
@@ -6078,13 +6096,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           return origin?.host && inboxPullRepoKey(origin.host, origin.display) === repo;
         })
         .map((project) => project.root),
-    threadPulls: (thread) => pullOwners.keys(thread).reverse(),
-    // An Inbox just started has no list yet: read it for a PR it does not know.
-    pullFile: async (pull, path) => {
-      const { wanted } = await pullProjects();
-      if (!pulls.find(pull)) await findPulls([pull], wanted);
-      return pulls.file(pull, path, wanted);
-    },
+    ...linkPulls,
   });
 
   // Run and Secret (`:::run`, `:::secret`; inbox-run-setup.ts): the person's press runs a command here, as them; a

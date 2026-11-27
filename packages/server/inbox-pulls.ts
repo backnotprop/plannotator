@@ -831,6 +831,11 @@ export interface InboxPulls {
    * Null when the PR is not in the last list, has no known head, or has no such text file there. Never throws.
    */
   file(key: string, path: string, repos?: InboxPullRepo[]): Promise<InboxPullFile | null>;
+  /**
+   * `file`'s answer from memory alone: never the forge, never a list read. The file; null when the forge said there is
+   * no such text file at the PR's head; undefined when nothing kept says (the PR, its head or that path never read).
+   */
+  cachedFile(key: string, path: string): InboxPullFile | null | undefined;
   /** Whether a PR still has this commit (a force-push takes it off); null when the forge did not say. */
   hasCommit(key: string, sha: string): Promise<boolean | null>;
   /** Whether a GitLab MR has a version whose head is this commit; null when the forge did not say. */
@@ -1271,6 +1276,12 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
     const own = departed.get(key);
     if (own && lastRepos.has(inboxPullRepoKey(own.host, own.repo))) return own;
     return departedWide.get(key);
+  };
+  /** A file's text at a PR's head, with its label and its address on the forge. */
+  const headFileOf = (pull: InboxPull, sha: string, path: string, contents: string): InboxPullFile => {
+    const encoded = path.split("/").map(encodeURIComponent).join("/");
+    const url = `https://${pull.host}/${pull.repo}/${pull.platform === "gitlab" ? "-/" : ""}blob/${sha}/${encoded}`;
+    return { contents, label: inboxPullLabel(pull), platform: pull.platform, url };
   };
   /** The PR a diff, details or file read is for: one the last lists name in a repository they showed, or one that left. */
   const readable = (key: string): InboxPull | undefined => {
@@ -2002,10 +2013,14 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
           while (headFiles.size > INBOX_PULL_FILES_KEPT) headFiles.delete(headFiles.keys().next().value!);
         }
       }
-      if (contents === null) return null;
-      const encoded = path.split("/").map(encodeURIComponent).join("/");
-      const url = `https://${pull.host}/${pull.repo}/${pull.platform === "gitlab" ? "-/" : ""}blob/${sha}/${encoded}`;
-      return { contents, label: inboxPullLabel(pull), platform: pull.platform, url };
+      return contents === null ? null : headFileOf(pull, sha, path, contents);
+    },
+    cachedFile(key, path) {
+      const pull = findKnown(key) ?? departedOf(key);
+      const sha = pull ? (pull.head_sha ?? readHeads.get(key)) : null;
+      if (!pull || !sha || !splitPath(pull.repo)) return undefined;
+      const contents = headFiles.get(`${pull.host}/${pull.repo}@${sha}:${path}`);
+      return contents === undefined ? undefined : contents === null ? null : headFileOf(pull, sha, path, contents);
     },
     async hasCommit(key, sha) {
       const pull = findKnown(key) ?? departedOf(key);
