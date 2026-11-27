@@ -15,6 +15,7 @@ import { reaskRowLine, sentRowLine, undeliveredLabel } from '../deliveryLine';
 import { sentRecipientsWords } from '../tags';
 import { TagStack } from './TagPicker';
 import { LazyRowTips, opensTips, RowTip } from './RowTip';
+import { RowSlotNames } from './RowSlot';
 import { AuthorMark, Icon } from '../icons';
 import { canMarkUnread, offersRowMarkRead } from '../markRead';
 import { inboxHasUnsent, inboxRowArchived } from '@plannotator/core/inbox-types';
@@ -88,11 +89,16 @@ export function SnoozedUntil({ row }: { row: InboxListRow }) {
  */
 export const RowTimeBy = createContext<((row: InboxListRow) => string) | null>(null);
 
-/** Around a list's rows: their tooltips mounted on first use (`LazyRowTips`, RowTip.tsx), and the time they show (`RowTimeBy`). */
+/**
+ * Around a list's rows: their tooltips mounted on first use (`LazyRowTips`, RowTip.tsx), the time they show
+ * (`RowTimeBy`), and the session names their slots read, read once for the list (`RowSlotNames`, RowSlot.tsx).
+ */
 export function ListRows({ timeBy, children }: { timeBy?: ((row: InboxListRow) => string) | null; children: ReactNode }) {
   return (
     <LazyRowTips.Provider value={true}>
-      <RowTimeBy.Provider value={timeBy ?? null}>{children}</RowTimeBy.Provider>
+      <RowTimeBy.Provider value={timeBy ?? null}>
+        <RowSlotNames>{children}</RowSlotNames>
+      </RowTimeBy.Provider>
     </LazyRowTips.Provider>
   );
 }
