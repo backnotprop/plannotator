@@ -1548,3 +1548,44 @@ describe("the Group tip: a band's one-time tooltip, outside the line, stamped on
     expect((await shown.post("/api/inbox/reveal", { id: "sidebar_tip", used: true })).status).toBe(422);
   });
 });
+
+describe("the Search tip: outside the line, stamped once when shown, never for someone who already searched with quotes", () => {
+  const KEY = "search-tip-key-1";
+
+  test("due a day or more after first use; the claim stamps only inboxReveals.search_tip and starts the gap; another window gets no; the same key again yes", async () => {
+    const w = await world();
+    expect((await w.settings()).reveal.search_tip).toBe(true);
+    expect((await w.claim("search_tip", KEY)).show).toBe(true);
+    const saved = w.saved().inboxReveals;
+    expect(saved.search_tip).toEqual({ shownAt: expect.stringMatching(/^\d{4}-/), key: KEY });
+    expect(saved.lastShownAt).toBeUndefined();
+    // It starts the 40-minute gap, as the Sidebar tip does: nothing of the line, and no other tip, follows it at once.
+    const after = (await w.settings()).reveal;
+    expect(after).toMatchObject({ next: null, search_tip: false, sidebar_tip: false });
+    expect((await w.claim("board")).show).toBe(false);
+    expect((await w.claim("sidebar_tip", "sidebar-key-2")).show).toBe(false);
+    expect((await w.claim("search_tip", "another-key-22")).show).toBe(false);
+    expect((await w.claim("search_tip", KEY)).show).toBe(true);
+    expect(w.saved().inboxReveals.search_tip.shownAt).toBe(saved.search_tip.shownAt);
+  });
+
+  test("not on a first-run day, nor within a dialog's gap (unspent); never once a recent search holds a quote", async () => {
+    const fresh = await world({ days: 0 });
+    expect((await fresh.settings()).reveal.search_tip).toBe(false);
+    expect((await fresh.claim("search_tip", KEY)).show).toBe(false);
+    expect(fresh.saved().inboxReveals?.search_tip).toBeUndefined();
+
+    const dialogFirst = await world();
+    expect((await dialogFirst.claim("board")).show).toBe(true);
+    expect((await dialogFirst.settings()).reveal.search_tip).toBe(false);
+    expect((await dialogFirst.claim("search_tip", KEY)).show).toBe(false);
+    expect(dialogFirst.saved().inboxReveals?.search_tip).toBeUndefined();
+
+    const quoted = await world();
+    expect((await quoted.settings()).reveal.search_tip).toBe(true);
+    expect((await quoted.post("/api/inbox/search/recent", { q: "“rate limit” totals" })).status).toBe(200);
+    expect((await quoted.settings()).reveal.search_tip).toBe(false);
+    expect((await quoted.claim("search_tip", KEY)).show).toBe(false);
+    expect(quoted.saved().inboxReveals?.search_tip).toBeUndefined();
+  });
+});
