@@ -23,6 +23,7 @@ const { agentStatusWatchersForTests } = (hasDom ? await import('./agents/agentSt
 const { setSessionLabels } = (hasDom ? await import('./sessionLabels') : {}) as typeof import('./sessionLabels');
 const { hover, openTooltips, settle, unhover } = await import('./testing/tooltip');
 const { undeliveredLabel } = await import('./deliveryLine');
+const { agentFaceWatchersForTests, hearAgentFacesEvent, resetAgentFaces } = (hasDom ? await import('./agents/agentFaces') : {}) as typeof import('./agents/agentFaces');
 
 const realFetch = globalThis.fetch;
 let root: Root | null = null;
@@ -48,6 +49,7 @@ afterEach(() => {
     resetListLookForTests();
     setInboxAgents(null);
     setSessionLabels({});
+    resetAgentFaces();
   });
 });
 
@@ -216,10 +218,10 @@ test.skipIf(!hasDom)("a row's tooltips wait with two hooks each and one handler;
 });
 
 /**
- * Every hook a plain wide row holds (no PR, no waiting reply, relative time off): its tooltips waiting (two each),
- * its focus and menu state, its agent icon's face. Each was paid on every row a list mounts.
+ * Every hook a plain wide row holds (no PR, no waiting reply, relative time off): its three tooltips waiting (two
+ * each), its keyboard focus and id, its hover action's state. It was 66 before the rows read shared values once.
  */
-const PLAIN_ROW_HOOKS = 15;
+const PLAIN_ROW_HOOKS = 9;
 
 /** A reply waiting on a busy agent since `minutes` ago (approval "inbox-busy-agent-reply"). */
 const waitingReply = (minutes: number): InboxListRow['delivery'] => ({ kind: 'reply', state: 'queued', reason: 'working', send_now: false, message_id: 'msg_r', at: null, host: 'claude-code', name: null, waiting_since: new Date(Date.now() - minutes * 60_000).toISOString() }) as InboxListRow['delivery'];
@@ -250,4 +252,21 @@ test.skipIf(!hasDom)('with relative time off a row keeps no clock; turned on aft
   expect(relative.every((time) => time.querySelector('.ib-sr')!.textContent === '5 minutes ago' && !!time.title)).toBe(true);
   act(() => adoptSavedRows(['smallNames'], 2));
   expect(el.querySelectorAll('[data-relative-time]').length).toBe(0);
+});
+
+test.skipIf(!hasDom)("the rows' agent icons hear the agents' faces once for the list; a face picked after it drew shows on all of that agent's rows", () => {
+  const before = agentFaceWatchersForTests();
+  const el = mount();
+  // No watcher per icon (each had two: its agent's face and its tile choice, 120 here).
+  expect(agentFaceWatchersForTests() - before).toBe(0);
+  const faceOf = (row: HTMLElement) => row.querySelector('[data-agent-face]')?.getAttribute('data-agent-face') ?? null;
+  expect(rowEls(el).filter((row) => faceOf(row) !== null).length).toBe(0);
+  // Another window picked a face for the second session (its stream's `agent-faces` event).
+  act(() => void hearAgentFacesEvent({ faces: { ses_1: { face: 'glass', sessions: [] } }, rev: 1 }));
+  const rows = rowEls(el);
+  expect(rows.filter((row, i) => i % 3 === 1 && faceOf(row) === 'glass').length).toBe(ROWS / 3);
+  expect(rows.filter((row, i) => i % 3 !== 1 && faceOf(row) !== null).length).toBe(0);
+  // Picked back to its own mark: every one of its rows follows.
+  act(() => void hearAgentFacesEvent({ faces: {}, rev: 2 }));
+  expect(rowEls(el).filter((row) => faceOf(row) !== null).length).toBe(0);
 });

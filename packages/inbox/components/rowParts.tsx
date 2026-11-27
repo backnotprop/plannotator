@@ -17,6 +17,7 @@ import { TagStack } from './TagPicker';
 import { LazyRowTips, opensTips, RowTip } from './RowTip';
 import { RowSlotNames } from './RowSlot';
 import { ListRexMarksScope } from '../agents/rexMark';
+import { ListAgentFacesScope } from '../agents/listFaces';
 import { AuthorMark, Icon } from '../icons';
 import { canMarkUnread, offersRowMarkRead } from '../markRead';
 import { inboxHasUnsent, inboxRowArchived } from '@plannotator/core/inbox-types';
@@ -94,7 +95,8 @@ export const RowTimeBy = createContext<((row: InboxListRow) => string) | null>(n
  * Around a list's rows: their tooltips mounted on first use (`LazyRowTips`, RowTip.tsx), the time they show
  * (`RowTimeBy`), and what every row reads from a store, read once for the list: the session names their slots and
  * agent tiles show (`RowSlotNames`, RowSlot.tsx), their letter marks (`ListRowMarks`, letterMarks.tsx) and the
- * agents' Rex marks on their icons (`ListRexMarksScope`, agents/rexMark.tsx).
+ * agents' Rex marks and faces on their icons (`ListRexMarksScope`, agents/rexMark.tsx; `ListAgentFacesScope`,
+ * agents/listFaces.tsx).
  */
 export function ListRows({ timeBy, children }: { timeBy?: ((row: InboxListRow) => string) | null; children: ReactNode }) {
   return (
@@ -102,7 +104,9 @@ export function ListRows({ timeBy, children }: { timeBy?: ((row: InboxListRow) =
       <RowTimeBy.Provider value={timeBy ?? null}>
         <RowSlotNames>
           <ListRowMarks>
-            <ListRexMarksScope>{children}</ListRexMarksScope>
+            <ListRexMarksScope>
+              <ListAgentFacesScope>{children}</ListAgentFacesScope>
+            </ListRexMarksScope>
           </ListRowMarks>
         </RowSlotNames>
       </RowTimeBy.Provider>

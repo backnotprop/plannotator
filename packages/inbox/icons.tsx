@@ -14,8 +14,10 @@ import { isScriptAuthor } from './scriptAuthor';
 import type { CSSProperties, ReactNode } from 'react';
 import { listedRexMark, RexMark, useListRexMarks, useRexMarkOf, type ShownMark } from './agents/rexMark';
 import { ProjectFaceMark, shownAgentFace, useShownAgentFace } from './agents/projectFace';
-import { useAgentFace, useAgentTakesTiles } from './agents/agentFaces';
+import { agentFaceOf, agentTakesTiles } from './agents/agentFaces';
+import { useListAgentFaces } from './agents/listFaces';
 import { useGivenRowMarks } from './letterMarks';
+import { usePictureWorld } from './pictureWorld';
 import { useAgentFaceSources } from './agents/faceArtLoad';
 import { isOwnFace, type AgentFace, type OurFace, type OwnFace } from './agents/faceChoices';
 import { ownIconSrc } from './agents/ownIcons';
@@ -29,10 +31,17 @@ export * from '@plannotator/ui/components/inbox-thread/icons';
  * icons "From the project name", its project's tile (agents/projectFace.tsx).
  */
 export function HostMark(props: HostMarkProps) {
-  // In a list's rows: the agents' marks and the Rows look the list read once for every row (rowParts.tsx `ListRows`).
+  // In a list's rows: the agents' marks, their faces and the Rows look, heard once for every row (rowParts.tsx `ListRows`).
   const marks = useListRexMarks();
   const given = useGivenRowMarks();
-  return marks && given ? <ListedHostMark {...props} marks={marks} projectIcons={given.projectIcons} /> : <OwnHostMark {...props} />;
+  const faces = useListAgentFaces();
+  const world = usePictureWorld();
+  if (!marks || !given || faces === null) return <OwnHostMark {...props} />;
+  // `useShownAgentFace`, read as the icon draws: the list draws its icons again when any face changes.
+  const { agent } = props;
+  const kept = world ? ((agent ? world.faces.get(agent) : undefined) ?? 'agent') : agentFaceOf(agent);
+  const face = agent ? shownAgentFace(kept, given.projectIcons && agentTakesTiles(agent)) : kept;
+  return drawHostMark(props, listedRexMark(marks, agent), face);
 }
 
 type HostMarkProps = { host: string | null | undefined; big?: boolean; agent?: string | null; script?: boolean };
@@ -42,14 +51,6 @@ function OwnHostMark({ host, big, agent, script }: HostMarkProps) {
   const rex = useRexMarkOf(agent);
   const face = useShownAgentFace(agent);
   return drawHostMark({ host, big, agent, script }, rex, face);
-}
-
-/** `useShownAgentFace` with the list's `projectIcons`: the agent's own face stays its own subscription. */
-function ListedHostMark({ marks, projectIcons, ...props }: HostMarkProps & { marks: ReadonlyMap<string, string>; projectIcons: boolean }) {
-  const kept = useAgentFace(props.agent);
-  const takes = useAgentTakesTiles(props.agent);
-  const face = props.agent ? shownAgentFace(kept, projectIcons && takes) : kept;
-  return drawHostMark(props, listedRexMark(marks, props.agent), face);
 }
 
 function drawHostMark({ host, big, agent, script }: HostMarkProps, rex: ShownMark | null, face: AgentFace) {
