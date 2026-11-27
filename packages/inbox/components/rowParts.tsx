@@ -4,7 +4,7 @@
  * them the same.
  */
 import { createContext, useContext, useState, type ReactNode } from 'react';
-import { HueDot, LetterMark, showsThreads, useRowMarks } from '../letterMarks';
+import { HueDot, LetterMark, ListRowMarks, showsThreads, useGivenRowMarks, useRowMarks, type MarksChoice } from '../letterMarks';
 import { withShortcut } from '../shortcuts/hint';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
 import type { InboxListGroupId, InboxListRow } from '@plannotator/core/inbox-types';
@@ -16,6 +16,8 @@ import { sentRecipientsWords } from '../tags';
 import { TagStack } from './TagPicker';
 import { LazyRowTips, opensTips, RowTip } from './RowTip';
 import { RowSlotNames } from './RowSlot';
+import { ListRexMarksScope } from '../agents/rexMark';
+import { ListAgentFacesScope } from '../agents/listFaces';
 import { AuthorMark, Icon } from '../icons';
 import { canMarkUnread, offersRowMarkRead } from '../markRead';
 import { inboxHasUnsent, inboxRowArchived } from '@plannotator/core/inbox-types';
@@ -91,13 +93,22 @@ export const RowTimeBy = createContext<((row: InboxListRow) => string) | null>(n
 
 /**
  * Around a list's rows: their tooltips mounted on first use (`LazyRowTips`, RowTip.tsx), the time they show
- * (`RowTimeBy`), and the session names their slots read, read once for the list (`RowSlotNames`, RowSlot.tsx).
+ * (`RowTimeBy`), and what every row reads from a store, read once for the list: the session names their slots and
+ * agent tiles show (`RowSlotNames`, RowSlot.tsx), their letter marks (`ListRowMarks`, letterMarks.tsx) and the
+ * agents' Rex marks and faces on their icons (`ListRexMarksScope`, agents/rexMark.tsx; `ListAgentFacesScope`,
+ * agents/listFaces.tsx).
  */
 export function ListRows({ timeBy, children }: { timeBy?: ((row: InboxListRow) => string) | null; children: ReactNode }) {
   return (
     <LazyRowTips.Provider value={true}>
       <RowTimeBy.Provider value={timeBy ?? null}>
-        <RowSlotNames>{children}</RowSlotNames>
+        <RowSlotNames>
+          <ListRowMarks>
+            <ListRexMarksScope>
+              <ListAgentFacesScope>{children}</ListAgentFacesScope>
+            </ListRexMarksScope>
+          </ListRowMarks>
+        </RowSlotNames>
       </RowTimeBy.Provider>
     </LazyRowTips.Provider>
   );
@@ -105,19 +116,10 @@ export function ListRows({ timeBy, children }: { timeBy?: ((row: InboxListRow) =
 
 /** The row's time. A thread back from a snooze shows a small clock before it until the person reads it. */
 export function RowTime({ row, relative = false }: { row: InboxListRow; relative?: boolean }) {
-  // A relative time moves on by itself: the shared minute clock renders it again (only while it is on).
-  const now = useRelativeClock(relative);
   const timeBy = useContext(RowTimeBy);
   const iso = timeBy?.(row) || rowTimeIso(row);
-  // Relative: a screen reader hears "4 minutes ago" (never "4m"), and the pointer's tooltip gives the clock time.
-  const time = relative ? (
-    <span className="ib-trel" data-relative-time="" title={whenTime(iso)}>
-      <span aria-hidden="true">{relativeTime(iso, now)}</span>
-      <span className="ib-sr">{relativeWords(iso, now)}</span>
-    </span>
-  ) : (
-    shortTime(iso)
-  );
+  // Relative time off (the default): no clock at all in the row, on any of the ~2,200 rows a large Inbox mounts.
+  const time = relative ? <RelativeTime iso={iso} /> : shortTime(iso);
   return (
     <>
       {row.snooze_back && (
@@ -127,6 +129,18 @@ export function RowTime({ row, relative = false }: { row: InboxListRow; relative
       )}
       <TimeWithTick delivery={row.delivery} time={time} />
     </>
+  );
+}
+
+/** A relative time: it moves on by itself, the shared minute clock renders it again. */
+function RelativeTime({ iso }: { iso: string }) {
+  const now = useRelativeClock(true);
+  // A screen reader hears "4 minutes ago" (never "4m"), and the pointer's tooltip gives the clock time.
+  return (
+    <span className="ib-trel" data-relative-time="" title={whenTime(iso)}>
+      <span aria-hidden="true">{relativeTime(iso, now)}</span>
+      <span className="ib-sr">{relativeWords(iso, now)}</span>
+    </span>
   );
 }
 
@@ -190,8 +204,17 @@ export function RowTitle({ row, className, pill, tip = false }: { row: InboxList
 }
 
 /** Letter marks (letterMarks.tsx), style "Inline": a 20 px tile before the title; style "Dot": the thread's hue alone. */
-export function TitleMark({ row, children }: { row: InboxListRow; children: ReactNode }) {
-  const { marks } = useRowMarks();
+export function TitleMark(props: { row: InboxListRow; children: ReactNode }) {
+  // In a list's rows, the list's marks (letterMarks.tsx `ListRowMarks`); anywhere else the row reads them itself.
+  const given = useGivenRowMarks();
+  return given ? drawTitleMark(props, given.marks) : <OwnTitleMark {...props} />;
+}
+
+function OwnTitleMark(props: { row: InboxListRow; children: ReactNode }) {
+  return drawTitleMark(props, useRowMarks().marks);
+}
+
+function drawTitleMark({ row, children }: { row: InboxListRow; children: ReactNode }, marks: MarksChoice) {
   if (marks.style === 'avatar' || !showsThreads(marks.what)) return <>{children}</>;
   return (
     <span className="ib-lm-tt" data-take={marks.style}>
@@ -243,9 +266,21 @@ export function liveCount(rows: readonly InboxListRow[]): number {
  * the short form, its full words for a screen reader and, with `tip`, in the tooltip. A wide row (`wide`) draws the
  * full words in its words column; cut there, they are the tooltip too.
  */
-export function CountWords({ row, tip = false, wide = false, status = false }: { row: InboxListRow; tip?: boolean; wide?: boolean; status?: boolean }) {
-  const now = useMinuteClock(rowWait(row.delivery) !== null);
-  const words = useContext(InArchivedGroup) && inboxRowArchived(row) ? null : countWords(row, now, status);
+type CountWordsProps = { row: InboxListRow; tip?: boolean; wide?: boolean; status?: boolean };
+
+export function CountWords(props: CountWordsProps) {
+  const archivedGroup = useContext(InArchivedGroup);
+  // Only a reply waiting on a busy agent counts minutes: the other rows (nearly all of the ~2,200 a large Inbox
+  // mounts) keep no clock. `countWords` reads the time for that wait alone.
+  return rowWait(props.row.delivery) !== null ? <TimedCountWords {...props} archivedGroup={archivedGroup} /> : drawCountWords(props, archivedGroup, 0);
+}
+
+function TimedCountWords({ archivedGroup, ...props }: CountWordsProps & { archivedGroup: boolean }) {
+  return drawCountWords(props, archivedGroup, useMinuteClock(true));
+}
+
+function drawCountWords({ row, tip = false, wide = false, status = false }: CountWordsProps, archivedGroup: boolean, now: number) {
+  const words = archivedGroup && inboxRowArchived(row) ? null : countWords(row, now, status);
   if (!words) return null;
   const quiet = row.section === 'quiet' ? ' ib-qlabel' : '';
   if (wide) {
