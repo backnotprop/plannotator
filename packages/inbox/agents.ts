@@ -25,7 +25,7 @@ import {
  * as `{}`, a stranger's JSON) throws, so the read counts as failed and the model the window holds stays.
  */
 export function agentsRead(model: InboxAgentsModel): InboxAgentsModel {
-  if (!Array.isArray((model as Partial<InboxAgentsModel> | null)?.agents)) throw new TypeError('GET /api/inbox/agents answered without its agents list');
+  if (!Array.isArray((model as Partial<InboxAgentsModel> | null)?.agents)) throw new TypeError('the agents read answered without its agents list');
   return model;
 }
 
