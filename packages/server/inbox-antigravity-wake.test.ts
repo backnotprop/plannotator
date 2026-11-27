@@ -17,8 +17,8 @@ import {
 } from "@plannotator/core/inbox-types";
 import type { InboxReplyCommand } from "@plannotator/shared/inbox/connection";
 import { InboxStore } from "@plannotator/shared/inbox/store";
-import { createAgentEnvironmentFor } from "./inbox-agents";
-import { createInboxAntigravityWake, type InboxAntigravityWake } from "./inbox-antigravity-wake";
+import { createAgentEnvironmentFor, type AgentEnvironment } from "./inbox-agents";
+import { createInboxAntigravityWake, unwrapWindowsAgentApiShim, type InboxAntigravityWake } from "./inbox-antigravity-wake";
 import { INBOX_REPLY_ANTIGRAVITY_HANDOVER_TEXT, INBOX_REPLY_ARRIVES_TEXT, INBOX_REPLY_LOOK_TEXT, INBOX_REPLY_READ_LATER_TEXT, antigravityHandsOver, replyNextStepText } from "./inbox-mcp";
 import { createFakeAgy, type FakeAgy } from "../../tests/helpers/fake-agy";
 
@@ -388,5 +388,82 @@ describe("how a call names its conversation", () => {
     expect(antigravityLoopbackAddress("example.com:56548")).toBeNull();
     expect(antigravityLoopbackAddress("localhost:0")).toBeNull();
     expect(antigravityLoopbackAddress("localhost:56548/../x")).toBeNull();
+  });
+});
+
+describe("Windows agentapi shim unwrapping", () => {
+  test("unwraps Antigravity's standard agentapi.bat to the underlying language_server.exe", () => {
+    const exe = "C:\\Users\\alice\\AppData\\Local\\Programs\\antigravity\\resources\\bin\\language_server.exe";
+    const bat = `@echo off\r\n"${exe}" agentapi %*\r\n`;
+    expect(unwrapWindowsAgentApiShim("C:\\Users\\alice\\.gemini\\antigravity\\bin\\agentapi.bat", (p) => p === exe, () => bat)).toEqual([exe, "agentapi"]);
+  });
+
+  test("handles BOM, comments, setlocal, call, unquoted paths, and direct .exe wrappers", () => {
+    const exe = "C:\\antigravity\\language_server.exe";
+    const bat = `\uFEFF@echo off\r\nrem generated\r\n:: wrapper\r\nsetlocal\r\ncall ${exe} agentapi %*\r\nendlocal\r\n`;
+    expect(unwrapWindowsAgentApiShim("C:\\bin\\agentapi.cmd", (p) => p === exe, () => bat)).toEqual([exe, "agentapi"]);
+
+    const direct = "C:\\antigravity\\agentapi.exe";
+    expect(unwrapWindowsAgentApiShim("C:\\bin\\agentapi.bat", (p) => p === direct, () => `"${direct}" %*\r\n`)).toEqual([direct]);
+  });
+
+  test("refuses non-batch files, missing targets, relative paths, and multi-command scripts", () => {
+    const exe = "C:\\antigravity\\language_server.exe";
+    expect(unwrapWindowsAgentApiShim("C:\\bin\\agentapi.exe", () => true, () => `"${exe}" agentapi %*`)).toBeNull();
+    expect(unwrapWindowsAgentApiShim("C:\\bin\\agentapi.bat", () => false, () => `"${exe}" agentapi %*`)).toBeNull();
+    expect(unwrapWindowsAgentApiShim("C:\\bin\\agentapi.bat", () => true, () => `language_server.exe agentapi %*`)).toBeNull();
+    expect(unwrapWindowsAgentApiShim("C:\\bin\\agentapi.bat", () => true, () => `@echo off\r\nset FOO=1\r\n"${exe}" agentapi %*\r\n`)).toBeNull();
+  });
+
+  test("delivers multiline replies on win32 by spawning the unwrapped native exe directly", async () => {
+    const fake = createFakeAgy();
+    fakes.push(fake);
+    const store = InboxStore.open(join(fake.root, "data", "inbox"));
+    const project = store.ensureProject({ name: "ledger", root: "/work/ledger" });
+    const author: Extract<InboxAuthor, { kind: "agent" }> = { kind: "agent", host: "antigravity", session: CONVERSATION, name: "Antigravity" };
+    const asked = store.sendMessage({ project_id: project.id, author, body: "Ship it?", wakes: true }).message;
+    fake.hub("app", 57930, APP_TOKEN);
+
+    const nativeExe = join(fake.root, "language_server.exe");
+    writeFileSync(nativeExe, "stub");
+    const appBin = join(fake.home, ".gemini", "antigravity", "bin");
+    writeFileSync(join(appBin, "agentapi.bat"), `@echo off\r\n"${nativeExe}" agentapi %*\r\n`);
+
+    const calls: string[][] = [];
+    const environment: AgentEnvironment = {
+      platform: "win32",
+      homeDir: fake.home,
+      env: { HOME: fake.home, USERPROFILE: fake.home, PATH: "" },
+      which: () => null,
+      run: async (argv) => {
+        calls.push([...argv]);
+        const cmdIdx = argv[1] === "agentapi" ? 2 : 1;
+        if (argv[cmdIdx] === "get-conversation-metadata") {
+          return { exitCode: 0, timedOut: false, stdout: JSON.stringify({ response: { conversationMetadata: { metadata: { rootConversationId: CONVERSATION } } } }), stderr: "" };
+        }
+        if (argv[cmdIdx] === "send-message") {
+          return { exitCode: 0, timedOut: false, stdout: JSON.stringify({ response: { sendMessage: { recipientId: argv[cmdIdx + 1], content: argv[cmdIdx + 2] } } }), stderr: "" };
+        }
+        return { exitCode: 2, timedOut: false, stdout: "", stderr: "unexpected" };
+      },
+    };
+
+    const wake = createInboxAntigravityWake({ store, environment, commandOf, appClients: [], waitCheckMs: 50 });
+    wakes.push(wake);
+    expect(await wake.wakes("antigravity", CONVERSATION, meta(CONVERSATION, "antigravity"))).toBe(true);
+    const reply = store.sendReply(asked.id, { words: "Line 1\nLine 2 \"quoted\"", idempotency_key: "win-1" }).reply!;
+    await wake.sweep();
+
+    expect(calls.some((argv) => argv[0] === nativeExe && argv[1] === "agentapi" && argv[2] === "send-message" && argv[3] === CONVERSATION && argv[4]!.includes("Line 1\nLine 2"))).toBe(true);
+    expect(store.message(reply.id)!.delivery).toMatchObject({ host: "antigravity", session: CONVERSATION });
+
+    // When a native agentapi.exe sits alongside agentapi.bat, agentapi.exe takes precedence.
+    const nativeShim = join(appBin, "agentapi.exe");
+    writeFileSync(nativeShim, "stub");
+    calls.length = 0;
+    const reply2 = store.sendReply(asked.id, { words: "Second reply", idempotency_key: "win-2" }).reply!;
+    await wake.sweep();
+    expect(calls.some((argv) => argv[0] === nativeShim && argv[1] === "send-message")).toBe(true);
+    expect(store.message(reply2.id)!.delivery).toMatchObject({ host: "antigravity", session: CONVERSATION });
   });
 });

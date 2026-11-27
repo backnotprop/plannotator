@@ -38,6 +38,11 @@ function subscribe(listener: () => void): () => void {
 
 const snapshot = () => current;
 
+/** How many draws watch the titles (a list watches once, not once per row: RowSlot.tsx). */
+export function sessionTitlesWatchersForTests(): number {
+  return listeners.size;
+}
+
 export function useSessionTitles(): SessionLabels {
   return useSyncExternalStore(subscribe, snapshot, snapshot);
 }

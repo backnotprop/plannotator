@@ -101,6 +101,8 @@ export interface SidebarProps {
   tags?: Pick<TagsSectionProps, 'tags' | 'waiting' | 'tagId' | 'onOpen' | 'onCreate' | 'onRename' | 'onDelete' | 'colours' | 'activity'> & { shown: boolean };
   onAgentFilter?: (agentId: string | null) => void;
   onMessageAgent?: (session: string, opener: HTMLElement) => void;
+  /** An agent's menu offers New message… (AgentsSection `newMessage`). Absent: not offered. */
+  agentNewMessage?: { linked: boolean };
   onAddAgent?: (opener: HTMLElement) => void;
   onAddMachine?: () => void;
   /** Rows waiting on the person, all projects. */
@@ -796,6 +798,7 @@ export function Sidebar(props: SidebarProps) {
             onMachineUpdate={props.onMachineUpdate}
             onAgentFilter={(agentId) => props.onAgentFilter?.(agentId)}
             onMessageAgent={(session, opener) => props.onMessageAgent?.(session, opener)}
+            newMessage={props.onMessageAgent ? props.agentNewMessage : undefined}
             onAddAgent={(opener) => (props.onAddAgent ?? props.onCompose)?.(opener)}
             onAddMachine={props.onAddMachine}
             pick={pick}
