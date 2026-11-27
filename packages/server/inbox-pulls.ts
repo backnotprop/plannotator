@@ -2134,7 +2134,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         // The PR as the forge has it now, one call: its head commit, read around the patch (a push between the two reads
         // leaves it unknown; a layer posts nothing), and its description.
         // `tojson`: gh colours an object answer under CLICOLOR_FORCE, whatever NO_COLOR says, and prints a string raw.
-        const pullNow = async (): Promise<{ sha: string | null; description: string | null; fork?: GitlabForkProjects | null; state: InboxPullState | null; merged_at: string | null } | null> => {
+        const pullNow = async (): Promise<{ sha: string | null; description: string | null; fork?: GitlabForkProjects | null; state: InboxPullState | null; merged_at: string | null; changes_count?: string | null } | null> => {
           const endpoint = pull.platform === "github" ? `repos/${parts.owner}/${parts.repo}/pulls/${pull.number}` : gitlabMergeRequest;
           const read = await run(cli, ["api", "--hostname", pull.host, endpoint, ...(pull.platform === "github" ? ["--jq", INBOX_PULL_NOW_JQ] : [])]).catch(() => null);
           if (!read || read.exitCode !== 0) return null;
@@ -2144,7 +2144,9 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
             const state = forgePullState(pull.platform, answer);
             const merged_at = typeof answer.merged_at === "string" ? answer.merged_at : null;
             if (pull.platform === "github") return { sha: shaOf(answer.sha), description: descriptionOf(answer.body), state, merged_at };
-            return { sha: shaOf(answer.sha) ?? shaOf(obj(answer.diff_refs).head_sha), description: descriptionOf(answer.description), fork: gitlabForkProjects(answer), state, merged_at };
+            // GitLab's own count of the files in the merge request's latest diff, a string ("1000+" past its limit).
+            const changes_count = typeof answer.changes_count === "string" || typeof answer.changes_count === "number" ? String(answer.changes_count) : null;
+            return { sha: shaOf(answer.sha) ?? shaOf(obj(answer.diff_refs).head_sha), description: descriptionOf(answer.description), fork: gitlabForkProjects(answer), state, merged_at, changes_count };
           } catch {
             return null;
           }
@@ -2184,10 +2186,16 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
           try {
             const pages = result.stdout.trim();
             const entries = pages.startsWith("[") && pages.endsWith("]") ? parsePaginatedArray<GitLabDiffEntry>(pages) : [];
-            // A cached file count describes only the head that was listed with it.
+            // A cached file count describes only the head that was listed with it. GitLab's own count comes with the head
+            // read just now; "1000+" means it stopped storing files. With no count at all, nothing says no page is missing.
             const listedFiles = pull.head_sha === before?.sha ? pull.files : 0;
-            if (entries.length >= Math.max(1, listedFiles) && entries.every((entry) =>
-              typeof entry.old_path === "string" && typeof entry.new_path === "string" && !glMayBeHeldBack(entry)
+            const counted = before?.changes_count?.trim() ?? "";
+            const expected = Math.max(listedFiles, /^\d+$/.test(counted) ? Number(counted) : 0);
+            // The paged diffs carry no flags before GitLab 18.4: an empty diff there may be one it held back, whatever
+            // the file's kind (a renamed file's held-back changes would show as a pure rename).
+            if (!counted.endsWith("+") && expected > 0 && entries.length >= expected && entries.every((entry) =>
+              typeof entry.old_path === "string" && typeof entry.new_path === "string" && !glMayBeHeldBack(entry) &&
+              !(entry.diff.trim() === "" && entry.too_large == null && entry.collapsed == null)
             )) patch = reconstructGitlabPatch(entries);
           } catch {
             // An invalid page cannot supply the layer's complete diff.
@@ -2207,6 +2215,8 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         const headBefore = before?.sha ?? null;
         const headAfter = headBefore ? ((await pullNow())?.sha ?? null) : null;
         const head_sha = headBefore && headBefore === headAfter ? headBefore : null;
+        // The paged read is many requests: a new diff version (the merge request's head moved) during it may mix two.
+        if (paginatedGitlab && !head_sha) throw new InboxPullsError("pull_diff_failed", "glab could not read this diff. Try again, or open it on the forge.");
         const description = before?.description ?? null;
         if (head_sha) readHeads.set(key, head_sha);
         const answer: InboxPullDiffAnswer = { key, scope, base, head, patch, description, head_sha, ...(before?.state ? { state: before.state, merged_at: before.merged_at } : {}) };
