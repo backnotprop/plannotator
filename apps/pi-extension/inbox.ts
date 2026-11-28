@@ -455,8 +455,9 @@ export function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, o
 			const failed = (error: unknown) => {
 				if (waiting?.id === command.id) endWaiting(error instanceof Error ? error : new Error(String(error)));
 			};
-			// Oh My Pi (18.18.2+) returns a promise that rejects when it drops the message before a turn starts
-			// (a turn began between the idle check and the send). That passes: the claim is given back and the
+			// Oh My Pi (18.18.2+) returns a promise that rejects (PromptDroppedError) when it does not admit the
+			// message (an abort, its cost cap; a turn already running queues it as a steer instead, no drop: omp
+			// agent-session.ts sendUserMessage). That passes: the claim is given back and the
 			// next idle tick sends the reply again (InboxDeliverLater), up to DELIVER_LATER_TRIES times for one
 			// reply; after that it is reported, as a throw is at once.
 			const dropped = (error: unknown) => {
