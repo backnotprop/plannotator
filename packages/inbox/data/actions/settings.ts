@@ -3,6 +3,7 @@ import { reloadSkillCatalog } from '@plannotator/ui/utils/skillCatalog';
 import { inboxApi, post, type AgentToolHost, type InboxStorageModel, type SettingsModel } from '../../api';
 import { inboxUrl } from '../../inboxUrl';
 import { scheduledApi } from '../../scheduled/client';
+import { onInboxReconnected } from '../../sessionAdopt';
 import { noteDeletedHere } from '../deletedHere';
 
 export interface SettingsHost {
@@ -31,6 +32,10 @@ export function useSettingsSaves(
 ) {
   const saveSetting = settingsSaver(app);
   const { setSettings, setError: setSettingsError, refresh: refreshSettings, adoptStore, readStore, refreshList } = app;
+  // Every (re)connect of the page's stream, the first one too: a switch turned while this page was not listening (it
+  // reads its settings at load, before its stream opens; or the stream was away) is told only to the streams open then
+  // (`event: capabilities`), and no frame replays it, so the settings are read again.
+  useEffect(() => onInboxReconnected(() => void refreshSettings()), [refreshSettings]);
   adoptSplitView = (on) => setSettings((s) => (s ? ({ ...s, split_view: { on } } as SettingsModel) : s));
   const toggleTool = (host: AgentToolHost, next: boolean) =>
     saveSetting(
