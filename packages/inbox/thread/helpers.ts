@@ -11,6 +11,8 @@ import type { AskingSession } from '../components/ReplyRoute';
 import type { ReviewOutcome } from '../components/ReviewCard';
 import type { SentAnswerGroup } from '../sentReply';
 import { answersItself, routeSendAnnotations, sendTargetsOf } from '../sendTargets';
+/** A script's post in the thread: its name and how it is told apart (Thread.tsx imports them here). */
+export { isScriptPost, messageAuthorName, SCRIPT_AUTHOR_NAME, threadAskerName } from '../scriptAuthor';
 
 export const noop = () => {};
 export const NO_ANNOTATIONS: never[] = [];

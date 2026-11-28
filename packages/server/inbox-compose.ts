@@ -57,9 +57,9 @@ import {
 } from "@plannotator/shared/inbox/uploads";
 import type { InboxLaunch } from "./inbox-launch";
 import { replacesEndedAsker, takesOver, thereInThread, type createInboxLiveSessions } from "./inbox-sessions";
-
-/** How many characters of a reply draft the Drafts page shows. */
-const INBOX_REPLY_PREVIEW_MAX = 160;
+import { replyDraftPreview } from "@plannotator/core/inbox-reply-draft";
+/** The Drafts page's "Replies not sent": the most recently drafted first. */
+const newestDraftFirst = (a: InboxReplyDraftRow, b: InboxReplyDraftRow) => (b.unsent!.reply_at ?? b.last_at).localeCompare(a.unsent!.reply_at ?? a.last_at) || a.thread_id.localeCompare(b.thread_id);
 
 /** How often pending uploads are swept (each sweep drops those older than a day that no draft names). */
 export const INBOX_UPLOAD_SWEEP_MS = 60 * 60 * 1000;
@@ -101,6 +101,8 @@ export function createInboxCompose(options: {
   keepUploads?: () => Iterable<string>;
   /** A compose draft was saved, deleted or sent: every window's stream says `event: drafts`, so its Drafts count follows (#2593). */
   onDraftsChange?: () => void;
+  /** Linked machines' threads holding unsent work (mark `reply-drafts`; inbox-machine-drafts.ts), listed with this Inbox's own. */
+  farReplies?: () => Promise<InboxReplyDraftRow[]>;
   /** Where live sessions live, as this computer's Rex last confirmed (inbox-rex.ts): one line each. Absent: none. */
   places?: (sessions: string[]) => ReadonlyMap<string, string>;
   /** A new thread's first message was just written (not a replay), before its agent starts: inbox.ts's `/create-routine` grant. */
@@ -160,6 +162,7 @@ export function createInboxCompose(options: {
         last_thread: last ? { id: last.id, subject: last.subject, at: last.at } : null,
         ...(root !== group.project.root ? { root } : {}),
         ...(entry.label ? { label: entry.label } : {}),
+        ...(entry.runtime ? { runtime: entry.runtime } : {}),
         activity: Math.max(entry.startedAt, last ? Date.parse(last.at) : 0),
       });
     }
@@ -362,7 +365,10 @@ export function createInboxCompose(options: {
       if (req.method !== "GET") return json({ error: "Use GET." }, 405);
       // `replies` (additive, approval "inbox-reply-drafts"): every open thread holding unsent work
       // (reply words, picks, comments), for the Drafts page's "Replies not sent" and the sidebar's count.
-      return json({ serverSession, drafts: listInboxDrafts(store.dir).map(withStatus), replies: replyDraftRows() });
+      // A linked machine's threads too (its rows say `machine`), newest draft first across both.
+      const far = (await options.farReplies?.().catch(() => [])) ?? [];
+      const replies = far.length === 0 ? replyDraftRows() : [...replyDraftRows(), ...far].sort(newestDraftFirst);
+      return json({ serverSession, drafts: listInboxDrafts(store.dir).map(withStatus), replies });
     }
     const draftMatch = /^\/api\/inbox\/drafts\/([A-Za-z0-9_]+)(\/delete)?$/.exec(path);
     if (draftMatch) {
@@ -425,14 +431,9 @@ export function createInboxCompose(options: {
     store
       .unsentRows()
       .filter((row) => inboxHasUnsent(row.unsent) && !inboxRowArchived(row))
-      .map((row) => {
-        const draft = store.replyDraft(row.thread_id);
-        // A draft holding only files reads as its first: a long paste's first words, another file's name.
-        const first = draft?.files?.[0];
-        const words = (draft?.body.trim() || first?.pasted?.preview || first?.name || "").replace(/\s+/g, " ").trim();
-        return { ...row, reply_preview: words ? words.slice(0, INBOX_REPLY_PREVIEW_MAX) : null };
-      })
-      .sort((a, b) => (b.unsent!.reply_at ?? b.last_at).localeCompare(a.unsent!.reply_at ?? a.last_at) || a.thread_id.localeCompare(b.thread_id));
+      // A draft holding only files reads as its first: a long paste's first words, another file's name.
+      .map((row) => ({ ...row, reply_preview: replyDraftPreview(store.replyDraft(row.thread_id)) }))
+      .sort(newestDraftFirst);
 
   /** Forget uploads older than a day that no draft names, and the blobs only they held. */
   const sweep = () => {

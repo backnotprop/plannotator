@@ -22,7 +22,7 @@
  * is the only consumer of @opencode-ai/sdk and no test may spawn a real
  * server.
  */
-import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -39,6 +39,10 @@ let spawned: FakeSpawn[] = [];
 let clientFactory: () => unknown = () => ({});
 let spawnGate: Promise<void> | null = null;
 let serverError: Error | null = null;
+const legacyInfo = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("<!doctype html>", { headers: { "Content-Type": "text/html" } }) });
+afterAll(() => legacyInfo.stop(true));
+let serverUrl = legacyInfo.url.origin;
+let clientConfig: { headers?: Record<string, string> } = {};
 
 mock.module("@opencode-ai/sdk", () => ({
 	createOpencodeServer: async (opts: {
@@ -51,6 +55,9 @@ mock.module("@opencode-ai/sdk", () => ({
 			...opts,
 			closed: false,
 			env: {
+				OPENCODE_SERVER_USERNAME: process.env.OPENCODE_SERVER_USERNAME,
+				OPENCODE_PASSWORD: process.env.OPENCODE_PASSWORD,
+				OPENCODE_SERVER_PASSWORD: process.env.OPENCODE_SERVER_PASSWORD,
 				PLANNOTATOR_ASK_AI_CHILD: process.env.PLANNOTATOR_ASK_AI_CHILD,
 				PLANNOTATOR_INBOX_TOOL: process.env.PLANNOTATOR_INBOX_TOOL,
 				PLANNOTATOR_AGENT_TOOL: process.env.PLANNOTATOR_AGENT_TOOL,
@@ -59,13 +66,16 @@ mock.module("@opencode-ai/sdk", () => ({
 		spawned.push(record);
 		if (spawnGate) await spawnGate;
 		return {
-			url: "http://127.0.0.1:54321",
+			url: serverUrl,
 			close: () => {
 				record.closed = true;
 			},
 		};
 	},
-	createOpencodeClient: () => clientFactory(),
+	createOpencodeClient: (config: typeof clientConfig) => {
+		clientConfig = config;
+		return clientFactory();
+	},
 }));
 
 const { OpenCodeProvider } = await import("./opencode-sdk.ts");
@@ -82,6 +92,270 @@ beforeEach(() => {
 	clientFactory = () => ({});
 	spawnGate = null;
 	serverError = null;
+	serverUrl = legacyInfo.url.origin;
+});
+
+const CREDENTIALS = ["OPENCODE_SERVER_USERNAME", "OPENCODE_PASSWORD", "OPENCODE_SERVER_PASSWORD"] as const;
+/** Clears the credential names for a test and puts the runner's own values back after it. */
+function saveCredentials() {
+	const saved = CREDENTIALS.map((name) => [name, process.env[name]] as const);
+	for (const name of CREDENTIALS) delete process.env[name];
+	return {
+		restore() {
+			for (const [name, value] of saved) {
+				if (value === undefined) delete process.env[name];
+				else process.env[name] = value;
+			}
+		},
+	};
+}
+
+describe("OpenCode protocol detection and authentication", () => {
+	test("temporary credentials are removed even when spawn fails", async () => {
+		const saved = saveCredentials();
+		const provider = makeProvider();
+		try {
+			serverError = new Error("spawn failed");
+			await expect(provider.ensureServer()).rejects.toThrow("spawn failed");
+			for (const name of CREDENTIALS) expect(process.env[name]).toBeUndefined();
+			serverError = null;
+			await provider.ensureServer();
+			for (const name of CREDENTIALS) expect(process.env[name]).toBeUndefined();
+		} finally {
+			provider.dispose();
+			saved.restore();
+		}
+	});
+
+	test("the spawn gets a fresh password, the v1 client authenticates, and the host env is restored", async () => {
+		const saved = saveCredentials();
+		process.env.OPENCODE_SERVER_USERNAME = "personal";
+		process.env.OPENCODE_PASSWORD = "personal-current";
+		process.env.OPENCODE_SERVER_PASSWORD = "personal-password";
+		const provider = makeProvider();
+		try {
+			await provider.ensureServer();
+			const first = spawned[0]!.env;
+			expect(first.OPENCODE_SERVER_USERNAME).toBe("opencode");
+			expect(first.OPENCODE_SERVER_PASSWORD).toMatch(/^[\w-]{43}$/);
+			// OpenCode 2 reads OPENCODE_PASSWORD first: it must be ours too, not the shell's.
+			expect(first.OPENCODE_PASSWORD).toBe(first.OPENCODE_SERVER_PASSWORD);
+			expect(clientConfig.headers?.Authorization).toBe(`Basic ${Buffer.from(`opencode:${first.OPENCODE_SERVER_PASSWORD}`).toString("base64")}`);
+			expect(process.env.OPENCODE_SERVER_USERNAME).toBe("personal");
+			expect(process.env.OPENCODE_PASSWORD).toBe("personal-current");
+			expect(process.env.OPENCODE_SERVER_PASSWORD).toBe("personal-password");
+			provider.dispose();
+			await provider.ensureServer();
+			expect(spawned[1]!.env.OPENCODE_SERVER_PASSWORD).not.toBe(first.OPENCODE_SERVER_PASSWORD);
+		} finally {
+			provider.dispose();
+			saved.restore();
+		}
+	});
+
+	test("an OpenCode 1 whose /api/info fails (its catch-all, offline) keeps the 1.x client", async () => {
+		const offline = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("Internal Server Error", { status: 500 }) });
+		serverUrl = offline.url.origin;
+		clientConfig = {};
+		const provider = makeProvider();
+		try {
+			await provider.ensureServer();
+			expect(spawned[0]!.closed).toBe(false);
+			expect(clientConfig.headers?.Authorization).toStartWith("Basic ");
+		} finally { provider.dispose(); offline.stop(true); }
+	});
+
+	test("a failed detection reaps the server and removes its exit handler", async () => {
+		const stopped = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response() });
+		serverUrl = stopped.url.origin;
+		stopped.stop(true);
+		const provider = makeProvider();
+		const listeners = process.listeners("exit").length;
+		try {
+			await expect(provider.ensureServer()).rejects.toThrow();
+			expect(spawned[0]!.closed).toBe(true);
+			expect(process.listeners("exit").length).toBe(listeners);
+		} finally { provider.dispose(); }
+	});
+
+	test("dispose during detection cannot resurrect the server", async () => {
+		let reply: () => void = () => {};
+		let received: () => void = () => {};
+		const request = new Promise<void>((resolve) => { received = resolve; });
+		const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch() {
+			return new Response(new ReadableStream({ start(controller) {
+				reply = () => {
+					controller.enqueue(new TextEncoder().encode('{"version":"2.3.2"}'));
+					controller.close();
+				};
+				received();
+			} }));
+		} });
+		serverUrl = server.url.origin;
+		const provider = makeProvider();
+		const listeners = process.listeners("exit").length;
+		try {
+			const pending = provider.ensureServer();
+			await request;
+			provider.dispose();
+			reply();
+			await expect(pending).rejects.toThrow("disposed during startup");
+			expect(spawned[0]!.closed).toBe(true);
+			expect(process.listeners("exit").length).toBe(listeners);
+		} finally { provider.dispose(); server.stop(true); }
+	});
+});
+
+describe("OpenCode 2 through an authenticated HTTP server", () => {
+	function serve(mode: "answer" | "silent" | "close" | "fail" | "reject" | "wait" = "answer") {
+		const calls: Array<{ path: string; body?: Record<string, unknown> }> = [];
+		let send: (type: string, data?: Record<string, unknown>) => void = () => {};
+		let cancelled = false;
+		let badAuth = 0;
+		let preferred = "other";
+		let emptyModels = false;
+		const server = Bun.serve({
+			hostname: "127.0.0.1", port: 0,
+			async fetch(req) {
+				const url = new URL(req.url);
+				const path = url.pathname;
+				// OpenCode 2's order: the current name, then the legacy one.
+				const env = spawned.at(-1)?.env;
+				const password = env?.OPENCODE_PASSWORD ?? env?.OPENCODE_SERVER_PASSWORD;
+				if (req.headers.get("Authorization") !== `Basic ${Buffer.from(`opencode:${password}`).toString("base64")}`) {
+					badAuth++;
+					return Response.json({ message: "Authentication required" }, { status: 401 });
+				}
+				const body = req.method === "POST" ? await req.json() : undefined;
+				calls.push({ path: path + url.search, body });
+				if (path === "/api/info") return Response.json({ version: "2.3.2" });
+				if (path === "/api/event") return new Response(new ReadableStream({
+					start(controller) {
+						send = (type, data = {}) => {
+							try { controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ type, data })}\r\n\r\n`)); } catch {}
+						};
+						if (mode === "close") controller.close();
+						else if (mode !== "silent") send("server.connected");
+					},
+					cancel() { cancelled = true; },
+				}), { headers: { "Content-Type": "text/event-stream" } });
+				if (path === "/api/session") return Response.json({ data: { id: "v2" } });
+				if (path.endsWith("/fork")) return Response.json({ data: { id: "forked" } });
+				if (path.startsWith("/api/session/") && path.endsWith("/model")) return new Response(null, { status: 204 });
+				if (path.endsWith("/missing")) return Response.json({ _tag: "SessionNotFoundError", message: "No session" }, { status: 404 });
+				if (path.endsWith("/prompt")) {
+					if (mode === "reject") return Response.json({ _tag: "InvalidRequestError", message: "Bad prompt" }, { status: 400 });
+					send("session.execution.succeeded", { sessionID: "v2" });
+					send("session.execution.started", { sessionID: "unrelated" });
+					send("session.execution.failed", { sessionID: "unrelated", error: { message: "wrong session" } });
+					send("session.execution.started", { sessionID: "v2" });
+					if (mode === "wait") {
+						send("permission.asked", { sessionID: "v2", id: "req", action: "shell", metadata: { command: "ls" }, message: "Allow ls?" });
+					} else if (mode === "fail") send("session.execution.failed", { sessionID: "v2", error: { message: "Model unavailable" } });
+					else {
+						send("session.tool.input.started", { sessionID: "v2", id: "t", name: "shell" });
+						send("session.tool.called", { sessionID: "v2", id: "t", input: { command: "ls" } });
+						send("session.tool.success", { sessionID: "v2", id: "t", content: [{ type: "text", text: "file.ts" }] });
+						send("session.text.delta", { sessionID: "v2", delta: "pong" });
+						send("session.text.ended", { sessionID: "v2", text: "pong" });
+						send("session.execution.succeeded", { sessionID: "v2" });
+					}
+				}
+				if (path.endsWith("/reply")) send("session.execution.succeeded", { sessionID: "v2" });
+				if (path.endsWith("/interrupt")) send("session.execution.interrupted", { sessionID: "v2", reason: "user" });
+				const model = (id: string, enabled = true) => ({ id, providerID: "opencode", name: id.toUpperCase(), enabled });
+				if (path === "/api/model") return Response.json({ data: emptyModels ? [] : [model("one"), model("other"), model("off", false)] });
+				if (path === "/api/model/default") return Response.json({ data: model(preferred) });
+				return Response.json({ data: { id: "v2" } });
+			},
+		});
+		serverUrl = server.url.origin;
+		const provider = new OpenCodeProvider({ type: "opencode-sdk", cwd: "/scratch/a b", firstEventTimeoutMs: 30 });
+		return { provider, calls, setEmptyModels() { emptyModels = true; }, setDefault(id: string) { preferred = id; }, get badAuth() { return badAuth; }, get cancelled() { return cancelled; }, close() { provider.dispose(); server.stop(true); } };
+	}
+	const context = { mode: "plan-review", plan: { plan: "# Plan" } } as const;
+
+	test("create, synthetic once, streaming tools, one-shot, fork/resume and models use the v2 contract", async () => {
+		const fake = serve();
+		try {
+			const session = await fake.provider.createSession({ context, model: "opencode/family/model", oneShot: { systemPrompt: "JUDGE" } });
+			const messages = await Array.fromAsync(session.query("ping"));
+			expect(messages).toEqual([
+				{ type: "tool_use", toolName: "shell", toolInput: { command: "ls" }, toolUseId: "t" },
+				{ type: "tool_result", toolUseId: "t", result: "file.ts" },
+				{ type: "text_delta", delta: "pong" },
+				{ type: "result", sessionId: "v2", success: true },
+			]);
+			await Array.fromAsync(session.query("again"));
+			expect(fake.calls.filter((call) => call.path.endsWith("/synthetic"))).toEqual([{ path: "/api/session/v2/synthetic", body: { text: "JUDGE", resume: false } }]);
+			expect(fake.calls.find((call) => call.path === "/api/session")?.body).toEqual({ location: { directory: "/scratch/a b" }, model: { providerID: "opencode", id: "family/model" }, permissions: [{ action: "*", resource: "*", effect: "deny" }] });
+			expect(fake.calls.findIndex((call) => call.path === "/api/event")).toBeLessThan(fake.calls.findIndex((call) => call.path.endsWith("/synthetic")));
+			expect(fake.calls.filter((call) => call.path.endsWith("/prompt")).map((call) => call.body)).toEqual([{ text: "ping" }, { text: "again" }]);
+			expect((await fake.provider.forkSession({ context: { ...context, parent: { sessionId: "v2" } }, model: "opencode/family/model" } as never)).id).toBe("forked");
+			expect(fake.calls.find((call) => call.path === "/api/session/forked/model")?.body).toEqual({ model: { providerID: "opencode", id: "family/model" } });
+			expect(fake.calls.find((call) => call.path.endsWith("/fork"))?.body).toEqual({});
+			const resumed = await fake.provider.resumeSession("v2");
+			await Array.fromAsync(resumed.query("resume"));
+			expect(fake.calls.filter((call) => call.path.endsWith("/synthetic"))).toHaveLength(1);
+			await expect(fake.provider.resumeSession("missing")).rejects.toThrow("OpenCode HTTP 404: SessionNotFoundError: No session");
+			await fake.provider.fetchModels();
+			expect(fake.provider.models).toEqual([{ id: "opencode/one", label: "ONE (opencode)", default: false }, { id: "opencode/other", label: "OTHER (opencode)", default: true }]);
+			expect(fake.calls.some((call) => call.path === "/api/model?location%5Bdirectory%5D=%2Fscratch%2Fa+b")).toBe(true);
+			fake.setDefault("missing");
+			await fake.provider.fetchModels();
+			expect(fake.provider.models?.[0]?.default).toBe(true);
+			await fake.provider.createSession({ context });
+			expect(fake.calls.filter((call) => call.path === "/api/session").at(-1)?.body).toEqual({ location: { directory: "/scratch/a b" } });
+			expect(fake.badAuth).toBe(0);
+		} finally { fake.close(); }
+	});
+
+	test("empty model discovery leaves the provider usable", async () => {
+		const fake = serve();
+		try {
+			fake.setEmptyModels();
+			await fake.provider.fetchModels();
+			expect(fake.provider.models).toBeUndefined();
+			expect((await fake.provider.createSession({ context })).id).toBe("v2");
+		} finally { fake.close(); }
+	});
+
+	for (const mode of ["silent", "close", "fail", "reject"] as const) {
+		test(`${mode} stream/prompt ends with an error rather than hanging`, async () => {
+			const fake = serve(mode);
+			try {
+				const session = await fake.provider.createSession({ context });
+				const messages = await Array.fromAsync(session.query("ping"));
+				expect(messages).toHaveLength(1);
+				expect(messages[0]?.type).toBe("error");
+				if (mode === "silent" || mode === "close") expect(fake.calls.some((call) => call.path.endsWith("/prompt"))).toBe(false);
+				if (mode === "reject") expect(messages[0]).toMatchObject({ code: "opencode_prompt_rejected", error: "OpenCode rejected prompt: OpenCode HTTP 400: InvalidRequestError: Bad prompt" });
+				if (mode === "fail") expect(messages[0]).toMatchObject({ error: "Model unavailable" });
+			} finally { fake.close(); }
+		});
+	}
+
+	test("permission decisions and Stop reach the v2 endpoints", async () => {
+		const fake = serve("wait");
+		try {
+			const session = await fake.provider.createSession({ context });
+			for (const allow of [true, false]) {
+				for await (const message of session.query("ls")) {
+					if (message.type === "permission_request") {
+						expect(message).toMatchObject({ requestId: "req", title: "Allow ls?", toolName: "shell", toolInput: { command: "ls" } });
+						session.respondToPermission?.("req", allow, "reason");
+					}
+				}
+			}
+			for await (const message of session.query("ls")) {
+				if (message.type === "permission_request") session.abort();
+			}
+			await new Promise((resolve) => setTimeout(resolve, 20));
+			expect(fake.calls.filter((call) => call.path.endsWith("/reply")).map((call) => call.body)).toEqual([{ decision: "once", message: "reason" }, { decision: "reject", message: "reason" }]);
+			expect(fake.calls.find((call) => call.path.endsWith("/interrupt"))?.body).toEqual({});
+			expect(fake.cancelled).toBe(true);
+		} finally { fake.close(); }
+	});
 });
 
 describe("OpenCodeProvider server lifecycle", () => {
@@ -124,7 +398,7 @@ describe("OpenCodeProvider server lifecycle", () => {
 		try {
 			const provider = makeProvider();
 			await provider.ensureServer();
-			expect(spawned[0]!.env).toEqual({ PLANNOTATOR_ASK_AI_CHILD: "1", PLANNOTATOR_INBOX_TOOL: "0", PLANNOTATOR_AGENT_TOOL: "0" });
+			expect(spawned[0]!.env).toMatchObject({ PLANNOTATOR_ASK_AI_CHILD: "1", PLANNOTATOR_INBOX_TOOL: "0", PLANNOTATOR_AGENT_TOOL: "0" });
 			expect(process.env.PLANNOTATOR_INBOX_TOOL).toBe("1");
 			expect(process.env.PLANNOTATOR_ASK_AI_CHILD).toBeUndefined();
 			provider.dispose();

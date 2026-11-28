@@ -5,8 +5,8 @@
  * if the order were unstable, "Show more" could skip or repeat rows.
  */
 import { describe, expect, test } from "bun:test";
-import type { InboxListRow } from "@plannotator/core/inbox-types";
-import { inboxArchivedRows, inboxRowArchived, inboxSectionOf } from "./list";
+import type { InboxListRow, InboxSectionId } from "@plannotator/core/inbox-types";
+import { inboxArchivedRows, inboxRowArchived, inboxSectionOf, inboxSectionWhileRoutineRuns } from "./list";
 
 const row = (thread_id: string, resolved_at: string | null, back_from_archive?: boolean): InboxListRow =>
   ({ thread_id, resolved_at, ...(back_from_archive === undefined ? {} : { back_from_archive }) }) as InboxListRow;
@@ -58,5 +58,20 @@ describe("unsent work and Re-ask", () => {
   });
   test("archived wins over unsent work", () => {
     expect(inboxSectionOf(facts({ unsent: words, resolved_at: "2026-10-20T10:02:00Z" }))).toBe("quiet");
+  });
+});
+
+describe("a routine's run going (the owner, 2026-11-24: under New until the run ends)", () => {
+  const placed = (section: InboxSectionId, resolved_at: string | null = null, back_from_archive?: boolean) =>
+    inboxSectionWhileRoutineRuns({ section, resolved_at, ...(back_from_archive === undefined ? {} : { back_from_archive }) });
+  test("Sent and Quiet come up to New; New stays", () => {
+    expect([placed("sent"), placed("quiet"), placed("new")]).toEqual(["new", "new", "new"]);
+  });
+  test("a section that needs the person more keeps it: New is a floor, never a demotion", () => {
+    expect([placed("stopped"), placed("holding"), placed("waiting")]).toEqual(["stopped", "holding", "waiting"]);
+  });
+  test("an archived thread stays archived; one that came back is lifted like an open one", () => {
+    expect(placed("quiet", "2026-11-24T10:00:00Z")).toBe("quiet");
+    expect(placed("quiet", "2026-11-24T10:00:00Z", true)).toBe("new");
   });
 });

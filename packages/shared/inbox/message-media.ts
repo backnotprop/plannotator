@@ -7,7 +7,7 @@ import { locateInboxMessageImage, stillSameFile, type InboxMessageImageInput } f
 import { sniffInboxVideo } from "./video";
 
 export type InboxMessageMediaOpen =
-  | { ok: true; handle: FileHandle; size: number; contentType: string; etag: string; named: string }
+  | { ok: true; handle: FileHandle; size: number; contentType: string; etag: string; named: string; real: string; mtime: string; head: Buffer }
   | { ok: false; status: number; code: string; error: string; notYet?: true };
 
 const OPEN_FLAGS = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
@@ -38,7 +38,7 @@ export async function openInboxMessageMedia(input: InboxMessageImageInput): Prom
     const contentType = sniffInboxVideo(bytes) ?? inboxAudioServedType(bytes);
     if (!contentType) return await closed(handle, refuse(415, "not_media", "That file is not a recognized sound or video."));
     if (!stillSameFile(located.real, stat)) return await closed(handle, refuse(409, "image_changed", "That file changed while it was read."));
-    return { ok: true, handle, size: stat.size, contentType, etag: inboxStatEtag(stat), named: located.named };
+    return { ok: true, handle, size: stat.size, contentType, etag: inboxStatEtag(stat), named: located.named, real: located.real, mtime: stat.mtime.toISOString(), head: Buffer.from(bytes) };
   } catch {
     return closed(handle, refuse(500, "image_read_failed", "That file could not be read."));
   }

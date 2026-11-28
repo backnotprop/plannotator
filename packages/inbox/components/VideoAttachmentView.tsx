@@ -21,6 +21,7 @@ import { markImageComposer } from '../pageMarks';
 import { AudioScrub, useAudioPeaks } from './AudioPlayer';
 import { PlaybackSpeed, readPlaybackRate, writePlaybackRate } from './PlaybackSpeed';
 import { useTouchPhone } from '../phone';
+import { InboxComposerField } from './ComposerField';
 
 /** A fresh annotation id. */
 function newId(): string {
@@ -435,38 +436,42 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
           </Tip>
         )
       )}
-      <textarea
-        ref={textRef}
-        className="ib-ta"
-        rows={1}
-        value={text}
-        placeholder={kept ? 'Note (optional)' : `Comment at ${formatInboxVideoTime(shownTime)}…`}
-        aria-label={kept ? `A note with your drawing at ${formatInboxVideoTime(kept.time)}` : `Comment on ${attachment.name} at ${formatInboxVideoTime(shownTime)}`}
-        onChange={(event) => {
-          const value = event.target.value;
-          setText(value);
-          // Typing pauses the film and pins the moment; clearing the words lets the moment follow the film again
-          // (a phone's row opened from "Comment at" keeps its moment until Cancel; full screen's composer has no
-          // Cancel, so there clearing the words lets go of it, and the next moment is pinned as before).
-          if (value.trim() !== '' && pinned === null) void pin();
-          else if (value.trim() === '' && !markup && !kept && (!phone || fullComposer)) {
-            setPinned(null);
-            replaceFrame(null);
-          }
-        }}
-        onFocus={() => {
-          // A phone in full screen's composer: a tap in the comment field is "Comment at" (that button is gone
-          // there), so the film pauses and the moment pins as the field takes focus, not at the first keystroke.
-          if (phone && fullComposer && pinned === null && !kept && !markup) void pin();
-        }}
-        onKeyDown={(event) => {
-          if (isCommentSubmitKey(event, enterSavesComment)) {
-            event.preventDefault();
-            event.stopPropagation();
-            void submit();
-          }
-        }}
-      />
+      {/* The reply's field (`/` and `$` skills), at the row's one-line size (inbox.css `.ib-crowfield`). */}
+      <div className="ib-fcomp-field ib-crowfield">
+        <InboxComposerField
+          textareaRef={textRef}
+          rows={1}
+          value={text}
+          placeholder={kept ? 'Note (optional)' : `Comment at ${formatInboxVideoTime(shownTime)}…`}
+          ariaLabel={kept ? `A note with your drawing at ${formatInboxVideoTime(kept.time)}` : `Comment on ${attachment.name} at ${formatInboxVideoTime(shownTime)}`}
+          destination="your comment"
+          // An open skill list takes Escape first, even before a query is typed; the pane's Escape comes next.
+          escapeClosesMenu
+          onChange={(value) => {
+            setText(value);
+            // Typing pauses the film and pins the moment; clearing the words lets the moment follow the film again
+            // (a phone's row opened from "Comment at" keeps its moment until Cancel; full screen's composer has no
+            // Cancel, so there clearing the words lets go of it, and the next moment is pinned as before).
+            if (value.trim() !== '' && pinned === null) void pin();
+            else if (value.trim() === '' && !markup && !kept && (!phone || fullComposer)) {
+              setPinned(null);
+              replaceFrame(null);
+            }
+          }}
+          onFocus={() => {
+            // A phone in full screen's composer: a tap in the comment field is "Comment at" (that button is gone
+            // there), so the film pauses and the moment pins as the field takes focus, not at the first keystroke.
+            if (phone && fullComposer && pinned === null && !kept && !markup) void pin();
+          }}
+          onKeyDown={(event) => {
+            if (isCommentSubmitKey(event, enterSavesComment)) {
+              event.preventDefault();
+              event.stopPropagation();
+              void submit();
+            }
+          }}
+        />
+      </div>
       {!audio && (
         <Tip content="Draw on this frame (pen, arrow, circle)">
           <button type="button" className="ib-btn ib-cbtn" onClick={() => void openMarkup()} data-markup-open="" aria-label={markup || kept ? 'Redraw' : 'Mark up'}>

@@ -76,6 +76,29 @@ public enum ActionWords {
     return "An agent"
   }
 
+  /// A row's agent as the window's tiles name it (packages/inbox/scriptAuthor.ts `rowAgentName`): a script's post
+  /// (no session, host or name) is "Script", and a thread a script started that a session took over is that
+  /// session's (the first of the row's `participants`).
+  public static func rowAgent(_ row: InboxListRow) -> String {
+    let author = row.author
+    let script = author.kind == .agent && (author.session ?? "").isEmpty && (author.host ?? "").isEmpty && (author.name ?? "").isEmpty
+    guard script else { return agent(author) }
+    guard let first = row.participants?.first else { return "Script" }
+    return agent(InboxAuthor(kind: .agent, host: first.host, session: first.session, name: first.name))
+  }
+
+  /// Whom the person's reply goes to on a row (packages/inbox/scriptAuthor.ts `rowRecipientName`): in a thread a
+  /// script started, the row's delivery names it ("Script" only where no session takes the reply, `script`); with no
+  /// delivery, the row's agent as its tiles name it (`rowAgent`). Every other row names its agent as before.
+  public static func rowRecipient(_ row: InboxListRow) -> String {
+    let author = row.author
+    let script = author.kind == .agent && (author.session ?? "").isEmpty && (author.host ?? "").isEmpty && (author.name ?? "").isEmpty
+    if script, let delivery = row.delivery {
+      return delivery.script == true ? "Script" : agent(InboxAuthor(kind: .agent, host: delivery.host, name: delivery.name))
+    }
+    return rowAgent(row)
+  }
+
   /// `shortAgentName`: whole up to 40 characters as a person counts them, else cut with "…", at the last space when
   /// one is near, with no bracket or dash left hanging.
   public static func shortName(_ name: String, max: Int = shortNameMax) -> String {
@@ -108,7 +131,7 @@ public enum ActionWords {
     let warn = before.questions.stopped || !before.questions.holdsUp.isEmpty
     if place == .held { return ToastWords(mark: warn ? .warn : .check, lead: "Marked read", phoneLead: "Read", detail: subject, warn: warn) }
     if before.questions.stopped {
-      let name = agent(before.author)
+      let name = rowAgent(before)
       let short = shortName(name)
       return ToastWords(mark: .warn, lead: "Marked read", phoneLead: "Read", detail: "\(short) was stopped", phoneDetail: "Stopped · \(short)", warn: true, speech: short != name ? "Marked read. \(name) was stopped." : nil)
     }

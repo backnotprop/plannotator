@@ -498,7 +498,7 @@ struct CommentsSheet: View {
   }
 
   /// The agent the thread's lines name, as the thread's own foot says it.
-  private var agent: String { session.thread(thread).map { ThreadScreen.agentName($0.thread) } ?? PhoneWords.anAgent }
+  private var agent: String { session.thread(thread).map { ThreadScreen.agentName($0.thread, row: session.row(thread)) } ?? PhoneWords.anAgent }
 }
 
 struct CommentRow: View {

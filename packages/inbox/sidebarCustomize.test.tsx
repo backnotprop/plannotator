@@ -31,8 +31,11 @@ const { setInboxAgents } = await import('./agentsList');
 
 const stored = new Map<string, string>();
 const saves: unknown[] = [];
-/** The cookie while Plans is off (it is, here): its row is left out (sidebarLayout.ts); the save sends the layout whole. */
-const COOKIE_DEFAULT = { ...INBOX_SIDEBAR_DEFAULT, top: INBOX_SIDEBAR_DEFAULT.top.filter((id) => id !== 'plans') };
+/**
+ * The cookie while Plans and Grid are off (they are, here): their rows are left out (sidebarLayout.ts); the save sends
+ * the layout whole. Grid's cookie once it is on: grid/gridPage.test.tsx.
+ */
+const COOKIE_DEFAULT = { ...INBOX_SIDEBAR_DEFAULT, top: INBOX_SIDEBAR_DEFAULT.top.filter((id) => id !== 'plans' && id !== 'grid') };
 let serverRev = 0;
 const realFetch = globalThis.fetch;
 let root: Root | null = null;

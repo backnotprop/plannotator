@@ -139,11 +139,18 @@ export function useExternalAnnotations<T extends { id: string; source?: string }
      * fallback does not.
      */
     onSessionClosed?: (event: ExternalSessionClosed) => void;
+    /**
+     * The stream reported whether the agent that asked for this review is
+     * gone (`agent-gone`). Only the SSE stream carries it.
+     */
+    onAgentGone?: (gone: boolean) => void;
   },
 ): UseExternalAnnotationsReturn<T> {
   const enabled = options?.enabled ?? true;
   const onSessionClosedRef = useRef(options?.onSessionClosed);
   onSessionClosedRef.current = options?.onSessionClosed;
+  const onAgentGoneRef = useRef(options?.onAgentGone);
+  onAgentGoneRef.current = options?.onAgentGone;
   const [annotations, setAnnotations] = useState<T[]>([]);
   const versionRef = useRef(0);
   const fallbackRef = useRef(false);
@@ -200,6 +207,9 @@ export function useExternalAnnotations<T extends { id: string; source?: string }
             unsentAnnotations: typeof parsed.unsentAnnotations === 'number' ? parsed.unsentAnnotations : 0,
             by: parsed.by === 'session' ? 'session' : 'agent',
           });
+          break;
+        case 'agent-gone':
+          onAgentGoneRef.current?.(parsed.gone === true);
           break;
       }
     }

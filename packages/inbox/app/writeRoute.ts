@@ -17,6 +17,7 @@ export function hashOf(route: Route): string {
   if (route.page === 'settings') hash = settingsHash({ section: route.section ?? null, pair: route.pair });
   else if (route.page === 'whats-new') hash = new URLSearchParams({ 'whats-new': route.version ?? '' }).toString();
   else if (route.page === 'drafts') hash = 'drafts';
+  else if (route.page === 'grid') hash = 'grid';
   else if (route.page === 'artifacts') hash = route.pinned ? 'artifacts=pinned' : 'artifacts';
   else if (route.page === 'plans') hash = plansHash(route);
   else if (route.page === 'scheduled') hash = route.scheduled ? `routine=${encodeURIComponent(route.scheduled)}${route.routineRuns ? '&runs' : ''}` : 'routines';
@@ -74,6 +75,7 @@ export function hashOf(route: Route): string {
       params.set('in', route.ref.messageId);
       if (route.ref.line) params.set('line', String(route.ref.line));
       if (route.ref.lineEnd) params.set('to', String(route.ref.lineEnd));
+      if (route.ref.skill) params.set('skill', '');
     }
     if (route.thread && route.guide) params.set('guide', route.guide);
     if (route.thread && route.guide) writeReviewAt(params, route.guideAt);

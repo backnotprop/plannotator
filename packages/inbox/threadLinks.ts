@@ -5,7 +5,8 @@
  *
  * What counts is what the message text draws as a link (`ui` InlineMarkdown):
  * `[text](url)`, `<url>`, a bare url, `owner/repo#12` (with no repo, on the host
- * most projects use: defaultRefHost.ts) and `#12` when the project names its repo, and `<a href>` in a raw HTML block. Not: anything in
+ * most projects use: defaultRefHost.ts) and `#12` when the project names its repo (on GitLab also `!12` and
+ * `group/sub/project!12`), and `<a href>` in a raw HTML block. Not: anything in
  * a code block or a code span, images, `@mentions`, local file links (they
  * have their own hover), links inside attachments. Nothing is fetched here: a
  * title is the words the message wrote for the link, when it wrote any.
@@ -14,7 +15,7 @@
  */
 
 import { forgeOfUrl, forgeRefKey, forgeRefLabel } from '@plannotator/core/forge-ref-card';
-import { forgeRefLinks, matchCrossRepoRef, type ForgePlatform } from '@plannotator/core/forge-refs';
+import { BARE_MR_REF, forgeRefLinks, matchCrossRepoRef, type ForgePlatform } from '@plannotator/core/forge-refs';
 import type { InboxMessageWire, InboxProjectRepo } from '@plannotator/core/inbox-types';
 import { parseTableContent } from '@plannotator/ui/components/blocks/TableBlock';
 import { trimUrlTail } from '@plannotator/ui/components/InlineMarkdown';
@@ -73,8 +74,8 @@ export interface WrittenLink {
 
 const WEB = /^https?:\/\//i;
 const BARE = /^https?:\/\/[^\s<>"']+/;
-/** A quick look: no scheme, no `#12`, nothing to parse. */
-const MAY_HAVE_LINK = /https?:\/\/|#\d/i;
+/** A quick look: no scheme, no `#12` or GitLab `!12`, nothing to parse. */
+const MAY_HAVE_LINK = /https?:\/\/|[#!]\d/i;
 
 /** `[words](url)` at `start` (the `[`), by the renderer's own scan; null when it is not a link. */
 function readLink(text: string, start: number): { words: string; url: string; end: number } | null {
@@ -149,6 +150,14 @@ function readInline(text: string, repo: RefRepo, out: WrittenLink[], fallbackHos
         i = image.end;
         continue;
       }
+    } else if (ch === '!' && refs?.mergeRequest && !/\w/.test(prev)) {
+      // GitLab's `!12`, as the renderer draws it: `#12`'s boundary, a GitLab project only.
+      const mr = BARE_MR_REF.exec(text.slice(i));
+      if (mr) {
+        out.push({ href: refs.mergeRequest(mr[1]!), words: null, fromRef: true });
+        i += mr[0].length;
+        continue;
+      }
     } else if (ch === '[') {
       const link = readLink(text, i);
       if (link) {
@@ -179,7 +188,8 @@ function readInline(text: string, repo: RefRepo, out: WrittenLink[], fallbackHos
           continue;
         }
       } else if (/[A-Za-z0-9]/.test(ch)) {
-        const cross = matchCrossRepoRef(text.slice(i), prev, { host: repo ? repo.host : fallbackHost });
+        // With no repo the host is a guess: GitLab's `group/project!12` stays plain there, as the message draws it.
+        const cross = matchCrossRepoRef(text.slice(i), prev, repo ? { host: repo.host } : { host: fallbackHost, withoutRepo: true });
         if (cross?.href) {
           out.push({ href: cross.href, words: null, fromRef: true });
           i += cross.label.length;

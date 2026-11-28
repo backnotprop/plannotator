@@ -355,6 +355,37 @@ test.skipIf(!hasDom)('a sound or a video the body shows is a native player in pl
   expect(video.hasAttribute('autoplay')).toBe(false);
 });
 
+test.skipIf(!hasDom)('a video the Inbox keeps has "Open" under its player, into the viewer; before its record lands it has none, and a click on the player opens nothing', async () => {
+  const opened: InboxInlineImage[] = [];
+  const body = ['The walkthrough:', '', '![Walkthrough](media/walkthrough.webm)', '', 'Listen: ![Standup](media/standup.wav)'].join('\n');
+  await render(body, [B], opened);
+  // Not captured yet: the player only.
+  expect(host!.querySelectorAll('[data-ib-media-open]')).toHaveLength(0);
+
+  const film: InboxInlineImage = { ...image('att_01K7FFFFFFFFFFFFFFFFFFFFFF', 'media/walkthrough.webm'), kind: 'video', media_type: 'video/webm' };
+  await redraw(body, [B, film], opened);
+  const video = host!.querySelector<HTMLVideoElement>('video[data-inline-media]')!;
+  const open = video.nextElementSibling as HTMLElement;
+  expect(open.hasAttribute('data-ib-media-open')).toBe(true);
+  // Its words are not text of the body (a comment never quotes them).
+  expect(open.classList.contains('annotation-exclude')).toBe(true);
+  expect(open.textContent).toBe('');
+  const button = open.querySelector('button')!;
+  expect(button.getAttribute('aria-label')).toBe('Open walkthrough.webm');
+  expect(button.getAttribute('data-label')).toBe('Open');
+  // The sound has no record: no button.
+  expect(host!.querySelectorAll('[data-ib-media-open]')).toHaveLength(1);
+
+  await act(async () => video.click());
+  expect(opened).toEqual([]);
+  await act(async () => button.click());
+  expect(opened.map((record) => record.id)).toEqual([film.id]);
+  // Across a redraw: one button, still under its player.
+  await redraw(body, [B, film], opened);
+  expect(host!.querySelectorAll('[data-ib-media-open]')).toHaveLength(1);
+  expect(host!.querySelector('video[data-inline-media]')!.nextElementSibling!.hasAttribute('data-ib-media-open')).toBe(true);
+});
+
 test.skipIf(!hasDom)('a raw <img> naming a sound or a video draws the player in place, the same element across a redraw; one that fails to load is the chip', async () => {
   const body = '<p>The run: <img src="rec/clip.mp4" alt="Clip"> and <img src="notes/hi.wav" alt="Voice"> end there.</p>\n\n![B](design/b.png)';
   await render(body, [B], []);

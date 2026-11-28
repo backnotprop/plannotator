@@ -14,7 +14,10 @@
  * - a click on a part of a flowchart, sequence, state, class, ER or
  *   requirement diagram makes a different anchor (kind, id, ends, label,
  *   source line) under Pele than under Mermaid, or a comment made under one
- *   engine does not restore onto the same part under the other.
+ *   engine does not restore onto the same part under the other;
+ * - an inline diagram Pele draws small is blown up to fill its box (a
+ *   two-node flowchart's words three times the page's), or Mermaid's inline
+ *   fit changes.
  *
  * DOM-gated (DOM_TESTS=1).
  */
@@ -466,4 +469,47 @@ describe.if(hasDom)('diagram engine: a comment anchored under one engine restore
       }
     });
   }
+});
+
+describe.if(hasDom)('diagram engine: an inline diagram is fitted at most at the size Pele drew it', () => {
+  /** Give the canvas a layout (happy-dom has none), fit it with the `0` key, and read the scale Fit chose. */
+  async function fittedScale(width: number, height: number): Promise<number> {
+    const canvas = host!.querySelector<HTMLElement>('[data-diagram-canvas]')!;
+    canvas.getBoundingClientRect = () => new DOMRect(0, 0, width, height);
+    await act(async () => {
+      canvas.dispatchEvent(new KeyboardEvent('keydown', { key: '0', bubbles: true }));
+    });
+    const match = /scale\(([\d.]+)\)/u.exec(host!.querySelector<HTMLElement>('[data-diagram-svg]')!.style.transform);
+    return Number(match?.[1]);
+  }
+
+  test('a narrow Pele diagram stays at its own size; Mermaid still fills the box', async () => {
+    const source = 'flowchart LR\n  A[Start] --> B[Done]';
+    await mount(<MermaidBlock block={fence(source)} annotations={[]} onAddAnnotation={noop} />);
+    await waitFor(() => drawn());
+    expect(engineOf(drawn())).toBe('pele');
+    // A box far wider and taller than the drawing: filling it would scale the drawing up about threefold.
+    expect(await fittedScale(758, 290)).toBe(1);
+    await act(async () => root!.unmount());
+    root = null;
+
+    __setDiagramEngineModeForTests('mermaid');
+    await mount(<MermaidBlock block={fence(CASES.flowchart.source)} annotations={[]} onAddAnnotation={noop} />);
+    await waitFor(() => drawn());
+    expect(engineOf(drawn())).toBe('mermaid');
+    const [, , w, h] = drawn().getAttribute('viewBox')!.split(/[\s,]+/u).map(Number);
+    // As before: Fit fills the box inside its 24px padding, here twice the drawing's own size.
+    expect(await fittedScale(w! * 2 + 48, h! * 2 + 48)).toBeCloseTo(2, 3);
+  });
+
+  test('a Pele diagram larger than its box in either direction is still scaled down to fit it whole', async () => {
+    await mount(<MermaidBlock block={fence('flowchart LR\n  A[Start] --> B[Done]')} annotations={[]} onAddAnnotation={noop} />);
+    await waitFor(() => drawn());
+    expect(engineOf(drawn())).toBe('pele');
+    const [, , w, h] = drawn().getAttribute('viewBox')!.split(/[\s,]+/u).map(Number);
+    // Too narrow (a phone): half the drawing's width inside the 24px padding, height to spare.
+    expect(await fittedScale(w! / 2 + 48, h! * 4 + 48)).toBeCloseTo(0.5, 3);
+    // Too short: half its height, width to spare.
+    expect(await fittedScale(w! * 4 + 48, h! / 2 + 48)).toBeCloseTo(0.5, 3);
+  });
 });

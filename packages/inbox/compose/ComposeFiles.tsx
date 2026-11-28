@@ -13,6 +13,7 @@ import { isPhone } from '../phone';
 import { chosenFiles, clipboardHasText, pastedFiles, pastedImageOwnLink } from './paste';
 import { PASTED_UNDO_MS, boxText, isLongPaste, mapAnchor, pastedPreview, pastedTextName, putTextBack } from './pastedText';
 import { newUuid } from '../uuid';
+import { FILE_NOT_ADDED, dismissLostDraftFile } from '../lostDraftFiles';
 
 /**
  * Compose's files, and the reply box's: each one the person picked, dropped
@@ -38,6 +39,8 @@ export interface ComposeFile {
   reuse?: { sha256: string } | null;
   /** Just pointed at (added again): the tile says so for a moment. */
   flash?: boolean;
+  /** A file its draft did not take (lostDraftFiles.ts): its upload's id, refused on its tile until removed. */
+  gone?: string;
 }
 
 /** A long paste the person can put back in the box. */
@@ -275,7 +278,7 @@ export function useComposeFiles(
       })
       .catch((cause) => {
         if (!(cause instanceof DOMException && cause.name === 'AbortError')) {
-          patch(key, { state: 'refused', error: cause instanceof InboxApiError ? cause.message : 'Not attached: that file could not be added.' });
+          patch(key, { state: 'refused', error: cause instanceof InboxApiError ? cause.message : FILE_NOT_ADDED });
         }
         return null;
       })
@@ -324,7 +327,7 @@ export function useComposeFiles(
           add(pictures);
           onPasted.current?.(pictures.map((file) => file.name));
         } else {
-          patch(key, { state: 'refused', name: 'Picture', error: cause instanceof InboxApiError ? cause.message : 'Not attached: that file could not be added.' });
+          patch(key, { state: 'refused', name: 'Picture', error: cause instanceof InboxApiError ? cause.message : FILE_NOT_ADDED });
         }
         return null;
       })
@@ -346,6 +349,8 @@ export function useComposeFiles(
 
   const remove = useCallback((key: string) => {
     release(key);
+    const gone = filesRef.current.find((file) => file.key === key)?.gone;
+    if (gone) dismissLostDraftFile(gone);
     setFiles((current) => current.filter((file) => file.key !== key));
   }, []);
 
@@ -567,10 +572,24 @@ export function useComposeFiles(
    * draft no longer holds goes (another window removed it), unless `alsoKeep`
    * names it (attached here since). Tiles already here keep their state. A file
    * here that is not uploaded yet (or whose upload was refused) is in no draft:
-   * it stays, a paste's text still to put back, carried into `words`.
+   * it stays, a paste's text still to put back, carried into `words`. `lost`: files the draft did not take
+   * (lostDraftFiles.ts): each is a refused tile (its own, or a new one), never dropped unsaid.
    */
-  const restoreDraft = useCallback((list: readonly InboxDraftFile[], words: string, mode: 'replace' | 'add' = 'replace', alsoKeep: readonly string[] = []) => {
+  const restoreDraft = useCallback((list: readonly InboxDraftFile[], words: string, mode: 'replace' | 'add' = 'replace', alsoKeep: readonly string[] = [], lost: readonly InboxDraftFile[] = []) => {
     const wanted = new Set([...list.map((file) => file.upload_id), ...alsoKeep]);
+    const notTaken = lost.filter((file) => !wanted.has(file.upload_id));
+    if (notTaken.length > 0) {
+      const refused = (file: ComposeFile, id: string): ComposeFile => {
+        anchors.current.delete(file.key);
+        return { ...file, state: 'refused', upload: null, error: FILE_NOT_ADDED, gone: id, pasted: null };
+      };
+      const shown = filesRef.current.map((file) => {
+        const id = file.upload?.upload_id;
+        return id && notTaken.some((one) => one.upload_id === id) ? refused(file, id) : file;
+      });
+      const fresh = notTaken.filter((one) => !shown.some((file) => file.gone === one.upload_id)).map((one) => refused(fromUpload(one), one.upload_id));
+      filesRef.current = [...shown, ...fresh];
+    }
     const here = new Set(filesRef.current.filter((file) => file.upload).map((file) => file.upload!.upload_id));
     const keep = (file: ComposeFile) => mode === 'add' || !file.upload || wanted.has(file.upload.upload_id);
     for (const file of filesRef.current) {

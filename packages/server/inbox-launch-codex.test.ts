@@ -107,6 +107,35 @@ function setup(options: { state?: FakeCodexLaunchState; config?: string | null; 
 }
 
 describe("Codex through the launch engine, against the fake codex", () => {
+  test("a trusted project's Inbox registration enables launch without a global registration", async () => {
+    const t = setup({ config: 'sandbox_mode = "workspace-write"\n' });
+    mkdirSync(join(t.folder, ".codex"));
+    writeFileSync(join(t.folder, ".codex", "config.toml"), CONFIG);
+    writeFileSync(join(t.codexHome, "config.toml"), `sandbox_mode = "workspace-write"\n[projects.${JSON.stringify(t.folder)}]\ntrust_level = "trusted"\n`);
+    const root = await t.send("Check the project.");
+    const thread = await until("the thread", () => t.store.message(root.id)!.launch!.session_ref);
+    expect(thread).toBeTruthy();
+    await until("the prompt delivered", () => t.fake.turnTexts().some((text) => text.includes("Check the project.")));
+  });
+
+  test("a project registration does not make an untrusted folder available", async () => {
+    const t = setup({ config: 'sandbox_mode = "workspace-write"\n' });
+    mkdirSync(join(t.folder, ".codex"));
+    writeFileSync(join(t.folder, ".codex", "config.toml"), CONFIG);
+    writeFileSync(join(t.codexHome, "config.toml"), `[projects.${JSON.stringify(t.folder)}]\ntrust_level = "untrusted"\n`);
+    await expect(t.send("Check the project.")).rejects.toMatchObject({ code: "agent_unavailable" });
+    expect(t.fake.starts()).toHaveLength(0);
+  });
+
+  test("a disabled project registration does not make Codex available", async () => {
+    const t = setup({ config: 'sandbox_mode = "workspace-write"\n' });
+    mkdirSync(join(t.folder, ".codex"));
+    writeFileSync(join(t.folder, ".codex", "config.toml"), CONFIG + 'enabled = false\n');
+    writeFileSync(join(t.codexHome, "config.toml"), `[projects.${JSON.stringify(t.folder)}]\ntrust_level = "trusted"\n`);
+    await expect(t.send("Check the project.")).rejects.toMatchObject({ code: "agent_unavailable" });
+    expect(t.fake.starts()).toHaveLength(0);
+  });
+
   test("a provider without OpenAI auth stays eligible despite a signed-out CLI status", async () => {
     const t = setup({ state: { login: "none", requiresOpenaiAuth: false } });
     const block = (await t.launch.composeBlock())!;

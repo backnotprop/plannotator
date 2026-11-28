@@ -189,9 +189,10 @@ interface Scan {
  * Read a file handle from its start to its end in 1 MiB chunks, yielding to
  * the event loop between them: the sha256, the size, the first
  * INBOX_ATTACHMENT_HEAD_BYTES and whether it is UTF-8 text with no NUL.
- * `sink` sees every chunk (the send path copies them to a blob).
+ * `sink` sees every chunk (the send path copies them to a blob; so does the
+ * capture of a sound or video a message's text plays, inline-media-capture.ts).
  */
-async function scanHandle(handle: FileHandle, sink?: (chunk: Buffer) => Promise<void>): Promise<Scan> {
+export async function scanHandle(handle: FileHandle, sink?: (chunk: Buffer) => Promise<void>): Promise<Scan> {
   const hash = createHash("sha256");
   const decoder = new TextDecoder("utf-8", { fatal: true });
   const headParts: Buffer[] = [];
@@ -300,7 +301,18 @@ export function sweepStaleInboxSendTemps(inboxDirPath: string, now = Date.now())
  * stream through the hash into a temp blob, so a file of any size is taken
  * without holding it in memory or blocking other requests.
  */
-export async function recordInboxAttachments(inboxDirPath: string, paths: readonly unknown[], options: { base: string; at: string }): Promise<InboxAttachment[]> {
+/** The copy went past `maxBytes` (recordInboxAttachments). */
+const TOO_BIG = new Error("past the bound");
+
+/**
+ * `maxBytes`: a file past `bytes` as it is copied is refused with `refusal()` and nothing of the send is kept (a held
+ * answer's file for another computer, whose `uploads` route takes only so much).
+ */
+export async function recordInboxAttachments(
+  inboxDirPath: string,
+  paths: readonly unknown[],
+  options: { base: string; at: string; maxBytes?: { bytes: number; refusal: () => Error } },
+): Promise<InboxAttachment[]> {
   const checked: { named: string; real: string; stat: Stats; field: string }[] = [];
   // This store's data folder, and the one this process uses (the same one but in tests).
   const guarded = [dirname(inboxDirPath), getPlannotatorDataDir()];
@@ -367,7 +379,11 @@ export async function recordInboxAttachments(inboxDirPath: string, paths: readon
       if (!opened.isFile() || opened.dev !== stat.dev || opened.ino !== stat.ino) refuse(`${named}: changed while it was read.`);
       out = await open(temp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
       const target = out;
+      let copied = 0;
       const scan = await scanHandle(handle, async (chunk) => {
+        copied += chunk.length;
+        // A file that grew past the bound since it was looked at: never copied whole.
+        if (options.maxBytes && copied > options.maxBytes.bytes) throw TOO_BIG;
         let written = 0;
         while (written < chunk.length) written += (await target.write(chunk, written, chunk.length - written)).bytesWritten;
       });
@@ -380,6 +396,10 @@ export async function recordInboxAttachments(inboxDirPath: string, paths: readon
         unlinkSync(temp);
       } catch {
         // Never written.
+      }
+      if (error === TOO_BIG && options.maxBytes) {
+        dropTemps();
+        throw options.maxBytes.refusal();
       }
       return refuse(`${named}: could not be read.`);
     } finally {

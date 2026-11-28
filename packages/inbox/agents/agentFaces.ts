@@ -66,6 +66,9 @@ let resolved = new Map<string, Shown>();
 let ready = false;
 let watching = false;
 const listeners = new Map<string, Set<() => void>>();
+/** Moves whenever any agent's face or tile choice does (`agentFaceOf`, `agentTakesTiles`): a list's icons hear it once. */
+let facesRev = 0;
+const anyListeners = new Set<() => void>();
 
 function storageGet(key: string): unknown {
   try {
@@ -196,14 +199,15 @@ function rebuild(): void {
   setAgentNames(names);
   const was = resolved;
   resolved = next;
-  // Our faces' pictures load only when one is shown (an uploaded picture, a set icon or a project's tile needs none of them).
-  if ([...next.values()].some((face) => !face.startsWith('own:') && !face.startsWith('set:') && face !== 'mark' && face !== 'project')) void loadAgentFaceArt().catch(() => {});
+  // Our faces' pictures load only when one is shown (an uploaded picture, a set icon, another host's mark or a project's tile needs none of them).
+  if ([...next.values()].some((face) => !face.startsWith('own:') && !face.startsWith('set:') && !face.startsWith('mark:') && face !== 'mark' && face !== 'project')) void loadAgentFaceArt().catch(() => {});
   const changed = new Set<string>();
   for (const [id, face] of next) if (was.get(id) !== face) changed.add(id);
   for (const id of was.keys()) if (!next.has(id)) changed.add(id);
   for (const id of noTiles) if (!wasNoTiles.has(id)) changed.add(id);
   for (const id of wasNoTiles) if (!noTiles.has(id)) changed.add(id);
   for (const id of changed) for (const listener of [...(listeners.get(id) ?? [])]) listener();
+  if (changed.size > 0) facesChanged();
   const chains = JSON.stringify([entries(), ...linkedGroups().map(linkedFaces)].map((kept) => Object.entries(kept).map(([key, entry]) => [key, entry.sessions])));
   if (chains !== chainsSeen) {
     chainsSeen = chains;
@@ -437,6 +441,26 @@ function subscribeTo(id: string, listener: () => void): () => void {
 const nothing = () => () => {};
 const plain = (): AgentFace => 'agent';
 
+function facesChanged(): void {
+  facesRev += 1;
+  for (const listener of [...anyListeners]) listener();
+}
+
+/** Hear any agent's face change, for a list's icons at once (agents/listFaces.tsx); `agentFacesRev` says which. */
+export function subscribeAgentFaces(listener: () => void): () => void {
+  anyListeners.add(listener);
+  return () => void anyListeners.delete(listener);
+}
+
+export const agentFacesRev = (): number => facesRev;
+
+/** How many draws watch one agent's face (an icon outside a list; a list's icons watch all faces once). */
+export function agentFaceWatchersForTests(): number {
+  let n = 0;
+  for (const set of listeners.values()) n += set.size;
+  return n;
+}
+
 /**
  * Whether the machine an agent is on keeps a tile choice: this Inbox does, and a linked one that says so (its agents
  * group's `face_tiles`). An Inbox from before tiles would keep neither a tile nor the own mark picked back.
@@ -492,5 +516,6 @@ export function resetAgentFaces(): void {
   resolved = new Map();
   noTiles = new Set();
   for (const id of was.keys()) for (const listener of [...(listeners.get(id) ?? [])]) listener();
+  facesChanged();
   setAgentNames(new Map());
 }

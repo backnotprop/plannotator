@@ -24,7 +24,7 @@ import { realpathSync } from "node:fs";
 import { basename, join } from "node:path";
 import { isInboxId, type InboxInlineImage } from "@plannotator/core/inbox-types";
 import { inboxBlobPath, inboxBlobsDir } from "@plannotator/shared/inbox/attachments";
-import { INBOX_MESSAGE_IMAGE_CSP, inboxMessageImageRefsInOrder, readInboxMessageImageAsync, readInboxPictureAsync, type InboxMessageImageResult } from "@plannotator/shared/inbox/message-images";
+import { INBOX_MESSAGE_IMAGE_CSP, inboxMessageShownFileRefsInOrder, readInboxMessageImageAsync, readInboxPictureAsync, type InboxMessageImageResult } from "@plannotator/shared/inbox/message-images";
 import { captureInboxInlineImages, yieldToLoop } from "@plannotator/shared/inbox/inline-images";
 import { openInboxMessageMedia } from "@plannotator/shared/inbox/message-media";
 import { inboxInlineMediaKind } from "@plannotator/core/inbox-inline-media";
@@ -83,6 +83,8 @@ export async function inboxMessageImageRoute(req: Request, url: URL, store: Inbo
   if (input.path && inboxInlineMediaKind(input.path)) {
     const media = await openInboxMessageMedia(input);
     if (!media.ok) return refuse(media.status, media.code, media.error);
+    // On disk now: it becomes a file of the thread (an artifact) as a shown picture does.
+    shown?.(message.id, input.path);
     const decision = decideByteRange(req.headers.get("range"), media.size, { ifRange: req.headers.get("if-range"), etag: media.etag });
     return byteRangeResponse(media.handle, media.size, decision, {
       ...GUARD_HEADERS,
@@ -189,7 +191,7 @@ const MESSAGE_BATCH = 64;
 /** Messages the retry table remembers (least recently tried dropped first). */
 const ATTEMPTS_MAX_MESSAGES = 10_000;
 /** Refusals that cost a read of the file (or will fail the same way at once): not tried again until the retry window passes. */
-const COSTLY_REFUSALS = new Set(["not_an_image", "image_changed", "image_too_large", "write_failed", "image_unreadable", "image_read_failed"]);
+const COSTLY_REFUSALS = new Set(["not_an_image", "not_media", "image_changed", "image_too_large", "image_unreadable", "image_read_failed"]);
 
 /** A source the capture could not take (`createInboxImageCapture`'s retry table). */
 interface Attempt {
@@ -205,7 +207,7 @@ export interface InboxImageCapture {
   shown: (messageId: string, ref: string) => void;
   /** Resolves once nothing is queued or running (tests). */
   idle: () => Promise<void>;
-  /** The server stopped: nothing more is read or written; a capture in flight discards its copies. */
+  /** The server stopped: nothing more is read or written; a capture in flight discards its copies (a film's copy ends at its next chunk). */
   stop: () => void;
 }
 
@@ -223,7 +225,8 @@ export interface InboxImageCapture {
  * deletion's blob sweep (which keeps only blobs a record names) can never
  * remove a copy no record names yet. A source refused after a read (not an
  * image, changed while read, too many pixels) is tried again only after
- * INBOX_IMAGE_CAPTURE_RETRY_MS; one refused before any read (not on disk yet,
+ * INBOX_IMAGE_CAPTURE_RETRY_MS; a copy that could not be written (a full
+ * disk) after the longest miss wait; one refused before any read (not on disk yet,
  * hidden) after INBOX_IMAGE_CAPTURE_MISS_WAITS_MS, or as soon as the image
  * route serves it or its thread changes (a new message: the window keeps a
  * picture that failed as it is and never asks the route again). A thread
@@ -237,6 +240,8 @@ export function createInboxImageCapture(
     pauseMs?: number;
     retryMs?: number;
     missWaitsMs?: readonly number[];
+    /** A copy that could not be written (`write_failed`) is tried again after this long (default the longest miss wait). */
+    writeFailedMs?: number;
     /** Messages the retry table remembers (tests). */
     maxMessages?: number;
     now?: () => number;
@@ -248,6 +253,7 @@ export function createInboxImageCapture(
   const pauseMs = options.pauseMs ?? INBOX_IMAGE_CAPTURE_PAUSE_MS;
   const retryMs = options.retryMs ?? INBOX_IMAGE_CAPTURE_RETRY_MS;
   const missWaits = options.missWaitsMs ?? INBOX_IMAGE_CAPTURE_MISS_WAITS_MS;
+  const writeFailedMs = options.writeFailedMs ?? Math.max(retryMs, ...missWaits);
   const maxMessages = Math.max(1, options.maxMessages ?? ATTEMPTS_MAX_MESSAGES);
   const clock = options.now ?? Date.now;
   const capture = options.capture ?? captureInboxInlineImages;
@@ -280,9 +286,11 @@ export function createInboxImageCapture(
     while (attempts.size > maxMessages) attempts.delete(attempts.keys().next().value!);
   };
   /** A capture that began at `began` could not take `ref`. */
-  const tried = (messageId: string, ref: string, costly: boolean, began: number) => {
+  const tried = (messageId: string, ref: string, code: string, began: number) => {
     const before = attempts.get(messageId)?.get(ref);
-    if (costly) return remember(messageId, ref, { due: clock() + retryMs, misses: 0 });
+    // A full disk is not filled again every minute while the thread is open, nor at once when it changes.
+    if (code === "write_failed") return remember(messageId, ref, { due: clock() + writeFailedMs, misses: 0 });
+    if (COSTLY_REFUSALS.has(code)) return remember(messageId, ref, { due: clock() + retryMs, misses: 0 });
     // Served by the route while this capture ran: it is on disk now, and the thread's capture runs again.
     if (before?.shownAt !== undefined && before.shownAt >= began) return remember(messageId, ref, { due: -Infinity, misses: 0 });
     const misses = (before?.misses ?? 0) + 1;
@@ -302,7 +310,7 @@ export function createInboxImageCapture(
 
   const captureThread = async (threadId: string, budget: { bytes: number }) => {
     const version = store.threadVersion(threadId);
-    const gaps = syncSection("image-capture:gaps", () => store.imageCaptureGaps(threadId, inboxMessageImageRefsInOrder));
+    const gaps = syncSection("image-capture:gaps", () => store.imageCaptureGaps(threadId, inboxMessageShownFileRefsInOrder));
     const start = clock();
     const last = triedAt.get(threadId);
     const changed = last !== undefined && last !== version;
@@ -321,44 +329,54 @@ export function createInboxImageCapture(
       const now = clock();
       const due = refs.filter((ref) => dueAt(message.id, ref, changed) <= now).slice(0, MESSAGE_BATCH);
       if (due.length === 0) continue;
-      const began = now;
-      await yieldToLoop();
-      try {
-        const project = store.project(message.project_id);
-        if (!project) continue;
-        const latest = store.message(message.id);
-        if (!latest || stopped) continue;
-        const captured = await capture(store.dir, {
-          body: latest.body,
-          root: project.root,
-          base: latest.base_path ?? null,
-          anywhere: latest.author.kind === "agent",
-          sentAt: latest.created_at,
-          capturedOnOpenAt: new Date().toISOString(),
-          refs: due,
-          max: MESSAGE_BATCH,
-          stage: true,
-        });
-        // A refusal decided before any read (missing, hidden, outside its project) waits
-        // INBOX_IMAGE_CAPTURE_MISS_WAITS_MS; one that cost a read (not an image, changed while read) INBOX_IMAGE_CAPTURE_RETRY_MS.
-        for (const failure of captured.failures) tried(message.id, failure.ref, COSTLY_REFUSALS.has(failure.code), began);
-        // Still there (a deletion may have run meanwhile) and the server still running: the records go on
-        // it, in text order, and only then do the copies move into blobs/ (no await in between).
-        if (stopped || !store.message(message.id)) {
-          await captured.discard();
-          continue;
+      // The pictures in one go, then each sound or video on its own: a film's copy is written and committed, and the
+      // pass's budget checked, before the next film is read.
+      const pictures = due.filter((ref) => !inboxInlineMediaKind(ref));
+      const groups = [...(pictures.length > 0 ? [pictures] : []), ...due.filter((ref) => inboxInlineMediaKind(ref)).map((ref) => [ref])];
+      for (const group of groups) {
+        if (stopped) return;
+        const began = clock();
+        await yieldToLoop();
+        try {
+          const project = store.project(message.project_id);
+          if (!project) break;
+          const latest = store.message(message.id);
+          if (!latest || stopped) break;
+          const captured = await capture(store.dir, {
+            body: latest.body,
+            root: project.root,
+            base: latest.base_path ?? null,
+            anywhere: latest.author.kind === "agent",
+            sentAt: latest.created_at,
+            capturedOnOpenAt: new Date().toISOString(),
+            refs: group,
+            max: MESSAGE_BATCH,
+            stage: true,
+            attached: latest.attachments,
+            stopped: () => stopped,
+          });
+          // A refusal decided before any read (missing, hidden, outside its project) waits
+          // INBOX_IMAGE_CAPTURE_MISS_WAITS_MS; one that cost a read (not an image, changed while read) INBOX_IMAGE_CAPTURE_RETRY_MS;
+          // a copy that could not be written (a full disk) the longest miss wait.
+          for (const failure of captured.failures) tried(message.id, failure.ref, failure.code, began);
+          // Still there (a deletion may have run meanwhile) and the server still running: the records go on
+          // it, in text order, and only then do the copies move into blobs/ (no await in between).
+          if (stopped || !store.message(message.id)) {
+            await captured.discard();
+            break;
+          }
+          if (store.threadVersion(threadId) !== ours) raced = true;
+          syncSection("image-capture:write", () => store.addCapturedImages(message.id, captured.images, inboxMessageShownFileRefsInOrder(latest.body)));
+          ours = store.threadVersion(threadId);
+          await captured.commit();
+          budget.bytes += captured.bytes;
+          if (budget.bytes >= passBytes) {
+            budget.bytes = 0;
+            await new Promise((resolve) => setTimeout(resolve, pauseMs));
+          }
+        } catch {
+          // Left for a later read.
         }
-        if (store.threadVersion(threadId) !== ours) raced = true;
-        syncSection("image-capture:write", () => store.addCapturedImages(message.id, captured.images, inboxMessageImageRefsInOrder(latest.body)));
-        ours = store.threadVersion(threadId);
-        await captured.commit();
-        budget.bytes += captured.bytes;
-        if (budget.bytes >= passBytes) {
-          budget.bytes = 0;
-          await new Promise((resolve) => setTimeout(resolve, pauseMs));
-        }
-      } catch {
-        // Left for a later read.
       }
     }
     // A line not this pass's (a message that came meanwhile): the next read tries the misses again.

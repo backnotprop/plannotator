@@ -13,13 +13,14 @@ import { INBOX_MESSAGE_IMAGE_CSP } from "@plannotator/shared/inbox/message-image
 import { doorRouteOf } from "./inbox-devices";
 import { INBOX_HTML_DOCUMENT_CSP } from "./inbox-attachments";
 import { InboxLinks } from "./inbox-links";
-import { MACHINE_IMAGE_MAX_BYTES, machineMarkdownImageAnswer } from "./inbox-machine-files";
+import { MACHINE_GUIDE_JSON_MAX_BYTES, MACHINE_IMAGE_MAX_BYTES, machineMarkdownImageAnswer } from "./inbox-machine-files";
 import { createInboxMachines } from "./inbox-machines";
 
 const FAR = "ibx_01K00000000000000000000000";
 const TOKEN = "tok_test";
 const MD = "att_01K7MDMDMDMDMDMDMDMDMDMDMD";
 const PAGE = "att_01K7PAPAPAPAPAPAPAPAPAPAPA";
+const GUIDE = "msg_01K7GUGUGUGUGUGUGUGUGUGUGU";
 const FOLDER = "f0f1f2f3f4f5f6f7";
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
 /** What a hostile far machine adds to every answer: a sandbox that escapes, a sniffing hint, CORS and a cross-origin CORP. */
@@ -64,20 +65,34 @@ function streamed(size: number): ReadableStream<Uint8Array> {
   });
 }
 
+/** The far machine asleep: its stream ends and every request hangs, as a sleeping computer's do. */
+let farSleep: () => void = () => {};
+
 /** The far machine's door: what keeps it online, then what its window routes answer (some of them hostile). */
 function farDoor() {
+  let asleep = false;
+  const streams: ReadableStreamDefaultController<Uint8Array>[] = [];
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
     idleTimeout: 0,
     fetch(req) {
+      if (asleep) return new Promise<Response>(() => {});
       const url = new URL(req.url);
       const route = url.pathname.replace("/api/inbox/device/", "");
       if (req.headers.get("authorization") !== `Bearer ${TOKEN}`) return Response.json({ code: "device_token_invalid" }, { status: 401 });
       if (route === "health") return Response.json({ ok: true, inbox_id: FAR, machine_links: 1, version: "0.28.66" });
       if (route === "threads") return Response.json({ cursor: 0, sections: [], projects: [] });
       if (route === "events") {
-        return new Response(new ReadableStream({ start: (c) => c.enqueue(new TextEncoder().encode(`event: hello\ndata: {"cursor":0}\n\n`)) }), { headers: { "Content-Type": "text/event-stream" } });
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            start: (c) => {
+              streams.push(c);
+              c.enqueue(new TextEncoder().encode(`event: hello\ndata: {"cursor":0}\n\n`));
+            },
+          }),
+          { headers: { "Content-Type": "text/event-stream" } },
+        );
       }
       asked.push(`${route}${url.search}`);
       const path = url.searchParams.get("path");
@@ -89,6 +104,23 @@ function farDoor() {
         if (path === "page.png") return new Response("<script>top.x()</script>", { headers: { ...HOSTILE, "Content-Type": "text/html" } });
         if (path === "huge.png") return new Response(streamed(MACHINE_IMAGE_MAX_BYTES + 10), { headers: { "Content-Type": "image/png" } });
         return Response.json({ error: "That image is not shown by this file.", code: "image_not_referenced" }, { status: 404, headers: HOSTILE });
+      }
+      // A guided review's pictures on that machine (mark `linked-reads`): an image's side, a Markdown file's picture.
+      if (route === `messages/${GUIDE}/guide/review-image` || route === `messages/${GUIDE}/guide/review-markdown-image`) {
+        const name = path ?? url.searchParams.get("src");
+        if (name === "shot.png") return new Response(PNG, { headers: { ...HOSTILE, "Content-Type": "image/png", "X-Image-Width": "1", "X-Image-Height": "1" } });
+        if (name === "page.png") return new Response("<script>top.x()</script>", { headers: { ...HOSTILE, "Content-Type": "text/html" } });
+        if (name === "huge.png") return new Response(streamed(MACHINE_IMAGE_MAX_BYTES + 10), { headers: { "Content-Type": "image/png" } });
+        return Response.json({ reason: "too-large", error: "The file is larger than 10 MB" }, { status: 413 });
+      }
+      // Its JSON reads: a changed file's whole text, the package changes card.
+      if (route === `messages/${GUIDE}/guide/file` || route === `messages/${GUIDE}/guide/package-changes`) {
+        const name = path ?? url.searchParams.get("snapshot");
+        if (name === "src/app.ts" || name === GUIDE) return Response.json({ path: "src/app.ts", content: "export const harbor = 1;\n" }, { headers: HOSTILE });
+        if (name === "page.ts") return new Response("<script>top.x()</script>", { headers: { "Content-Type": "text/html" } });
+        if (name === "broken.ts") return new Response("{not json", { headers: { "Content-Type": "application/json" } });
+        if (name === "huge.ts") return new Response(streamed(MACHINE_GUIDE_JSON_MAX_BYTES + 10), { headers: { "Content-Type": "application/json" } });
+        return Response.json({ error: "Not a file the guide changes.", code: "guide_file_refused" }, { status: 404 });
       }
       if (route === `attachments/${MD}/linked-page`) {
         if (path === "notes.md") return Response.json({ serverSession: "far", path: "/work/docs/notes.md", name: "notes.md", html: null, text: "# Notes", url: "https://evil.example/" });
@@ -117,6 +149,10 @@ function farDoor() {
     },
   });
   cleanups.push(() => server.stop(true));
+  farSleep = () => {
+    asleep = true;
+    for (const stream of streams) stream.close();
+  };
   return `http://127.0.0.1:${server.port}`;
 }
 
@@ -132,6 +168,10 @@ async function linkedInbox() {
       openMachineOffer: () => ({ secret: "s", code: "000000", expires_at: "" }),
       offerDevice: () => null,
       closeMachineOffer: () => null,
+      openIntroductionOffer: () => ({ secret: "s", expires_at: "" }),
+      introduction: () => null,
+      settleIntroduction: noop,
+      dropIntroductions: noop,
       revokeDevice: noop,
       tailnetAddress: () => null,
       tailnetError: () => null,
@@ -151,7 +191,8 @@ async function linkedInbox() {
     const url = new URL(`http://127.0.0.1:1${path}`);
     return (await machines.route(new Request(url, { method, headers: { Host: "127.0.0.1:1", ...headers } }), url, "local"))!;
   };
-  return { get };
+  const state = () => machines.machinesView().find((m) => m.id === FAR)?.state;
+  return { get, state };
 }
 
 /** The window's own read (an `<img>` or a fetch from the Inbox page). */
@@ -219,6 +260,85 @@ describe("a far Markdown file's pictures", () => {
     const huge = await get(image("huge.png"));
     expect(huge.status).toBe(200);
     await expect(huge.arrayBuffer()).rejects.toThrow();
+  });
+});
+
+describe("a far guided review's pictures", () => {
+  const reads = (name: string) => [
+    `/api/inbox/m/${FAR}/messages/${GUIDE}/guide/review-image?path=${name}&side=new&snapshot=${GUIDE}`,
+    `/api/inbox/m/${FAR}/messages/${GUIDE}/guide/review-markdown-image?doc=README.md&side=new&src=${name}&snapshot=${GUIDE}`,
+  ];
+
+  test("held as a far Markdown file's pictures are: a picture under this computer's headers, the same cap, never a page", async () => {
+    const { get } = await linkedInbox();
+    for (const path of reads("shot.png")) {
+      const shot = await get(path);
+      expect([path, shot.status, Buffer.from(await shot.arrayBuffer()).equals(PNG)]).toEqual([path, 200, true]);
+      expect([shot.headers.get("content-security-policy"), shot.headers.get("cross-origin-resource-policy"), shot.headers.get("cache-control"), shot.headers.get("content-disposition"), shot.headers.get("x-image-width")]).toEqual([
+        INBOX_MESSAGE_IMAGE_CSP,
+        "same-origin",
+        "private, no-cache",
+        null,
+        "1",
+      ]);
+    }
+    for (const path of reads("huge.png")) {
+      const huge = await get(path);
+      expect([path, huge.status]).toEqual([path, 200]);
+      await expect(huge.arrayBuffer()).rejects.toThrow();
+    }
+    for (const path of reads("page.png")) {
+      const page = await get(path);
+      expect([path, page.status, ((await page.json()) as { code: string }).code]).toEqual([path, 502, "machine_answer_unreadable"]);
+    }
+    // Its own refusal (the preview's words) comes back as it said it.
+    const refused = await get(reads("big.png")[0]!);
+    expect([refused.status, ((await refused.json()) as { reason: string }).reason]).toEqual([413, "too-large"]);
+  });
+
+  test("its whole files and package changes: JSON under this computer's headers, read up to the cap and refused past it", async () => {
+    const { get } = await linkedInbox();
+    const file = (name: string) => `/api/inbox/m/${FAR}/messages/${GUIDE}/guide/file?path=${name}`;
+    const ok = await get(file("src/app.ts"));
+    expect([ok.status, await ok.json()]).toEqual([200, { path: "src/app.ts", content: "export const harbor = 1;\n" }]);
+    expect([ok.headers.get("content-type"), ok.headers.get("cache-control"), ok.headers.get("access-control-allow-origin"), ok.headers.get("content-disposition")]).toEqual(["application/json; charset=utf-8", "no-store", null, null]);
+    const cards = await get(`/api/inbox/m/${FAR}/messages/${GUIDE}/guide/package-changes?snapshot=${GUIDE}`);
+    expect(cards.status).toBe(200);
+    const huge = await get(file("huge.ts"));
+    expect([huge.status, ((await huge.json()) as { code: string }).code]).toEqual([413, "machine_answer_too_large"]);
+    for (const name of ["page.ts", "broken.ts"]) {
+      const odd = await get(file(name));
+      expect([name, odd.status, ((await odd.json()) as { code: string }).code]).toEqual([name, 502, "machine_answer_unreadable"]);
+    }
+    // Its own refusal comes back as it said it.
+    const refused = await get(file("other.ts"));
+    expect([refused.status, ((await refused.json()) as { code: string }).code]).toEqual([404, "guide_file_refused"]);
+  });
+
+  test("with the far machine known to be away, each read answers that at once, never after the request's limit", async () => {
+    const { get, state } = await linkedInbox();
+    farSleep();
+    for (let i = 0; i < 300 && state() !== "offline"; i++) await Bun.sleep(20);
+    expect(state()).toBe("offline");
+    for (const path of [`/api/inbox/m/${FAR}/messages/${GUIDE}/guide/file?path=src/app.ts`, ...reads("shot.png"), `/api/inbox/m/${FAR}/threads/thr_x/steps`, `/api/inbox/m/${FAR}/open-in/file/code?thread=thr_x&path=a.ts`]) {
+      const started = Date.now();
+      const away = await get(path);
+      expect([path, away.status, ((await away.json()) as { code: string }).code]).toEqual([path, 503, "machine_offline"]);
+      // The request's own limit here is 2 s (`requestMs`): an answer at once, not after it.
+      expect(Date.now() - started).toBeLessThan(500);
+    }
+  });
+
+  test("only this Inbox's window reads them: a bare call is refused, never asked of the far machine", async () => {
+    const { get } = await linkedInbox();
+    const json =[`/api/inbox/m/${FAR}/messages/${GUIDE}/guide/file?path=src/app.ts`, `/api/inbox/m/${FAR}/messages/${GUIDE}/guide/package-changes?snapshot=${GUIDE}`];
+    for (const path of [...reads("shot.png"), ...json]) {
+      for (const headers of [{}, { "Sec-Fetch-Site": "none" }, { "Sec-Fetch-Site": "same-origin", Origin: "http://evil.test" }] as Record<string, string>[]) {
+        const refused = await get(path, headers);
+        expect([path, headers, refused.status, ((await refused.json()) as { code: string }).code]).toEqual([path, headers, 403, "window_only"]);
+      }
+    }
+    expect(asked).toEqual([]);
   });
 });
 

@@ -159,6 +159,7 @@ import {
 import { readHostMessages, takeHostMessagesPath } from "./host-messages";
 import { exitOnPortInUse } from "./port-in-use";
 import { exitWhenParentGone } from "./orphan-plan-review";
+import { cliReviewAgentWatch, endReviewWhenAgentGone, noTabMsFromEnv } from "./review-agent-watch";
 import { parseModPlanInput, readModPlanRevision, writeModPlanRevisionAck } from "./claude-mod-plan";
 import { INBOX_SESSION_HOST_NAMES, inboxHostSessionFromEnv } from "./inbox-mcp-shim";
 import { isInboxSessionId } from "@plannotator/core/inbox-types";
@@ -269,6 +270,7 @@ import { inboxPairedRouteFetch, runInboxCallCommand } from "./inbox-call-command
 import { isInboxTurnedOn } from "@plannotator/shared/inbox/turned-on";
 import { runRoutineCommand } from "./routine-command";
 import { runInboxStepsCommand } from "./inbox-steps-command";
+import { runInboxCapabilityCommand } from "./inbox-capability-command";
 import { runInboxPullsCommand } from "./inbox-pulls-command";
 import { runInboxExportDecisionsCommand } from "./inbox-export-decisions-command";
 import { runFeedbackCommand } from "./feedback-command";
@@ -471,6 +473,21 @@ const rawArgs = process.argv.slice(2);
         cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
         ensureRunning: () => ensureInboxRunning(exportDataDir),
         ...(pairedRoute ? { fetchRoute: pairedRoute } : {}),
+      }),
+    );
+  }
+}
+// `plannotator inbox capability [<capability> on|off]`: the capability switches, a thin client over the Inbox's `/api/inbox/capability` (inbox-capability-command.ts).
+{
+  const args = rawArgs;
+  if (args[0] === "inbox" && args[1] === "capability") {
+    const capabilityDataDir = getPlannotatorDataDir();
+    process.exit(
+      await runInboxCapabilityCommand(args.slice(2), {
+        cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
+        env: process.env,
+        askAiChild: isAskAiChild(process.env),
+        ensureRunning: () => ensureInboxRunning(capabilityDataDir),
       }),
     );
   }
@@ -1768,7 +1785,12 @@ if (args[0] === "sessions") {
 
   // Start review server (even if empty - user can switch diff types in local mode)
   const liveSession = reviewLiveSessionOf(process.env);
+  // Who reads the decision, and whether they are gone (review-agent-watch.ts).
+  // A review the Inbox opened from a live thread answers into that thread:
+  // no agent to lose.
+  const agentWatch = liveSession ? null : cliReviewAgentWatch();
   const server = await startReviewServer({
+    agentPresence: agentWatch ? () => agentWatch.presence() : undefined,
     liveReviewAgent: reviewLiveTargetOf(process.env.PLANNOTATOR_SESSION_TAG),
     liveReviewKey: liveSession ? { key: liveSession.key, title: liveSession.title } : null,
     rawPatch,
@@ -1832,8 +1854,17 @@ if (args[0] === "sessions") {
     ...(reviewTarget ? { target: reviewTarget } : {}),
   });
 
+  // Once its agent is gone the page says so and keeps every comment; a local
+  // review ends when no tab has had it open for a while, keeping its draft.
+  // A PR review never ends that way: it can still post to GitHub/GitLab.
+  const stopAgentWatch = agentWatch
+    ? endReviewWhenAgentGone(agentWatch, server, { noTabMs: isPRMode ? Infinity : noTabMsFromEnv(process.env) })
+    : () => {};
+
   // Wait for user feedback
   const result = await server.waitForDecision();
+  // A decision was taken: it is delivered below, whatever the agent does now.
+  stopAgentWatch();
 
   // Give browser time to receive response and update UI
   await Bun.sleep(1500);
@@ -2846,7 +2877,10 @@ if (args[0] === "sessions") {
   });
   setServerReadyTarget(reviewTarget);
 
+  // The OpenCode plugin reads the decision off this process's stdout.
+  const agentWatch = cliReviewAgentWatch();
   const server = await startReviewServer({
+    agentPresence: agentWatch ? () => agentWatch.presence() : undefined,
     rawPatch,
     gitRef,
     error: diffError,
@@ -2901,7 +2935,12 @@ if (args[0] === "sessions") {
     ...(reviewTarget ? { target: reviewTarget } : {}),
   });
 
+  const stopAgentWatch = agentWatch
+    ? endReviewWhenAgentGone(agentWatch, server, { noTabMs: isPRMode ? Infinity : noTabMsFromEnv(process.env) })
+    : () => {};
+
   const result = await server.waitForDecision();
+  stopAgentWatch();
   await Bun.sleep(1500);
   server.stop();
 

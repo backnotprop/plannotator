@@ -34,6 +34,7 @@ import { useInboxTheme } from '../theme';
 import { TaterMark } from './TaterMark';
 import { ProjectTip } from './ProjectRow';
 import { Tip } from './Tip';
+import { SectionSortToggle } from './SectionSortToggle';
 import { CheckFailingRow, UpdateButton } from './Updates';
 import { UsageRow } from './Usage';
 import type { UpdateCheckFailing } from '../api';
@@ -42,9 +43,12 @@ import { ShortcutHint, useShortcutAria, withShortcut } from '../shortcuts/hint';
 import { inboxAppShortcuts } from '../shortcuts/app.shortcuts';
 import { ScheduledNav } from '../scheduled/ScheduledNav';
 import { PlansNav } from '../plans/PlansNav';
+import { useStickyHeadings } from './stickyHeadings';
 
 export interface SidebarProps {
-  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'board' | 'reviews' | 'prs' | 'artifacts' | 'scheduled' | 'plans';
+  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'board' | 'reviews' | 'prs' | 'artifacts' | 'scheduled' | 'plans' | 'grid';
+  /** Grid (approval "inbox-agent-grid"): the row under Inbox, only while Settings → Capabilities → Experimental → Grid is on. */
+  onGrid?: () => void;
   /** Plans: the row second under Inbox, only while Plans is on (config.json `inboxPlans`); no row, menu item or Customize entry while off. */
   onPlans?: () => void;
   /**
@@ -94,9 +98,11 @@ export interface SidebarProps {
    * The Tags section (approval "inbox-thread-tags", TagsSection.tsx), under Starred: drawn while `shown` (a tag holds
    * a thread, or the person made one). Absent (an Inbox that keeps no tags, the tour): no section.
    */
-  tags?: Pick<TagsSectionProps, 'tags' | 'waiting' | 'tagId' | 'onOpen' | 'onCreate' | 'onRename' | 'onDelete' | 'colours'> & { shown: boolean };
+  tags?: Pick<TagsSectionProps, 'tags' | 'waiting' | 'tagId' | 'onOpen' | 'onCreate' | 'onRename' | 'onDelete' | 'colours' | 'activity'> & { shown: boolean };
   onAgentFilter?: (agentId: string | null) => void;
   onMessageAgent?: (session: string, opener: HTMLElement) => void;
+  /** An agent's menu offers New message… (AgentsSection `newMessage`). Absent: not offered. */
+  agentNewMessage?: { linked: boolean };
   onAddAgent?: (opener: HTMLElement) => void;
   onAddMachine?: () => void;
   /** Rows waiting on the person, all projects. */
@@ -402,34 +408,23 @@ export function Sidebar(props: SidebarProps) {
     const tag = props.tags?.tagId ? props.tags.tags.find((t) => t.id === props.tags?.tagId) : undefined;
     return tag ? { kind: 'tag', name: tag.name } : null;
   })();
-  // A phone's sheet: a section heading that has stuck to the top of the scroll takes a hairline, so rows read as passing under it.
-  useLayoutEffect(() => {
-    const scroll = projsRef.current;
-    if (!phone || !scroll) return;
-    const read = () => {
-      const top = scroll.getBoundingClientRect().top;
-      for (const head of scroll.querySelectorAll<HTMLElement>('.ib-secrow')) {
-        const section = head.parentElement?.getBoundingClientRect();
-        const stuck = scroll.scrollTop > 0 && head.getBoundingClientRect().top - top <= 1 && (section ? section.bottom - top > head.offsetHeight + 2 : true);
-        head.toggleAttribute('data-stuck', stuck);
-      }
-    };
-    read();
-    scroll.addEventListener('scroll', read, { passive: true });
-    return () => scroll.removeEventListener('scroll', read);
-  });
-  /** On a phone each section is one block (its heading sticks while its own rows pass under it); elsewhere the rows stay as they were. */
-  const sheetSection = (name: SidebarSection, children: ReactNode): ReactNode =>
-    phone ? (
-      <div className="ib-sheet-sec" data-sheet-section={name}>
-        {children}
-      </div>
-    ) : (
-      children
-    );
+  // Each section's heading sticks to the top of the one scroll while its own rows pass under it, on a phone and off it
+  // (approval "inbox-sidebar-sticky-headings"); a heading pressed while stuck folds its section and stays where it was.
+  const keepHeading = useStickyHeadings(projsRef);
+  const fold = (section: SidebarSection) => {
+    keepHeading(section);
+    sections.toggle(section);
+  };
+  /** Each section is one block, so its heading sticks only while its own rows pass under it. */
+  const sheetSection = (name: SidebarSection, children: ReactNode): ReactNode => (
+    <div className="ib-sheet-sec" data-sheet-section={name}>
+      {children}
+    </div>
+  );
   const drawn = drawnSidebarItems({
     board: Boolean(props.onBoard),
     plans: Boolean(props.onPlans),
+    grid: Boolean(props.onGrid),
     scheduled: Boolean(props.onScheduled),
     reviews: Boolean(props.onPulls),
     // The Usage row decides itself whether it shows (components/Usage.tsx); the menu offers it only where `cswap` is.
@@ -555,6 +550,13 @@ export function Sidebar(props: SidebarProps) {
           Board
         </button>
         );
+      case 'grid':
+        return (
+        <button type="button" className={`ib-nav${props.page === 'grid' ? ' ib-on' : ''}`} onClick={pick(() => props.onGrid?.())} aria-current={props.page === 'grid' ? 'page' : undefined} data-grid-nav="">
+          <Icon name="grid" />
+          Grid
+        </button>
+        );
       case 'plans':
         return <PlansNav on={props.page === 'plans' && !props.projectId} onClick={pick(() => props.onPlans?.())} pick={pick} phone={phone} />;
       case 'scheduled':
@@ -656,8 +658,8 @@ export function Sidebar(props: SidebarProps) {
       <span>Inbox</span>
     </div>
   );
-  /** A phone's sheet: Starred's heading in a row of its own, as Agents' and Projects' are, so all three stick alike. */
-  const sheetHeading = (heading: ReactNode): ReactNode => (phone ? <div className="ib-secrow">{heading}</div> : heading);
+  /** Starred's heading in a row of its own, as the other sections' are, so they all stick alike. */
+  const sheetHeading = (heading: ReactNode): ReactNode => <div className="ib-secrow">{heading}</div>;
   // The notices (Update, What's new, Can't check, Reload agents) are not items: they head the bottom area, under the
   // Copy prompt pill when it leads it, as before.
   const noticesAfter = bottom[0] === 'copy-prompt' ? 1 : 0;
@@ -690,6 +692,8 @@ export function Sidebar(props: SidebarProps) {
       )}
       {!phone && stack(layout.top)}
       <div className="ib-sidescroll" ref={projsRef} data-more={moreProjects ? '' : undefined}>
+        {/* The scroll's first pixel, taking no room: whether it has moved, for the lines under the header (stickyHeadings.ts). */}
+        <div className="ib-sidescroll-top" data-scroll-top="" aria-hidden="true" />
         {/* A phone's sheet has one scroll: the places scroll with the sections. */}
         {phone && stack(layout.top)}
         {starredShown && pins.length > 0 && !starredAbove && sheetSection('pinned',
@@ -706,7 +710,7 @@ export function Sidebar(props: SidebarProps) {
               open={!pinnedClosed}
               count={pinsWaiting}
               total={phone ? pins.length : undefined}
-              onToggle={() => sections.toggle('pinned')}
+              onToggle={() => fold('pinned')}
             />,
             )}
             <section className="ib-pins" id={pinnedBodyId} aria-labelledby={pinnedLabelId} data-pinned-section="" data-closed={pinnedClosed ? '' : undefined}>
@@ -740,7 +744,7 @@ export function Sidebar(props: SidebarProps) {
             waiting={props.tags.waiting}
             tagId={props.page === 'inbox' ? props.tags.tagId : null}
             closed={tagsClosed}
-            onToggle={() => sections.toggle('tags')}
+            onToggle={() => fold('tags')}
             labelId={tagsLabelId}
             bodyId={tagsBodyId}
             header={
@@ -753,7 +757,7 @@ export function Sidebar(props: SidebarProps) {
                 open={!tagsClosed}
                 count={0}
                 total={phone ? props.tags.tags.length : undefined}
-                onToggle={() => sections.toggle('tags')}
+                onToggle={() => fold('tags')}
               />
             }
             phone={phone}
@@ -763,6 +767,8 @@ export function Sidebar(props: SidebarProps) {
             onRename={props.tags.onRename}
             onDelete={props.tags.onDelete}
             colours={props.tags.colours}
+            activity={props.tags.activity}
+            announce={props.announce}
           />,
         )}
         {agentsShown && (
@@ -773,10 +779,10 @@ export function Sidebar(props: SidebarProps) {
             agentId={props.agentFilter?.id ?? null}
             page={props.page}
             closed={agentsClosed}
-            onToggle={() => sections.toggle('agents')}
+            onToggle={() => fold('agents')}
             labelId={agentsLabelId}
             bodyId={agentsBodyId}
-            header={(icon) => (
+            header={(icon, waitingCount) => (
               <SectionHeader
                 section="agents"
                 id={agentsLabelId}
@@ -784,14 +790,15 @@ export function Sidebar(props: SidebarProps) {
                 label="Agents"
                 iconNode={icon}
                 open={!agentsClosed}
-                count={0}
-                onToggle={() => sections.toggle('agents')}
+                count={waitingCount}
+                onToggle={() => fold('agents')}
               />
             )}
             onMachine={props.onMachine}
             onMachineUpdate={props.onMachineUpdate}
             onAgentFilter={(agentId) => props.onAgentFilter?.(agentId)}
             onMessageAgent={(session, opener) => props.onMessageAgent?.(session, opener)}
+            newMessage={props.onMessageAgent ? props.agentNewMessage : undefined}
             onAddAgent={(opener) => (props.onAddAgent ?? props.onCompose)?.(opener)}
             onAddMachine={props.onAddMachine}
             pick={pick}
@@ -817,7 +824,7 @@ export function Sidebar(props: SidebarProps) {
             open={!projectsClosed}
             count={0}
             total={phone && shown.length > 0 ? shown.length : undefined}
-            onToggle={() => sections.toggle('projects')}
+            onToggle={() => fold('projects')}
           />
           {!projectsClosed && shown.length > 1 && <ProjectSortToggle sort={projectSort} announce={props.announce} />}
         </div>
@@ -1003,40 +1010,10 @@ function SectionHeader(props: {
   );
 }
 
-/**
- * The order of Projects, one quiet icon beside the header's chevron: the icon
- * is the order on screen, a press goes to the next. It shows on the header's
- * hover and keyboard focus; where nothing hovers (a phone, a tablet) it always
- * shows. Only with two projects or more, and only while the section is open.
- * Not navigation: the phone sheet stays open. Going while it holds focus (the
- * list fell to one project), it hands focus to the header, never the page.
- */
+/** The order of Projects (projectSort.ts), in the sections' one sort toggle. */
 function ProjectSortToggle({ sort, announce }: { sort: ProjectSort; announce?: (text: string) => void }) {
-  const { icon, label, next, said } = projectSortControl(sort);
-  const button = useRef<HTMLButtonElement>(null);
-  useLayoutEffect(() => {
-    const node = button.current;
-    return () => {
-      if (node && node === document.activeElement) node.closest('.ib-secrow')?.querySelector<HTMLElement>('[data-sidebar-section]')?.focus({ preventScroll: true });
-    };
-  }, []);
-  return (
-    <Tip content={label}>
-      <button
-        ref={button}
-        type="button"
-        className="ib-proj-sort"
-        aria-label={label}
-        data-projects-sort={sort}
-        onClick={() => {
-          setProjectSort(next);
-          announce?.(said);
-        }}
-      >
-        <Icon name={icon} />
-      </button>
-    </Tip>
-  );
+  const control = projectSortControl(sort);
+  return <SectionSortToggle control={control} onPress={() => setProjectSort(control.next)} announce={announce} data={{ 'data-projects-sort': sort }} />;
 }
 
 /**

@@ -8,10 +8,13 @@
  *  - off: the read and a Checklist save's `event: capabilities` carry Code review off and no Shape;
  *  - on (with an old `inboxShape: true`): turning Code review off answers `{ on: false }` and tells every window, then
  *    the next read still carries Code review (off); a save of `shape` alone is not a setting;
- *  - a release build: Code review's switch is there and off, and Code review's one-time offer is never next
- *    (`CODE_REVIEW_OFFER_SHOWN`: the owner chose the switch without the offer).
+ *  - a release build: Code review's switch is there and off. Code review's one-time offer, while shown
+ *    (`CODE_REVIEW_OFFER_SHOWN`; the `codeReviewOffer` test option shows it whichever way the release has it), is next
+ *    for someone who used an earlier Inbox while Code review was never decided, never once it is on, never for a fresh
+ *    install; switched off (as from 0.29.6), it is never next, and the switch is there all the same.
  *
- * What regresses: a person on a release build not finding Code review's switch, or being shown the offer; the owner
+ * What regresses: a person on a release build not finding Code review's switch, or being shown the offer with Code
+ * review on, or as a fresh install, or at all while it is switched off; the owner
  * (on) losing the row; a shown switch that cannot be turned off; an old `inboxShape` bringing a Shape row back.
  */
 import { afterEach, expect, test } from "bun:test";
@@ -32,14 +35,14 @@ afterEach(() => {
 
 type Frame = { board?: { on: boolean }; steps?: { on: boolean }; bro?: { on: boolean }; code_review?: { on: boolean }; shape?: { on: boolean }; reveal?: { next: string | null } };
 
-async function world(config: Record<string, unknown> | null, version?: string) {
+async function world(config: Record<string, unknown> | null, version?: string, codeReviewOffer?: boolean) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-held-switches-")));
   roots.push(root);
   const dataDir = join(root, "data");
   mkdirSync(dataDir, { recursive: true });
   if (config) writeFileSync(join(dataDir, "config.json"), JSON.stringify(config));
   process.env.PLANNOTATOR_DATA_DIR = dataDir;
-  const server = await startInboxServer({ dataDir, phones: false, ...(version ? { version, binaryPath: null } : {}) });
+  const server = await startInboxServer({ dataDir, phones: false, ...(version ? { version, binaryPath: null } : {}), ...(codeReviewOffer === undefined ? {} : { codeReviewOffer }) });
   servers.push(server);
   const base = `http://127.0.0.1:${server.port}`;
   const read = async () => (await (await fetch(`${base}/api/inbox/settings`)).json()) as Frame;
@@ -135,16 +138,37 @@ test("on, with an old inboxShape: true: Code review's row is there and turns off
   expect("shape" in after).toBe(false);
 });
 
-test("a release build: the Code review switch is there and off, no Shape switch, and Code review's offer is never next", async () => {
+test("a release build: the Code review switch is there and off, no Shape switch, and Code review's offer (while shown) is next only for someone who used an earlier Inbox while Code review was never decided", async () => {
+  // Someone who used an earlier Inbox (a setting its page wrote, inbox.ts `inboxUsedBefore`): the offer is theirs.
+  const earlier = { updateCheck: false, inboxNotifications: { dismissed: true } };
   for (const version of ["0.28.50", "0.30.0"]) {
-    const off = await (await world({ updateCheck: false }, version)).read();
+    const off = await (await world(earlier, version, true)).read();
     expect(off.code_review).toEqual({ on: false });
     expect("shape" in off).toBe(false);
     expect(off.reveal).toBeDefined();
-    expect(off.reveal!.next).not.toBe("code_review");
+    expect(off.reveal!.next).toBe("code_review");
 
-    const on = await (await world({ updateCheck: false, inboxCodeReview: true, inboxShape: true }, version)).read();
+    // A fresh install: the switch is there, the offer never is.
+    const fresh = await (await world({ updateCheck: false }, version, true)).read();
+    expect(fresh.code_review).toEqual({ on: false });
+    expect(fresh.reveal!.next).not.toBe("code_review");
+
+    const on = await (await world({ ...earlier, inboxCodeReview: true, inboxShape: true }, version, true)).read();
     expect(on.code_review).toEqual({ on: true });
     expect("shape" in on).toBe(false);
+    expect(on.reveal!.next).not.toBe("code_review");
+  }
+});
+
+test("a release build with Code review's offer switched off (as from 0.29.6): the switch is there and off and can be turned on; the offer is never next", async () => {
+  const earlier = { updateCheck: false, inboxNotifications: { dismissed: true } };
+  for (const version of ["0.28.50", "0.30.0"]) {
+    const w = await world(earlier, version, false);
+    const read = await w.read();
+    expect(read.code_review).toEqual({ on: false });
+    expect(read.reveal).toBeDefined();
+    expect(read.reveal!.next).not.toBe("code_review");
+    expect((await w.save({ code_review: { on: true } })).code_review).toEqual({ on: true });
+    expect((await w.read()).code_review).toEqual({ on: true });
   }
 });

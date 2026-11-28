@@ -5,6 +5,11 @@
    line comments on a guided review's diffs with the same components. */
 
 /* Review comment thread styling */
+[data-annotation-slot] {
+  min-width: 0;
+  max-width: 100%;
+}
+
 .review-comment {
   position: relative;
   box-sizing: border-box;
@@ -465,6 +470,8 @@ html:has([data-selection-chooser]) { --review-selection-plus: none; }
 .suggestion-block {
   border: 1px solid oklch(from var(--success) l c h / 0.3);
   border-radius: var(--radius-sm);
+  min-width: 0;
+  max-width: 100%;
   overflow: hidden;
 }
 
@@ -484,6 +491,7 @@ html:has([data-selection-chooser]) { --review-selection-plus: none; }
 
 .suggestion-block-code {
   margin: 0;
+  max-width: 100%;
   font-size: 0.6875rem;
   line-height: 1.6;
   background: var(--code-bg);
@@ -533,6 +541,7 @@ html:has([data-selection-chooser]) { --review-selection-plus: none; }
 
 /* Suggestion diff (original vs suggested) */
 .suggestion-diff {
+  max-width: 100%;
   font-family: var(--font-mono);
   font-size: 0.6875rem;
   line-height: 1.5;

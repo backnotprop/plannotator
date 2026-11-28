@@ -357,9 +357,9 @@ test.skipIf(!hasDom)("another window's save brings its tile into a box with no e
   );
   expect(saved.status).toBe(200);
   await act(async () => emit('drafts', { thread_id: world.waiting }));
-  await until(() => el.querySelector('[data-draft-restore]') !== null, 'the offer');
-  act(() => (el.querySelector('[data-draft-restore]') as HTMLButtonElement).click());
+  // Nothing typed in the box yet: it takes the draft, with no Restore draft to press.
   await until(() => pastedTiles(el).length === 1 && replyText(el)?.value === BEFORE + AFTER, 'the other window\'s draft');
+  expect(el.querySelector('[data-draft-restore]')).toBeNull();
   expect(pastedTiles(el)[0]!.querySelector('.ib-pt-nm')?.textContent).toBe('From the other window');
   act(() => (pastedTiles(el)[0]!.querySelector('[data-pasted-put-back]') as HTMLButtonElement).click());
   await until(() => pastedTiles(el).length === 0, 'the words back');

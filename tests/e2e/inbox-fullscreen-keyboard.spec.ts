@@ -88,8 +88,8 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   mkdirSync(home);
   mkdirSync(trap);
   mkdirSync(dataDir, { recursive: true });
-  // Decision mode (an experiment) and the Board (off by default) on, and the Board's first-visit dialog already seen, in this Inbox's own config.
-  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ ...E2E_LAUNCH_OFF, experimental: { decisionMode: true }, inboxBoard: true, inboxBoardIntro: { shownAt: new Date().toISOString() } }));
+  // The Board (off by default) on, and its first-visit dialog already seen, in this Inbox's own config. Decision mode is on by default.
+  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ ...E2E_LAUNCH_OFF, inboxBoard: true, inboxBoardIntro: { shownAt: new Date().toISOString() } }));
   // Nothing here may reach the real tailscale CLI.
   writeFileSync(join(trap, 'tailscale'), '#!/bin/sh\necho "inbox-fullscreen-keyboard: tailscale must not run" >&2\nexit 97\n');
   chmodSync(join(trap, 'tailscale'), 0o755);
@@ -223,8 +223,10 @@ for (const phone of [{ browserName: 'webkit' as const }, { browserName: 'chromiu
       await decide.click();
       const dialog = page.locator('[data-decision-mode]');
       await expect(dialog).toBeVisible();
-      await dialog.locator('[data-decision-note]').click();
-      const note = dialog.locator('textarea.ib-dm-ta');
+      // The card is the thread's own question card: its Add note opens the note and puts focus in it.
+      const card = dialog.locator('[data-decision-question] fieldset[data-question-key]');
+      await card.getByRole('button', { name: 'Add note', exact: true }).click();
+      const note = card.getByPlaceholder('Context for the agent…');
       await expect(note).toBeFocused();
       await keyboardUp(page);
       await note.evaluate((el) => el.scrollIntoView({ block: 'nearest' }));

@@ -68,6 +68,8 @@ import { runtime as gitRuntime } from "./git";
 import { gitBlobId, INBOX_PULL_FILE_MAX_BYTES, textOfBytes } from "./inbox-pulls";
 import { buildAuthoredGuideSnapshot } from "./guide/guide-cli";
 import { mediaNotShownText } from "./inbox-media-not-shown";
+import { linksNotFoundText } from "./inbox-links-not-found";
+import { pagesNotShownText, questionMediaNotShownText } from "./inbox-send-warnings";
 import { composeGuideMethodology } from "./guide/guide-review";
 import { SEND_ROUTING_FIELDS, antigravityHandsOver, replyNextStepText, senderWakes, t3WokenOnlyWhileRunning, guarded, imagesNotShownText, noStakesText, recommendedInLabelText,
   callerWorkingFolder, namingLine, ok, removedFromThreadText, sendAgentMessage, sendProject, type InboxMcpContext } from "./inbox-mcp";
@@ -514,7 +516,8 @@ export function guidePullKey(store: InboxStore, sha256: string): string | null {
 /**
  * The window's guide routes, null when the path is neither:
  *  - `GET /api/inbox/messages/:id/guide`: the snapshot a message carries, for
- *    the guide viewer. Served only by message, never a blob by hash.
+ *    the guide viewer, with `code_review` (this Inbox's switch). Served only
+ *    by message, never a blob by hash.
  *  - `POST /api/inbox/messages/:id/guide/reviewed` `{ serverSession?, reviewed }`:
  *    the person's reviewed ticks, kept on the message (the record's 4.2). The
  *    server has already run the same-origin check on every POST; the stale-tab
@@ -552,7 +555,7 @@ export async function inboxGuideRoute(
       }
     }
     try {
-      return answer({ message_id: viewedMatch[1], viewed: store.saveGuideViewed(viewedMatch[1]!, body.viewed, files) });
+      return answer({ message_id: viewedMatch[1], viewed: store.saveGuideViewed(viewedMatch[1]!, body.viewed, files, body.path) });
     } catch (error) {
       if (!(error instanceof InboxError)) throw error;
       const status = error.code === "validation_error" ? 422 : 404;
@@ -591,7 +594,9 @@ export async function inboxGuideRoute(
     // Gone from the store (or not a blob hash): answered as missing below.
   }
   if (text === null) return answer({ error: "The guided review is missing from the store.", code: "guide_not_found" }, 404);
-  return new Response(`{"message_id":${JSON.stringify(message.id)},"guide":${JSON.stringify(message.guide)},"snapshot":${text}}`, { headers: JSON_HEADERS });
+  // `code_review`: this Inbox's Code review switch, which decides the review's verdict, Viewed ticks and Post here (a
+  // linked machine's window reads it with the snapshot, so it offers only what this Inbox takes).
+  return new Response(`{"message_id":${JSON.stringify(message.id)},"guide":${JSON.stringify(message.guide)},"code_review":${codeReviewOn() ? "true" : "false"},"snapshot":${text}}`, { headers: JSON_HEADERS });
 }
 
 /**
@@ -727,7 +732,7 @@ export function registerInboxGuideTools(server: McpServer, context: InboxMcpCont
         const guide = context.store.message(String(sent.structured.message_id))?.guide ?? described.ref;
         return ok(
           // The link ends its line: a terminal links up to the next space, so a `).` after it would be part of the link.
-          `${sent.replayed ? "Already sent" : "Sent"} the ${guide.review ? "review" : "guided review"} "${guide.title}" (${guide.sections} section${guide.sections === 1 ? "" : "s"}, ${guide.files} file${guide.files === 1 ? "" : "s"}) to the Plannotator Inbox, thread ${sent.structured.thread_id}: ${sent.structured.url}\n${`${namingLine(sent.naming)} ${replyNextStepText(wakes, input.agent_host, await t3WokenOnlyWhileRunning(context, wakes, input), antigravityHandsOver(ctx, wakes, input))}`.trimStart()}${imagesNotShownText(sent.imagesNotShown)}${mediaNotShownText(sent.mediaNotShown)}${noStakesText(sent.noStakes)}${recommendedInLabelText(sent.recommendedInLabel)}${questionsToCheckText(String(sent.structured.message_id), sent.questionsToCheck)}${questionOpenersWithTextText(sent.questionOpenersWithText)}${inboxSupersedeSkipsText(sent.structured.skipped as InboxSupersedeSkip[] | undefined)}${removedFromThreadText(context.store, sent.structured, input.agent_session)}`,
+          `${sent.replayed ? "Already sent" : "Sent"} the ${guide.review ? "review" : "guided review"} "${guide.title}" (${guide.sections} section${guide.sections === 1 ? "" : "s"}, ${guide.files} file${guide.files === 1 ? "" : "s"}) to the Plannotator Inbox, thread ${sent.structured.thread_id}: ${sent.structured.url}\n${`${namingLine(sent.naming)} ${replyNextStepText(wakes, input.agent_host, await t3WokenOnlyWhileRunning(context, wakes, input), antigravityHandsOver(ctx, wakes, input))}`.trimStart()}${imagesNotShownText(sent.imagesNotShown)}${mediaNotShownText(sent.mediaNotShown)}${linksNotFoundText(sent.linksNotFound)}${questionMediaNotShownText(sent.questionMediaNotShown)}${pagesNotShownText(sent.pagesNotShown)}${noStakesText(sent.noStakes)}${recommendedInLabelText(sent.recommendedInLabel)}${questionsToCheckText(String(sent.structured.message_id), sent.questionsToCheck)}${questionOpenersWithTextText(sent.questionOpenersWithText)}${inboxSupersedeSkipsText(sent.structured.skipped as InboxSupersedeSkip[] | undefined)}${removedFromThreadText(context.store, sent.structured, input.agent_session)}`,
           { ...sent.structured, guide },
         );
       }),

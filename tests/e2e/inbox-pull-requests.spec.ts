@@ -256,6 +256,8 @@ function writeForge(dir: string) {
     'if [ "$1" = api ] && [ "$4" = graphql ]; then',
     '  case "$*" in *"query InboxPullsOthers"*) echo "glab others" >> "$calls"; echo \'{"data":{"currentUser":{"username":"dana"}}}\'; exit 0;; esac',
     '  case "$*" in *reviewRequestedMergeRequests*) echo "glab pulls" >> "$calls"; cat "$dir/glab-pulls.json"; exit 0;; esac',
+    // The read's other lists, a query each: one "glab pulls" line a read.
+    '  case "$*" in *"query InboxPulls "*) cat "$dir/glab-pulls.json"; exit 0;; esac',
     '  echo "glab graphql-other" >> "$calls"; echo \'{"data":null}\'; exit 1',
     'fi',
     'if [ "$1" = api ] && [ "$2" = --hostname ]; then',
@@ -4485,16 +4487,20 @@ test('Reviews: what waits on the person is never hidden, every row shows what it
   await expect(page.getByText('Before one.')).toHaveCount(0);
   await page.unroute('**/api/inbox/reviews*');
 
-  // The row goes while the person is in the thread (archived from another window): the link to what was left out went
-  // with it, so the thread shows whole, and stays whole if the row comes back.
+  // The row goes while the person is in the thread (archived from another window): what is open stays open, so the
+  // thread keeps its look, its fold and its context line (app/reviewView.ts), and still when the row comes back.
   const archive = (threadId: string, resolved: boolean) => page.request.post(`${world.url}api/inbox/messages/${threadId}/resolve`, { data: { resolved } });
   await fresh(long.thread_id);
   await expect(page.getByText('Before one.')).toHaveCount(0);
+  const without = page.waitForResponse(async (r) => new URL(r.url()).pathname === '/api/inbox/reviews' && !(await r.text()).includes(long.thread_id), { timeout: 15_000 });
   await archive(long.thread_id, true);
-  await expect(page.getByText('Before one.')).toBeVisible({ timeout: 15_000 });
+  await without;
+  await page.waitForTimeout(800);
+  await expect(page.locator('[data-review-context]')).toBeVisible();
+  await expect(page.getByText('Before one.')).toHaveCount(0);
   await archive(long.thread_id, false);
   await expect(page.locator('[data-review-context]')).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByText('Before one.')).toBeVisible();
+  await expect(page.getByText('Before one.')).toHaveCount(0);
 
   // A thread handed a PR and archived before its review: the PR's launchpad offers Guided review again, not "on the way".
   const handed = await claude.send({ project_path: world.projects.web, thread: 'handed-off', subject: 'Handed', body: 'On it.' });

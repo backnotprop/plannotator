@@ -173,7 +173,7 @@ export const INBOX_DEFAULT_TOOLS: readonly InboxToolInfo[] = [
   },
   {
     "name": "search",
-    "description": "Search the Inbox's messages (yours, other agents' and the person's) by words, read-only: in this project unless all_projects. Up to `limit` results (default 10, at most 50; a larger limit answers 50). Every word must match (the last may be the start of a word), questions' prompts, choices and answers included. Each result is one line: the thread, the message, who wrote it, when, and the words around the match. read_thread with that thread_id and message_id shows the message in full. Search before you say something was never discussed.",
+    "description": "Search the Inbox's messages (yours, other agents' and the person's) by words, read-only: in this project unless all_projects. Up to `limit` results (default 10, at most 50; a larger limit answers 50). Every word must match (the last may be the start of a word), questions' prompts, choices and answers included. Words in double quotes are an exact phrase. Each result is one line: the thread, the message, who wrote it, when, and the words around the match. read_thread with that thread_id and message_id shows the message in full. Search before you say something was never discussed.",
     "inputSchema": {
       "type": "object",
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -284,6 +284,30 @@ export const INBOX_DEFAULT_TOOLS: readonly InboxToolInfo[] = [
           "items": {
             "type": "string"
           }
+        },
+        "ship": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "step",
+                "stuck",
+                "merged"
+              ]
+            },
+            "text": {
+              "type": "string"
+            },
+            "sha": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "text"
+          ],
+          "additionalProperties": false
         },
         "project_path": {
           "type": "string"

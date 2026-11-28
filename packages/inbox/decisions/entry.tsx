@@ -1,5 +1,5 @@
 /**
- * Decision mode's way in and its pill (approval "inbox-decision-mode"; experimental).
+ * Decision mode's way in and its pill (approval "inbox-decision-mode"; on unless Settings → Capabilities turns it off).
  * Thread only (owner, 2026-10-27: "I thought decides were gonna be integrated
  * to the thread, not a whole global thing"): the one way in is "Decide these N"
  * in a thread's open-questions list, shown only while two or more of that
@@ -60,17 +60,15 @@ function usePillBottom(): number | null {
 
 /**
  * Open the thread tucks decision mode into this pill at the bottom of the
- * window, the thread behind it ("Decisions · 9 left · Resume"). Replies whose
- * Hold was running wait while it is tucked: they go on once the dialog is back.
+ * window, the thread behind it ("Decisions · 9 left · Resume"). Nothing sends
+ * while it is tucked: the answers wait as drafts in the thread.
  */
 export function DecisionPill({
   left,
-  paused,
   thread = null,
   onResume,
 }: {
   left: number;
-  paused?: number;
   /**
    * The sitting's thread, by its subject, while the screen shows another thread
    * or the list (a sitting is one thread's): "Decisions · <subject> · 3 left".
@@ -103,7 +101,6 @@ export function DecisionPill({
           </>
         )}
         {left === 0 ? 'nothing left' : `${formatCount(left)} left`}
-        {(paused ?? 0) > 0 && <span data-decision-pill-paused=""> · {paused === 1 ? 'a reply waits' : `${formatCount(paused!)} replies wait`}</span>}
       </span>
       <button type="button" className="ib-btn ib-pri ib-sm" data-decision-resume="" onClick={onResume}>
         Resume

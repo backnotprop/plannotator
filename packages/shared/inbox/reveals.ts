@@ -5,7 +5,7 @@
  * `revealNext` to the page (`GET /api/inbox/settings` `reveal.next`, and `reveal.setup` for the agent note) and spends
  * every claim against it.
  *
- * In the line, in this order (the owner's, 2026-11-10): Code review's day-0 offer (`CODE_REVIEW_OFFER`, never shown: `CODE_REVIEW_OFFER_SHOWN`), the
+ * In the line, in this order (the owner's, 2026-11-10): Code review's day-0 offer (`CODE_REVIEW_OFFER`, while `CODE_REVIEW_OFFER_SHOWN`), the
  * same-day group (the tab icon, themes, the view choice, list options "Rows", the sound, voice: no tenure, the
  * gap apart), then the later group, later only by tenure (Snooze, personal agents, Priority, the Board, the Checklist, Bro mode,
  * "Set the rules"). The agent note is a setup dialog: never in the queue, but it keeps the gap
@@ -14,7 +14,8 @@
  * The rules:
  *  - Tenure: the later group's offers need two days or more since first use. The same-day group has none, so on a
  *    person's first day the update-day dialogs and the view choice (once there are five threads) may show, the gap
- *    apart, as may Code review's offer (`CODE_REVIEW_OFFER`, the owner, 2026-11-06: "show up like immediately").
+ *    apart, as may Code review's offer for someone who used an earlier Inbox (`CODE_REVIEW_OFFER`, the owner,
+ *    2026-11-06: "show up like immediately"; a fresh install never gets it).
  *  - One due at a time: the first entry, in table order, whose "who" holds (a release build, tenure since first use,
  *    enough threads, heavy use where it asks for it, its own conditions).
  *  - Ahead at its moment: an offer marked `ahead` (the view choice, whose "who" only the page can see) may also
@@ -28,7 +29,7 @@
  *  - Spacing (changed 2026-11-09: about 40 minutes; it was one day): `REVEAL_SPACING_MS` (40 minutes) after the last
  *    dialog of any kind: the line's own (`lastShownAt`), the agent note (`dayShownAt`), the ones that stand aside
  *    (`asideShownAt`: the star ask, the grill-me tip) and the tips outside the line (`tipShownAt`: the Sidebar tip,
- *    the Launch tip), so none stacks on another (`revealGapFree`). The tips keep the gap themselves the same way
+ *    the Launch tip, the Search tip), so none stacks on another (`revealGapFree`). The tips keep the gap themselves the same way
  *    (the server asks `revealLineFree("setup")` before it reports or claims one).
  *    `REVEAL_NOT_NOW_SPACING_MS` (3 days) after an offer closed with Not now (`inboxReveals.notNowAt`; offers only, an
  *    update-day dialog's Not now keeps the 40 minutes; the agent note does not wait for it). The clock also
@@ -96,27 +97,34 @@ export interface RevealEntry {
 
 /**
  * Code review's offer (approval "code-review-offer-card", 2026-11-06; the owner: "this one needs to show up like
- * immediately"): its slot in the line. First in the queue with no tenure, so it is next on day 0 (first use not known
- * yet is fine: no tenure to count), and the page opens it at once (`atOnce`, packages/inbox/codeReviewOffer.ts) once
- * the tour's entry screen is gone, before the agent note, which then keeps the gap and waits for a later
- * load. Only while Code review was never decided (config.json `inboxCodeReview` unset). To move the slot, change
- * this entry (its `tenureMs`) or its place in `INBOX_REVEALS`.
+ * immediately"): its slot in the line. First in the queue with no tenure, so it is next on the first day of the release
+ * that shows it (first use not known yet is fine: no tenure to count), and the page opens it at once (`atOnce`,
+ * packages/inbox/codeReviewOffer.ts) once the tour's entry screen is gone, before the agent note, which then keeps the
+ * gap and waits for a later load. Only for someone who used an earlier Inbox (approval "inbox-code-review-offer"; the
+ * server marks who at a release start, as the tab icon's, packages/server/inbox-code-review-offer.ts: a fresh install
+ * never gets it), and only while Code review was never decided (config.json `inboxCodeReview` unset). To move the
+ * slot, change this entry (its `tenureMs`) or its place in `INBOX_REVEALS`. Its `enabled` is the offer's one switch
+ * (`CODE_REVIEW_OFFER_SHOWN` follows it).
  */
-export const CODE_REVIEW_OFFER: RevealEntry = { id: "code_review", kind: "offer", tenureMs: 0, minThreads: 0, enabled: true };
+// Off since 0.29.6 at the owner's word (27 Nov 2026: not advertised to normal users yet); flip to true to show it again.
+export const CODE_REVIEW_OFFER: RevealEntry = { id: "code_review", kind: "offer", tenureMs: 0, minThreads: 0, enabled: false };
 
 /**
- * Whether Code review's one-time offer is ever shown. The owner chose the switch without the offer for this release
- * (2026-11-17: "keep code review, no need for the code review dialogue, but enable it in the capabilities"): Settings →
- * Capabilities shows the Code review switch to everyone, off unless the person turns it on, and nobody is offered it.
- * False: the server never lists the offer as open (packages/server/inbox.ts `codeReviewUndecided`), so it is never
- * next and never claimed; its slot (`CODE_REVIEW_OFFER`) and any stamp already in config.json are kept as they are.
- * To offer it again, set this to true.
+ * Whether Code review's one-time offer is ever shown: `CODE_REVIEW_OFFER.enabled`, so one line switches it. Held back
+ * from 2026-11-17 (the owner: "keep code review, no need for the code review dialogue, but enable it in the
+ * capabilities"); shown again from the release after 2026-11-23, with its four new lines (approval
+ * "inbox-code-review-offer"); off again from 0.29.6 (the owner, 2026-11-27: "I will eventually, just not yet"). True:
+ * the server marks who it is for at a release start and lists the offer as open for someone who used an earlier Inbox
+ * while config.json `inboxCodeReview` is unset (packages/server/inbox.ts `codeReviewUndecided`), so it takes its slot
+ * (`CODE_REVIEW_OFFER`) under the line's rules. False: never next and never claimed, it holds no other dialog back,
+ * nothing new is written at a release start (so switched on again, it is still asked once of everyone who never saw
+ * it), and any stamp already in config.json is kept as it is. Code review's Settings switch is unchanged either way.
  */
-export const CODE_REVIEW_OFFER_SHOWN = false;
+export const CODE_REVIEW_OFFER_SHOWN: boolean = CODE_REVIEW_OFFER.enabled;
 
 /** The queue, in order. */
 export const INBOX_REVEALS: readonly RevealEntry[] = [
-  // Never shown for now (`CODE_REVIEW_OFFER_SHOWN`): its slot is kept as it was.
+  // Code review's offer (while `CODE_REVIEW_OFFER_SHOWN`; off since 0.29.6): first, ahead of the owner's order below.
   CODE_REVIEW_OFFER,
   // The order below is the owner's (2026-11-10, "Alright, let's ship it"). First the same-day group: no tenure, so each
   // may show on a person's first day, the line's gap apart (`REVEAL_SPACING_MS`), as each one's own "who" holds. Then
@@ -198,6 +206,15 @@ export const INBOX_REVEALS: readonly RevealEntry[] = [
 ];
 
 /**
+ * The queue with Code review's offer shown (`shown`) or not, every other entry as it is: how a test exercises either
+ * state of `CODE_REVIEW_OFFER.enabled` whichever way the release has it (and the Inbox's `codeReviewOffer` test option).
+ */
+export function revealsWithCodeReviewOffer(shown: boolean, table: readonly RevealEntry[] = INBOX_REVEALS): readonly RevealEntry[] {
+  if (table.every((entry) => entry.id !== CODE_REVIEW_OFFER.id || entry.enabled === shown)) return table;
+  return table.map((entry) => (entry.id === CODE_REVIEW_OFFER.id ? { ...entry, enabled: shown } : entry));
+}
+
+/**
  * Never two dialogs within this long on one machine: 40 minutes (the owner, 2026-11-09: "the user can wait 20, 40
  * minutes, and at 40 minutes, give him the new option. They don't need to wait a whole day"; it was one day, and at
  * most one a calendar day). One clock for every dialog: the line's, the agent note and the ones that stand aside.
@@ -232,12 +249,19 @@ export interface RevealState {
   /** Per entry: when it first became next, or an `ahead` offer first armed (config.json `inboxReveals.waitingSince`, `revealWaitStarts`). Patience and retirement count from it. */
   waitingSince?: Partial<Record<RevealId, string>>;
   /**
-   * When a tip outside the line was last shown (config.json `inboxReveals.sidebar_tip.shownAt`, `launch_tip.shownAt`):
+   * When a tip outside the line was last shown (config.json `inboxReveals.sidebar_tip.shownAt`, `launch_tip.shownAt`, `search_tip.shownAt`):
    * the gap counts from it too, so no dialog follows a tip within 40 minutes, and a tip waits out the gap after a dialog.
    */
   tipShownAt?: string | null;
   /** When an `aside` entry was last shown (config.json `inboxReveals.star.shownAt`, `grill_me_tip.shownAt`): the gap counts from it too, and a `lastResort` entry never goes on its day. */
   asideShownAt?: string | null;
+  /**
+   * The launch dialog goes first here (the launch switch, packages/shared/launch-switch.ts: a campaign on and never
+   * shown on this computer), with no gap before it: the whole line holds until the page's claim is answered, either
+   * way (packages/server/inbox-launch-queue.ts): no entry is next or claimed, and neither is the agent note or a tip.
+   * Its show (`launch[campaign].shownAt`) then starts the gap as a tip's does (`tipShownAt`).
+   */
+  launchDue?: boolean;
 }
 
 const time = (iso: string | null | undefined): number | null => {
@@ -273,9 +297,11 @@ export function revealGapFree(state: Pick<RevealState, "lastShownAt" | "dayShown
 
 /**
  * The line's own rules, for any dialog in it, on any page load: not within the gap of any other dialog, and (except
- * the agent note, `setup`) not within three days of an offer's Not now. A dev build keeps no line: free.
+ * the agent note, `setup`) not within three days of an offer's Not now. A dev build keeps no line: free. Never while
+ * the launch dialog is due (`launchDue`).
  */
 export function revealLineFree(kind: "setup" | "spaced", state: RevealState, now: Date): boolean {
+  if (state.launchDue) return false;
   if (!state.release) return true;
   if (!revealGapFree(state, now)) return false;
   return kind === "setup" || revealSpaced(state.lastShownAt, now, state.notNowAt);

@@ -116,7 +116,7 @@ describe("a file a message names, asked for by a linked machine", () => {
     expect(w.attachments().map((a) => a.name)).toEqual(["plan.md"]);
   });
 
-  test("a path the message does not name: a file in the thread's project opens; out of it, by any road, is not on this computer", async () => {
+  test("a path the message does not name: a file in the thread's project opens; out of it, by any road, is found nowhere, and the error names no path out of the project", async () => {
     const w = world().as({ window: true });
     expect((await w.view("src/app.ts")).body).toMatchObject({ found: true, contents: "export const app = 1;\n" });
     for (const path of [join(w.elsewhere, "other.md"), "~/notes/todo.md", "../elsewhere/other.md", "docs/../../elsewhere/other.md", "docs/link.md"]) {
@@ -124,7 +124,8 @@ describe("a file a message names, asked for by a linked machine", () => {
     }
     expect((await w.raw(join(w.elsewhere, "shot.png"))).status).toBe(404);
     const refused = await w.attach("../elsewhere/other.md");
-    expect(refused.body).toEqual({ code: "attachment_missing", error: "../elsewhere/other.md is not on this computer." });
+    // A linked machine's window is never handed where on this computer it was looked for, out of the project.
+    expect(refused.body).toEqual({ code: "attachment_missing", error: "Couldn't find other.md." });
     expect(w.attachments()).toEqual([]);
   });
 
@@ -134,7 +135,7 @@ describe("a file a message names, asked for by a linked machine", () => {
     expect((await w.as(null).view(join(w.elsewhere, "named.lo"))).body).toMatchObject({ found: true, contents: "a prefix\n" });
   });
 
-  test("a path named only in the person's own reply (one a linked machine may post) is not on this computer", async () => {
+  test("a path named only in the person's own reply (one a linked machine may post) opens nothing", async () => {
     const w = world().as({ window: true });
     const outside = join(w.elsewhere, "other.md");
     const { reply } = w.store.sendReply(w.message.id, { words: `look at ${outside} and ${join(w.elsewhere, "shot.png")}`, idempotency_key: "k1" });

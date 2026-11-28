@@ -15,6 +15,8 @@ const KEY = 'plannotator-routine-draft';
 export interface KeptRoutine {
   fields: ScheduledFields;
   key: string;
+  /** The linked computer it is made on (absent: this one). */
+  machine?: string;
 }
 
 function store(): Storage | null {
@@ -35,9 +37,9 @@ export function readKeptRoutine(): KeptRoutine | null {
 }
 
 /** Keeps it while it has a name or a prompt; forgets it when both are empty. */
-export function keepRoutine(fields: ScheduledFields, key: string): void {
+export function keepRoutine(fields: ScheduledFields, key: string, machine: string | null = null): void {
   try {
-    if (fields.name.trim() || fields.prompt.trim()) store()?.setItem(KEY, JSON.stringify({ fields, key }));
+    if (fields.name.trim() || fields.prompt.trim()) store()?.setItem(KEY, JSON.stringify(machine ? { fields, key, machine } : { fields, key }));
     else store()?.removeItem(KEY);
   } catch {
     // Full or refused: the words stay in the fields.

@@ -67,7 +67,7 @@ async function openAndReply(page: Page, id: string) {
   await expect(box(page)).toBeFocused();
 }
 
-test('a draft read that answers after Reply was tapped waits behind Restore draft', async ({ browser }) => {
+test('a draft read that answers after a word was typed: the draft first, the word after it, both saved', async ({ browser }) => {
   const id = await thread('Late draft');
   await fetch(`${url}/api/inbox/threads/${id}/draft`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body: OLD, base: null }) });
   const context = await browser.newContext({ ...ipad, reducedMotion: 'reduce' });
@@ -83,41 +83,63 @@ test('a draft read that answers after Reply was tapped waits behind Restore draf
   });
   await openAndReply(page, id);
   await expect(box(page)).toHaveValue('');
-  releaseDraftRead();
-  await expect(restore(page)).toBeVisible({ timeout: 10_000 });
-  await expect(box(page)).toHaveValue('');
+  // Typed before the read answers: the draft goes in first, the typed word after it, and both are saved.
   await page.keyboard.type('Thanks', { delay: 60 });
-  await expect(box(page)).toHaveValue('Thanks');
-  await page.waitForTimeout(1500);
-  expect(await draftWords(id)).toBe(OLD);
-  await restore(page).tap();
-  await expect(box(page)).toHaveValue(`${OLD}\n\nThanks`);
+  releaseDraftRead();
+  await expect(box(page)).toHaveValue(`${OLD}\n\nThanks`, { timeout: 10_000 });
   await expect(restore(page)).toHaveCount(0);
   await expect.poll(() => draftWords(id), { timeout: 15_000 }).toBe(`${OLD}\n\nThanks`);
   await context.close();
 });
 
-test('a draft another window saves while this box is open waits behind Restore draft', async ({ browser }) => {
+test('a draft read that answers after Reply was tapped, nothing typed yet: the box takes it, and typing on saves', async ({ browser }) => {
+  const id = await thread('Late draft untouched');
+  await fetch(`${url}/api/inbox/threads/${id}/draft`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body: OLD, base: null }) });
+  const context = await browser.newContext({ ...ipad, reducedMotion: 'reduce' });
+  const page = await context.newPage();
+  let releaseDraftRead!: () => void;
+  const draftReadHeld = new Promise<void>((done) => (releaseDraftRead = done));
+  await page.route(/\/api\/inbox\/threads\/[^/]+\/draft$/, async (route) => {
+    if (route.request().method() === 'GET') await draftReadHeld;
+    await route.continue().catch(() => {});
+  });
+  await openAndReply(page, id);
+  releaseDraftRead();
+  await expect(box(page)).toHaveValue(OLD, { timeout: 10_000 });
+  await expect(restore(page)).toHaveCount(0);
+  await box(page).press('End');
+  await page.keyboard.type(' Thanks', { delay: 60 });
+  await expect.poll(() => draftWords(id), { timeout: 15_000 }).toBe(`${OLD} Thanks`);
+  await context.close();
+});
+
+// Two devices: the iPad on 127.0.0.1, the Mac on localhost (two origins, so no tab of one hears the other's stream).
+test('two devices type in one reply: every word typed on either is saved, and neither device loses its words', async ({ browser }) => {
   const id = await thread('Synced draft');
   const ipadContext = await browser.newContext({ ...ipad, reducedMotion: 'reduce' });
   const macContext = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' });
   const page = await ipadContext.newPage();
   const mac = await macContext.newPage();
-  await mac.goto(`${url}/#thread=${encodeURIComponent(id)}`);
+  const otherOrigin = url.includes('127.0.0.1') ? url.replace('127.0.0.1', 'localhost') : url.replace('localhost', '127.0.0.1');
+  await mac.goto(`${otherOrigin}/#thread=${encodeURIComponent(id)}`);
   await openAndReply(page, id);
   await mac.locator(`section.ib-pane[data-thread-id="${id}"] .ib-pfoot`).getByRole('button', { name: /^Reply/ }).click();
   await box(mac).pressSequentially(OLD, { delay: 20 });
   await expect.poll(() => draftWords(id)).toBe(OLD);
-  await expect(restore(page)).toBeVisible();
-  await expect(box(page)).toHaveValue('');
-  await page.keyboard.type('Ok', { delay: 60 });
-  await expect(box(page)).toHaveValue('Ok');
-  await page.waitForTimeout(1500);
-  expect(await draftWords(id)).toBe(OLD);
+  // The iPad's box was untouched: it takes the Mac's words.
+  await expect(box(page)).toHaveValue(OLD);
+  await expect(restore(page)).toHaveCount(0);
+  await box(page).press('End');
+  await page.keyboard.type(' Ok', { delay: 60 });
+  await expect.poll(() => draftWords(id), { timeout: 15_000 }).toBe(`${OLD} Ok`);
+  // The Mac wrote in its box: the iPad's words wait behind Restore draft, and the Mac's next key takes them in.
+  await expect(restore(mac)).toBeVisible();
   await expect(box(mac)).toHaveValue(OLD);
-  await restore(page).tap();
-  await expect(box(page)).toHaveValue(`${OLD}\n\nOk`);
-  await expect.poll(() => draftWords(id), { timeout: 15_000 }).toBe(`${OLD}\n\nOk`);
+  await box(mac).press('End');
+  await mac.keyboard.type(' Done.', { delay: 60 });
+  await expect(box(mac)).toHaveValue(`${OLD} Ok Done.`);
+  await expect(restore(mac)).toHaveCount(0);
+  await expect.poll(() => draftWords(id), { timeout: 15_000 }).toBe(`${OLD} Ok Done.`);
   await ipadContext.close();
   await macContext.close();
 });

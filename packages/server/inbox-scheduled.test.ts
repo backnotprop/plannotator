@@ -303,6 +303,34 @@ describe("Rex chosen in Settings → Agents", () => {
   });
 });
 
+describe("Stop", () => {
+  test("a Stop names the run it was pressed for: pressed at 8:55 and landing after 9:00's started, it ends nothing; for the run going, it ends it", async () => {
+    const w = world();
+    const { record } = await w.make();
+    const runAt = async (iso: string) => {
+      w.at(iso);
+      const { message } = await w.scheduled.runNow(record.id, { kind: "person" });
+      await until(() => !!w.store.message(message.id)!.launch!.session_ref);
+      return message;
+    };
+    const stops = () => w.fake.calls.filter((call) => call.startsWith("stop ")).length;
+    const state = () => w.scheduled.rowOf(w.store.scheduledThread(record.id)!).state;
+    // 8:55: a run goes; the person presses Stop for it, and that Stop waits (the computer is away). The run ends.
+    const at855 = await runAt("2026-11-16T13:55:00.000Z");
+    await w.settle(at855, "Done.");
+    // 9:00: the next run goes. The 8:55 Stop lands now.
+    const at900 = await runAt("2026-11-16T14:00:00.000Z");
+    w.fake.poll(w.store.message(at900.id)!.to!.session, true, w.clock.now);
+    expect(state()).toBe("running");
+    const before = stops();
+    await w.scheduled.stopRun(record.id, at855.id);
+    expect([state(), stops()]).toEqual(["running", before]);
+    // A Stop pressed for the 9:00 run ends it.
+    await w.scheduled.stopRun(record.id, at900.id);
+    expect(stops()).toBe(before + 1);
+  });
+});
+
 describe("delete", () => {
   test("a run under way is stopped first; Undo brings it back as it was, catching up nothing due meanwhile", async () => {
     const w = world();

@@ -187,6 +187,7 @@ test.skipIf(!hasDom)("a recorded card takes a pick, sent under the record's key;
   await act(async () => buttonIn(flag!, 'Accept recommended')!.click());
   expect(picks).toHaveLength(1);
   expect(picks[0]!.key).toBe(`${flagKey}-2`);
+  expect(picks[0]!.answer?.key).toBe(`${flagKey}-2`);
   expect(picks[0]!.answer?.selected).toEqual(['Yes']);
 });
 

@@ -8,6 +8,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { CodeAnnotation, Annotation, CommentAnnotation } from '../types';
 import { getDraftTransport, type DraftTransport } from './useAnnotationDraft';
+import { flushBeforeReload } from '../utils/beforeReload';
 
 const DEBOUNCE_MS = 500;
 /** Bound on one read of a switched-onto target's draft (#1590). */
@@ -148,6 +149,14 @@ export function useCodeAnnotationDraft({
   const pendingSaveRef = useRef<(() => Promise<void>) | null>(null);
   const savingRef = useRef<Promise<void> | null>(null);
   const switchPausedRef = useRef(false);
+  /** False once the host unmounted (a failed region's notice took its place, the page goes). */
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
   const [draftTargetChanged, setDraftTargetChanged] = useState(false);
   const targetChangedRef = useRef(false);
   const [draftBanner, setDraftBanner] = useState<{ count: number; viewedCount: number; timeAgo: string } | null>(null);
@@ -341,9 +350,25 @@ export function useCodeAnnotationDraft({
 
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
+      const waiting = pendingSaveRef.current === save;
       pendingSaveRef.current = null;
+      // The host unmounted with this save still waiting for the pause (a render error took the review's place):
+      // send it now rather than drop it. A change of what is saved also runs this cleanup; it leaves the host mounted.
+      if (waiting) queueMicrotask(() => {
+        if (!mountedRef.current && !switchPausedRef.current) save().catch(() => {});
+      });
     };
   }, [annotations, descriptionAnnotations, commentAnnotations, viewedFiles, autoViewSuppressed, isApiMode, submitted, saveNudge, persistViewedFiles, transport]);
+
+  // A failure box's Reload (ui's RegionBoundary) sends the save waiting for the pause first.
+  useEffect(() => flushBeforeReload(async () => {
+    if (switchPausedRef.current) return;
+    if (timerRef.current) clearTimeout(timerRef.current);
+    await savingRef.current?.catch(() => {});
+    const pending = pendingSaveRef.current;
+    pendingSaveRef.current = null;
+    if (pending) await pending().catch(() => {});
+  }), []);
 
   const flushBeforeSwitch = useCallback(async () => {
     switchPausedRef.current = true;

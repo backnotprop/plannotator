@@ -79,6 +79,11 @@ export function sessionLabelsNow(): SessionLabels {
   return current;
 }
 
+/** How many draws watch the labels (a list watches once, not once per row: RowSlot.tsx, RowAgents.tsx). */
+export function sessionLabelsWatchersForTests(): number {
+  return listeners.size;
+}
+
 /** The labels now, redrawn when a list read or a given name changes them. */
 export function useSessionLabels(): SessionLabels {
   return useSyncExternalStore(subscribe, snapshot, snapshot);

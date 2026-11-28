@@ -68,11 +68,13 @@ export function reviewRowProject(row: InboxReviewRow): string | null {
   return row.review?.project_id ?? row.started?.project_id ?? null;
 }
 
-export function reviewRowTitle(row: InboxReviewRow, pullTitle: (stack: InboxPullStack) => string): string {
+/** `shown`: the PR whose ship the row draws (`reviewRowLanding`). */
+export function reviewRowTitle(row: InboxReviewRow, pullTitle: (stack: InboxPullStack) => string, shown?: string | null): string {
   const stack = row.stacks[0];
   if (stack) return pullTitle(stack);
   if (row.review) return inboxReviewTitleLine(row.review.title);
-  return row.started?.name ?? row.link?.thread_id ?? '';
+  // A shipped PR's thread, its PR merged: the PR's title, as its row had while open.
+  return row.started?.name ?? reviewRowLanding(row, shown)?.title ?? row.link?.thread_id ?? '';
 }
 
 /** A row's third line: what it is, whose agent, and why it is where it is. */
@@ -148,8 +150,13 @@ function statusOf(row: InboxReviewRow): { status: Words; tone: ReviewRowLine['to
 
 const reviewIsWalkthrough = (row: InboxReviewRow) => !!row.review?.walkthrough || row.started?.kind === 'walkthrough';
 
-/** The landing a row speaks for: a link's own PR only, since an agent's guide may name another that merged. */
-export function reviewRowLanding(row: InboxReviewRow): InboxReviewRow['landed'][number] | null {
+/**
+ * The landing a row speaks for: a link's own PR only, since an agent's guide may name another that merged. `shown`: the
+ * PR whose ship the row draws (its Merged words): its landing, so the title is of the PR that merged.
+ */
+export function reviewRowLanding(row: InboxReviewRow, shown?: string | null): InboxReviewRow['landed'][number] | null {
+  const ship = shown ? row.landed.find((landing) => landing.key === shown) : undefined;
+  if (ship) return ship;
   const handed = row.started?.pull;
   return (handed ? row.landed.find((landing) => landing.key === handed.key) : row.landed[0]) ?? null;
 }
@@ -182,7 +189,7 @@ export function reviewRowAutoWords(run: InboxPullRiskAutoRun | null, row: Pick<I
   return run.made === 'picture_it' ? 'Making a Picture page…' : 'Making a guided review…';
 }
 
-export function reviewRowLine(row: InboxReviewRow, autoRuns?: Readonly<Record<string, InboxPullRiskAutoRun>>): ReviewRowLine {
+export function reviewRowLine(row: InboxReviewRow, autoRuns?: Readonly<Record<string, InboxPullRiskAutoRun>>, shown?: string | null): ReviewRowLine {
   const stack = row.stacks[0];
   const name = row.review?.agent?.name ?? linkAgentName(row.link) ?? (row.started ? hostLabel(row.started.host) : null);
   const host = row.review?.agent?.host ?? row.link?.agent?.host ?? row.started?.host ?? null;
@@ -203,7 +210,7 @@ export function reviewRowLine(row: InboxReviewRow, autoRuns?: Readonly<Record<st
     }
     return { kind: 'pr', lead: inboxPullLabel(focusOf(stack)), agent, status, parts, tone };
   }
-  const landing = reviewRowLanding(row);
+  const landing = reviewRowLanding(row, shown);
   if (landing) return { kind: 'pr', lead: `${landing.platform === 'gitlab' ? '!' : '#'}${landing.number} ${landing.state}`, agent, status, parts, tone };
   // The PR the person handed it: an agent's words about another PR don't change where a Post goes.
   const linked = row.started?.pull;

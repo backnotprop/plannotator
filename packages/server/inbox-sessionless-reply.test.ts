@@ -21,7 +21,14 @@ import { deliveryText } from "@plannotator/core/inbox-delivery-line";
 import { INBOX_HOST_NAMES, inboxAgentName, type InboxAuthor } from "@plannotator/core/inbox-types";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { sendTargetsOf } from "../inbox/sendTargets";
+import { rowDeliveryLine } from "../inbox/rowDelivery";
+import { rowAgentName, rowIsScript, rowRecipientName } from "../inbox/scriptAuthor";
+import { agentAuthor, windowedThread, windowedThreadText } from "./inbox-mcp-read";
 import { createInboxLiveSessions, INBOX_ASKER_RESTART_GRACE_MS } from "./inbox-sessions";
+import { InboxOutbox } from "./inbox-outbox";
+import { inboxPushSummary } from "./inbox-relay-push";
+import { PeerLink } from "./inbox-peer-link";
+import { openTransport } from "./inbox-transport";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -68,7 +75,7 @@ function world() {
     store.markAgentChecked(threadId, undefined, undefined, reader);
     store.settleReadPast(threadId, reader);
   };
-  return { store, live, poll, tool, script, reply, row, line, read, later: (ms: number) => void (offset += ms) };
+  return { store, projectId: project.id, live, poll, tool, script, reply, row, line, read, later: (ms: number) => void (offset += ms) };
 }
 
 describe("a script's post does not steal the thread", () => {
@@ -181,5 +188,129 @@ describe("a script's post does not steal the thread", () => {
     expect(sent.to).toBeUndefined();
     expect(w.live.pendingOf("ses-ops")).toEqual([]);
     expect(w.line(root.thread_id)).toBe("Saved for An agent. It sees it when it next reads this thread.");
+  });
+});
+
+describe("a script's post reads \"Script\" in the window, and only there", () => {
+  test("a reply to a script's post: the row's delivery marks it, so the row's line names Script; an agent's read_thread still names it An agent", async () => {
+    const w = world();
+    const root = w.script("Spend check: $412 of $450 this month.");
+    w.reply(root.thread_id, "Thanks.");
+    const delivery = w.row(root.thread_id).delivery!;
+    expect(delivery.script).toBe(true);
+    expect(rowDeliveryLine(delivery, () => "7:00 AM")).toBe("Saved for Script. It sees it when it next reads this thread.");
+    // What an agent reads is unchanged.
+    expect(agentAuthor(root.author)).toEqual({ kind: "agent", name: "An agent" });
+  });
+
+  test("a reply to an agent with a session but no host or name (a stdio shim's ses_ agent): not a script, the row's line reads as before", async () => {
+    const w = world();
+    const root = w.script("Which queue should I drain first?", undefined, "ses_shim1");
+    w.reply(root.thread_id, "The billing queue.");
+    const delivery = w.row(root.thread_id).delivery!;
+    expect(delivery.script).toBeUndefined();
+    expect(rowDeliveryLine(delivery, () => "7:00 AM")).toBe("Saved for An agent. It sees it when it next reads this thread.");
+  });
+
+  test("a reply to a Claude Code session's message in a thread a script started: the row's line names Claude Code, not Script", async () => {
+    const w = world();
+    await w.poll("ses-ops");
+    const root = w.script("Disk at 91% on node 3.");
+    const answer = w.tool("ses-ops", "I can clear the snapshots.", root.id);
+    const sent = w.reply(root.thread_id, "Go ahead.");
+    expect(sent.reply_to).toBe(answer.id);
+    const delivery = w.row(root.thread_id).delivery!;
+    expect(delivery.script).toBeUndefined();
+    const line = rowDeliveryLine(delivery, () => "7:00 AM");
+    expect(line).toContain("Claude Code");
+    expect(line).not.toContain("Script");
+  });
+
+  test("a thread a script started that a session took over: its row lists that one session, so the row names it; a script's own thread and a session's own thread list none, as before", async () => {
+    const w = world();
+    await w.poll("ses-ops");
+    const taken = w.script("Disk at 91% on node 3.");
+    w.tool("ses-ops", "I can clear the snapshots.", taken.id);
+    const row = w.row(taken.thread_id);
+    expect(row.participants).toEqual([{ host: "claude-code", session: "ses-ops", name: "Claude Code" }]);
+    expect(rowIsScript(row, row.author)).toBe(false);
+    expect(rowAgentName(row, row.author)).toBe("Claude Code");
+    expect(rowRecipientName(row, row.author)).toBe("Claude Code");
+    const scriptOnly = w.script("Spend check: $412 of $450 this month.");
+    expect(w.row(scriptOnly.thread_id).participants).toBeUndefined();
+    expect(rowAgentName(w.row(scriptOnly.thread_id), scriptOnly.author)).toBe("Script");
+    const own = w.tool("ses-ops", "The nightly sync is green.");
+    expect(w.row(own.thread_id).participants).toBeUndefined();
+  });
+
+  test("a linked computer's script rows, as this Inbox's link takes its list: a script's own thread still names Script, one a session took over names that session", async () => {
+    const far = world();
+    await far.poll("ses-ops");
+    const scriptOnly = far.script("Spend check: $412 of $450 this month.");
+    far.reply(scriptOnly.thread_id, "Thanks.");
+    const taken = far.script("Disk at 91% on node 3.");
+    far.tool("ses-ops", "I can clear the snapshots.", taken.id);
+    // Its door's `threads` is its window's list; the link here reads it as JSON (inbox-peer-link.ts `acceptList`).
+    const sent = JSON.parse(JSON.stringify({ cursor: 1, sections: [{ id: "new", threads: [far.row(scriptOnly.thread_id), far.row(taken.thread_id)] }] }));
+    const outboxRoot = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-sessionless-link-")));
+    roots.push(outboxRoot);
+    const url = "http://127.0.0.1:9";
+    const peer = new PeerLink({
+      link: { id: "ibx_01K00000000000000000000000", name: "Mini", token: "t", transport: { kind: "tailnet", url }, device_id: null, linked_at: "2026-11-25T00:00:00Z" },
+      transport: openTransport({ kind: "tailnet", url }),
+      outbox: InboxOutbox.open(join(outboxRoot, "data")),
+      onRecord: () => {},
+      onChange: () => {},
+      onRevoked: () => {},
+    });
+    expect(peer.acceptList(sent)).toBe(true);
+    const here = (id: string) => peer.list!.rows.find((r) => r.thread_id === id)!;
+    const own = here(scriptOnly.thread_id);
+    expect(own.delivery?.script).toBe(true);
+    expect(rowIsScript(own, own.author)).toBe(true);
+    expect(rowAgentName(own, own.author)).toBe("Script");
+    expect(rowRecipientName(own, own.author)).toBe("Script");
+    const over = here(taken.thread_id);
+    expect(rowIsScript(over, over.author)).toBe(false);
+    expect(rowAgentName(over, over.author)).toBe("Claude Code");
+    expect(rowRecipientName(over, over.author)).toBe("Claude Code");
+  });
+
+  test("the phone's push for a script's new thread names Script, as the window's notification does; an agent's names the agent", async () => {
+    const w = world();
+    const script = w.script("Spend check: $412 of $450 this month.");
+    expect(inboxPushSummary(w.store, script.id, () => w.store.listRows())?.agent).toBe("Script");
+    const own = w.tool("ses-ops", "The nightly sync is green.");
+    expect(inboxPushSummary(w.store, own.id, () => w.store.listRows())?.agent).toBe("Claude Code");
+    const shim = w.script("Which queue should I drain first?", undefined, "ses_shim1");
+    expect(inboxPushSummary(w.store, shim.id, () => w.store.listRows())?.agent).toBe("An agent");
+  });
+
+  test("an author that woke with no session, host or name is named as it is drawn: its row lists no session for it and a reply to it reads Script", async () => {
+    const w = world();
+    const woke = w.store.sendMessage({ project_id: w.projectId, author: { kind: "agent", host: null, session: null, name: null }, body: "Disk at 91%.", wakes: true }).message;
+    w.reply(woke.thread_id, "Thanks.");
+    const row = w.row(woke.thread_id);
+    expect(row.delivery?.script).toBe(true);
+    expect(rowAgentName(row, row.author)).toBe("Script");
+    expect(rowRecipientName(row, row.author)).toBe("Script");
+  });
+
+  test("read_thread's text, as an agent gets it, never says Script: a script's thread and one a session took over still name the script An agent", async () => {
+    const w = world();
+    await w.poll("ses-ops");
+    const scriptOnly = w.script("Spend check: $412 of $450 this month.");
+    w.reply(scriptOnly.thread_id, "Thanks.");
+    const taken = w.script("Disk at 91% on node 3.");
+    w.tool("ses-ops", "I can clear the snapshots.", taken.id);
+    w.reply(taken.thread_id, "Go ahead.");
+    for (const threadId of [scriptOnly.thread_id, taken.thread_id]) {
+      for (const caller of [null, "ses-ops"]) {
+        const { result, order } = windowedThread(w.store, threadId, { caller }, "http://localhost/#thread");
+        const text = windowedThreadText(result, order);
+        expect(text).toContain("An agent");
+        expect(text).not.toMatch(/\bScript\b/);
+      }
+    }
   });
 });
