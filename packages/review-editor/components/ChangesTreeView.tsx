@@ -6,6 +6,7 @@ import type { DiffFile } from '../types';
 import { GROUP_ICONS, TreeRowMenu, ancestorsOf, countParts, fileRowParts, gitStatusFor, leadAtRoot, type FileRowState } from './treeRows';
 import { treeLook } from './treeLook';
 import { useTreeSearchKeys } from './treeSearchKeys';
+import { useTreeMemory, type TreeMemory } from './treeMemory';
 
 export interface ChangesTreeGroup {
   key: string;
@@ -44,6 +45,7 @@ interface ChangesTreeViewProps extends FileRowState {
   onDoubleClickFile?: (index: number) => void;
   handleRef?: React.Ref<ChangesTreeHandle>;
   grouping?: string;
+  memory?: TreeMemory;
 }
 
 const NO_PATHS: ReadonlySet<string> = new Set();
@@ -230,6 +232,8 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
       },
     },
   });
+
+  useTreeMemory(model, props.memory);
 
   const expandedOnce = useRef(false);
   if (!expandedOnce.current) {

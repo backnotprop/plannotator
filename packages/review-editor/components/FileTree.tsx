@@ -21,6 +21,7 @@ import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea'
 import { PRPlatformIcon } from '@plannotator/ui/components/PRPlatformIcon';
 import { Paperclip } from 'lucide-react';
 import { RepoTreeView, type RepoTreeHandle } from './RepoTreeView';
+import type { TreeMemory } from './treeMemory';
 import { NoMatchingReviewFiles, ReviewFileFilterControls, ReviewTreeSearchAccessory } from './ReviewFileFilter';
 import { ReviewPanelHeader, ScopeSwitch, reviewPanelBodyProps, type ReviewPanelHeaderModel } from './ReviewPanelHeader';
 
@@ -37,6 +38,8 @@ import { holdsImeEscape, isImeCompositionKey } from '@plannotator/ui/utils/comme
 
 interface FileTreeProps {
   controlsNotice?: React.ReactNode;
+  changesMemory?: TreeMemory;
+  repoMemory?: TreeMemory;
   /** The top of the panel (views, the comparison sentence, Changes | All
    *  files, Go to File), shared with the other views. Absent: no header. */
   header?: ReviewPanelHeaderModel;
@@ -186,6 +189,8 @@ export const FileTree: React.FC<FileTreeProps> = ({
   autoViewed,
   onToggleAutoViewed,
   controlsNotice,
+  changesMemory,
+  repoMemory,
   onCopyRawDiff,
   canCopyRawDiff = false,
   copyRawDiffStatus = 'idle',
@@ -659,6 +664,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
             repoRoot={repoRoot}
             onSelectFile={onSelectFile}
             onDoubleClickFile={onDoubleClickFile}
+            memory={changesMemory}
           />}
         </div>
         {repoReady && (showRepoTree || repoVisited) && (
@@ -688,6 +694,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
               onDoubleClickFile={onDoubleClickFile}
               onOpenRepoFile={onOpenRepoFile}
               snapshotId={snapshotId}
+              memory={repoMemory}
             />
           </div>
         )}
