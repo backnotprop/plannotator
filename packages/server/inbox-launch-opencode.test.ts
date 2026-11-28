@@ -243,14 +243,14 @@ describe("OpenCode through the launch engine, against the fake opencode2", () =>
 
   test("Rex, right after an Inbox restart (no check has run yet): the tab runs OpenCode 2 by the name it has here, `opencode` too", async () => {
     const { host, folder } = bareHost("opencode");
-    const again = await host.rexCommand!({ id: "l1", agent: "opencode", folder, session: "ses_one", session_ref: "ses_one" } as unknown as InboxLaunchRecord, { name: "Tidy", login: {}, resume: true });
+    const again = await host.terminalCommand!({ id: "l1", agent: "opencode", folder, session: "ses_one", session_ref: "ses_one" } as unknown as InboxLaunchRecord, { name: "Tidy", login: {}, resume: true });
     expect(again.ok && again.command).toContain(" opencode --standalone --session 'ses_one'");
   });
 
   test("the Inbox closing while a Rex start's short-lived server makes its session: that server ends too", async () => {
     // Making the session takes a while: the Inbox closes meanwhile.
     const { host, folder, fake } = bareHost("opencode2", { sessionMs: 5_000 });
-    void host.rexCommand!({ id: "l2", agent: "opencode", folder } as unknown as InboxLaunchRecord, { name: "Tidy", login: {}, resume: false });
+    void host.terminalCommand!({ id: "l2", agent: "opencode", folder } as unknown as InboxLaunchRecord, { name: "Tidy", login: {}, resume: false });
     const [server] = await until("the making server", () => (fake.starts().length ? fake.starts() : null));
     await until("its session asked for", () => fake.http("POST", /^\/api\/session$/).length > 0);
     host.close();

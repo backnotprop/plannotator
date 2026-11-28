@@ -35,41 +35,58 @@ import type { InboxLaunchRecord, InboxRun } from "./inbox-types";
  */
 export const INBOX_TURN_FAILED_WORDS = "couldn't answer";
 
+/** Rex's name, as the person reads it in a place's words (packages/server/inbox-terminal-place.ts). */
+export const INBOX_REX_NAME = "Rex";
+
+// A terminal place's words are functions of its name (`place`); the INBOX_REX_* and INBOX_RUN_IN_REX_* constants are
+// Rex's, and read exactly as they did before a place could be anything else.
 /** A start in Rex whose session never connected: the failed line's cause (the agent's own tab says why; the line has its own frame). */
 export const INBOX_RUN_REX_NOT_CONNECTED = "Look at its tab there.";
 /** Try again on a Rex session the Inbox may not have heard from yet since it started (its connection retries every minute at most). */
-export const INBOX_REX_MAY_RUN = "It may still be running in Rex. Try again in a minute.";
+export const inboxPlaceMayRun = (place: string) => `It may still be running in ${place}. Try again in a minute.`;
+export const INBOX_REX_MAY_RUN = inboxPlaceMayRun(INBOX_REX_NAME);
 /** Try again, or a reply's restart, on a Rex session whose process still runs (its tab, or wherever it was resumed): nothing starts beside it. */
 export const INBOX_REX_STILL_RUNS = "It's still running, so it can't start again yet.";
 /** Stop of a session that runs in Rex when Rex said no to closing its pane. */
-export const INBOX_RUN_IN_REX_STOP = "Rex didn't close its tab. Stop it in its tab there.";
+export const inboxPlaceStopRefused = (place: string) => `${place} didn't close its tab. Stop it in its tab there.`;
+export const INBOX_RUN_IN_REX_STOP = inboxPlaceStopRefused(INBOX_REX_NAME);
 /** Stop of a session that runs in Rex when Rex did not answer in time (it may still close it). */
-export const INBOX_RUN_IN_REX_NO_ANSWER = "Rex didn't answer. Stop it in its tab there.";
+export const inboxPlaceStopNoAnswer = (place: string) => `${place} didn't answer. Stop it in its tab there.`;
+export const INBOX_RUN_IN_REX_NO_ANSWER = inboxPlaceStopNoAnswer(INBOX_REX_NAME);
 /** Stop of a session that runs in Rex when the Inbox never learned its pane (Rex was not asked). */
-export const INBOX_RUN_IN_REX_NO_TAB = "The Inbox doesn't know its tab in Rex. Stop it in its tab there.";
+export const inboxPlaceNoTab = (place: string) => `The Inbox doesn't know its tab in ${place}. Stop it in its tab there.`;
+export const INBOX_RUN_IN_REX_NO_TAB = inboxPlaceNoTab(INBOX_REX_NAME);
 /** Stop of a session in a Rex pane the Inbox did not open, when its process could not be found: nothing was closed. */
 export const INBOX_RUN_IN_REX_ELSEWHERE = "It runs in a tab the Inbox didn't open. Stop it there.";
 /** Stop of an agent in Rex whose process could not be found or ended (`ps` unread, a wrapper only, the signal refused). */
 export const INBOX_RUN_IN_REX_COULDNT = "Couldn't stop it. Stop it in its tab.";
 /** A reply to a session that ran in Rex, while Rex is not on this computer: the failed line's cause. */
-export const INBOX_REX_NOT_HERE_AGAIN = "Rex isn't open on this computer.";
+export const inboxPlaceNotHereAgain = (place: string) => `${place} isn't open on this computer.`;
+export const INBOX_REX_NOT_HERE_AGAIN = inboxPlaceNotHereAgain(INBOX_REX_NAME);
 /**
  * The same where Rex is a server with no app on that computer (Linux, FreeBSD) and it did not answer. The owner
  * approved these words and the shared ones below (2026-11-18); the Mac's lines above and in RunLine.tsx are untouched.
  * No computer is named: the person usually reads this from another one.
  */
-export const INBOX_REX_SERVER_AWAY_AGAIN = "Rex's server isn't running.";
+export const inboxPlaceServerAwayAgain = (place: string) => `${place}'s server isn't running.`;
+export const INBOX_REX_SERVER_AWAY_AGAIN = inboxPlaceServerAwayAgain(INBOX_REX_NAME);
 /** The run line's note for a start that went to the background for that reason. */
-export const INBOX_REX_SERVER_AWAY = "Rex's server isn't running, so it started in the background.";
+export const inboxPlaceServerAway = (place: string) => `${place}'s server isn't running, so it started in the background.`;
+export const INBOX_REX_SERVER_AWAY = inboxPlaceServerAway(INBOX_REX_NAME);
 /** Settings → Agents, Rex chosen, for that reason. */
-export const INBOX_REX_SERVER_AWAY_SETTINGS = "Rex's server isn't running now, so new agents start in the background until it is.";
+export const inboxPlaceServerAwaySettings = (place: string) => `${place}'s server isn't running now, so new agents start in the background until it is.`;
+export const INBOX_REX_SERVER_AWAY_SETTINGS = inboxPlaceServerAwaySettings(INBOX_REX_NAME);
 /** The Rex server there is another account's (a shared server): the Inbox never starts an agent on it. */
-export const INBOX_REX_SHARED = "Rex here runs as another account, so it started in the background.";
-export const INBOX_REX_SHARED_AGAIN = "Rex here runs as another account.";
+export const inboxPlaceShared = (place: string) => `${place} here runs as another account, so it started in the background.`;
+export const INBOX_REX_SHARED = inboxPlaceShared(INBOX_REX_NAME);
+export const inboxPlaceSharedAgain = (place: string) => `${place} here runs as another account.`;
+export const INBOX_REX_SHARED_AGAIN = inboxPlaceSharedAgain(INBOX_REX_NAME);
 /** A reply to a session that ran in Rex, when Rex said no to its new tab (an error answer): the failed line's cause. */
-export const INBOX_REX_REFUSED_AGAIN = "Rex didn't open a tab for it.";
+export const inboxPlaceRefusedAgain = (place: string) => `${place} didn't open a tab for it.`;
+export const INBOX_REX_REFUSED_AGAIN = inboxPlaceRefusedAgain(INBOX_REX_NAME);
 /** Open in Terminal for a session that runs in Rex (its line offers none; an older window's press). */
-export const INBOX_RUN_IN_REX_OPEN = "This agent runs in Rex. Open its tab there.";
+export const inboxPlaceRunsOpen = (place: string) => `This agent runs in ${place}. Open its tab there.`;
+export const INBOX_RUN_IN_REX_OPEN = inboxPlaceRunsOpen(INBOX_REX_NAME);
 
 /** A start that has not connected within this long is not "starting" any more. */
 export const INBOX_RUN_START_GRACE_MS = 60_000;

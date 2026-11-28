@@ -293,8 +293,8 @@ export interface LaunchHost {
    */
   start(launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv }): Promise<{ ok: true; session: string; ref: string } | ({ ok: false } & LaunchStartFailure)>;
   /**
-   * Start in Rex (Settings → Agents' "Start new agents in"): the agent's ordinary interactive command, for a Rex tab
-   * to run through the person's login shell. Only a host whose interactive session connects to the Inbox by itself
+   * Start in a terminal place (Settings → Agents' "Start new agents in": Rex, inbox-terminal-place.ts): the agent's
+   * ordinary interactive command, for a tab there (a Rex tab) to run through the person's login shell. Only a host whose interactive session connects to the Inbox by itself
    * at its start, as the session id given here (so the root, addressed to it, is its first turn through its own
    * channel, as for `start`): never the person's message on the command line. `resume`: the same session again (a
    * reply to one that ended). `fresh` with it: that session never took a turn (it never connected: stopped at a
@@ -304,7 +304,7 @@ export interface LaunchHost {
    * agent itself runs only in the tab. No member: this agent always starts in the background (Codex: a Codex in a tab
    * never tells the Inbox between turns whether it runs, so its line could not say).
    */
-  rexCommand?(launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv; resume: boolean; fresh?: boolean }): Promise<{ ok: true; session: string; ref: string; command: string } | ({ ok: false } & LaunchStartFailure)>;
+  terminalCommand?(launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv; resume: boolean; fresh?: boolean }): Promise<{ ok: true; session: string; ref: string; command: string } | ({ ok: false } & LaunchStartFailure)>;
   /**
    * Start in Rex: whether a process on this computer runs `session`, by `listing` (`ps -A -o pid=,ppid=,command=`),
    * for an agent whose running process does not keep its argv (Pi sets `process.title`). No member: its argv names

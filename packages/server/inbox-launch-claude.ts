@@ -820,7 +820,7 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
      * prompts come to the Inbox's card as well as its own dialog in the tab). The plugin connects it at its start,
      * as that id, and takes the root as its first turn: the message is never on the command line.
      */
-    async rexCommand(launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv; resume: boolean; fresh?: boolean }) {
+    async terminalCommand(launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv; resume: boolean; fresh?: boolean }) {
       const person = personSettings();
       if (person && !person.ok) {
         ctx.startLog(launch.id, person.text);

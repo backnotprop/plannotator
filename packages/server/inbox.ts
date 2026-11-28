@@ -290,6 +290,7 @@ import { INBOX_CROSS_SITE_BODY, INBOX_MACHINE_PULL_WINDOW_ONLY_BODY, INBOX_MACHI
 import { createInboxLaunch } from "./inbox-launch";
 import { createInboxRex, type InboxRex, type InboxRexReach, type InboxRexStatus } from "./inbox-rex";
 import { inboxRaiseAfterFarShow } from "./inbox-rex-far";
+import { inboxRexPlace } from "./inbox-rex-place";
 import { inboxRexHeadless, inboxRexSockets } from "./inbox-rex-where";
 import { withRexMark, withRexStatus } from "./inbox-rex-status";
 import { createInboxAgentStatusSetting } from "./inbox-agent-status-setting";
@@ -5511,7 +5512,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // Ship's watch, made below: a launch that moved binds a new session's ship, or says Stuck when it failed.
   let shipLaunchMoved: (() => void) | null = null;
   const launch = createInboxLaunch({
-    rex,
+    // The terminal places agents may start in (inbox-terminal-place.ts): Rex.
+    places: { rex: inboxRexPlace(rex) },
     rexStatus: (session) => rexStatusOf(session),
     placeOf: (session) => live.placeOf(session),
     store,
