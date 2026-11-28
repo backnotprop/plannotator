@@ -41,7 +41,7 @@ export interface FakePiConfig {
   /** The RPC process answers its first `get_state` this much later (ms): a Pi slow to come up. */
   readyDelayMs?: number;
   /** Each turn first asks this extension dialog over RPC, and waits for the answer (10 s at most). */
-  dialog?: { method?: "select" | "confirm" | "input" | "editor"; title: string; options?: string[] } | null;
+  dialog?: { method?: "select" | "confirm" | "input" | "editor" | "form"; title: string; options?: string[]; html?: string } | null;
   /** Ask `dialog` once as the session starts, before any turn (an extension's session_start). */
   dialogOnStart?: boolean;
   /** How long a turn works before it answers (ms, default 600). */
@@ -58,6 +58,18 @@ export interface FakePiConfig {
   settles?: boolean;
   /** One turn of the RPC process's own as the session starts (no Inbox message). */
   turnOnStart?: boolean;
+  /** Oh My Pi only: a start with no `--resume` reopens the newest session in its folder (its Auto Resume setting). */
+  autoResume?: boolean;
+  /** Oh My Pi only: RPC `new_session` is refused (an extension cancelled it); the session stays. */
+  newSessionCancelled?: boolean;
+  /** Oh My Pi only: `--resume <id>` answers as another copy of the conversation (a new id), or one of no lineage. */
+  resumeAs?: "continuation" | "fork" | "stranger" | null;
+  /** With `resumeAs`: the id that copy gets (else a new one). */
+  resumeId?: string | null;
+  /** `get_state` reports this as the session id instead of its own. */
+  stateId?: string | null;
+  /** Oh My Pi only: its other extensions' `session_start` take this long (ms); every RPC frame but a dialog's answer waits. */
+  startMs?: number;
 }
 
 export interface FakePiCall {
@@ -84,6 +96,8 @@ export interface FakePi {
   delivered(): string[];
   dialogs(): { sessionId: string; title: string; response: { cancelled?: boolean; value?: string; confirmed?: boolean } | null }[];
   exits(): { sessionId: string; pid: number; why: string; aborted?: boolean; terminal?: boolean; at: number }[];
+  /** Oh My Pi only: the commands whose turn `new_session` cancelled (delivered, never answered). */
+  cancelled(): { id: string; sessionId: string; at: number }[];
   osascript(): string[][];
   /** Every session file of Pi's agent dir in the test HOME. */
   sessionFiles(): string[];
@@ -99,21 +113,41 @@ export interface FakePi {
 
 const q = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
 
-export function installFakePi(input: { bin: string; state: string; home: string; config?: FakePiConfig }): FakePi {
+/**
+ * `omp`: the fake as Oh My Pi instead (tests/helpers/fake-omp): its command, title, `--version`, its own session ids
+ * and `--resume`, `~/.omp/agent`, and the extension installed as an Oh My Pi plugin.
+ */
+export type FakePiFlavor = "pi" | "omp";
+
+export function installFakePi(input: { bin: string; state: string; home: string; config?: FakePiConfig; flavor?: FakePiFlavor }): FakePi {
   const { bin, state, home } = input;
-  for (const dir of [bin, state, join(home, ".pi", "agent")]) mkdirSync(dir, { recursive: true });
+  const flavor = input.flavor ?? "pi";
+  const command = flavor === "omp" ? "omp" : "pi";
+  const agentRoot = join(home, flavor === "omp" ? ".omp" : ".pi");
+  for (const dir of [bin, state, join(agentRoot, "agent")]) mkdirSync(dir, { recursive: true });
   writeFileSync(join(state, "config.json"), JSON.stringify(input.config ?? {}));
-  const pi = join(bin, "pi");
+  const pi = join(bin, command);
   /** `exec` off: the wrapper runs Pi as its child, as Volta's shim or `node …/cli.js "$@"` does. */
   let exec = true;
   const runtime = fakeRuntime();
   const install = () => {
-    writeFileSync(pi, `#!/bin/sh\nFAKE_PI_STATE=${q(state)} ${exec ? "exec " : ""}${q(runtime)} ${q(SCRIPT)} "$@"\n`);
+    writeFileSync(pi, `#!/bin/sh\nFAKE_PI_STATE=${q(state)} ${flavor === "omp" ? "FAKE_PI_AS=omp " : ""}${exec ? "exec " : ""}${q(runtime)} ${q(SCRIPT)} "$@"\n`);
     chmodSync(pi, 0o755);
   };
   install();
   const settings = join(home, ".pi", "agent", "settings.json");
-  const setExtension = (on: boolean) => writeFileSync(settings, JSON.stringify({ packages: on ? ["npm:@plannotator/pi-extension"] : ["npm:pi-subagents"] }));
+  // Oh My Pi's plugin record (`omp plugin install`): the plugins folder's package.json, its lock, and the package
+  // itself under node_modules (its loader skips a dependency whose package is not there).
+  const plugins = join(agentRoot, "plugins");
+  const setExtension = (on: boolean) => {
+    if (flavor === "pi") return writeFileSync(settings, JSON.stringify({ packages: on ? ["npm:@plannotator/pi-extension"] : ["npm:pi-subagents"] }));
+    mkdirSync(plugins, { recursive: true });
+    const name = on ? "@plannotator/pi-extension" : "pi-subagents";
+    mkdirSync(join(plugins, "node_modules", ...name.split("/")), { recursive: true });
+    writeFileSync(join(plugins, "node_modules", ...name.split("/"), "package.json"), JSON.stringify({ name, version: "0.28.70", pi: {} }));
+    writeFileSync(join(plugins, "package.json"), JSON.stringify({ name: "omp-plugins", private: true, dependencies: { [name]: "^0.28.0" } }));
+    writeFileSync(join(plugins, "omp-plugins.lock.json"), JSON.stringify({ plugins: { [name]: { version: "0.28.70", enabledFeatures: null, enabled: true } }, settings: {} }));
+  };
   setExtension(true);
   writeFileSync(join(bin, "osascript"), `#!/bin/sh\nfor a in "$@"; do printf '%s\\037' "$a"; done >> ${q(join(state, "osascript.log"))}\nprintf '\\n' >> ${q(join(state, "osascript.log"))}\n`, { mode: 0o755 });
   const shell = join(bin, "login-shell");
@@ -134,14 +168,15 @@ export function installFakePi(input: { bin: string; state: string; home: string;
    * it as `pi` alone (this script's path only in the instant before): the pid must also have started when
    * that fake did (ps's elapsed time against its `startedAt`), so a real Pi that reused the pid never counts.
    */
+  const title = command;
   const alive = (pid: number) => {
     const call = lines<FakePiCall>("calls.jsonl").filter((c) => c.pid === pid).at(-1);
     if (!call) return false;
     const row = spawnSync("/bin/ps", ["-o", "etime=,command=", "-p", String(pid)], { encoding: "utf8" }).stdout.trim();
     const match = /^(?:(?:(\d+)-)?(\d+):)?(\d+):(\d+)\s+(.*)$/.exec(row);
     if (!match) return false;
-    const command = match[5]!.trim();
-    if (command !== "pi" && !command.includes(SCRIPT)) return false;
+    const listed = match[5]!.trim();
+    if (listed !== title && !listed.includes(SCRIPT)) return false;
     const elapsed = ((Number(match[1] ?? 0) * 24 + Number(match[2] ?? 0)) * 60 + Number(match[3])) * 60 + Number(match[4]);
     // ps rounds the elapsed time down to the second.
     const started = Date.now() - elapsed * 1000;
@@ -164,6 +199,7 @@ export function installFakePi(input: { bin: string; state: string; home: string;
     delivered: () => (existsSync(join(state, "delivered.log")) ? readFileSync(join(state, "delivered.log"), "utf8").split("\n").filter(Boolean) : []),
     dialogs: () => lines("dialogs.jsonl"),
     exits: () => lines("exits.jsonl"),
+    cancelled: () => lines("cancelled.jsonl"),
     osascript() {
       const file = join(state, "osascript.log");
       if (!existsSync(file)) return [];
@@ -176,7 +212,7 @@ export function installFakePi(input: { bin: string; state: string; home: string;
         .map((line) => line.split("\u001f").filter((part, i, all) => i < all.length - 1 || part !== ""));
     },
     sessionFiles() {
-      const root = join(home, ".pi", "agent", "sessions");
+      const root = join(agentRoot, "agent", "sessions");
       if (!existsSync(root)) return [];
       return readdirSync(root).flatMap((dir) => readdirSync(join(root, dir)).map((name) => join(root, dir, name)));
     },

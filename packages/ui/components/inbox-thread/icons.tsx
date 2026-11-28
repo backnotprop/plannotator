@@ -297,6 +297,8 @@ function ownMark(host: string | null | undefined): React.ReactNode | null {
         </svg>
       );
     case 'pi':
+    // Oh My Pi is built on Pi and runs its extension: Pi's mark.
+    case 'oh-my-pi':
       return <PiIcon />;
     case 'hermes':
       return <HermesAgentIcon />;

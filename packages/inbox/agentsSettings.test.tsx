@@ -189,6 +189,8 @@ test.skipIf(!hasDom)('"Start agents from New message": always shown, saves confi
   // Its own group, first, above the agents.
   expect(el.querySelector('.ib-agents')!.firstElementChild!.hasAttribute('data-launch-enabled-group')).toBe(true);
   expect(enabledRow()!.getAttribute('data-launch-enabled-row')).toBe('on');
+  // Every agent New message can start, Oh My Pi among them (#3443).
+  expect(enabledRow()!.textContent).toContain('Claude Code, Codex, OpenCode, Pi and Oh My Pi');
   expect(launchRows()).toEqual([true, true]);
   const press = async () => {
     await act(async () => (enabledRow()!.querySelector('[role="switch"]') as HTMLButtonElement).click());
@@ -233,7 +235,7 @@ test.skipIf(!hasDom)('"Start new agents in": only while Rex is open here or chos
     ['In the background', 'true'],
     ['Rex', 'false'],
   ]);
-  expect(row().textContent).toContain('Claude Code and Pi can start in Rex; Codex and OpenCode always start in the background.');
+  expect(row().textContent).toContain('Claude Code and Pi can start in Rex; Codex, OpenCode and Oh My Pi always start in the background.');
   expect(row().querySelector('[data-launch-rex-away]')).toBeNull();
   await act(async () => (row().querySelector('[data-launch-start-in="rex"]') as HTMLButtonElement).click());
   await settle();

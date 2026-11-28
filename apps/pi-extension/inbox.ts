@@ -39,7 +39,8 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { randomUUID } from "node:crypto";
-import { closeSync, existsSync, openSync, readSync } from "node:fs";
+import { closeSync, existsSync, openSync, readdirSync, readSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { loadConfig, resolveInboxReminder, resolveInboxReminderText, resolveInboxTool } from "./generated/config.ts";
 import { getPlannotatorDataDir } from "./generated/data-dir.ts";
 import {
@@ -369,6 +370,71 @@ function piHandoffLineOf(ctx: ExtensionContext, sessionId: string): string[] {
 	}
 }
 
+/** An Oh My Pi session id (a UUID): the only name looked for as a session file. */
+const OMP_SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The sessions an Oh My Pi session continues, nearest first (#3443). Oh My Pi's header names the session a copy
+ * comes from by its id, not its file: `continuationOf` (the sibling a conversation went on in, session-manager.ts
+ * `#moveOffSessionFile`), else `parentSession` (that, or a fork). Each earlier header is read from
+ * `<stamp>_<id>.jsonl` in the same folder; a `parentSession` that is a path (a branch) is read as Pi's. So after
+ * `--resume <id>` opened a newer copy, the replies still waiting for the old id come here. Exported for the tests.
+ */
+export function ompContinuesLine(header: { continuationOf?: unknown; parentSession?: unknown } | null | undefined, sessionFile: string | null | undefined, currentSessionId: string): string[] {
+	const dir = sessionFile ? dirname(sessionFile) : null;
+	const fileOf = (id: string): string | null => {
+		if (!dir) return null;
+		try {
+			const name = readdirSync(dir).find((entry) => entry.toLowerCase().endsWith(`_${id.toLowerCase()}.jsonl`));
+			return name ? join(dir, name) : null;
+		} catch {
+			return null;
+		}
+	};
+	const line: string[] = [];
+	const seen = new Set<string>([currentSessionId.toLowerCase()]);
+	let at = header;
+	while (at && line.length < PI_HANDOFF_LINE_MAX) {
+		const back = typeof at.continuationOf === "string" && OMP_SESSION_ID.test(at.continuationOf) ? at.continuationOf : at.parentSession;
+		if (typeof back !== "string" || !back) break;
+		const byId = OMP_SESSION_ID.test(back);
+		const file = byId ? fileOf(back) : back;
+		const earlier = file ? readPiSessionHeader(file) : null;
+		const id = byId ? back : earlier?.id;
+		if (typeof id !== "string" || !id || seen.has(id.toLowerCase())) break;
+		seen.add(id.toLowerCase());
+		line.push(id);
+		at = earlier as { continuationOf?: unknown; parentSession?: unknown } | null;
+	}
+	return line;
+}
+
+/** The line of the Oh My Pi session `ctx` runs (ompContinuesLine), from its header in memory, else its file's. */
+function ompContinuesLineOf(ctx: ExtensionContext, sessionId: string): string[] {
+	try {
+		const file = ctx.sessionManager.getSessionFile();
+		const header = (ctx.sessionManager.getHeader?.() as { continuationOf?: unknown; parentSession?: unknown } | null | undefined) ?? (file ? readPiSessionHeader(file) : null);
+		return ompContinuesLine(header, file, sessionId);
+	} catch {
+		return [];
+	}
+}
+
+/**
+ * Whether the session `ctx` opened already holds a conversation (a message: Oh My Pi's Auto Resume reopens only a
+ * session with turns, session-listing.ts isEmptySession). A new session has none at its start, whatever settings
+ * entries it holds; false when it can't tell.
+ */
+function ompSessionHasMessages(ctx: ExtensionContext): boolean {
+	try {
+		const manager = ctx.sessionManager as { getEntries?: () => unknown[] };
+		const entries = typeof manager.getEntries === "function" ? manager.getEntries() : ctx.sessionManager.getBranch();
+		return Array.isArray(entries) && entries.some((entry) => (entry as { type?: unknown } | null)?.type === "message");
+	} catch {
+		return false;
+	}
+}
+
 /** Exported for the tests. */
 export function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options: PiInboxOptions & { reminder: string | null }): void {
 	const spec = inboxAgentTool(connection.tools);
@@ -394,6 +460,17 @@ export function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, o
 	let wake: InboxWake | null = null;
 	/** The sessions this one continues (piHandoffLine), read as the session starts: the poll's `continues`. */
 	let continues: string[] = [];
+	/**
+	 * Oh My Pi that the Inbox started for a new session (`PLANNOTATOR_INBOX_NEW_SESSION`, inbox-launch-pi.ts) but whose
+	 * Auto Resume opened an earlier conversation: that session's id, polled for nothing. The Inbox asks for a new
+	 * session (`new_session`) once it reads `get_state`, which Oh My Pi answers only after this handler; a poll as the
+	 * earlier id meanwhile could start a reply waiting for it, and the switch would cancel that turn. Cleared once the
+	 * session changes.
+	 */
+	let reopened: string | null = null;
+	let newStart = ohMyPi && process.env.PLANNOTATOR_INBOX_NEW_SESSION === "1";
+	// Read once: a process the session starts (an `omp` in its shell) is never taken for the Inbox's new start.
+	if (ohMyPi) delete process.env.PLANNOTATOR_INBOX_NEW_SESSION;
 	/** The on-disk version the session was last told about (#2085's message, once per version). */
 	let notifiedOnDisk: string | null = null;
 	let activationSettled = false;
@@ -539,8 +616,13 @@ export function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, o
 			prompts.clear();
 			endWaiting(new Error("the session changed"));
 		}
-		continues = startCtx.hasUI ? piHandoffLineOf(startCtx, sessionId) : [];
-		if (!wake && startCtx.hasUI) {
+		continues = !startCtx.hasUI ? [] : ohMyPi ? ompContinuesLineOf(startCtx, sessionId) : piHandoffLineOf(startCtx, sessionId);
+		if (newStart) {
+			newStart = false;
+			if (ompSessionHasMessages(startCtx)) reopened = sessionId;
+		}
+		if (reopened !== null && reopened !== sessionId) reopened = null;
+		if (!wake && startCtx.hasUI && reopened === null) {
 			wake = new InboxWake(connection, sessionId, target);
 			wake.start();
 		}

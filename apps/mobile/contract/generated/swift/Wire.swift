@@ -5132,17 +5132,19 @@ public enum InboxInlineImageCaptured: Codable, Hashable, Sendable, RawRepresenta
 public enum InboxLaunchAgent: Codable, Hashable, Sendable, RawRepresentable {
   case claudeCode
   case codex
+  case ohMyPi
   case opencode
   case pi
   /// A value this app does not know (a newer Inbox).
   case unknown(String)
 
-  public static let known: [InboxLaunchAgent] = [.claudeCode, .codex, .opencode, .pi]
+  public static let known: [InboxLaunchAgent] = [.claudeCode, .codex, .ohMyPi, .opencode, .pi]
 
   public init(rawValue: String) {
     switch rawValue {
     case "claude-code": self = .claudeCode
     case "codex": self = .codex
+    case "oh-my-pi": self = .ohMyPi
     case "opencode": self = .opencode
     case "pi": self = .pi
     default: self = .unknown(rawValue)
@@ -5153,6 +5155,7 @@ public enum InboxLaunchAgent: Codable, Hashable, Sendable, RawRepresentable {
     switch self {
     case .claudeCode: return "claude-code"
     case .codex: return "codex"
+    case .ohMyPi: return "oh-my-pi"
     case .opencode: return "opencode"
     case .pi: return "pi"
     case .unknown(let value): return value

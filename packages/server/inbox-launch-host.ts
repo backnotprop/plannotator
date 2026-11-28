@@ -253,6 +253,8 @@ export interface LaunchHost {
   readonly agent: InboxLaunchAgent;
   /** "Claude Code": To's row, a refusal, the questions' author. */
   readonly name: string;
+  /** The host its sessions poll as, when not `agent` (Oh My Pi's are `pi`): the launched root's `to.host`. */
+  readonly sessionHost?: string;
   /** What of Plannotator's connects a session, in the line's words: "plugin" (the default), Pi's "extension". */
   readonly connector?: string;
   /** The login-shell names it keeps from each read (the rest of the env is held only by a host with `loginRead`). */
@@ -321,8 +323,11 @@ export interface LaunchHost {
   sessions(): Promise<LaunchSessions | null>;
   /** The session connected to the Inbox now; null when not. `polls` must rise whenever it shows new life (Stop waits for a higher count). */
   live(session: string): LaunchLive | null;
-  /** Start a session that is not live again (a reply to it, Try again). `failure` when it did not take. */
-  resume(launch: InboxLaunchRecord): Promise<LaunchHostResult & { failure: { code: "untrusted" | "failed"; text: string } | null }>;
+  /**
+   * Start a session that is not live again (a reply to it, Try again). `failure` when it did not take. `session`: it
+   * goes on under that id now (Oh My Pi resumed a newer copy of the conversation), and the thread moves to it.
+   */
+  resume(launch: InboxLaunchRecord): Promise<LaunchHostResult & { failure: { code: "untrusted" | "failed"; text: string } | null; session?: string }>;
   stop(ref: string): Promise<LaunchHostResult>;
   /** Delete, after stop: the host forgets the session. */
   remove(ref: string): Promise<LaunchHostResult>;

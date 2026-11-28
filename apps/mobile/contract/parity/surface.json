@@ -612,6 +612,7 @@
       "InboxInlineImage.captured.on_open",
       "InboxLaunchAgent.claude-code",
       "InboxLaunchAgent.codex",
+      "InboxLaunchAgent.oh-my-pi",
       "InboxLaunchAgent.opencode",
       "InboxLaunchAgent.pi",
       "InboxLaunchClone.error.auth",

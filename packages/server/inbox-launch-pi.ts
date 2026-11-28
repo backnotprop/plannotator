@@ -50,8 +50,8 @@
 
 import { randomUUID } from "node:crypto";
 import { closeSync, existsSync, lstatSync, openSync, readdirSync, readFileSync, readSync, realpathSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
-import type { InboxLaunchRecord } from "@plannotator/core/inbox-types";
+import { dirname, join, resolve } from "node:path";
+import type { InboxLaunchNotReady, InboxLaunchRecord } from "@plannotator/core/inbox-types";
 import { childEnv } from "@plannotator/shared/child-env";
 import { getDefaultPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { piSessionClaimFileOf, readPiSessionClaims, type PiSessionClaim } from "@plannotator/shared/inbox/pi-session-claim";
@@ -73,6 +73,10 @@ export const PI_STOPPED_NOTE = "A Pi session runs only while the Inbox runs. You
 export const PI_HANDOFF_NOTE = "It is open in Terminal: that Pi takes your replies while it runs.";
 /** The stopped line's words once the Terminal's Pi quit (or never came). */
 export const PI_HANDED_BACK_NOTE = "It was opened in Terminal and is not running there now. Your reply continues it here.";
+/** The line's cause when `--resume <id>` answered with a session that does not lead back to this thread's. */
+const STRAY = (name: string) => `${name} opened another session in place of this one, so it can't continue it here. Start a new ${name} session.`;
+/** The stopped line's words when an agent that picks its own ids never saved the session (Oh My Pi writes its file at its first answer). */
+export const piUnsavedNote = (name: string) => `${name} had not saved this session yet, so there is nothing to continue. Start a new ${name} session.`;
 /** How long a new process may take to answer its first RPC command. */
 const READY_MS = 30_000;
 /** How long Stop waits for the process to end after its stdin closed, before it signals it. */
@@ -92,7 +96,75 @@ const NOTE_TITLE_MAX = 80;
  */
 const SETTLE_MS = 1_500;
 
-const DIALOGS = new Set(["select", "confirm", "input", "editor"]);
+/**
+ * The dialogs answered Cancel: Pi's four, and Oh My Pi's `form` (one whole HTML form, sent with no opt-in: its `ask`
+ * tool always asks this way in RPC mode, rpc-mode.ts requestRpcFormDialog) and `ask` (only once a client sent
+ * `set_ask_dialog`, which the Inbox never does). Either untouched would leave the session waiting with no word.
+ */
+const DIALOGS = new Set(["select", "confirm", "input", "editor", "form", "ask"]);
+
+/**
+ * What tells Pi from an agent built on it that loads the same extension (Oh My Pi, inbox-launch-omp.ts): one
+ * launcher, one flavor each. Everything else (the process, its RPC, Stop, the one writer per session, Open in
+ * Terminal's hand-off, the dialogs, the notes) is the same code.
+ */
+export interface PiLaunchFlavor {
+  /** The launch's agent (`InboxLaunchAgent`). Its sessions poll as host `pi` either way. */
+  agent: "pi" | "oh-my-pi";
+  /** "Pi": To's row, the line, the notes. */
+  name: string;
+  /** The command on PATH. */
+  bin: string;
+  minVersion: string;
+  /** The login-shell names it keeps from each read: where it keeps its settings, plugins and sessions. */
+  shellNames: readonly string[];
+  /**
+   * Who picks the session id: the Inbox (Pi's `--session-id <uuid>`, made when missing), or the agent (Oh My Pi
+   * makes its own, read from `get_state`; `--resume <id>` continues it, which needs its session file on disk).
+   */
+  ids: "inbox" | "agent";
+  /** The background process's argv: RPC mode, the session (null: a new one, ids "agent" only), its name, the menus' args. */
+  argv(path: string, session: string | null, name: string, choice: readonly string[]): string[];
+  /** The flag before a session id on a command line (a terminal's shell, a process that keeps its argv): a regex source. */
+  sessionFlag: string;
+  /** What runs the session interactively, in a terminal: the command, its flags (plain words) and the session last. */
+  terminalArgs(session: string): string[];
+  /** Its own folder, from the login shell's names (or the Inbox's own), else its default under home. */
+  agentDir(env: (name: string) => string | undefined, home: string): string;
+  /** Whether Plannotator's Pi extension is installed for it (read from its files, nothing run); the reason when not. */
+  extension(env: (name: string) => string | undefined, home: string, agentDir: string): { ok: true } | { ok: false; reason: string; code?: InboxLaunchNotReady };
+  /** Its default sessions folders for `cwd` (Delete of a scratch folder purges the session files there whose header names it). */
+  sessionDirs(agentDir: string, cwd: string, home: string, env: (name: string) => string | undefined): string[];
+  /** The model and effort menus (`--help`, `--list-models`). */
+  choices: boolean;
+}
+
+/** Pi's own settings file under its agent dir, or null. */
+function piSettingsText(agentDir: string): string | null {
+  try {
+    return readFileSync(join(agentDir, "settings.json"), "utf8");
+  } catch {
+    return null;
+  }
+}
+
+export const PI_FLAVOR: PiLaunchFlavor = {
+  agent: "pi",
+  name: "Pi",
+  bin: "pi",
+  minVersion: PI_LAUNCH_MIN_VERSION,
+  shellNames: ["PI_CODING_AGENT_DIR"],
+  ids: "inbox",
+  argv: (path, session, name, choice) => piArgv(path, session!, name, choice),
+  sessionFlag: "--session-id",
+  terminalArgs: (session) => ["pi", "--session-id", session],
+  /** `PI_CODING_AGENT_DIR` from the login shell or the Inbox, else `~/.pi/agent`. */
+  agentDir: (env, home) => env("PI_CODING_AGENT_DIR") ?? join(home, ".pi", "agent"),
+  extension: (_env, _home, agentDir) =>
+    piExtensionListed(piSettingsText(agentDir)) ? { ok: true } : { ok: false, reason: "Plannotator's Pi extension is not installed (pi install npm:@plannotator/pi-extension)" },
+  sessionDirs: (agentDir, cwd) => [piSessionDirOf(agentDir, cwd)],
+  choices: true,
+};
 
 // ── Pure helpers (unit-tested) ──
 
@@ -146,8 +218,10 @@ export function piSpawnEnv(login: Readonly<LaunchEnv>, dataDir: string | null): 
  * Inbox's bridge, and the Inbox sees it live), this Inbox's data dir when not the default, and the exact
  * session id (`--session-id` opens the session's file, or starts the session when Pi has written none yet).
  */
-function piTerminalRun(session: string, dataDir: string | null): string {
-  return `PLANNOTATOR_INBOX_TOOL=1 ${dataDir ? `PLANNOTATOR_DATA_DIR=${shellQuote(dataDir)} ` : ""}pi --session-id ${shellQuote(session)}`;
+function piTerminalRun(session: string, dataDir: string | null, flavor: PiLaunchFlavor = PI_FLAVOR): string {
+  // The command and its flags as they are (the process listing finds `--session-id <uuid>`), the session quoted.
+  const words = flavor.terminalArgs(session);
+  return `PLANNOTATOR_INBOX_TOOL=1 ${dataDir ? `PLANNOTATOR_DATA_DIR=${shellQuote(dataDir)} ` : ""}${words.slice(0, -1).join(" ")} ${shellQuote(words.at(-1)!)}`;
 }
 
 /**
@@ -160,14 +234,14 @@ function shNeutral(command: string): string {
 }
 
 /** What Copy attach command copies: the session, opened in Pi in its folder. */
-export function piAttachCommand(folder: string, session: string, dataDir: string | null = null): string {
-  return shNeutral(`cd ${shellQuote(folder)} && ${piTerminalRun(session, dataDir)}`);
+export function piAttachCommand(folder: string, session: string, dataDir: string | null = null, flavor: PiLaunchFlavor = PI_FLAVOR): string {
+  return shNeutral(`cd ${shellQuote(folder)} && ${piTerminalRun(session, dataDir, flavor)}`);
 }
 
 /** Open in Terminal while the Inbox's process `pid` runs: wait for it to end first, so one process writes the session. */
-export function piHandoffCommand(folder: string, session: string, pid: number, dataDir: string | null = null): string {
+export function piHandoffCommand(folder: string, session: string, pid: number, dataDir: string | null = null, flavor: PiLaunchFlavor = PI_FLAVOR): string {
   // `|| exit 1`: no folder, no Pi (never one in the shell's own folder, before the Inbox's has ended).
-  return shNeutral(`cd ${shellQuote(folder)} || exit 1; while kill -0 ${pid} 2>/dev/null; do sleep 0.2; done; ${piTerminalRun(session, dataDir)}`);
+  return shNeutral(`cd ${shellQuote(folder)} || exit 1; while kill -0 ${pid} 2>/dev/null; do sleep 0.2; done; ${piTerminalRun(session, dataDir, flavor)}`);
 }
 
 /**
@@ -178,7 +252,7 @@ export function piHandoffCommand(folder: string, session: string, pid: number, d
  * argv is not listed). Never one of `exclude` or a process under one (a `pi` wrapper that does not exec, as
  * Volta's shim, runs Pi as its child).
  */
-export function piSessionProcesses(listing: string, session: string, exclude: Iterable<number> = [], claims: readonly Pick<PiSessionClaim, "session" | "pid" | "rpc" | "title">[] = []): { pid: number; rpc: boolean }[] {
+export function piSessionProcesses(listing: string, session: string, exclude: Iterable<number> = [], claims: readonly Pick<PiSessionClaim, "session" | "pid" | "rpc" | "title">[] = [], sessionFlag = PI_FLAVOR.sessionFlag): { pid: number; rpc: boolean }[] {
   const rows = new Map<number, string>();
   const parent = new Map<number, number>();
   for (const line of listing.split("\n")) {
@@ -193,7 +267,8 @@ export function piSessionProcesses(listing: string, session: string, exclude: It
     return false;
   };
   // Quoted (a terminal's `sh -c`) or not (Pi's own argv), and never a longer id that starts the same.
-  const names = (command: string) => new RegExp(`--session-id\\s+'?${session}(?![0-9a-f-])`, "i").test(inboxCommandBeforeName(command));
+  const pattern = new RegExp(`(?:${sessionFlag})\\s+'?${session.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![0-9a-f-])`, "i");
+  const names = (command: string) => pattern.test(inboxCommandBeforeName(command));
   const found = new Map<number, boolean>();
   for (const [pid, command] of rows) {
     if (!under(pid) && names(command)) found.set(pid, /--mode\s+rpc\b/.test(command));
@@ -217,9 +292,9 @@ export function piDialogTitle(title: unknown): string {
 }
 
 /** The thread note for a dialog the Inbox answered Cancel. */
-export function piDialogNote(title: unknown): string {
+export function piDialogNote(title: unknown, name = PI_FLAVOR.name): string {
   const shown = piDialogTitle(title);
-  return shown ? `Pi asked something the Inbox can't show yet (“${shown}”); answered Cancel.` : "Pi asked something the Inbox can't show yet; answered Cancel.";
+  return shown ? `${name} asked something the Inbox can't show yet (“${shown}”); answered Cancel.` : `${name} asked something the Inbox can't show yet; answered Cancel.`;
 }
 
 /**
@@ -234,27 +309,92 @@ export function piTurnError(messages: unknown): string | undefined {
 }
 
 /** The thread note for a turn that ended in an error: Pi's own words, one line. */
-export const piTurnErrorNote = (error: string): string => launchTurnErrorNote("Pi", error);
+export const piTurnErrorNote = (error: string, name = PI_FLAVOR.name): string => launchTurnErrorNote(name, error);
 
 /** Pi's default sessions folder for `cwd` under `agentDir` (its `getDefaultSessionDirPath`). */
 export function piSessionDirOf(agentDir: string, cwd: string): string {
   return join(resolve(agentDir), "sessions", `--${resolve(cwd).replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`);
 }
 
-/** The `cwd` of a Pi session file's header line, or null. */
-export function piSessionCwd(file: string): string | null {
+/** A session id as Pi and Oh My Pi make them (a UUID; Oh My Pi's a v7). Nothing else goes on argv, in a pattern or a path. */
+const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const piSessionIdOk = (id: unknown): id is string => typeof id === "string" && SESSION_ID.test(id);
+
+/** "A Pi", "An Oh My Pi": the agent's name with the article it takes (`capital` false: mid-sentence). */
+export function piArticled(name: string, capital = true): string {
+  const article = /^[AEIOU]/i.test(name) ? "an" : "a";
+  return `${capital ? article[0]!.toUpperCase() + article.slice(1) : article} ${name}`;
+}
+
+/** What a `get_state` answer says of the session: its id (a UUID, else nothing), its file, how many messages it holds. */
+export interface PiState {
+  id: string;
+  file: string | null;
+  messageCount: number | null;
+}
+export function piStateOf(answer: Record<string, unknown> | null): PiState | null {
+  if (answer?.success !== true) return null;
+  const data = answer.data as { sessionId?: unknown; sessionFile?: unknown; messageCount?: unknown } | undefined;
+  const id = typeof data?.sessionId === "string" ? data.sessionId.trim() : "";
+  if (!piSessionIdOk(id)) return null;
+  return { id, file: typeof data!.sessionFile === "string" ? data!.sessionFile : null, messageCount: typeof data!.messageCount === "number" ? data!.messageCount : null };
+}
+
+/** A session file's header line (its first), read from at most `bytes` of it; null when it is not one. */
+export function piSessionHeader(file: string, bytes = 4096): Record<string, unknown> | null {
   let fd: number | null = null;
   try {
     fd = openSync(file, "r");
-    const buffer = Buffer.alloc(4096);
+    const buffer = Buffer.alloc(bytes);
     const read = readSync(fd, buffer, 0, buffer.length, 0);
-    const header = JSON.parse(buffer.subarray(0, read).toString("utf8").split("\n", 1)[0] ?? "") as { type?: unknown; cwd?: unknown };
-    return header.type === "session" && typeof header.cwd === "string" ? header.cwd : null;
+    const header = JSON.parse(buffer.subarray(0, read).toString("utf8").split("\n", 1)[0] ?? "") as Record<string, unknown> | null;
+    return header && typeof header === "object" && header.type === "session" ? header : null;
   } catch {
     return null;
   } finally {
     if (fd !== null) closeSync(fd);
   }
+}
+
+/** The `cwd` of a Pi session file's header line, or null. */
+export function piSessionCwd(file: string): string | null {
+  const cwd = piSessionHeader(file)?.cwd;
+  return typeof cwd === "string" ? cwd : null;
+}
+
+/**
+ * Whether Oh My Pi's session file `file` (session `id`) carries on the session `of`: its header, or the header of each
+ * copy it points back to, leads to `of` within 32 steps. Oh My Pi points a copy back with `continuationOf` (a sibling
+ * file the conversation went on in, session-manager.ts `#moveOffSessionFile`) and `parentSession` (that, or a fork:
+ * `forkFrom`, which `forkIfMovedAway` makes of a session that moved away); each copy is found by its id in `dirs`.
+ */
+export function piSessionContinues(file: string, id: string, of: string, dirs: readonly string[]): boolean {
+  const target = of.toLowerCase();
+  const seen = new Set<string>([id.toLowerCase()]);
+  let at: string | null = file;
+  for (let step = 0; at && step < 32; step++) {
+    const header = piSessionHeader(at, 65_536);
+    // The file must be the session it says (the first one, the id `get_state` gave).
+    if (!header || (step === 0 && String(header.id ?? "").toLowerCase() !== id.toLowerCase())) return false;
+    const back = piSessionIdOk(header.continuationOf) ? header.continuationOf : piSessionIdOk(header.parentSession) ? header.parentSession : null;
+    if (!back || seen.has(back.toLowerCase())) return false;
+    if (back.toLowerCase() === target) return true;
+    seen.add(back.toLowerCase());
+    at = sessionFileOfId(back, dirs);
+  }
+  return false;
+}
+
+/** The session file of `id` in one of `dirs` (named `<stamp>_<id>.jsonl`), or null. */
+function sessionFileOfId(id: string, dirs: readonly string[]): string | null {
+  const end = `_${id.toLowerCase()}.jsonl`;
+  for (const dir of dirs) {
+    try {
+      const name = readdirSync(dir).find((entry) => entry.toLowerCase().endsWith(end));
+      if (name) return join(dir, name);
+    } catch {}
+  }
+  return null;
 }
 
 // ── The process ──
@@ -277,6 +417,8 @@ interface PiProcess {
   pollsAtExit: number | null;
   /** The error a run just ended in, held until Pi settles (no retry, compaction or continuation follows). */
   turnError: { text: string; timer: ReturnType<typeof setTimeout> | null } | null;
+  /** Notes said before the agent named its new session (an extension's dialog at its start): written once it has. */
+  later?: (() => void)[];
 }
 
 /** A restart under way (`resume`): what cancelled it, if anything, and when it is over. */
@@ -300,6 +442,8 @@ interface PiHandoff {
 interface PiSessionRecord {
   file: string;
   written: boolean;
+  /** `--resume` once answered with another session that does not lead back to this one: it is not started again. */
+  stray?: true;
 }
 
 /**
@@ -318,21 +462,17 @@ function processListing(ps: string): string | null {
 /** How long one process listing answers for every session (it runs only when a session is in question). */
 const LISTING_MS = 1_500;
 
-/** Pi as a `LaunchHost`; `close` ends every process it owns. The options are for tests. */
-export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?: number; terminalOpenMs?: number; ps?: string; readyMs?: number } = {}) {
+/** Pi (or an agent built on it, `flavor`) as a `LaunchHost`; `close` ends every process it owns. The options are for tests. */
+export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?: number; terminalOpenMs?: number; ps?: string; readyMs?: number } = {}, flavor: PiLaunchFlavor = PI_FLAVOR) {
+  const { name: NAME, bin: BIN } = flavor;
   const handoffMs = options.handoffMs ?? HANDOFF_MS;
   const readyMs = options.readyMs ?? READY_MS;
   const terminalOpenMs = options.terminalOpenMs ?? TERMINAL_OPEN_MS;
   const ps = options.ps ?? (existsSync("/bin/ps") ? "/bin/ps" : "ps");
-  /** Pi's own folder (`PI_CODING_AGENT_DIR` from the login shell or the Inbox, else `~/.pi/agent`). */
-  const agentDir = () => ctx.shell()?.PI_CODING_AGENT_DIR ?? ctx.ownEnv().PI_CODING_AGENT_DIR ?? join(ctx.homeDir, ".pi", "agent");
-  const settingsText = () => {
-    try {
-      return readFileSync(join(agentDir(), "settings.json"), "utf8");
-    } catch {
-      return null;
-    }
-  };
+  /** A name from the last login-shell read, else the Inbox's own env (only the flavor's `shellNames` are kept). */
+  const envOf = (name: string): string | undefined => ctx.shell()?.[name] ?? ctx.ownEnv()[name] ?? undefined;
+  /** Its own folder (Pi: `PI_CODING_AGENT_DIR`, else `~/.pi/agent`). */
+  const agentDir = () => flavor.agentDir(envOf, ctx.homeDir);
   /** This Inbox's data dir for a Pi it starts or a terminal runs; null when it is the default (Pi finds it alone). */
   const dataDirArg = () => (resolve(ctx.dataDir) === resolve(getDefaultPlannotatorDataDir(ctx.homeDir)) ? null : ctx.dataDir);
 
@@ -358,8 +498,8 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
   const recordFile = (launchId: string) => join(ctx.launchDir(launchId), "pi-session.json");
   const readRecord = (launchId: string): PiSessionRecord | null => {
     try {
-      const record = JSON.parse(readFileSync(recordFile(launchId), "utf8")) as { file?: unknown; written?: unknown };
-      return typeof record.file === "string" ? { file: record.file, written: record.written === true } : null;
+      const record = JSON.parse(readFileSync(recordFile(launchId), "utf8")) as { file?: unknown; written?: unknown; stray?: unknown };
+      return typeof record.file === "string" ? { file: record.file, written: record.written === true, ...(record.stray === true ? { stray: true as const } : {}) } : null;
     } catch {
       return null;
     }
@@ -383,7 +523,7 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
     listing = { at: Date.now(), text: processListing(ps) };
     if (listing.text === null && !psFailLogged) {
       psFailLogged = true;
-      ctx.log(`Inbox launch: ${ps} -A -ww -o pid=,ppid=,command= did not run; no Pi restarts while it cannot`);
+      ctx.log(`Inbox launch: ${ps} -A -ww -o pid=,ppid=,command= did not run; no ${NAME} restarts while it cannot`);
     }
     return listing.text;
   };
@@ -396,7 +536,7 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
     const text = fresh || !listing || Date.now() - listing.at > LISTING_MS ? list() : listing.text;
     if (text === null) return null;
     const own = [...procs.values()].filter((p) => !p.exited).map((p) => p.proc.pid);
-    return piSessionProcesses(text, session, own, readPiSessionClaims(ctx.dataDir)).filter((found) => found.pid !== process.pid);
+    return piSessionProcesses(text, session, own, readPiSessionClaims(ctx.dataDir), flavor.sessionFlag).filter((found) => found.pid !== process.pid);
   };
   /**
    * Sessions this Inbox found held by a process of no hand-off of its own (a Terminal's Pi the Inbox
@@ -411,7 +551,7 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
     const text = list() ?? "";
     // Each process's own session only: never an id inside a thread's name (`--name`, after it on the line).
     for (const line of text.split("\n")) {
-      for (const match of inboxCommandBeforeName(line).matchAll(/--session-id\s+'?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/gi)) elsewhere.add(match[1]!.toLowerCase());
+      for (const match of inboxCommandBeforeName(line).matchAll(new RegExp(`(?:${flavor.sessionFlag})\\s+'?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})`, "gi"))) elsewhere.add(match[1]!.toLowerCase());
     }
     for (const claim of readPiSessionClaims(ctx.dataDir)) elsewhere.add(claim.session.toLowerCase());
   };
@@ -446,7 +586,7 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
     if ((othersOn(session)?.length ?? 0) > 0) return true;
     handoffs.delete(session);
     handedBack.add(session);
-    ctx.log(`Inbox launch: Pi session ${session} is back from Terminal (${h.sawLive ? "its Pi quit" : "its Pi never connected"})`);
+    ctx.log(`Inbox launch: ${NAME} session ${session} is back from Terminal (${h.sawLive ? `its ${NAME} quit` : `its ${NAME} never connected`})`);
     threads?.onChange();
     return false;
   };
@@ -483,7 +623,8 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
   const note = (launchId: string, session: string, body: string, key: string, turnError = false) => {
     const root = threads?.rootOf(launchId);
     if (!threads || !root) return;
-    writeLaunchNote(threads, root, { author: { host: PI, session, name: PI_NAME }, body, key, turnError }, ctx.log);
+    // Its sessions poll as host `pi` (Oh My Pi's too), under the agent's own name.
+    writeLaunchNote(threads, root, { author: { host: PI, session, name: NAME }, body, key, turnError }, ctx.log);
   };
 
   /** A dialog no one here can show: Cancel at once, and one note in the launch's thread saying so. */
@@ -491,7 +632,10 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
     send(p, { type: "extension_ui_response", id: event.id, cancelled: true });
     ctx.startLog(p.launchId, `extension dialog ${String(event.method)} answered cancelled: ${String(event.title ?? "").slice(0, 200)}`);
     ctx.log(`Inbox launch ${p.launchId}: a Pi extension dialog (${String(event.method)}) answered Cancel`);
-    note(p.launchId, p.session, piDialogNote(event.title), `pi-dialog-${p.launchId}-${String(event.id)}`);
+    const write = () => note(p.launchId, p.session, piDialogNote(event.title, NAME), `pi-dialog-${p.launchId}-${String(event.id)}`);
+    // Oh My Pi asks before it says its session id (the extension's session start runs first): the note waits for it.
+    if (p.session.startsWith("launch:")) (p.later ??= []).push(write);
+    else write();
   };
 
   const onLine = (p: PiProcess, line: string) => {
@@ -542,20 +686,42 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
     if (held.timer) clearTimeout(held.timer);
     p.turnError = null;
     // Never into a launch folder a Delete removed meanwhile.
-    if (existsSync(ctx.launchDir(p.launchId))) ctx.startLog(p.launchId, `pi ${p.session}: the turn ended with an error: ${held.text.slice(0, 2000)}`);
-    ctx.log(`Inbox launch ${p.launchId}: a Pi turn ended with an error: ${held.text.slice(0, 200)}`);
-    note(p.launchId, p.session, piTurnErrorNote(held.text), `pi-error-${p.launchId}-${Date.now()}-${++errorNotes}`, true);
+    if (existsSync(ctx.launchDir(p.launchId))) ctx.startLog(p.launchId, `${BIN} ${p.session}: the turn ended with an error: ${held.text.slice(0, 2000)}`);
+    ctx.log(`Inbox launch ${p.launchId}: ${piArticled(NAME, false)} turn ended with an error: ${held.text.slice(0, 200)}`);
+    note(p.launchId, p.session, piTurnErrorNote(held.text, NAME), `pi-error-${p.launchId}-${Date.now()}-${++errorNotes}`, true);
   };
 
-  type SpawnResult = { ok: true } | { ok: false; cancelled: boolean; missing: boolean; text: string; output: string };
-  /** One Pi process for `session` in the launch's folder; resolves once it answered (or could not). Nothing is spawned once `cancelled()`. */
-  const spawnPi = async (launch: InboxLaunchRecord, session: string, name: string, login: Readonly<LaunchEnv>, cancelled: () => boolean): Promise<SpawnResult> => {
+  type SpawnResult = { ok: true; session: string } | { ok: false; cancelled: boolean; missing: boolean; text: string; output: string; stray?: true };
+
+  /** The ids this Inbox knows for its launches' sessions (any thread), and the ones its processes ran. */
+  const knownIds = (except: PiProcess): Set<string> => {
+    const out = new Set<string>();
+    for (const [id, p] of procs) if (p !== except) out.add(id.toLowerCase());
+    for (const root of threads?.roots() ?? []) {
+      for (const id of [root.launch?.session, root.launch?.session_ref, root.to?.session]) if (id) out.add(id.toLowerCase());
+    }
+    return out;
+  };
+  /**
+   * A new session, as a start must have: no conversation in it, an id no thread here has, and (`unsaved`, before a
+   * `new_session`) no file on disk yet (Oh My Pi writes a new session's file only at its first answer).
+   */
+  const freshSession = (got: PiState, p: PiProcess, unsaved = true): boolean =>
+    (got.messageCount ?? 0) === 0 && !knownIds(p).has(got.id.toLowerCase()) && !(unsaved && got.file && existsSync(got.file));
+  /**
+   * One process for `session` in the launch's folder; resolves once it answered (or could not). Nothing is spawned
+   * once `cancelled()`. `session` null (an agent that picks its own id): a new session, whose id its `get_state` says.
+   */
+  const spawnPi = async (launch: InboxLaunchRecord, session: string | null, name: string, login: Readonly<LaunchEnv>, cancelled: () => boolean): Promise<SpawnResult> => {
     const env = piSpawnEnv(login.PATH ? login : (await ctx.environment()).env as LaunchEnv, dataDirArg());
-    const path = createAgentEnvironmentFor({ platform: ctx.platform, homeDir: ctx.homeDir, env }).which("pi") ?? (await ctx.environment()).which("pi");
-    if (!path) return { ok: false, cancelled: false, missing: true, text: "pi is not on the login PATH.", output: "pi not found" };
+    // A new session of an agent that picks its own id: should Auto Resume open an earlier one, the extension polls
+    // nothing as that one before the `new_session` below (apps/pi-extension/inbox.ts `reopened`).
+    if (session === null) env.PLANNOTATOR_INBOX_NEW_SESSION = "1";
+    const path = createAgentEnvironmentFor({ platform: ctx.platform, homeDir: ctx.homeDir, env }).which(BIN) ?? (await ctx.environment()).which(BIN);
+    if (!path) return { ok: false, cancelled: false, missing: true, text: `${BIN} is not on the login PATH.`, output: `${BIN} not found` };
     // The last moment a Stop, Delete or Open in Terminal can keep the process from being made at all.
     if (cancelled()) return { ok: false, cancelled: true, missing: false, text: "", output: "" };
-    const argv = piArgv(path, session, name, launchChoiceArgs(PI, { model: launch.model, effort: launch.effort }));
+    const argv = flavor.argv(path, session, name, flavor.choices ? launchChoiceArgs(PI, { model: launch.model, effort: launch.effort }) : []);
     let proc: ReturnType<typeof Bun.spawn>;
     try {
       proc = Bun.spawn(argv, { cwd: launch.folder, env, stdin: "pipe", stdout: "pipe", stderr: "pipe", windowsHide: true });
@@ -563,24 +729,25 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
       const text = error instanceof Error ? error.message : String(error);
       return { ok: false, cancelled: false, missing: false, text: piCause(text), output: text };
     }
-    const p: PiProcess = { launchId: launch.id, session, proc, exited: false, exitCode: null, busy: false, ending: null, waiters: new Map(), stderr: "", ended: null as never, pollsAtExit: null, turnError: null };
+    // A new session of an agent that picks its own id is kept under the launch until it says which.
+    const p: PiProcess = { launchId: launch.id, session: session ?? `launch:${launch.id}`, proc, exited: false, exitCode: null, busy: false, ending: null, waiters: new Map(), stderr: "", ended: null as never, pollsAtExit: null, turnError: null };
     p.ended = proc.exited.then((code) => {
       p.exited = true;
       p.exitCode = code;
       p.busy = false;
-      p.pollsAtExit = ctx.bridge.runStateOf(session)?.polls ?? 0;
+      p.pollsAtExit = ctx.bridge.runStateOf(p.session)?.polls ?? 0;
       noteWritten(launch.id);
       // A hand-off waiting for this process counts the bridge's polls from now: any later one is the Terminal's Pi.
-      if (handoffs.get(session)?.pid === proc.pid) handingOff(session);
+      if (handoffs.get(p.session)?.pid === proc.pid) handingOff(p.session);
       // Never into a launch folder a Delete removed meanwhile.
       if (existsSync(ctx.launchDir(launch.id))) {
-        ctx.startLog(launch.id, `pi ${session}: exited ${code}${p.ending ? ` (${p.ending})` : ""}${p.stderr.trim() ? `\n[stderr]\n${p.stderr.trim().slice(-2000)}` : ""}`);
+        ctx.startLog(launch.id, `${BIN} ${p.session}: exited ${code}${p.ending ? ` (${p.ending})` : ""}${p.stderr.trim() ? `\n[stderr]\n${p.stderr.trim().slice(-2000)}` : ""}`);
       }
       threads?.onChange();
       return code;
     });
-    procs.set(session, p);
-    handedBack.delete(session);
+    procs.set(p.session, p);
+    handedBack.delete(p.session);
     void (async () => {
       const decoder = new TextDecoder();
       let buffer = "";
@@ -606,12 +773,52 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
         // Closed.
       }
     })();
-    const state = await request(p, { type: "get_state" }, readyMs);
-    const data = state?.data as { sessionId?: unknown; sessionFile?: unknown } | undefined;
-    if (state?.success === true && data?.sessionId === session) {
-      if (typeof data.sessionFile === "string") writeRecord(launch.id, { file: data.sessionFile, written: existsSync(data.sessionFile) });
-      ctx.startLog(launch.id, `pi ${argv.slice(1).join(" ")}\nready: session ${session}${typeof data.sessionFile === "string" ? `, ${data.sessionFile}` : ""}`);
-      return { ok: true };
+    let state = await request(p, { type: "get_state" }, readyMs);
+    let got = piStateOf(state);
+    /** Why it is refused though it answered (null: not for one of these reasons). */
+    let refusal: { text: string; stray?: true } | null = null;
+    if (got && session === null && flavor.ids === "agent" && !freshSession(got, p)) {
+      // Not a new session: Oh My Pi's Auto Resume reopened the newest one in this folder (main.ts createSessionManager,
+      // `continueRecent`), in RPC mode too. A new one is asked for; nothing is sent to the one it reopened.
+      const reopened = got.id;
+      ctx.startLog(launch.id, `${BIN} ${argv.slice(1).join(" ")}: it opened session ${reopened} (${got.messageCount ?? "?"} messages${got.file ? `, ${got.file}` : ""}), not a new one; asking for a new session`);
+      const fresh = await request(p, { type: "new_session" }, readyMs);
+      state = fresh?.success === true ? await request(p, { type: "get_state" }, readyMs) : null;
+      got = piStateOf(state);
+      // New now: its id another, no conversation in it (its file is on disk already, with its header alone).
+      if (!got || got.id === reopened || !freshSession(got, p, false)) {
+        got = null;
+        refusal = { text: `${NAME} reopened an earlier session instead of starting a new one, so nothing was sent. Turn off Auto Resume in ${NAME}'s settings, then try again.` };
+      }
+    } else if (got && session !== null && got.id.toLowerCase() !== session.toLowerCase()) {
+      // `--resume <id>` may open the conversation's newer copy (a sibling file that continues it) or a fork of it
+      // (a session that moved away): another id. Taken for this thread only when its header leads back to ours.
+      const record = readRecord(launch.id);
+      const dirs = [...new Set([got.file ? dirname(got.file) : null, record ? dirname(record.file) : null].filter((dir): dir is string => !!dir))];
+      // Never an id another thread here has (or another process of the Inbox's runs): that is that thread's conversation.
+      if (flavor.ids === "agent" && got.file && !knownIds(p).has(got.id.toLowerCase()) && piSessionContinues(got.file, got.id, session, dirs)) {
+        ctx.startLog(launch.id, `${BIN} ${argv.slice(1).join(" ")}: session ${session} continues as ${got.id} (${got.file})`);
+      } else {
+        got = null;
+        refusal = flavor.ids === "agent" ? { text: STRAY(NAME), stray: true } : null;
+      }
+    }
+    if (state?.success === true && got) {
+      const id = got.id;
+      if (id !== p.session) {
+        procs.delete(p.session);
+        procs.set(id, p);
+        handedBack.delete(id);
+        p.session = id;
+      }
+      if (session === null) {
+        for (const write of p.later?.splice(0) ?? []) write();
+        // Oh My Pi takes no name on argv: the thread's name, as Pi's `--name` gives it.
+        if (name.trim()) await request(p, { type: "set_session_name", name: name.trim() }, 5_000);
+      }
+      if (got.file) writeRecord(launch.id, { file: got.file, written: existsSync(got.file) });
+      ctx.startLog(launch.id, `${BIN} ${argv.slice(1).join(" ")}\nready: session ${id}${got.file ? `, ${got.file}` : ""}`);
+      return { ok: true, session: id };
     }
     // Whether it ended by itself: then its stderr says why. Still running, it did not answer in time, and its
     // stderr is only what Pi prints on the way up (a new session's "No project session found…").
@@ -625,8 +832,8 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
     }
     await Promise.race([p.ended, Bun.sleep(2_000)]);
     const said = endedItself ? p.stderr.trim().split("\n").filter(Boolean).at(-1)?.slice(0, 200) : undefined;
-    const why = said ?? (state ? String(state.error ?? "It answered something else") : endedItself ? "It exited before it answered" : `It did not answer within ${Math.round(readyMs / 1000)} s`);
-    return { ok: false, cancelled: false, missing: false, text: piCause(why), output: `pi ${argv.slice(1).join(" ")}\n${p.stderr.trim().slice(-2000)}` };
+    const why = refusal?.text ?? said ?? (state ? String(state.error ?? "It answered something else") : endedItself ? "It exited before it answered" : `It did not answer within ${Math.round(readyMs / 1000)} s`);
+    return { ok: false, cancelled: false, missing: false, text: piCause(why), output: `${BIN} ${argv.slice(1).join(" ")}\n${p.stderr.trim().slice(-2000)}`, ...(refusal?.stray ? { stray: true as const } : {}) };
   };
 
   /** End a process: abort its turn, close its stdin (Pi then shuts down), and signal it only if it lingers. */
@@ -673,7 +880,7 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
     return head?.thread_name ?? head?.subject ?? "Inbox";
   };
 
-  type ResumeResult = LaunchHostResult & { failure: { code: "untrusted" | "failed"; text: string } | null };
+  type ResumeResult = LaunchHostResult & { failure: { code: "untrusted" | "failed"; text: string } | null; session?: string };
   const nothing = (text: string): ResumeResult => ({ exitCode: 0, text, failure: null });
   const say = (words: string) => `echo ${shellQuote(words)}`;
 
@@ -695,7 +902,7 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
     }
     if (!p.exited && handoffs.get(session)?.pid === p.proc.pid) {
       handoffs.delete(session);
-      ctx.log(`Inbox launch ${p.launchId}: no terminal took Pi session ${session}; the Inbox's Pi keeps it`);
+      ctx.log(`Inbox launch ${p.launchId}: no terminal took ${NAME} session ${session}; the Inbox's ${NAME} keeps it`);
       threads?.onChange();
     }
   };
@@ -705,8 +912,9 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
 
   let choiceKey: string | null = null;
   const choiceLists = launchChoiceCache(async () => {
+    if (!flavor.choices) return null;
     const e = await ctx.environment();
-    const path = e.which("pi");
+    const path = e.which(BIN);
     if (!path) return null;
     // Help with no `--thinking` (an older Pi) means no menu.
     const help = await e.run([path, "--help"], { timeoutMs: LAUNCH_CHOICES_RUN_MS });
@@ -718,25 +926,29 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
   /** The Pis that run `session` now by `listing` (argv or claim), not one this Inbox runs in the background. */
   const piRexPids = (session: string, listing: string): number[] => {
     const own = [...procs.values()].filter((p) => !p.exited).map((p) => p.proc.pid);
-    return piSessionProcesses(listing, session, own, readPiSessionClaims(ctx.dataDir)).flatMap((found) => (found.pid !== process.pid ? [found.pid] : []));
+    return piSessionProcesses(listing, session, own, readPiSessionClaims(ctx.dataDir), flavor.sessionFlag).flatMap((found) => (found.pid !== process.pid ? [found.pid] : []));
   };
 
-  return {
-    agent: PI,
-    name: PI_NAME,
+  const host = {
+    agent: flavor.agent,
+    name: NAME,
     connector: "extension",
-    // Of a login-shell read: where Pi keeps its settings and sessions.
-    shellNames: ["PI_CODING_AGENT_DIR"],
+    // Of a login-shell read: where it keeps its settings (plugins) and sessions.
+    shellNames: flavor.shellNames,
 
-    /** `pi` on the plain env's PATH, new enough, and Pi's settings load Plannotator's Pi extension (it is what connects the session). */
+    /** The command on the plain env's PATH, new enough, and Plannotator's Pi extension installed for it (it is what connects the session). */
     async available(): Promise<LaunchAvailability> {
       const e = await ctx.environment();
-      const path = e.which("pi");
-      if (!path) return { ok: false, missing: true, reason: "pi is not on the Inbox's PATH" };
-      // The file read first: no Pi start at all while the extension is not there.
-      if (!piExtensionListed(settingsText())) return { ok: false, missing: false, reason: "Plannotator's Pi extension is not installed (pi install npm:@plannotator/pi-extension)" };
+      const path = e.which(BIN);
+      // Pi has said nothing more since remote launch came; Oh My Pi says it is not installed, as Codex does.
+      if (!path) return { ok: false, missing: true, reason: `${BIN} is not on the Inbox's PATH`, ...(flavor === PI_FLAVOR ? {} : { code: "missing" as const }) };
+      // The files read first: no start at all while the extension is not there.
+      const extension = flavor.extension(envOf, ctx.homeDir, agentDir());
+      if (!extension.ok) return { ok: false, missing: false, reason: extension.reason, ...(extension.code ? { code: extension.code } : {}) };
       const version = parsePiVersion((await agentVersionRun(e, path, { timeoutMs: 10_000 })).stdout);
-      if (!version || !versionAtLeast(version, PI_LAUNCH_MIN_VERSION)) return { ok: false, missing: false, reason: `Pi ${version ?? "?"} is older than ${PI_LAUNCH_MIN_VERSION}` };
+      // Oh My Pi says it is too old, as Claude Code, Codex and OpenCode do: a linked computer's window names it too old;
+      // on this computer the row is simply absent, as for the others.
+      if (!version || !versionAtLeast(version, flavor.minVersion)) return { ok: false, missing: false, reason: `${NAME} ${version ?? "?"} is older than ${flavor.minVersion}`, ...(flavor === PI_FLAVOR ? {} : { code: "too_old" as const }) };
       choiceKey = `${path}@${version}`;
       return { ok: true, version };
     },
@@ -748,14 +960,14 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
     /** Pi never refuses a folder: in RPC mode its project trust only decides which project resources load. */
     trusts: () => true,
 
+    /** Pi on the id the Inbox picks now; Oh My Pi on its own, as its `get_state` says it. */
     async start(launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv }) {
-      const session = randomUUID();
-      const result = await spawnPi(launch, session, input.name, input.login, () => false);
+      const result = await spawnPi(launch, flavor.ids === "inbox" ? randomUUID() : null, input.name, input.login, () => false);
       if (!result.ok) {
         ctx.startLog(launch.id, result.output);
         return { ok: false as const, code: result.missing ? ("missing" as const) : ("failed" as const), text: result.text };
       }
-      return { ok: true as const, session, ref: session };
+      return { ok: true as const, session: result.session, ref: result.session };
     },
 
     /**
@@ -839,8 +1051,10 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
      */
     async resume(launch: InboxLaunchRecord): Promise<ResumeResult> {
       const session = launch.session_ref!;
+      // Never an id that is not one on argv (`--resume <id>`): a record from elsewhere could hold anything.
+      if (!piSessionIdOk(session)) return { exitCode: 1, text: `not a session id: ${JSON.stringify(session).slice(0, 80)}`, failure: { code: "failed", text: `${NAME} did not start again.` } };
       if (spawning.has(session)) return nothing("starting already");
-      if (handingOff(session) || heldElsewhere(session)) return nothing("open in a terminal: that Pi takes the reply; nothing started here");
+      if (handingOff(session) || heldElsewhere(session)) return nothing(`open in a terminal: that ${NAME} takes the reply; nothing started here`);
       const old = running(session);
       if (old && ctx.bridge.runStateOf(session)) return nothing("already running here");
       // Marked before the first await: a Stop, Delete or Open in Terminal from now on cancels this restart.
@@ -857,34 +1071,49 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
         // it; an RPC Pi an earlier Inbox could not end) keeps this restart off.
         const others = othersOn(session, true);
         if (others === null) {
-          ctx.startLog(launch.id, `pi ${session}: ${ps} -A -ww -o pid=,ppid=,command= did not run, so no one can tell whether another Pi runs this session; nothing started`);
-          return { exitCode: 1, text: `${ps} did not run`, failure: { code: "failed", text: "The Inbox could not list processes (ps), so it cannot tell whether another Pi runs this session. Pi did not start again." } };
+          ctx.startLog(launch.id, `${BIN} ${session}: ${ps} -A -ww -o pid=,ppid=,command= did not run, so no one can tell whether another ${NAME} runs this session; nothing started`);
+          return { exitCode: 1, text: `${ps} did not run`, failure: { code: "failed", text: `The Inbox could not list processes (ps), so it cannot tell whether another ${NAME} runs this session. ${NAME} did not start again.` } };
         }
         const terminal = others.find((found) => !found.rpc);
         if (terminal) {
           elsewhere.add(session);
-          ctx.log(`Inbox launch ${launch.id}: pid ${terminal.pid} runs Pi session ${session} in a terminal; nothing started`);
-          return nothing(`pid ${terminal.pid} runs this session in a terminal: the reply waits for that Pi; nothing started`);
+          ctx.log(`Inbox launch ${launch.id}: pid ${terminal.pid} runs ${NAME} session ${session} in a terminal; nothing started`);
+          return nothing(`pid ${terminal.pid} runs this session in a terminal: the reply waits for that ${NAME}; nothing started`);
         }
         if (others.length > 0) {
           const pid = others[0]!.pid;
-          ctx.log(`Inbox launch ${launch.id}: pid ${pid} still runs Pi session ${session}; not started again`);
-          return { exitCode: 1, text: `pid ${pid} still runs pi --mode rpc --session-id ${session}`, failure: { code: "failed", text: `A Pi process from before (pid ${pid}) still runs this session, so it did not start again.` } };
+          ctx.log(`Inbox launch ${launch.id}: pid ${pid} still runs ${NAME} session ${session}; not started again`);
+          return { exitCode: 1, text: `pid ${pid} still runs ${BIN} --mode rpc ${flavor.sessionFlag} ${session}`, failure: { code: "failed", text: `${piArticled(NAME)} process from before (pid ${pid}) still runs this session, so it did not start again.` } };
         }
         const record = readRecord(launch.id);
+        // It once answered `--resume` with a session that is not this one: said again, and nothing started (no loop of starts).
+        if (record?.stray) return { exitCode: 1, text: `${BIN} ${session}: it answered with another session before; nothing started`, failure: { code: "failed", text: STRAY(NAME) } };
         const gone = record?.written === true && !existsSync(record.file);
+        // An agent that picks its own ids continues a session only from its file (`--resume`): with none on disk there
+        // is nothing to continue (it never saved one: stopped before its first answer; or the file was removed).
+        if (flavor.ids === "agent" && record && !existsSync(record.file)) {
+          const text = gone ? `${NAME}'s session file for this thread is gone (${ctx.displayFolder(record.file)}), so it can't continue it.` : `${NAME} had not saved this session yet, so there is nothing to continue.`;
+          ctx.startLog(launch.id, `${BIN} ${session}: no session file at ${record.file}; nothing started`);
+          return { exitCode: 1, text: `no session file at ${record.file}`, failure: { code: "failed", text: `${text} Start a new ${NAME} session.` } };
+        }
         const result = await spawnPi(launch, session, nameOf(launch), login, () => mark.cancel !== null);
+        // (Oh My Pi's `--resume` reopens its file; Pi's `--session-id` makes the session when it has none.)
         if (mark.cancel) {
-          const p = running(session);
+          const p = running(result.ok ? result.session : session);
           if (p) await end(p, mark.cancel);
           return nothing(`${cancelledText()}: ${p ? "ended as it came up" : "nothing started"}`);
         }
-        if (!result.ok) return { exitCode: 1, text: result.output, failure: { code: "failed", text: result.text } };
-        if (gone) {
-          ctx.startLog(launch.id, `pi ${session}: its session file ${record!.file} is gone; Pi started the session again empty`);
-          note(launch.id, session, `Pi's session file for this thread is gone (${ctx.displayFolder(record!.file)}), so Pi continues with no memory of what came before.`, `pi-gone-${launch.id}-${Date.now()}`);
+        if (!result.ok) {
+          if (result.stray && record) writeRecord(launch.id, { ...record, stray: true });
+          return { exitCode: 1, text: result.output, failure: { code: "failed", text: result.text } };
         }
-        return nothing(`pi --session-id ${session}: ready`);
+        // Oh My Pi went on in a newer copy of this conversation (another id that leads back to this one): the thread takes it.
+        if (result.session !== session) return { exitCode: 0, text: `${BIN} ${flavor.sessionFlag} ${session}: ready as ${result.session}`, failure: null, session: result.session };
+        if (gone) {
+          ctx.startLog(launch.id, `${BIN} ${session}: its session file ${record!.file} is gone; ${NAME} started the session again empty`);
+          note(launch.id, session, `${NAME}'s session file for this thread is gone (${ctx.displayFolder(record!.file)}), so ${NAME} continues with no memory of what came before.`, `pi-gone-${launch.id}-${Date.now()}`);
+        }
+        return nothing(`${BIN} ${flavor.sessionFlag} ${session}: ready`);
       } finally {
         spawning.delete(session);
         finish();
@@ -905,7 +1134,7 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
       return { exitCode: code ?? 1, text: code === null ? "did not end; killed" : `ended ${code}` };
     },
     /** Pi keeps no list of sessions: nothing to remove (its session file stays, as a transcript does). */
-    remove: async (): Promise<LaunchHostResult> => ({ exitCode: 0, text: "Pi keeps no session list" }),
+    remove: async (): Promise<LaunchHostResult> => ({ exitCode: 0, text: `${NAME} keeps no session list` }),
     /**
      * Delete of a scratch folder: the Pi session files whose header names that folder exactly, in Pi's default
      * sessions folder for it, and that folder once empty. Nothing else, never through a link.
@@ -918,8 +1147,7 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
       } catch {}
       const removed: string[] = [];
       let dirs = 0;
-      for (const cwd of names) {
-        const dir = piSessionDirOf(agentDir(), cwd);
+      for (const dir of new Set([...names].flatMap((cwd) => flavor.sessionDirs(agentDir(), cwd, ctx.homeDir, envOf)))) {
         try {
           if (!lstatSync(dir).isDirectory()) continue;
         } catch {
@@ -931,7 +1159,7 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
           entries = readdirSync(dir);
         } catch (error) {
           // Unreadable (permissions): Delete goes on, and keeps that folder's files.
-          ctx.log(`Inbox launch: Pi sessions folder ${dir} could not be read (${error instanceof Error ? error.message : String(error)}); kept`);
+          ctx.log(`Inbox launch: ${NAME} sessions folder ${dir} could not be read (${error instanceof Error ? error.message : String(error)}); kept`);
           continue;
         }
         for (const name of entries) {
@@ -949,8 +1177,8 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
           if (readdirSync(dir).length === 0) rmdirSync(dir);
         } catch {}
       }
-      if (dirs === 0) return { exitCode: 0, text: "", skipped: "no Pi sessions folder for it" };
-      return { exitCode: 0, text: `removed ${removed.length} Pi session file(s)` };
+      if (dirs === 0) return { exitCode: 0, text: "", skipped: `no ${NAME} sessions folder for it` };
+      return { exitCode: 0, text: `removed ${removed.length} ${NAME} session file(s)` };
     },
 
     /**
@@ -963,7 +1191,7 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
       if (!session || running(session) || spawning.has(session) || handingOff(session) || heldElsewhere(session)) return null;
       const live = ctx.bridge.runStateOf(session);
       if (live && live.polls > (procs.get(session)?.pollsAtExit ?? -1)) return null;
-      return piAttachCommand(launch.folder, session, dataDirArg());
+      return piAttachCommand(launch.folder, session, dataDirArg(), flavor);
     },
     /**
      * Open in Terminal: hand the session over. The Inbox's process ends once the terminal shows (its turn
@@ -972,13 +1200,13 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
      */
     // `untrusted` never holds: Pi trusts every folder.
     terminal(launch: InboxLaunchRecord, _untrusted?: boolean): string {
-      if (!launch.session_ref) return shNeutral(`cd ${shellQuote(launch.folder)} && pi`);
+      if (!launch.session_ref) return shNeutral(`cd ${shellQuote(launch.folder)} && ${BIN}`);
       const session = launch.session_ref;
       // Never a second Pi on the session: the first terminal's may still be starting.
       if (handingOff(session)) {
-        return say(handoffs.get(session)?.sawLive ? "This Pi session is open in another terminal. Quit Pi there first." : "This Pi session is opening in another terminal. If you closed it, try again in a minute.");
+        return say(handoffs.get(session)?.sawLive ? `This ${NAME} session is open in another terminal. Quit ${NAME} there first.` : `This ${NAME} session is opening in another terminal. If you closed it, try again in a minute.`);
       }
-      if ((othersOn(session, true)?.length ?? 0) > 0) return say("This Pi session is open in another process. Quit Pi there first.");
+      if ((othersOn(session, true)?.length ?? 0) > 0) return say(`This ${NAME} session is open in another process. Quit ${NAME} there first.`);
       const mark = spawning.get(session);
       const cancels = mark && mark.cancel === null ? mark : null;
       if (cancels) cancels.cancel = "handoff";
@@ -986,7 +1214,7 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
       const wasHandedBack = handedBack.delete(session);
       const handoff: PiHandoff = { pid: p?.proc.pid ?? null, since: Date.now(), baseline: null, sawLive: false };
       handoffs.set(session, handoff);
-      const command = p ? piHandoffCommand(launch.folder, session, p.proc.pid, dataDirArg()) : piAttachCommand(launch.folder, session, dataDirArg());
+      const command = p ? piHandoffCommand(launch.folder, session, p.proc.pid, dataDirArg(), flavor) : piAttachCommand(launch.folder, session, dataDirArg(), flavor);
       opening.set(session, { command, handoff, cancels, wasHandedBack });
       if (!p) handingOff(session);
       else void handOver(p, session);
@@ -1003,7 +1231,7 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
       handoffs.delete(session);
       if (opened.wasHandedBack) handedBack.add(session);
       if (opened.cancels && opened.cancels.cancel === "handoff" && spawning.get(session) === opened.cancels) opened.cancels.cancel = null;
-      ctx.log(`Inbox launch: Terminal did not open for Pi session ${session}; the hand-off is withdrawn`);
+      ctx.log(`Inbox launch: Terminal did not open for ${NAME} session ${session}; the hand-off is withdrawn`);
       threads?.onChange();
     },
 
@@ -1027,14 +1255,27 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
     stoppedNote(launch: InboxLaunchRecord): string | null {
       const session = launch.session_ref;
       if (!session) return null;
-      if (handoffs.has(session)) return PI_HANDOFF_NOTE;
+      if (handoffs.has(session)) return flavor === PI_FLAVOR ? PI_HANDOFF_NOTE : `It is open in Terminal: that ${NAME} takes your replies while it runs.`;
+      // An agent that continues a session only from its file, which it never wrote: a reply has nothing to continue.
+      if (flavor.ids === "agent") {
+        const record = readRecord(launch.id);
+        // `--resume` once answered with a session that is not this one: a reply is refused with these words, so the line says them.
+        if (record?.stray) return STRAY(NAME);
+        if (record && !record.written && !existsSync(record.file)) return piUnsavedNote(NAME);
+      }
       if (handedBack.has(session)) return PI_HANDED_BACK_NOTE;
       const p = procs.get(session);
       // It ended on its own (a crash, or Pi quit): not the Inbox's doing.
-      if (p?.exited && p.ending === null) return `Pi ended on its own (exit ${p.exitCode ?? "unknown"}). Your reply continues it.`;
-      return PI_STOPPED_NOTE;
+      if (p?.exited && p.ending === null) return `${NAME} ended on its own (exit ${p.exitCode ?? "unknown"}). Your reply continues it.`;
+      return flavor === PI_FLAVOR ? PI_STOPPED_NOTE : piStoppedNote(NAME);
     },
 
     close,
   } satisfies LaunchHost;
+  return host;
+}
+
+/** The stopped line after an Inbox restart, for an agent built on Pi: "An Oh My Pi session runs only while the Inbox runs. Your reply continues it." */
+export function piStoppedNote(name: string): string {
+  return `${piArticled(name)} session runs only while the Inbox runs. Your reply continues it.`;
 }

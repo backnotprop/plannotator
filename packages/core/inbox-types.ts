@@ -1277,12 +1277,13 @@ export interface InboxAddressee {
 
 /**
  * Launch (start an agent from compose): the agents the Inbox can start a
- * session of, one per line: Claude Code (`claude --bg`), Pi (`pi --mode rpc`, owned by the Inbox), Codex
- * (`codex app-server`, owned by the Inbox).
+ * session of, one per line: Claude Code (`claude --bg`), Pi (`pi --mode rpc`, owned by the Inbox), Oh My Pi
+ * (`omp --mode rpc`, owned by the Inbox; its sessions poll as host `pi`), Codex (`codex app-server`, owned by the Inbox).
  */
 export type InboxLaunchAgent =
   | "claude-code"
   | "pi"
+  | "oh-my-pi"
   | "codex"
   | "opencode";
 

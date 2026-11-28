@@ -105,6 +105,7 @@ import { inboxSectionWhileRoutineRuns } from "@plannotator/shared/inbox/list";
 import { createAgentEnvironmentFor, type AgentEnvironment } from "./inbox-agents";
 import { createClaudeLaunchHost } from "./inbox-launch-claude";
 import { createPiLaunchHost } from "./inbox-launch-pi";
+import { createOhMyPiLaunchHost } from "./inbox-launch-omp";
 import { createCodexLaunchHost } from "./inbox-launch-codex";
 import { createOpenCodeLaunchHost } from "./inbox-launch-opencode";
 import { launchPlainEnv, launchSpawnEnv, type LaunchEnv } from "./inbox-launch-env";
@@ -548,6 +549,7 @@ export function createInboxLaunch(options: {
   const ownHosts: LaunchHost[] = [
     claude,
     createPiLaunchHost(context),
+    createOhMyPiLaunchHost(context),
     createCodexLaunchHost(context),
     createOpenCodeLaunchHost(context),
   ];
@@ -1013,7 +1015,7 @@ export function createInboxLaunch(options: {
         rmSync(launchDir(launch.id), { recursive: true, force: true });
         return;
       }
-      if (result.ok) store.settleLaunch(root.id, { to: { host: launch.agent, session: result.session }, session_ref: result.ref, ...(rex ? { rex } : {}) });
+      if (result.ok) store.settleLaunch(root.id, { to: { host: host.sessionHost ?? launch.agent, session: result.session }, session_ref: result.ref, ...(rex ? { rex } : {}) });
       else store.settleLaunch(root.id, { error: { code: result.code, text: result.text, at: new Date(now()).toISOString() }, ...(rex ? { rex } : {}) });
       log(`Inbox launch ${launch.id}: ${result.ok ? `started ${result.ref}` : `did not start (${result.code})`}`);
     } catch (error) {
@@ -1200,6 +1202,32 @@ ${result.text}`);
 
   // ── Respawn on reply: a person's message for a launched session that is not live ──
   const respawning = new Set<string>();
+  /**
+   * The session went on under another id (Oh My Pi resumed a newer copy of its conversation): the thread moves to it in
+   * one step, the launch's record and the root's `to`, and the person's messages still waiting for the old id with it.
+   */
+  const moveLaunch = (root: InboxMessage, from: string | null, to: string) => {
+    const now = store.message(root.id);
+    if (!from || !now?.launch || !now.to || now.launch.deleted_at || now.launch.session_ref !== from) return;
+    // Never onto a session another thread has: two threads would then share one conversation.
+    const taken = roots().find((other) => other.id !== root.id && [other.to?.session, other.launch?.session, other.launch?.session_ref].includes(to));
+    if (taken) {
+      log(`Inbox launch ${root.launch!.id}: not moved to ${to}, which thread ${taken.thread_id} already has`);
+      return;
+    }
+    const waiting = personPending(now.to.session).filter((m) => m.thread_id === root.thread_id && m.id !== root.id);
+    const at = { host: now.to.host, session: to };
+    store.settleLaunch(root.id, { to: at, session_ref: to });
+    for (const message of waiting) {
+      try {
+        store.readdressMessage(message.id, at, { askerEnded: true });
+      } catch (error) {
+        log(`Inbox launch ${root.launch!.id}: ${message.id} stays with ${from}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    log(`Inbox launch ${root.launch!.id}: its session goes on as ${to} (was ${from})`);
+  };
+
   /** The host's `resume` once; a failure is kept (and the CLI looked at again, for screen 15). */
   const respawn = (root: InboxMessage, host: LaunchHost, forReply: string) => {
     const launch = root.launch!;
@@ -1223,6 +1251,8 @@ ${result.text}`);
       .catch((error: unknown) => ({ exitCode: 1, text: `error: ${error instanceof Error ? error.message : String(error)}`, failure: { code: "failed" as const, text: "It did not start again." } }))
       .then(async (result) => {
         startLog(launch.id, `respawn ${launch.session_ref}: exit ${result.exitCode}\n${result.text}`);
+        const movedTo = !result.failure && "session" in result && typeof result.session === "string" ? result.session : null;
+        if (movedTo && movedTo !== launch.session_ref) moveLaunch(root, launch.session_ref, movedTo);
         if (!result.failure) return;
         attempt.failed = result.failure.text;
         // The agent may check trust before a restart too (a scratch folder that became its own repository needs its own).
