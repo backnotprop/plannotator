@@ -44,7 +44,7 @@ import {
   type InboxWakeTarget,
 } from "@plannotator/shared/inbox/agent-link";
 import { isInboxTurnedOn } from "@plannotator/shared/inbox/turned-on";
-import { INBOX_REMINDER_TEXT, INBOX_REMINDER_TEXT_NO_WAKE, INBOX_TOOL_NAME, inboxAgentTool } from "@plannotator/shared/inbox/connection";
+import { INBOX_REMINDER_TEXT, INBOX_REMINDER_TEXT_NO_WAKE, INBOX_TOOL_NAME, inboxAgentTool, inboxAgentWords } from "@plannotator/shared/inbox/connection";
 import { createOpenCodeMessageId, isAskTurnActive } from "./opencode-session-bridge";
 import type { V2ContextLike } from "./v2-client";
 
@@ -326,7 +326,7 @@ export async function registerInboxOpenCode2(
   options: { signal?: AbortSignal; plugin?: () => InboxLoadedPluginReport | null; launch?: { created: boolean; session: string | null } } = {},
 ): Promise<boolean> {
   const transform = toolDomain?.transform;
-  const spec = inboxAgentTool(connection.tools, { wakes: typeof v2.session?.prompt === "function" });
+  const spec = inboxAgentTool(connection.tools, { wakes: typeof v2.session?.prompt === "function", words: inboxAgentWords(loadConfig()) });
   if (typeof transform !== "function" || !spec) return false;
   const wakes = typeof v2.session?.prompt === "function" ? new OpenCode2Wakes(v2, connection, resolveRoot, options.plugin ?? openCodePluginReporter(), options.launch) : null;
   // `signal` ends the wakes (their event subscription and lease timers): the plugin's lifetime otherwise.

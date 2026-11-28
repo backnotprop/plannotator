@@ -26,7 +26,7 @@ import { INBOX_ACTION_EXAMPLE, INBOX_ACTION_GUIDE, INBOX_DONE_DESCRIPTION } from
 import { INBOX_RUN_TOOL_TEXT } from "@plannotator/core/inbox-run-guide";
 import { INBOX_NOTE_BLOCK_LINE } from "@plannotator/core/inbox-review";
 import { antigravityConversationOfCall, checkInboxSubject, INBOX_ANTIGRAVITY_HOST, INBOX_CARD_ACTION_ON, INBOX_MCP_WAKING_HOSTS, INBOX_T3_HOST, inboxTidyMcpLine, isInboxCombineRun, INBOX_NAME_THIS_THREAD_HINT, INBOX_SECTIONS, isInboxNote, INBOX_THREAD_NAME_MAX, type InboxGuideRef, type InboxSectionId, type InboxMessage, type InboxProject } from "@plannotator/core/inbox-types";
-import { inboxBodyWithBro, inboxStopNoticeReply, INBOX_OPTION_LINES_RULE, INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_ASK_RECOGNISE_RULE, INBOX_ATTACHMENTS_PROTOTYPE_CLAUSE, INBOX_CHANGE_RULE, INBOX_DELEGATED_OPTIONS_RULE, INBOX_PEEK_META_KEY, INBOX_PICTURES_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_REREAD_RULE, INBOX_SCENARIO_TABLE_RULE, INBOX_SHOWING_RULE, INBOX_THREAD_NEW_ISSUE_RULE, INBOX_MOVED_TO_FIELD_DESCRIPTION, INBOX_MOVED_TO_RULE, INBOX_WAKES_META_KEY, INBOX_WORKING_FOLDER_META_KEY } from "@plannotator/shared/inbox/connection";
+import { inboxBodyWithBro, inboxStopNoticeReply, INBOX_OPTION_LINES_RULE, INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_ASK_RECOGNISE_RULE, INBOX_ATTACHMENTS_PROTOTYPE_CLAUSE, INBOX_CHANGE_RULE, INBOX_DELEGATED_OPTIONS_RULE, INBOX_PEEK_META_KEY, INBOX_PICTURES_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_REREAD_RULE, INBOX_SCENARIO_TABLE_RULE, INBOX_SHOWING_RULE, INBOX_THREAD_NEW_ISSUE_RULE, INBOX_MOVED_TO_FIELD_DESCRIPTION, INBOX_MOVED_TO_RULE, INBOX_WAKES_META_KEY, INBOX_WORKING_FOLDER_META_KEY, type InboxAgentWords } from "@plannotator/shared/inbox/connection";
 import { inboxSectionOf } from "@plannotator/shared/inbox/list";
 import { inboxMcpInstructions, inboxMcpTierOf, type InboxMcpClient, type InboxMcpReminder } from "./inbox-mcp-instructions";
 import { bodyShowsLocalImages, captureInboxInlineImages, INBOX_INLINE_IMAGES_MAX, type InlineImageFailure } from "@plannotator/shared/inbox/inline-images";
@@ -396,6 +396,8 @@ export interface InboxMcpContext extends InboxSnoozeMcpContext, InboxScheduledMc
    * built-in instructions, as before.
    */
   inboxReminder?: () => InboxMcpReminder | null;
+  /** This computer's agent words (`inboxAgentWords(config)`), read on every connection: the instructions' rules. Absent: the full Inbox's. */
+  words?: () => InboxAgentWords;
   /**
    * The connecting client's `initialize` `clientInfo` (name, version), for an
    * initialize request: the room the person's text gets follows what that
@@ -1302,7 +1304,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
   const clock = () => context.now?.() ?? Date.now();
   const server = new McpServer(
     { name: "plannotator-inbox", version: "1.0.0" },
-    { instructions: inboxMcpInstructions(context.inboxReminder?.() ?? null, inboxMcpTierOf(context.mcpClient)), capabilities: { tools: {} } },
+    { instructions: inboxMcpInstructions(context.inboxReminder?.() ?? null, inboxMcpTierOf(context.mcpClient), context.words?.()), capabilities: { tools: {} } },
   );
   // Every tool's result carries a Tidy waiting on an agent no connection wakes (MCP only), once, at its end.
   const register = server.registerTool.bind(server) as (name: string, config: unknown, handler: (input: never, ctx: unknown) => Promise<ToolResult>) => unknown;

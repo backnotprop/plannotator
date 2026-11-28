@@ -172,7 +172,7 @@ test.skipIf(!hasDom)('a window already open follows `plannotator plans` live: on
 
 test.skipIf(!hasDom)('`plannotator plans` with a window open: the show frame names the Plans page for that window, never a thread', () => {
   const heard: [string, string, string | undefined][] = [];
-  const handlers = { onRecord: () => {}, onStatus: () => {}, onShow: (thread: string, target: string, page?: 'plans') => void heard.push([thread, target, page]) };
+  const handlers = { onRecord: () => {}, onStatus: () => {}, onShow: (thread: string, target: string, page?: 'plans' | 'reviews') => void heard.push([thread, target, page]) };
   dispatchInboxFrame({ name: 'show', id: null, data: JSON.stringify({ page: 'plans', window: 'w1' }) }, handlers);
   dispatchInboxFrame({ name: 'show', id: null, data: JSON.stringify({ page: 'elsewhere', window: 'w1' }) }, handlers);
   dispatchInboxFrame({ name: 'show', id: null, data: JSON.stringify({ thread_id: 'thr_1', window: 'w1' }) }, handlers);

@@ -36,7 +36,7 @@ import { INBOX_CONTRACT_EXAMPLE, INBOX_MCP_TOOLS, INBOX_TRADEOFFS_EXAMPLE, inbox
 import { INBOX_BODY_CUT_BYTES, INBOX_HEADER_CHOICES_CHARS, INBOX_HEADER_PROMPT_CHARS, INBOX_LINE_MAX_CHARS, INBOX_THREAD_LINES, INBOX_THREAD_WINDOW, INBOX_UNREAD_LINES, sizeText } from "@plannotator/server/inbox-mcp-read";
 import { INBOX_AGENT_SEARCH_LIMIT } from "@plannotator/server/inbox-mcp-search";
 import { INBOX_TOOL_DEFAULTS, INBOX_TOOL_HOSTS } from "@plannotator/shared/config";
-import { INBOX_PRIORITY_FIELD_DESCRIPTION, INBOX_PULLS_FIELD_DESCRIPTION, INBOX_SETUP_COMMAND, INBOX_STEPS_LEAD, INBOX_STEPS_START_WAKE_LINE } from "@plannotator/shared/inbox/connection";
+import { inboxAgentWords, INBOX_PRIORITY_FIELD_DESCRIPTION, INBOX_PULLS_FIELD_DESCRIPTION, INBOX_SETUP_COMMAND, INBOX_STEPS_LEAD, INBOX_STEPS_START_WAKE_LINE, type InboxAgentWords } from "@plannotator/shared/inbox/connection";
 import { INBOX_REVIEW_FIELD_DESCRIPTION, INBOX_WALKTHROUGH_FIELD_DESCRIPTION } from "@plannotator/core/inbox-review";
 import { INBOX_BRANCH_FIELD_DESCRIPTION } from "@plannotator/core/inbox-branch-reports";
 import { INBOX_CAPABILITY_AGENT_IDS } from "@plannotator/core/inbox-types";
@@ -331,6 +331,8 @@ export interface InboxHelpOptions {
    * guide says nothing of it: no `branch` field on send_message, as the Inbox serves none then.
    */
   branchReviews?: boolean;
+  /** This computer's agent words (`inboxAgentWords(config)`, read by the caller). Absent: the full Inbox's. */
+  words?: InboxAgentWords;
 }
 
 export function inboxHelpPlatform(platform: NodeJS.Platform = process.platform): ConnectContext["platform"] {
@@ -360,10 +362,12 @@ function toolBlock(name: InboxMcpToolName, steps = false, codeReview = false, br
 export const INBOX_ROUTINE_COMMAND_LINE = "  plannotator routine --help      Routines: work an agent runs on a schedule, each run reporting in the Inbox.";
 
 export function formatInboxHelp(options: InboxHelpOptions): string {
-  const board = INBOX_CARD_ACTION_ON && options.board === true;
-  const steps = options.steps === true;
+  // This computer's agent words (inboxAgentWords): code review only lists no card or steps, keeps Code review on, and adds its one line.
+  const agentWords = options.words ?? inboxAgentWords(null);
+  const board = INBOX_CARD_ACTION_ON && options.board === true && agentWords.action("card");
+  const steps = options.steps === true && agentWords.action("steps");
   const scheduled = options.scheduled === true;
-  const codeReview = options.codeReview === true;
+  const codeReview = options.codeReview === true || agentWords.reviewOnly;
   const branchReviews = codeReview && options.branchReviews === true;
   const mcpCommand = [...options.command, "inbox", "mcp"];
   const mcp = shellLine(mcpCommand);
@@ -399,6 +403,7 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "",
     "## When to use it",
     "",
+    ...(agentWords.helpLine ? [agentWords.helpLine, ""] : []),
     "Use it for:",
     "",
     "- A question you cannot settle from the code or the conversation, which can wait for an answer.",

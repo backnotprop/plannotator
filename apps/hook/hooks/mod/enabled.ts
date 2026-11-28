@@ -16,7 +16,7 @@
  * may import only its own files); `enabled.test.ts` keeps the two in step.
  */
 
-import { inboxReminderCustomText, inboxReminderRulesText } from './inbox-contract'
+import { inboxAgentWords, inboxReminderCustomText, inboxReminderRulesText, type InboxAgentWords } from './inbox-contract'
 
 /** The env override: true/false, or undefined when it does not decide (unset, empty, unrecognized). */
 export function parseClaudeModEnv(value: string | undefined): boolean | undefined {
@@ -179,6 +179,7 @@ export function resolveInboxToolEnabled(envValue: string | undefined, configText
 export function resolveInboxReminderEnabled(inboxToolEnv: string | undefined, configText: string | null | undefined): boolean {
   if (!resolveInboxToolEnabled(inboxToolEnv, configText)) return false
   if (!configText) return true
+  if (!inboxAgentWordsOf(configText).reminder) return false
   let value: unknown
   try {
     value = (JSON.parse(configText) as Record<string, unknown> | null)?.inboxReminder
@@ -193,6 +194,20 @@ export function resolveInboxReminderEnabled(inboxToolEnv: string | undefined, co
     if (v === 'false' || v === '0') return false
   }
   return true
+}
+
+/**
+ * This computer's agent words (`inboxAgentWords`, the contract's one resolver) from config.json's text: the mod's
+ * reading, the same as every other host's `inboxAgentWords(loadConfig())`. Read once, at the first session.start, with
+ * the tool. A config.json that does not read: the full Inbox's.
+ */
+export function inboxAgentWordsOf(configText: string | null | undefined): InboxAgentWords {
+  if (!configText) return inboxAgentWords(null)
+  try {
+    return inboxAgentWords(JSON.parse(configText) as Parameters<typeof inboxAgentWords>[0])
+  } catch {
+    return inboxAgentWords(null)
+  }
 }
 
 /**
