@@ -12,7 +12,8 @@
  * The same discovery and the same answers as plan review's `/api/skills` and
  * `/api/skills/content` (`handleReferenceSkills`, `handleReferenceSkillContent`):
  * the global skill folders only (`~/.claude/skills` or `$CLAUDE_CONFIG_DIR`,
- * `$CODEX_HOME/skills`, `~/.agents/skills`, `$XDG_CONFIG_HOME/agents/skills`),
+ * `$CODEX_HOME/skills`, `~/.agents/skills`, `$XDG_CONFIG_HOME/agents/skills`,
+ * then Claude Code's claude.ai-synced and user-scope plugin skills),
  * read fresh on every request, never a project's; a content name is matched
  * against discovered skills and never used as a path; a body is capped at
  * 20,000 characters.

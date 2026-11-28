@@ -37,7 +37,9 @@ The name is the folder name. The instructions are the `SKILL.md` body with the
 leading frontmatter block stripped off. Plannotator does not read the
 frontmatter: no `name`, no `description`, no YAML.
 
-Global skills only. A skill checked into a repo is ignored. (A pull request from
+Global skills only: your global skill folders, plus the skills Claude Code
+synced from claude.ai and the skills of plugins you installed for your user
+(not for one project). A skill checked into a repo is ignored. (A pull request from
 a fork could otherwise drop instructions straight into your reviewer.)
 
 ## Coming from JSON profiles

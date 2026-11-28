@@ -12,7 +12,10 @@
  *
  * Trust model (v1): global, user-owned roots only (`~/.claude/skills`,
  * `~/.codex/skills`, `~/.config/agents/skills`), honoring the standard env
- * overrides (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `XDG_CONFIG_HOME`). Project/repo
+ * overrides (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `XDG_CONFIG_HOME`), plus the two
+ * other places Claude Code keeps a person's own skills: skills synced from
+ * claude.ai (`~/.claude/skills/synced/<account>/`) and the skills of plugins
+ * installed at user scope (`~/.claude/plugins/installed_plugins.json`). Project/repo
  * skills are NOT discovered (the fork-trust problem). See docs/custom-reviews.md.
  *
  * Skip-and-log discipline: an unreadable dir / file is skipped with one log
@@ -140,6 +143,101 @@ export function resolveGlobalSkillRoots(): Array<{ dir: string; root: SkillRoot 
   return roots;
 }
 
+/** Claude Code's config folder (`CLAUDE_CONFIG_DIR`, else `~/.claude`), as resolveGlobalSkillRoots reads it. */
+function claudeConfigHome(): string {
+  const home = process.env.HOME?.trim() || homedir();
+  return process.env.CLAUDE_CONFIG_DIR?.trim() || join(home, ".claude");
+}
+
+/** Parsed JSON of `path`, or null when it is missing or unreadable (logged unless missing). */
+function readJsonFile(path: string): unknown {
+  let text: string;
+  try {
+    text = readFileSync(path, "utf-8");
+  } catch {
+    return null;
+  }
+  try {
+    return JSON.parse(text);
+  } catch (err) {
+    console.error(
+      `[plannotator] Ignoring ${path}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return null;
+  }
+}
+
+/**
+ * Where Claude Code finds skills besides `~/.claude/skills`, in the order it
+ * should win a name clash (after the global roots):
+ *
+ * - `synced`: each account folder under `~/.claude/skills/synced/`, the skills
+ *   synced from claude.ai. One level deeper than the global walk reaches.
+ * - `plugin`: each plugin installed at user scope in
+ *   `plugins/installed_plugins.json` (v2 `{ plugins: { id: [records] } }`, or
+ *   the v1 object of records), unless user `settings.json` sets
+ *   `enabledPlugins[id]` to false. Its skills are the ones Claude Code loads:
+ *   `<installPath>/skills/<name>/`, and each path in the manifest's `skills`
+ *   (`.claude-plugin/plugin.json`), which names one skill folder or a folder of
+ *   them. A project- or local-scope install is the project's, so it is left out
+ *   like any repo skill.
+ *
+ * Each entry is a folder whose direct children are skills, or (`kind: "skill"`)
+ * a skill folder itself. Under PLANNOTATOR_TEST_SANDBOX only scratch folders
+ * are kept, as for the global roots.
+ */
+export function resolveClaudeCodeSkillDirs(): Array<{ dir: string; kind: "children" | "skill" }> {
+  const claudeHome = claudeConfigHome();
+  const dirs: Array<{ dir: string; kind: "children" | "skill" }> = [];
+
+  const synced = join(claudeHome, "skills", "synced");
+  if (existsSync(synced)) {
+    for (const account of listSubdirs(synced)) dirs.push({ dir: join(synced, account), kind: "children" });
+  }
+
+  const asObject = (v: unknown): Record<string, unknown> =>
+    v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+  const registry = asObject(readJsonFile(join(claudeHome, "plugins", "installed_plugins.json")));
+  // v2 keeps the records under `plugins`; v1 is the object of records itself.
+  const byId = "plugins" in registry ? asObject(registry.plugins) : registry;
+  const enabledPlugins = asObject(asObject(readJsonFile(join(claudeHome, "settings.json"))).enabledPlugins);
+
+  for (const [id, value] of Object.entries(byId)) {
+    if (enabledPlugins[id] === false) continue;
+    const records = Array.isArray(value) ? value : [value];
+    for (const record of records) {
+      if (!record || typeof record !== "object") continue;
+      const { installPath, scope } = record as { installPath?: unknown; scope?: unknown };
+      if (typeof installPath !== "string" || !installPath) continue;
+      if (scope !== undefined && scope !== "user") continue;
+
+      dirs.push({ dir: join(installPath, "skills"), kind: "children" });
+      const manifest = readJsonFile(join(installPath, ".claude-plugin", "plugin.json"));
+      const declared =
+        manifest && typeof manifest === "object" ? (manifest as { skills?: unknown }).skills : undefined;
+      const paths = typeof declared === "string" ? [declared] : Array.isArray(declared) ? declared : [];
+      for (const path of paths) {
+        if (typeof path !== "string" || !path) continue;
+        const dir = join(installPath, path);
+        // Stay inside the plugin: a manifest path never reaches out of its folder.
+        if (dir !== installPath && !dir.startsWith(`${installPath.replace(/[\\/]+$/, "")}${sep}`)) continue;
+        dirs.push({ dir, kind: hasSkillMd(dir) ? "skill" : "children" });
+      }
+    }
+  }
+
+  if (!process.env.PLANNOTATOR_TEST_SANDBOX) return dirs;
+  return dirs.filter(({ dir }) => {
+    let key = dir;
+    try {
+      key = realpathSync(dir);
+    } catch {
+      // Not there; judged as written.
+    }
+    return isScratchDir(key);
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Discovery
 // ---------------------------------------------------------------------------
@@ -190,7 +288,8 @@ function listSubdirs(dir: string): string[] {
 }
 
 /**
- * Discover skills across the global roots. A skill is any directory containing a
+ * Discover skills across the global roots, then Claude Code's synced and plugin
+ * skills (resolveClaudeCodeSkillDirs). A skill is any directory containing a
  * SKILL.md; its `name` is the directory name (no frontmatter read).
  *
  * Container layout: roots are walked one extra level so the catalog layout
@@ -229,6 +328,21 @@ export function discoverSkills(): DiscoveredSkill[] {
         const grandDir = join(childDir, grandName);
         if (hasSkillMd(grandDir)) add(grandDir, root);
       }
+    }
+  }
+
+  // Claude Code's synced and plugin skills, after the global roots so a skill
+  // the person put in a global folder wins a name clash. Only the layout
+  // Claude Code itself loads: direct children, or a declared skill folder.
+  for (const { dir, kind } of resolveClaudeCodeSkillDirs()) {
+    if (kind === "skill") {
+      add(dir, "claude");
+      continue;
+    }
+    if (!existsSync(dir)) continue;
+    for (const childName of listSubdirs(dir)) {
+      const childDir = join(dir, childName);
+      if (hasSkillMd(childDir)) add(childDir, "claude");
     }
   }
 
