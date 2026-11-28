@@ -44,7 +44,7 @@ export const ActionMenu: React.FC<ActionMenuProps> = ({
     <div
       data-pn-dismissable-popover="true"
       data-pn-options-menu={compactEdgeSwipe ? panelId : undefined}
-      data-pn-compact-touch-layout={compactEdgeSwipe ? 'true' : undefined}
+      data-pn-swipe-surface={compactEdgeSwipe || undefined}
       role={compactEdgeSwipe ? 'dialog' : undefined}
       aria-label={compactEdgeSwipe ? 'Options' : undefined}
       data-pn-panel-side={compactEdgeSwipe ? 'right' : undefined}

@@ -35,7 +35,7 @@ async function mount() {
       enabled,
       panel: side ? { side, selector: '#test-panel', onClose: () => opened.push('closed') } : undefined,
     });
-    return <main data-pn-compact-touch-layout="true"><p>Review text</p><textarea />
+    return <main data-pn-swipe-surface="true"><p>Review text</p><textarea />
       {side && <section id="test-panel" role="dialog" aria-modal="true"><p>Panel text</p><textarea /></section>}
     </main>;
   }
@@ -145,7 +145,7 @@ describe.skipIf(!hasDom)('compact panel edge swipes', () => {
         const drag = usePanelDrag({ selector: '#flick', onClose: () => closed.push(true), fallbackWidth: () => 300 });
         useEdgeSwipe({ enabled: true, drag: { left: tracked ? drag.gesture : undefined },
           panel: { side: 'left', selector: '#flick', trackDrag: tracked, onClose: () => closed.push(true) } });
-        return <section id="flick" data-pn-compact-touch-layout="true"><p>Panel</p></section>;
+        return <section id="flick" data-pn-swipe-surface="true"><p>Panel</p></section>;
       }
       await mount();
       await act(async () => root?.render(<FlickPanel />));

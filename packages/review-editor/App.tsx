@@ -5975,6 +5975,7 @@ const ReviewApp: React.FC = () => {
         ref={refCardRootRef}
         className="pn-app-viewport flex flex-col bg-background overflow-hidden"
         data-pn-compact-touch-layout={isCompactTouchLayout ? 'true' : undefined}
+        data-pn-swipe-surface={isCompactTouchLayout || undefined}
         data-pn-compact-review-shell={isCompactTouchLayout || undefined}
         data-pn-browser-canvas="background"
       >

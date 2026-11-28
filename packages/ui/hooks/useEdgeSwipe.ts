@@ -58,7 +58,7 @@ export function useEdgeSwipe(options: EdgeSwipeOptions): void {
       if (!path.includes(panel)) return;
       // Ignore portals, lightboxes and other surfaces outside the compact app shell.
       if (!path.some(node => node instanceof Element
-        && node.matches('[data-pn-compact-touch-layout="true"]'))) return;
+        && node.matches('[data-pn-swipe-surface]'))) return;
       const touch = event.touches[0];
       const side = panelOptions.side;
       const direction = side === 'left' ? -1 : 1;
