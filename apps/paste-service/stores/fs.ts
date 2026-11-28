@@ -9,11 +9,21 @@ interface PasteFile {
 
 export class FsPasteStore implements PasteStore {
   private resolvedDir: string;
+  private sweepTimer: ReturnType<typeof setInterval>;
 
-  constructor(private dataDir: string) {
+  constructor(private dataDir: string, sweepIntervalMs = 60 * 60 * 1000) {
     mkdirSync(dataDir, { recursive: true });
     this.resolvedDir = resolve(dataDir);
     this.sweep();
+    // A long-running service must also drop expired pastes nobody reads again,
+    // not only at its next start. unref() so the timer never holds the process open.
+    this.sweepTimer = setInterval(() => this.sweep(), sweepIntervalMs);
+    this.sweepTimer.unref?.();
+  }
+
+  /** Stop the periodic sweep. */
+  close(): void {
+    clearInterval(this.sweepTimer);
   }
 
   private safePath(id: string): string {
@@ -46,7 +56,7 @@ export class FsPasteStore implements PasteStore {
     }
   }
 
-  /** Delete expired pastes on startup */
+  /** Delete expired pastes (at startup, then every sweep interval) */
   private sweep(): void {
     try {
       const files = readdirSync(this.dataDir).filter((f) => f.endsWith(".json"));
