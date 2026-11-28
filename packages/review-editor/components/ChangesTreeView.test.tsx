@@ -280,6 +280,21 @@ describe.skipIf(!hasDom)('The Changes tree on Pierre trees', () => {
     expect(shadow(el).activeElement?.getAttribute('data-item-path')).toEndWith('b.ts');
   });
 
+  test('Escape out of a search after stepping through its matches lands on the open file, not the last match', async () => {
+    const el = await mount(<Tree files={[file('src/alpha.ts'), file('src/beta.ts'), file('src/gamma.ts')]} activeFileIndex={0} />);
+    const host = el.querySelector('[data-changes-tree]')!;
+    await typeInSearch(host, 'a');
+    await act(async () => key(searchInput(host), 'ArrowDown'));
+    await act(async () => key(searchInput(host), 'ArrowDown'));
+    await settle();
+    expect(shadow(el).querySelector('[data-type="item"][tabindex="0"]')?.getAttribute('data-item-path')).toEndWith('gamma.ts');
+    await act(async () => key(searchInput(host), 'Escape'));
+    await settle();
+    await act(async () => key(searchInput(host), 'Escape'));
+    await settle();
+    expect(shadow(el).activeElement?.getAttribute('data-item-path')).toEndWith('alpha.ts');
+  });
+
   test('after a search is cleared, a click on a row moves focus to it and arrows walk the tree', async () => {
     const el = await mount(<Tree files={[file('src/alpha.ts'), file('src/beta.ts'), file('src/gamma.ts')]} activeFileIndex={0} />);
     const host = el.querySelector('[data-changes-tree]')!;

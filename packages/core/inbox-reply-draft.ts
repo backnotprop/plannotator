@@ -375,4 +375,9 @@ export interface DraftFileUploader {
    * screen. Absent: the host cannot, and the window offers no control for it.
    */
   reuse?(attachmentId: string, version: 'current' | 'sent', options: { signal: AbortSignal; sha256?: string }): Promise<InboxUpload>;
+  /**
+   * The host's own address for a held image (null: none), drawn in its tile when no local file is at hand: a draft
+   * reloaded, or opened in another window. Absent: such a tile shows its kind's icon, as the Inbox's does.
+   */
+  previewUrl?(uploadId: string): string | null;
 }
