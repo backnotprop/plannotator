@@ -67,7 +67,7 @@ Approval `inbox-swarm-thread-ui`; all of it in `packages/inbox/swarm/` (styles `
 - The window route checks the page's `serverSession` as every window write does (a tab from an earlier run: `409`), then takes it and `idempotency_key` off the body before it reads it. `{ on: true }` is Turn on for a swarm that exists (turned off); on any other thread it answers `409 not_a_swarm`: a swarm starts only from a message that names `/swarm`.
 - The settings read always carries `experimental.swarm` (`{ on, env }`), as it does Grid; a settings frame of an experimental change carries it too (`experimentalOfFrame`), so another window's or a linked computer's flip reaches this window. A turn reads the skill catalog again (`adoptSwarmOn`), so `/swarm` comes and goes with the switch.
 - Escape: the status view's and the ghost box's lists close on it, never on an Escape pressed inside a modal dialog that does not hold them (New message; `swarm/escape.ts`); the Swarm tip, a note, closes on an Escape that goes on to New message, so one Escape closes that.
-- A phone's New message: the other agents' marks, Add an agent's `+` and the badge sit inline after To's pill in the foot's row.
+- A phone's New message: the other agents' marks, Add an agent's `+` and the badge sit inline after To's pill in the foot's row. With them in it the row's gaps narrow (8 to 4 px, `swarm.css`), so Send stays on a 390 px screen; at 360 px and below the row is still wider than the screen, and what gives way there is not decided yet.
 - Deleting a thread deletes its ghost thread with it (`deleteThread`); the swarm record goes with the thread's lines.
 
 ### `plannotator inbox swarm`

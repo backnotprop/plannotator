@@ -13,6 +13,9 @@
 .ib-swarm-phoneline .ib-swarm-also { padding: 0 4px; }
 .ib-swarm-phoneline .ib-swarm-add { min-width: 36px; height: 36px; padding: 0; }
 .ib-swarm-phoneline .ib-swarm-end { margin-left: 2px; }
+/* With them in it the row's gaps narrow (8 → 4 px, the saved check's own 6 px gone), so Send stays on a 390 px screen. */
+.pn-inbox dialog.ib-cp[data-phone] .ib-cp-foot:has(> .ib-swarm-phoneline) { gap: 4px; }
+.pn-inbox dialog.ib-cp[data-phone] .ib-cp-foot:has(> .ib-swarm-phoneline) > .ib-cp-savedline { margin-left: 0; }
 
 /* ── The ghost mark: the owner's drawing as a mask over the colour of the words around it ── */
 .ib-ghost-g { display: inline-block; flex: none; background-color: currentColor; -webkit-mask: var(--ib-ghost-src) center / contain no-repeat; mask: var(--ib-ghost-src) center / contain no-repeat; }

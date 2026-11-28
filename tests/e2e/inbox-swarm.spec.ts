@@ -19,6 +19,7 @@
  *  6. The plan (`swarm propose`, what `plannotator inbox swarm propose` sends): in the quiet thread, Claude Code's
  *     proposal is its first reply, drawn as the plan card, Codex "joining"; Codex joins and adds its lines, and the
  *     same card changes in place, by the stream. A team of 20 in the first thread folds to six rows. The phone card.
+ *  7. A phone's New message with a second agent, the badge and the saved check in its one row: Send stays on screen.
  *
  * Proof, light and dark, in PLANNOTATOR_E2E_PROOF_DIR/swarm-piece-1/ (else .local/proof/swarm-piece-1/; CI keeps
  * .local/proof/ as the shard's artifact). Build the binary first (see inbox.spec.ts).
@@ -533,4 +534,27 @@ test('a phone: the plan card fits the screen, each part in one column', async ({
   });
   expect(fit).toEqual({ inside: true, stacked: true });
   await cardShot(page, '12-phone-plan-card');
+});
+
+test('a phone: New message with a second agent and the Swarm badge in its row keeps Send on the screen', async ({ page }) => {
+  await openWindow(page, 390, 844);
+  await page.locator('[data-open-compose]:visible').first().click();
+  const dialog = page.locator('dialog[data-compose]');
+  const to = dialog.locator('[data-compose-to]').first();
+  await expect(to).not.toHaveAttribute('data-loading', /.*/, { timeout: 20_000 });
+  await to.click();
+  await page.locator(`[data-compose-session="${CLAUDE.session}"]`).first().click();
+  await dialog.getByRole('textbox', { name: 'Message' }).fill('Refunds are off by a cent after Bob Tully\'s rounding change.');
+  await dialog.locator('[data-compose-add-agent]').click();
+  await page.locator(`[data-compose-session="${CODEX.session}"]`).first().click();
+  await expect(dialog.locator('[data-compose-swarm-line] [data-swarm-badge]')).toBeVisible();
+  // The fullest row: the saved draft's check is in it too.
+  await expect(dialog.locator('[data-compose-saved]')).toBeVisible({ timeout: 20_000 });
+  const fit = await page.evaluate(() => {
+    const foot = document.querySelector('dialog[data-compose] .ib-cp-foot')!;
+    const send = document.querySelector('dialog[data-compose] [data-compose-send]')!.getBoundingClientRect();
+    const inner = foot.getBoundingClientRect().right - parseFloat(getComputedStyle(foot).paddingRight);
+    return { inRow: send.right <= inner + 0.5, onScreen: send.right <= window.innerWidth + 0.5 };
+  });
+  expect(fit).toEqual({ inRow: true, onScreen: true });
 });
