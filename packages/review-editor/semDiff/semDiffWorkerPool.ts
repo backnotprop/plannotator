@@ -96,7 +96,8 @@ export function createSemDiffWorkerPool({ createWorker, size }: SemDiffWorkerPoo
     const empty = slots.find((slot) => slot.jobs.size === 0);
     if (empty) return empty;
     const stalled = slots.every((slot) => slot.downloads.size > 0);
-    if (slots.length === 0 || (warm && slots.length < size && (stalled || waiting.length >= SPAWN_BACKLOG))) return spawn();
+    const backlog = slots.reduce((sum, slot) => sum + slot.jobs.size - 1, waiting.length);
+    if (slots.length === 0 || (warm && slots.length < size && (stalled || backlog >= SPAWN_BACKLOG))) return spawn();
     const least = slots.reduce((a, b) => (b.jobs.size < a.jobs.size ? b : a));
     return stalled || least.jobs.size < JOBS_PER_WORKER ? least : null;
   };
