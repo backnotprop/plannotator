@@ -3,6 +3,8 @@ import { reloadSkillCatalog } from '@plannotator/ui/utils/skillCatalog';
 import { inboxApi, post, type AgentToolHost, type InboxStorageModel, type SettingsModel } from '../../api';
 import { inboxUrl } from '../../inboxUrl';
 import { scheduledApi } from '../../scheduled/client';
+import { saveFullInbox } from './fullInbox';
+import { onInboxReconnected } from '../../sessionAdopt';
 import { noteDeletedHere } from '../deletedHere';
 
 export interface SettingsHost {
@@ -31,6 +33,10 @@ export function useSettingsSaves(
 ) {
   const saveSetting = settingsSaver(app);
   const { setSettings, setError: setSettingsError, refresh: refreshSettings, adoptStore, readStore, refreshList } = app;
+  // Every (re)connect of the page's stream, the first one too: a switch turned while this page was not listening (it
+  // reads its settings at load, before its stream opens; or the stream was away) is told only to the streams open then
+  // (`event: capabilities`), and no frame replays it, so the settings are read again.
+  useEffect(() => onInboxReconnected(() => void refreshSettings()), [refreshSettings]);
   adoptSplitView = (on) => setSettings((s) => (s ? ({ ...s, split_view: { on } } as SettingsModel) : s));
   const toggleTool = (host: AgentToolHost, next: boolean) =>
     saveSetting(
@@ -60,6 +66,15 @@ export function useSettingsSaves(
 
   const toggleCodeReview = (next: boolean) =>
     saveSetting((s) => ({ ...s, code_review: { on: next } }), () => inboxApi.saveCodeReview(next), (s, saved) => ({ ...s, code_review: saved.code_review }), reloadSkillCatalog);
+
+  /** Full Inbox (reviewOnly.ts): off is the Inbox for code review only; the answer carries Code review, which stays on. */
+  const toggleFullInbox = (next: boolean) =>
+    saveSetting(
+      (s) => ({ ...s, full_inbox: { on: next } }),
+      () => saveFullInbox(next),
+      (s, saved) => ({ ...s, ...(saved.full_inbox ? { full_inbox: saved.full_inbox } : {}), ...(saved.code_review ? { code_review: saved.code_review } : {}) }),
+      reloadSkillCatalog,
+    );
 
   const toggleSystem = (next: boolean) => saveSetting((s) => ({ ...s, system: { on: next } }), () => inboxApi.saveSystem(next), (s, saved) => ({ ...s, system: saved.system ?? { on: next } }));
 
@@ -120,7 +135,7 @@ export function useSettingsSaves(
     }
     await refreshList(true);
   };
-  return { toggleTool, toggleCookieHost, toggleBoard, toggleBro, toggleFloatDrafts, toggleMarkReadWarning, toggleSteps, toggleCodeReview, toggleSystem, toggleChapterDiagrams, toggleScheduled, toggleDecisionMode, toggleExperimental, tailscaleBusy, toggleTailscale, deleteThread, deleteProject };
+  return { toggleTool, toggleCookieHost, toggleBoard, toggleBro, toggleFloatDrafts, toggleMarkReadWarning, toggleSteps, toggleCodeReview, toggleFullInbox, toggleSystem, toggleChapterDiagrams, toggleScheduled, toggleDecisionMode, toggleExperimental, tailscaleBusy, toggleTailscale, deleteThread, deleteProject };
 }
 
 /** App's settings take a saved thread panes switch through this (set where App runs `useSettingsSaves`). */

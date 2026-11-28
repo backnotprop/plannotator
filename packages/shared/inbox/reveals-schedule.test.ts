@@ -84,7 +84,7 @@ test("the grill-me tip is registered beside the line, waiting for every other ca
 });
 
 test("the same-day group, in the owner's order (2026-11-10): the tab icon, themes, the view choice, Rows, the sound, voice, none with a tenure; then the later group, each with one", () => {
-  const ids = INBOX_REVEALS.filter((entry) => !entry.aside && entry.id !== "code_review").map((entry) => entry.id);
+  const ids = INBOX_REVEALS.filter((entry) => !entry.aside && entry.id !== "code_review" && entry.id !== "review_welcome").map((entry) => entry.id);
   expect(ids).toEqual(["tab_icon", "theme_chooser", VIEW_CHOICE, "list_intro", "sound", "voice", "snooze", "personal_agents", "priority", "board", "routines", "steps", BRO, AGENT_RULES]);
   const tenure = (id: RevealId) => INBOX_REVEALS.find((entry) => entry.id === id)!.tenureMs;
   expect(ids.slice(0, 6).map(tenure)).toEqual([0, 0, 0, 0, 0, 0]);
@@ -163,7 +163,8 @@ function simulate(user: User, days = 30, table: readonly RevealEntry[] = TABLE):
         open: Object.fromEntries(
           table.map((entry) => [
             entry.id,
-            !done.has(entry.id) && (entry.id === "theme_chooser" ? user.defaultTheme === true : entry.id === CODE_REVIEW_OFFER.id ? user.codeReviewOff === true && user.update : entry.id === GRILL_ME ? user.grillMeGap !== undefined && day >= user.grillMeGap : entry.id === AGENT_RULES ? user.noRules === true : entry.id === "personal_agents" ? user.noPersonalAgent === true : entry.id === "priority" ? user.neverPriority === true : entry.id === "routines" ? user.goodDays !== undefined && day >= user.goodDays : entry.kind === "offer" || user.update),
+            // The code-review-only welcome: open only in that mode (docs/agent-guides/inbox-review-only.md), which no one here is in.
+            !done.has(entry.id) && entry.id !== "review_welcome" && (entry.id === "theme_chooser" ? user.defaultTheme === true : entry.id === CODE_REVIEW_OFFER.id ? user.codeReviewOff === true && user.update : entry.id === GRILL_ME ? user.grillMeGap !== undefined && day >= user.grillMeGap : entry.id === AGENT_RULES ? user.noRules === true : entry.id === "personal_agents" ? user.noPersonalAgent === true : entry.id === "priority" ? user.neverPriority === true : entry.id === "routines" ? user.goodDays !== undefined && day >= user.goodDays : entry.kind === "offer" || user.update),
           ]),
         ),
         waitingSince: saved.waitingSince,

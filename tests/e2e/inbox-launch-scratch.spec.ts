@@ -44,6 +44,7 @@ import { NO_BROWSER } from '../helpers/no-browser';
 import { markTourDecided } from '../helpers/tour-decided';
 import { installFakeClaude, type FakeClaude } from '../helpers/fake-claude';
 import { E2E_GROUP_TIP_SEEN, inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
+import { nextPostAnswer } from './page-answer';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -128,9 +129,9 @@ async function sendToScratch(page: Page): Promise<{ thread_id: string; launch: {
   const d = dialog(page);
   await d.locator('[data-compose-folder-option="scratch"]').click();
   await expect(d.locator('[data-compose-folder]')).toHaveText('New scratch folder');
-  const answer = page.waitForResponse((r) => r.url().endsWith('/api/inbox/messages') && r.request().method() === 'POST');
+  const answer = await nextPostAnswer<{ thread_id: string; launch: { id: string }; project: { name: string; root: string } }>(page, '/api/inbox/messages');
   await d.locator('[data-compose-send]').click();
-  const body = (await (await answer).json()) as { thread_id: string; launch: { id: string }; project: { name: string; root: string } };
+  const body = await answer();
   expect(body.launch?.id).toMatch(/^lch_/);
   await expect(d).toHaveCount(0);
   return body;

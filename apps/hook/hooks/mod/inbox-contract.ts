@@ -344,6 +344,96 @@ export const INBOX_TOOL_LEAD =
   `The Plannotator Inbox on this machine: message the person, get their answer later; nothing blocks. ${INBOX_AGENT_RULES} Set \`action\` to a tool below, with its fields.`
 
 /**
+ * For a person who uses the Inbox for code review only (config.json `inboxReviewOnly`): this one sentence takes the
+ * place of INBOX_USE_RULE, INBOX_THREAD_RULE, INBOX_CHANNEL_RULE and INBOX_FOLLOW_THROUGH_RULE, the rules that ask
+ * for other traffic. NOT YET APPROVED BY THE OWNER: the one place to change it (the mod's copy is pasted from here).
+ */
+export const INBOX_REVIEW_ONLY_RULE =
+  "The person uses it for code review only: use it for a review they ask you for, and to answer them in a review's thread; anything else, ask in the chat."
+
+/** The rules a code-review-only person's agents get with the tool or the MCP server, in one string. */
+export const INBOX_REVIEW_ONLY_AGENT_RULES = `${INBOX_REVIEW_ONLY_RULE} ${INBOX_SUBAGENT_RULE}`
+
+/** What the agent tool says, before the per-action lines, for a code-review-only person. */
+export const INBOX_TOOL_LEAD_REVIEW_ONLY =
+  `The Plannotator Inbox on this machine: message the person, get their answer later; nothing blocks. ${INBOX_REVIEW_ONLY_AGENT_RULES} Set \`action\` to a tool below, with its fields.`
+
+/**
+ * `plannotator inbox --help`, directly under "## When to use it", while code review only (WORDS B3, review-only mocks
+ * rounds 1-2, 2026-11-23). Nothing else in the guide changes: the line says which part applies.
+ */
+export const INBOX_HELP_REVIEW_ONLY_LINE =
+  "On this computer the person uses the Inbox for code review only: use it for a review they ask you for, and to answer them in a review's thread; anything else, ask in the chat."
+
+/** The one-time dialogs that offer a full-Inbox feature: never offered while code review only. */
+export const INBOX_FULL_INBOX_REVEALS: readonly string[] = ['board', 'steps', 'routines', 'snooze', 'priority', 'personal_agents', 'bro']
+
+/** The agent actions a full-Inbox feature adds (the Board's `card`, the Checklist's `steps`): not listed while code review only, whatever the feature's own switch says. */
+export const INBOX_FULL_INBOX_ACTIONS: readonly string[] = ['card', 'steps']
+
+/**
+ * Everything this computer's agents are told about the Inbox that depends on how the person uses it, in one place
+ * (`inboxAgentWords`): the server, the `plannotator` CLI, the Claude Code mod (its copy, `inboxAgentWordsOf`) and every
+ * plugin host build their words from it, never from the setting itself.
+ */
+export interface InboxAgentWords {
+  /** The person uses the Inbox for code review only here (config.json `inboxReviewOnly: true`). */
+  reviewOnly: boolean
+  /** The agent tool's lead. */
+  lead: string
+  /** The rules in the MCP server's instructions. */
+  rules: string
+  /** A session-start reminder may go (each host's own switch still decides). */
+  reminder: boolean
+  /** The person's own reminder and rules (Settings → Prompts) may ride the MCP instructions. */
+  personText: boolean
+  /** The Inbox note may be in agents' instructions files (written by itself, or kept there). */
+  notes: boolean
+  /** The line `--help` adds under "When to use it", or null. */
+  helpLine: string | null
+  /** The tool's "The Board … is off" line, when no `card` action is listed. */
+  boardOffNote: boolean
+  /** Whether this one-time dialog may be offered. */
+  reveal: (id: string) => boolean
+  /** Whether this agent action (or its field) may be listed. */
+  action: (name: string) => boolean
+}
+
+const FULL_INBOX_WORDS: InboxAgentWords = {
+  reviewOnly: false,
+  lead: INBOX_TOOL_LEAD,
+  rules: INBOX_AGENT_RULES,
+  reminder: true,
+  personText: true,
+  notes: true,
+  helpLine: null,
+  boardOffNote: true,
+  reveal: () => true,
+  action: () => true,
+}
+
+const REVIEW_ONLY_WORDS: InboxAgentWords = {
+  reviewOnly: true,
+  lead: INBOX_TOOL_LEAD_REVIEW_ONLY,
+  rules: INBOX_REVIEW_ONLY_AGENT_RULES,
+  reminder: false,
+  personText: false,
+  notes: false,
+  helpLine: INBOX_HELP_REVIEW_ONLY_LINE,
+  boardOffNote: false,
+  reveal: (id) => !INBOX_FULL_INBOX_REVEALS.includes(id),
+  action: (name) => !INBOX_FULL_INBOX_ACTIONS.includes(name),
+}
+
+/**
+ * The agent words for this computer, from its config.json (docs/agent-guides/inbox-review-only.md). Code review only is
+ * `inboxReviewOnly: true` alone: it keeps Code review on by itself, so no second switch can end it.
+ */
+export function inboxAgentWords(config: { inboxReviewOnly?: unknown } | null | undefined): InboxAgentWords {
+  return config?.inboxReviewOnly === true ? REVIEW_ONLY_WORDS : FULL_INBOX_WORDS
+}
+
+/**
  * Fixed text: how a reply comes back. The connection delivers the person's
  * reply to a message this session sent as a new turn once the session is idle.
  * Host-neutral: Claude Code frames the turn as the plugin's message, Pi and
@@ -836,21 +926,27 @@ export function inboxReminderFor(custom: string | null | undefined, toolName: st
  * The agent tool: name, description and input schema, built from the Inbox's
  * own tools. Null when it offers none. `wakes: false` for a host that cannot
  * deliver a reply as a turn (OpenCode 1): the description then says nothing
- * about replies arriving by themselves.
+ * about replies arriving by themselves. `words`: this computer's agent words
+ * (`inboxAgentWords(config)`, read at session start; every host passes them):
+ * the lead, the actions listed and the Board line follow how the person uses
+ * the Inbox. Absent: the full Inbox's (tests).
  */
 export function inboxAgentTool(
-  tools: readonly InboxToolInfo[],
-  options: { wakes?: boolean } = {},
+  listed: readonly InboxToolInfo[],
+  options: { wakes?: boolean; words?: InboxAgentWords } = {},
 ): { name: string; description: string; inputSchema: Record<string, unknown> } | null {
+  const words = options.words ?? FULL_INBOX_WORDS
+  const tools = listed.filter((tool) => words.action(tool.name))
   if (tools.length === 0) return null
   const description = [
-    INBOX_TOOL_LEAD,
+    words.lead,
     '',
     ...tools.filter((tool) => !INBOX_AGENT_ACTIONS_NO_LINE.includes(tool.name)).map((tool) => `- ${tool.name}: ${INBOX_AGENT_ACTION_LEADS[tool.name] ?? leadOf(tool.description)}`),
     ...(options.wakes === false ? [] : ['', INBOX_TOOL_WAKE_NOTE]),
     '',
     // The Board off: no card action, one line that it exists (nothing changes while it is on).
-    ...(tools.some((tool) => tool.name === 'card') ? [] : [INBOX_TOOL_BOARD_OFF_NOTE]),
+    // Code review only: no Board line either (the Board has no place there).
+    ...(tools.some((tool) => tool.name === 'card') || !words.boardOffNote ? [] : [INBOX_TOOL_BOARD_OFF_NOTE]),
     INBOX_TOOL_HELP_NOTE,
   ].join('\n')
   const properties: Record<string, Record<string, unknown>> = {

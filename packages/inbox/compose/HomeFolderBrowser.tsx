@@ -20,6 +20,7 @@ import {
   type FolderRead,
   type FolderRow,
 } from './homeFolders';
+import { holdsImeEscape, isImeCompositionKey } from '@plannotator/ui/utils/commentSubmitKey';
 
 /**
  * "Another folder on <machine>…" (remote launch, approval addendum "existing folders"): a folder under one machine's
@@ -327,7 +328,7 @@ export function HomeFolderBrowser({
   };
 
   const onKey = (event: ReactKeyboardEvent) => {
-    if (event.nativeEvent.isComposing) return;
+    if (holdsImeEscape(event) || isImeCompositionKey(event)) return;
     if (event.key === 'Escape') {
       event.preventDefault();
       event.stopPropagation();

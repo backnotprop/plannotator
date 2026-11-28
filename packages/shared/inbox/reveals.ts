@@ -50,7 +50,7 @@
  */
 
 /** Every dialog the queue orders. A registered dialog adds its id here. */
-export type RevealId = "code_review" | "sound" | "list_intro" | "voice" | "tab_icon" | "theme_chooser" | "snooze" | "bro" | "grill_me_tip" | "board" | "steps" | "agent_rules" | "star" | "view_choice" | "personal_agents" | "priority" | "routines";
+export type RevealId = "review_welcome" | "code_review" |"sound" | "list_intro" | "voice" | "tab_icon" | "theme_chooser" | "snooze" | "bro" | "grill_me_tip" | "board" | "steps" | "agent_rules" | "star" | "view_choice" | "personal_agents" | "priority" | "routines";
 /** Every dialog that keeps the line's day: the queue's, and the agent note (setup). */
 export type LineDialogId = RevealId | "agent_note";
 
@@ -124,6 +124,10 @@ export const CODE_REVIEW_OFFER_SHOWN: boolean = CODE_REVIEW_OFFER.enabled;
 
 /** The queue, in order. */
 export const INBOX_REVEALS: readonly RevealEntry[] = [
+  // The welcome to the code review Inbox (docs/agent-guides/inbox-review-only.md; the owner's mocks, rounds 2-3,
+  // 2026-11-23): open only while code review only and `plannotator inbox --review` asked for it on a first run, so it
+  // is the person's first dialog; an update-day dialog (no tenure, never retires), claimed and spaced as every other.
+  { id: "review_welcome", kind: "update", tenureMs: 0, minThreads: 0, enabled: true },
   // Code review's offer (while `CODE_REVIEW_OFFER_SHOWN`; off since 0.29.6): first, ahead of the owner's order below.
   CODE_REVIEW_OFFER,
   // The order below is the owner's (2026-11-10, "Alright, let's ship it"). First the same-day group: no tenure, so each

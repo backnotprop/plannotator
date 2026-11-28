@@ -23,6 +23,7 @@ import { CommentPopover } from '../CommentPopover';
 import { Button } from '../core/button';
 import { Textarea } from '../core/textarea';
 import { copyTextToClipboard } from '../../utils/clipboard';
+import { isImeCompositionKey } from '../../utils/commentSubmitKey';
 
 interface GoalSetupSurfaceProps {
   bundle: GoalSetupBundle;
@@ -353,6 +354,7 @@ const InterviewSurface = React.forwardRef<GoalSetupSurfaceHandle, {
 
       // Escape — blur current input so shortcuts work again
       if (event.key === 'Escape') {
+        if (isImeCompositionKey(event)) return;
         const el = event.target;
         if (el instanceof HTMLElement && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {
           event.preventDefault();

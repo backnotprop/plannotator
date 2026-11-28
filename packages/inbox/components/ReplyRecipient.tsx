@@ -25,7 +25,8 @@ import { HostMark, Icon } from '../icons';
 import { canAddRecipient, type RecipientRow } from '../replyRecipients';
 import type { SessionLabels } from '../sessionLabels';
 import { namesList } from '../tags';
-import { skillMenuHost } from './ComposerField';
+import { skillMenuHost } from './ComposerFieldBase';
+import { isImeCompositionKey } from '@plannotator/ui/utils/commentSubmitKey';
 import { leadMaxWidth } from './FieldLead';
 import { skillListRoom } from '../caretMenu';
 import { recipientNames } from '../thread/recipientNames';
@@ -377,6 +378,7 @@ export function ReplyRecipient({
   folderOf = NO_FOLDER,
   noun = 'reply',
   chip = false,
+  max,
 }: {
   /** Every agent the list offers, live first, ended last. */
   rows: readonly RecipientRow[];
@@ -399,8 +401,10 @@ export function ReplyRecipient({
   noun?: 'reply' | 'message';
   /** The chip at the start of the words (a thread's reply box, drawn as the field's lead), not the pill in the row. */
   chip?: boolean;
+  /** The most the reply goes to (default: what a draft holds, `RECIPIENTS_MAX`). */
+  max?: number;
 }) {
-  const listId = useRef(`ib-rpick-${Math.random().toString(36).slice(2)}`).current;
+  const listId =useRef(`ib-rpick-${Math.random().toString(36).slice(2)}`).current;
   const pillRef = useRef<HTMLButtonElement | null>(null);
   const spot = useListSpot(pillRef, open, rows.some((row) => row.start), chip);
   const host = pillRef.current ? skillMenuHost(pillRef.current) : null;
@@ -415,7 +419,7 @@ export function ReplyRecipient({
       if (!target?.closest?.('[data-recipient-list], [data-recipient]')) onOpen(false);
     };
     const key = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
+      if (event.key !== 'Escape' || isImeCompositionKey(event)) return;
       event.preventDefault();
       event.stopPropagation();
       onOpen(false);
@@ -521,7 +525,7 @@ export function ReplyRecipient({
               aria-label={`Also send to ${nameOf(row)}`}
               className="ib-rpick-tick"
               data-recipient-tick={row.session}
-              disabled={!canAddRecipient(row, chosenIds, rows)}
+              disabled={!canAddRecipient(row, chosenIds, rows, max)}
               onClick={() => onToggle!(row)}
             >
               <span>

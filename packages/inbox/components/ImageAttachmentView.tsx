@@ -13,7 +13,7 @@ import { useClearRows } from '../imageClear';
 import { PHONE_QUERY, usePhone, useTouchPhone } from '../phone';
 import { Tip } from './Tip';
 import { useConfigValue } from '@plannotator/ui/config';
-import { isCommentSubmitKey } from '@plannotator/ui/utils/commentSubmitKey';
+import { isCommentSubmitKey, isImeCompositionKey } from '@plannotator/ui/utils/commentSubmitKey';
 import { addedToComment, markupOf, markupWords, noteOnto } from '../markup';
 import { DRAWING_SCREEN, KeptMarkup, markupAddedToast, OverWindow, type Notice } from './Markup';
 import { FullScreenCommentBin, FullScreenComposer, FullScreenComposerContext } from './FullScreenComposer';
@@ -410,7 +410,7 @@ export function ImageAttachmentView({
             // Escape leaves the field first (approval "inbox-keyboard-shortcuts": one layer per Escape): focus goes
             // to the file's pane, the words stay; the next Escape is the pane's. Full screen's Escape ladder has
             // this rung already (AttachmentPane, "Left the comment box."); beside the thread it is this one.
-            if (event.key === 'Escape' && !event.nativeEvent.isComposing && !event.defaultPrevented) {
+            if (event.key === 'Escape' && !isImeCompositionKey(event) && !event.defaultPrevented) {
               const paneEl = event.currentTarget.closest<HTMLElement>('[data-attachment-pane]');
               if (!paneEl || paneEl.closest('[data-full-view]')) return;
               event.preventDefault();

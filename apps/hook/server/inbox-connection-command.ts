@@ -4,7 +4,7 @@ import { INBOX_HOST_NAMES } from "@plannotator/core/inbox-types";
 import { INBOX_TOOL_HOSTS, loadConfig, resolveInboxTool, type InboxToolHost } from "@plannotator/shared/config";
 import { discoverInboxTools, InboxAgentConnection, inboxRegistryFileOf, InboxWake } from "@plannotator/shared/inbox/agent-link";
 import { isInboxTurnedOn } from "@plannotator/shared/inbox/turned-on";
-import { INBOX_OFF_LINE, inboxAgentTool, type InboxToolInfo } from "@plannotator/shared/inbox/connection";
+import { INBOX_OFF_LINE, inboxAgentTool, inboxAgentWords, type InboxToolInfo } from "@plannotator/shared/inbox/connection";
 
 export const INBOX_CONNECTION_HOSTS: readonly InboxToolHost[] = INBOX_TOOL_HOSTS.filter((host) => host !== "claude-code");
 
@@ -104,7 +104,7 @@ export async function runInboxConnectionCommand(argv: readonly string[], deps: I
   const switchOn = () => isInboxTurnedOn(deps.dataDir, deps.env) && resolveInboxTool(loadConfig({ quiet: true }), deps.env, options.host);
   const neverRan = !existsSync(inboxRegistryFileOf(deps.dataDir)) || !isInboxTurnedOn(deps.dataDir, deps.env);
   const tools = neverRan ? null : await (deps.discover ?? ((dir) => discoverInboxTools(dir, { timeoutMs: INBOX_CONNECTION_DISCOVER_TIMEOUT_MS })))(deps.dataDir).catch(() => null);
-  const spec = tools ? inboxAgentTool(tools, { wakes: options.wakes }) : null;
+  const spec = tools ? inboxAgentTool(tools, { wakes: options.wakes, words: inboxAgentWords(loadConfig({ quiet: true })) }) : null;
   if (!tools || !spec) {
     send({ type: "ready", tool: null, on: false, why: neverRan ? INBOX_OFF_LINE : "The Inbox's tools are not known yet: start it once with plannotator inbox." });
     for await (const _line of deps.lines) continue;

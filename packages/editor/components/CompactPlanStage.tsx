@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { isImeCompositionKey } from '@plannotator/ui/utils/commentSubmitKey';
 
 interface CompactPlanStageProps {
   id: string;
@@ -6,15 +7,15 @@ interface CompactPlanStageProps {
   subtitle?: string;
   count?: number;
   onClose: () => void;
+  closing?: boolean;
+  animated?: boolean;
   children: React.ReactNode;
 }
 
 /**
  * Full-visible-viewport shell for one transient compact Plan task.
  *
- * The shell intentionally has no entrance animation: these are frequent
- * review surfaces, and immediate replacement makes the foreground-state
- * change easier to understand on a small screen.
+ * Side panels slide from the right; their parent retains them through exit.
  */
 export const CompactPlanStage: React.FC<CompactPlanStageProps> = ({
   id,
@@ -22,6 +23,8 @@ export const CompactPlanStage: React.FC<CompactPlanStageProps> = ({
   subtitle,
   count,
   onClose,
+  closing = false,
+  animated = true,
   children,
 }) => {
   const closeButtonRef = useRef<HTMLButtonElement>(null);
@@ -32,7 +35,7 @@ export const CompactPlanStage: React.FC<CompactPlanStageProps> = ({
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
     if (event.defaultPrevented) return;
-    if (event.key === 'Escape') {
+    if (event.key === 'Escape' && !isImeCompositionKey(event)) {
       event.preventDefault();
       event.stopPropagation();
       onClose();
@@ -62,6 +65,10 @@ export const CompactPlanStage: React.FC<CompactPlanStageProps> = ({
     <section
       id={id}
       data-pn-compact-plan-stage="true"
+      data-pn-panel-side={animated ? 'right' : undefined}
+      data-pn-panel-state={animated ? closing ? 'closed' : 'open' : undefined}
+      aria-hidden={closing || undefined}
+      inert={closing || undefined}
       // A transient task surface is never part of the printed document. Without
       // this, printing with Settings / Versions / Archive open on a touch device
       // puts the full-viewport overlay over the plan (print.css hides

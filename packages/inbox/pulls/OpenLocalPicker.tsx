@@ -19,6 +19,7 @@ import { relativeWords } from '../relativeTime';
 import { reviewAge } from './reviewRowParts';
 import { readLocalRefProjects, readLocalRefs } from './localWork';
 import type { LocalOpen } from './localRoute';
+import { holdsImeEscape, isImeCompositionKey } from '@plannotator/ui/utils/commentSubmitKey';
 
 export interface OpenLocalProps {
   phone: boolean;
@@ -209,7 +210,7 @@ function OpenLocalPicker({ anchor, phone, projectNames, onClose, onOpen }: { anc
     else onOpen({ project: row.work.project_id, branch: row.work.branch });
   };
   const onKey = (event: ReactKeyboardEvent) => {
-    if (event.nativeEvent.isComposing || step?.kind === 'folder') return;
+    if (holdsImeEscape(event) || isImeCompositionKey(event) || step?.kind === 'folder') return;
     if (event.key === 'Escape') {
       event.preventDefault();
       event.stopPropagation();

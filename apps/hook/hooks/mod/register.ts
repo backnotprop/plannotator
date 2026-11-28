@@ -107,6 +107,7 @@ import {
   resolveInboxReminderCustom,
   resolveInboxReminderEnabled,
   resolveInboxReminderRules,
+  inboxAgentWordsOf,
   resolveInboxToolEnabled,
   resolvePlanReviewEnabled,
   isPanelEntrypoint,
@@ -152,7 +153,7 @@ import {
   withSessionStart,
   withSessionTitles,
 } from './inbox'
-import { inboxAgentTool, inboxPlaceFromEnv, inboxReminderFor, type InboxPlace, type InboxToolInfo } from './inbox-contract'
+import { inboxAgentTool, inboxPlaceFromEnv, inboxReminderFor, type InboxAgentWords, type InboxPlace, type InboxToolInfo } from './inbox-contract'
 import { inboxTurnedOnHere } from './inbox-turned-on'
 import { INBOX_DEFAULT_TOOLS } from './inbox-default-tools'
 import { COMMANDS, debugAppendArgv, INBOX_COMMAND, isModCommand, privateDirArgv, resolveDataDir, waitArgv } from './launch'
@@ -355,6 +356,8 @@ interface Allowed {
   /** The person's own reminder text (config.json `prompts.inbox`), or null: the built-in line. */
   inboxReminderCustom: string | null
   inboxReminderRules: string | null
+  /** This computer's agent words (`inboxAgentWordsOf`, the contract's one resolver): the agent tool's lead and actions. */
+  inboxWords: InboxAgentWords
   /** A panel host's chat (`isPanelSession`: VS Code, Orca): not interactive, a person reading it. */
   panel: boolean
   /**
@@ -1002,6 +1005,7 @@ async function resolveAllowed($: Engine, e: { isInteractive?: unknown }): Promis
     inboxReminder: features.reminder && inboxOn && resolveInboxReminderEnabled(await $.env.get('PLANNOTATOR_INBOX_TOOL'), configText),
     inboxReminderCustom: resolveInboxReminderCustom(configText),
     inboxReminderRules: resolveInboxReminderRules(configText),
+    inboxWords: inboxAgentWordsOf(configText),
     panel: host.panel,
     hostPlanMode: host.hostPlanMode,
     planSwitch,
@@ -1063,7 +1067,7 @@ async function registerInboxTool($: Engine, settings: Allowed): Promise<void> {
   // The reminder speaks only for an Inbox that has run here; the tool is there either way.
   inboxRanHere = await host.exists(inboxRegistryPathOf(settings.dataDir)).catch(() => false)
   const tools = await discoverInboxTools(host, settings.dataDir).catch(() => INBOX_DEFAULT_TOOLS.map((tool) => ({ ...tool })))
-  const spec = tools.length > 0 ? inboxAgentTool(tools) : null
+  const spec = tools.length > 0 ? inboxAgentTool(tools, { words: settings.inboxWords }) : null
   if (!spec) return
   try {
     const registered = await $.tool.register(spec)

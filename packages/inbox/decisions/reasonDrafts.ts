@@ -6,12 +6,13 @@
  * only as the mark's note, once Save stages the mark.
  *
  * One reason's writes go one after another, each with the words as they are when it starts, so the last words always
- * land last. A thread on a linked computer keeps its reason on the card only: comment drafts are not forwarded there,
- * as the thread's own comment box keeps none for it (commentPictures.tsx).
+ * land last. A thread on a linked computer (mark `decisions`) keeps its reasons on this Inbox, in one draft per
+ * computer, thread and key that each save overwrites (inbox-comment-drafts.ts): nothing goes through the outbox, so
+ * they save the same while that computer is away and read back after a reload. Only the mark carries the reason there.
  */
 import { useState } from 'react';
-import { inboxApi, InboxApiError } from '../api';
-import { machineOf } from '../inboxUrl';
+import { get, inboxApi, InboxApiError, post, type InboxCommentDraftView } from '../api';
+import { inboxUrl, machineOf } from '../inboxUrl';
 import { createTypedSaves, type TypedSavesTimers } from '../typedAnswers';
 
 /** The comment-draft key of an action item's reason (`<message id>/<key>`). */
@@ -22,10 +23,21 @@ export interface ReasonStore {
   write: (threadId: string, key: string, text: string, keepalive: boolean) => Promise<void>;
 }
 
-const commentDrafts: ReasonStore = {
-  read: (threadId, key) => inboxApi.commentDraft(threadId, key).then(({ draft }) => draft?.text ?? null),
+/** A linked computer's thread: its reasons are this Inbox's drafts, named by that computer (never sent there). */
+const farDraftUrl = (threadId: string) => inboxUrl(`/threads/${encodeURIComponent(threadId)}/comment-draft`);
+
+export const commentDrafts: ReasonStore = {
+  read: (threadId, key) => {
+    const machine = machineOf(threadId);
+    const read = machine ? get<{ draft: InboxCommentDraftView | null }>(`${farDraftUrl(threadId)}?key=${encodeURIComponent(key)}&machine=${machine}`) : inboxApi.commentDraft(threadId, key);
+    return read.then(({ draft }) => draft?.text ?? null);
+  },
   // The last words typed stand (any window's): `force`, as a later click wins for picks.
-  write: (threadId, key, text, keepalive) => inboxApi.saveCommentDraft(threadId, { key, text, images: [], base: null, force: true }, { keepalive }).then(() => undefined),
+  write: (threadId, key, text, keepalive) => {
+    const machine = machineOf(threadId);
+    const body = { key, text, images: [], base: null, force: true };
+    return (machine ? post(farDraftUrl(threadId), { ...body, machine }, { keepalive }) : inboxApi.saveCommentDraft(threadId, body, { keepalive })).then(() => undefined);
+  },
 };
 
 export interface ReasonDrafts {
@@ -52,13 +64,10 @@ export function createReasonDrafts(options: {
   onChange: (texts: ReadonlyMap<string, string>) => void;
   onFailed: (message: string) => void;
   store?: ReasonStore;
-  /** The thread lives on a linked computer (its reason is never read or written). */
-  far?: (threadId: string) => boolean;
   delayMs?: number;
   timers?: TypedSavesTimers;
 }): ReasonDrafts {
   const store = options.store ?? commentDrafts;
-  const far = options.far ?? ((threadId: string) => machineOf(threadId) !== null);
   const typed = createTypedSaves(options.delayMs, options.timers);
   let texts: ReadonlyMap<string, string> = new Map();
   const threads = new Map<string, string>();
@@ -109,7 +118,7 @@ export function createReasonDrafts(options: {
   };
   const save = (id: string, keepalive = false): Promise<boolean> => {
     const threadId = threads.get(id);
-    if (!threadId || far(threadId)) return Promise.resolve(true);
+    if (!threadId) return Promise.resolve(true);
     owed.delete(id);
     quietOwed.delete(id);
     const before = running.get(id);
@@ -133,7 +142,7 @@ export function createReasonDrafts(options: {
     text: (id) => texts.get(id) ?? '',
     load(threadId, id) {
       threads.set(id, threadId);
-      if (known.has(id) || far(threadId)) return;
+      if (known.has(id)) return;
       known.add(id);
       void store.read(threadId, reasonDraftKey(id)).then(
         (text) => {

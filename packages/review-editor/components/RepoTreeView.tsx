@@ -9,6 +9,7 @@ import { prefetchRepoFile } from '../hooks/useRepoFileText';
 import { TreeRowMenu, ancestorsOf, countParts, fileRowParts, folderLineCounts, gitStatusFor, leadAtRoot, notePart, type FileRowState } from './treeRows';
 import { treeLook } from './treeLook';
 import { useTreeSearchKeys } from './treeSearchKeys';
+import { useTreeMemory, type TreeMemory } from './treeMemory';
 
 type ReadyRepoFiles = Extract<RepoFilesState, { status: 'ready' }>;
 
@@ -31,6 +32,7 @@ interface RepoTreeViewProps extends FileRowState {
   repoRoot?: string | null;
   handleRef?: React.Ref<RepoTreeHandle>;
   snapshotId?: string;
+  memory?: TreeMemory;
 }
 
 const ON_DISK_TITLES: Record<RepoOnDiskChange, string> = {
@@ -116,7 +118,7 @@ export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
   }, [files, repo.onDisk, changedIndex, props.getSectionEntry]);
 
   const initialExpanded = useMemo(
-    () => [...initialRepoExpansion(changedPaths, activePath)].map(dirPath),
+    () => (props.memory?.expanded ?? [...initialRepoExpansion(changedPaths, activePath)]).map(dirPath),
     [],
   );
 
@@ -161,6 +163,8 @@ export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
   useEffect(() => {
     for (const dir of initialExpanded) ensureLoaded(dir);
   }, [initialExpanded, ensureLoaded]);
+  const [resumes] = useState(() => !!props.memory?.expanded && props.memory.activePath === activePath);
+  useTreeMemory(model, props.memory, true, resumes);
 
   const known = useRef(new Set(paths));
   useEffect(() => {
@@ -214,19 +218,27 @@ export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
   }, [activePath]);
 
   const revealed = useRef<string | null>(null);
+  const restored = useRef(resumes);
+  useEffect(() => {
+    if (props.memory) props.memory.activePath = activePath;
+  }, [activePath, props.memory]);
   useEffect(() => {
     if (!activePath || !known.current.has(activePath) || revealed.current === activePath) return;
     revealed.current = activePath;
+    const keepFolders = restored.current;
+    restored.current = false;
     const selected = model.getSelectedPaths();
     if (!(selected.length === 1 && selected[0] === activePath)) {
       for (const path of selected) model.getItem(path)?.deselect();
-      for (const dir of ancestorsOf(activePath)) {
-        const item = model.getItem(dir);
-        if (item && 'expand' in item && !item.isExpanded()) item.expand();
+      if (!keepFolders) {
+        for (const dir of ancestorsOf(activePath)) {
+          const item = model.getItem(dir);
+          if (item && 'expand' in item && !item.isExpanded()) item.expand();
+        }
       }
       model.getItem(activePath)?.select();
     }
-    model.scrollToPath(activePath, { focus: false, offset: 'nearest' });
+    if (!keepFolders) model.scrollToPath(activePath, { focus: false, offset: 'nearest' });
   }, [activePath, paths, model]);
 
   useEffect(() => {

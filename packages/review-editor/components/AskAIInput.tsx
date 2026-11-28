@@ -3,6 +3,7 @@ import { formatLineRange } from '../utils/formatLineRange';
 import { SparklesIcon } from '@plannotator/ui/components/SparklesIcon';
 import type { AIChatEntry } from '../hooks/useAIChat';
 import { submitHint } from '@plannotator/ui/utils/platform';
+import { holdsImeEscape } from '@plannotator/ui/utils/commentSubmitKey';
 
 interface AskAIInputProps {
   lineStart: number;
@@ -68,6 +69,7 @@ export const AskAIInput: React.FC<AskAIInputProps> = ({
         autoFocus
         disabled={isLoading}
         onKeyDown={(e) => {
+          if (holdsImeEscape(e)) return;
           if (e.key === 'Escape') {
             onCancel();
           } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) {

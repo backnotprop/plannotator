@@ -14,6 +14,9 @@
  *                                   show that thread in the Inbox window open
  *                                   on this computer (the one used last), or
  *                                   open one at it; print its URL, exit 0
+ *   plannotator inbox --review      open it on Reviews, Code review on; where the Inbox
+ *                                   was never on, the Inbox for code review only
+ *                                   (inbox-review-command.ts)
  *   plannotator inbox --tailscale   also publish it over the tailnet for this
  *                                   run (with any of the above; a running
  *                                   Inbox is asked to publish), for the
@@ -95,6 +98,8 @@ import { writeWholeToStdout } from "./write-whole-stdout";
 import { inboxStartTrace } from "./inbox-start-trace";
 import { inboxPairedRouteFetch } from "./inbox-call-command";
 import { loadEmbeddedSemDiff } from "./sem-diff";
+import { runInboxReviewCommand } from "./inbox-review-command";
+import { loadConfig, saveConfig } from "@plannotator/shared/config";
 
 export const INBOX_LOG_FILE = "inbox.log";
 /** Set by a starter that holds the start lock for the detached Inbox it spawns. */
@@ -914,6 +919,27 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
   if (args[0] === "--notes") {
     if (args.length !== 2) usageError("--notes takes one list of agents, e.g. --notes codex,gemini, and no other option.");
     process.exit(await writeNotes(dataDir, args[1]!));
+  }
+
+  // `--review`: the Inbox for code review (inbox-review-command.ts). Alone: it starts detached and opens Reviews itself.
+  if (args[0] === "--review") {
+    if (args.length > 1) usageError("--review takes no other option: plannotator inbox --review");
+    process.exit(
+      await runInboxReviewCommand({
+        firstRun: !isInboxTurnedOn(dataDir),
+        markOn: () => markInboxTurnedOn(dataDir),
+        load: () => loadConfig({ quiet: true }),
+        save: (patch) => saveConfig(patch),
+        runningInbox: async () => {
+          const status = await inboxStatus(dataDir);
+          return status.state === "running" ? status.entry : null;
+        },
+        ensureInbox: () => ensureInboxRunning(dataDir),
+        openUrl: (url) => openBrowserDetached(url, { isRemote: isRemoteSession() }),
+        remoteHint: inboxRemoteOpenHint,
+        ...(connect ? { connect: (entry: InboxRegistryEntry) => connectRunningInbox(entry, OPEN_DONE_WITHIN_MS) } : {}),
+      }),
+    );
   }
 
   let background = false;

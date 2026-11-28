@@ -25,7 +25,7 @@ import type { DiffFile } from '../types';
 import type { AIProviderOption } from '@plannotator/ui/utils/aiProvider';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { useConfigValue } from '@plannotator/ui/config';
-import { isCommentSubmitKey } from '@plannotator/ui/utils/commentSubmitKey';
+import { holdsImeEscape, isCommentSubmitKey } from '@plannotator/ui/utils/commentSubmitKey';
 import { artifactAnchorLabel, artifactAnnotationQuote } from '../utils/artifactAnnotations';
 import { isAgentGeneratedFinding } from '../utils/explainFinding';
 
@@ -45,6 +45,7 @@ interface ReviewSidebarProps {
   isOpen: boolean;
   onClose: () => void;
   presentation?: 'panel' | 'overlay';
+  closing?: boolean;
   activeTab: ReviewSidebarTab;
   onSelectTab?: (tab: ReviewSidebarTab) => void;
   extraTabs?: readonly ReviewSidebarExtraTab[];
@@ -275,6 +276,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
   onSelectTab,
   extraTabs = NO_EXTRA_TABS,
   presentation = 'panel',
+  closing = false,
   activeTab,
   annotations,
   files,
@@ -510,6 +512,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
               value={editingOutdated.draft}
               onChange={(e) => setEditingOutdated({ id: annotation.id, draft: e.target.value })}
               onKeyDown={(e) => {
+                if (holdsImeEscape(e)) return;
                 if (e.key === 'Escape') { e.preventDefault(); setEditingOutdated(null); }
                 else if (isCommentSubmitKey(e, enterSavesComment)) { e.preventDefault(); saveOutdatedEdit(); }
               }}
@@ -637,6 +640,10 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
   return (
     <aside
       data-pn-review-transient-overlay={presentation === 'overlay' || undefined}
+      data-pn-panel-side={presentation === 'overlay' ? 'right' : undefined}
+      data-pn-panel-state={presentation === 'overlay' ? closing ? 'closed' : 'open' : undefined}
+      aria-hidden={presentation === 'overlay' && closing || undefined}
+      inert={presentation === 'overlay' && closing || undefined}
       role={presentation === 'overlay' ? 'dialog' : undefined}
       aria-label={presentation === 'overlay' ? 'Review sidebar' : undefined}
       className={presentation === 'overlay'

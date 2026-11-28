@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { inboxApi } from '../api';
 import { playCodeReviewArt } from '../codeReviewOfferArt';
 import { useReducedMotion } from '../tour/Tour';
 import { Modal } from './Updates';
@@ -20,24 +21,7 @@ export function CodeReviewOffer({ phone, onClose, onTurnOn }: { phone: boolean; 
       <CodeReviewOfferArt phone={phone} />
       <div className="ib-cro-body">
         <h2 id="ib-cro-title">A new way to review</h2>
-        <ul className="ib-cro-feats" id="ib-cro-feats">
-          <li>
-            <RiskIcon />
-            <span>Filter PRs by your own risk rules</span>
-          </li>
-          <li>
-            <CuratorIcon />
-            <span>A review curator works with you on everything you ship</span>
-          </li>
-          <li>
-            <MapIcon />
-            <span>A guided review walks you through each change</span>
-          </li>
-          <li>
-            <PicturesIcon />
-            <span>Big pictures of what changed and why</span>
-          </li>
-        </ul>
+        <CodeReviewFeatures id="ib-cro-feats" />
         <div className="ib-cro-acts">
           <button type="button" className="ib-btn ib-ghost" onClick={onClose} data-code-review-offer-close="">
             Not now
@@ -53,8 +37,49 @@ export function CodeReviewOffer({ phone, onClose, onTurnOn }: { phone: boolean; 
   );
 }
 
+/** App's offer, open: Not now (Escape, a click outside) is final, and the line's next offer waits three days. */
+export function CodeReviewOfferOpen({ phone, close, onTurnOn }: { phone: boolean; close: () => void; onTurnOn: () => void }) {
+  return (
+    <CodeReviewOffer
+      phone={phone}
+      onClose={() => {
+        void inboxApi.revealNotNow('code_review');
+        close();
+      }}
+      onTurnOn={onTurnOn}
+    />
+  );
+}
+
+/**
+ * What code review brings, the four lines in the owner's order with their icons (row "D · Mix"): the offer's and the
+ * welcome dialog's (ReviewWelcome.tsx, approval round 3 of the review-only Inbox), one list.
+ */
+export function CodeReviewFeatures({ id }: { id: string }) {
+  return (
+    <ul className="ib-cro-feats" id={id}>
+      <li>
+        <RiskIcon />
+        <span>Filter PRs by your own risk rules</span>
+      </li>
+      <li>
+        <CuratorIcon />
+        <span>A review curator works with you on everything you ship</span>
+      </li>
+      <li>
+        <MapIcon />
+        <span>A guided review walks you through each change</span>
+      </li>
+      <li>
+        <PicturesIcon />
+        <span>Big pictures of what changed and why</span>
+      </li>
+    </ul>
+  );
+}
+
 /** Focus after the dialog when nothing focusable opened it (it opens at once on a fresh load): the page's heading. */
-function pageHeading(): HTMLElement | null {
+export function pageHeading(): HTMLElement | null {
   const heading = document.querySelector<HTMLElement>('.ib-main h1');
   if (heading && !heading.hasAttribute('tabindex')) heading.setAttribute('tabindex', '-1');
   return heading;
@@ -66,9 +91,9 @@ function pageHeading(): HTMLElement | null {
  * before this one) and keeps the opener to give focus back. Tab from the dialog goes to its first button, Shift+Tab to
  * its last, so focus never leaves it.
  */
-function useFirstFocusOnDialog() {
+export function useFirstFocusOnDialog(testId = 'code-review-offer') {
   useEffect(() => {
-    const dialog = document.querySelector<HTMLDialogElement>('dialog[data-dialog="code-review-offer"]');
+    const dialog = document.querySelector<HTMLDialogElement>(`dialog[data-dialog="${testId}"]`);
     if (!dialog) return;
     dialog.tabIndex = -1;
     dialog.focus({ preventScroll: true });
@@ -82,11 +107,11 @@ function useFirstFocusOnDialog() {
     };
     dialog.addEventListener('keydown', onKey);
     return () => dialog.removeEventListener('keydown', onKey);
-  }, []);
+  }, [testId]);
 }
 
 /** The static storm, cracked open around one sorted column. Decoration only. */
-function CodeReviewOfferArt({ phone }: { phone: boolean }) {
+export function CodeReviewOfferArt({ phone }: { phone: boolean }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const still = useReducedMotion();
   useEffect(() => {

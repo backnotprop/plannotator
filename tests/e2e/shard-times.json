@@ -71,6 +71,7 @@
   "inbox-copy-highlight.spec.ts": 4,
   "inbox-copy-message.spec.ts": 11,
   "inbox-debug-log.spec.ts": 64,
+  "inbox-decision-mode-linked.spec.ts": 60,
   "inbox-decision-mode.spec.ts": 75,
   "inbox-dictation-paste.spec.ts": 26,
   "inbox-draft-after-send-webkit.spec.ts": 24,
@@ -210,6 +211,7 @@
   "inbox-review-jumps.spec.ts": 18,
   "inbox-review-keys.spec.ts": 30,
   "inbox-review-markdown.spec.ts": 35,
+  "inbox-review-only.spec.ts": 90,
   "inbox-review-plus-button-firefox.spec.ts": 60,
   "inbox-review-plus-button.spec.ts": 14,
   "inbox-review-risk-bars.spec.ts": 30,
@@ -236,6 +238,7 @@
   "inbox-search-type-filter.spec.ts": 13,
   "inbox-search.spec.ts": 26,
   "inbox-seen-on-sight.spec.ts": 33,
+  "inbox-send-always-ends-webkit.spec.ts": 44,
   "inbox-send-now.spec.ts": 19,
   "inbox-sent-row-lit.spec.ts": 6,
   "inbox-session-label-surfaces.spec.ts": 62,
@@ -337,5 +340,7 @@
   "toolstrip-rtl.spec.ts": 9,
   "toolstrip-stacking.spec.ts": 31,
   "vscode-guides-answer.spec.ts": 3,
-  "vscode-guides-sanitize.spec.ts": 9
+  "vscode-guides-sanitize.spec.ts": 9,
+  "compact-navigation-scroll.spec.ts": 20,
+  "compact-panel-swipe.spec.ts": 60
 }

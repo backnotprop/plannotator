@@ -6290,7 +6290,9 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 .ib-draft-saved { color: var(--muted-foreground); }
 .ib-draft-discard { position: relative; border: 0; background: transparent; padding: 0 2px; color: var(--muted-foreground); font: inherit; cursor: pointer; border-radius: 4px; }
 .ib-draft-discard::after { content: ''; position: absolute; inset: -8px -6px; }
-.ib-draft-discard:hover { color: var(--foreground); text-decoration: underline; }
+.ib-draft-discard:hover:not(:disabled) { color: var(--foreground); text-decoration: underline; }
+/* Held while a Send is out: it looks held, as the thread card's Ask does (.ib-crdp-ask:disabled). */
+.ib-draft-discard:disabled { opacity: 0.55; cursor: default; }
 .ib-draft-discard:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .ib-draft-foot { display: inline-flex; align-items: center; gap: 6px; margin-right: 4px; min-width: 0; white-space: nowrap; }
 .ib-draft-foot .ib-st { margin-right: 0; }
@@ -6883,6 +6885,9 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-dm-hold-l .ib-dm-lnk { min-height: 24px; padding: 0 6px; font-weight: 600; color: var(--primary); }
 .ib-dm-bad { color: var(--destructive); }
 .ib-dm-error { margin: 0 22px 8px; }
+/* What waits for a linked computer: the thread's held-write line, as a status. */
+.ib-dm-held:empty { display: none; }
+.ib-dm-held { margin: 0 22px 8px; }
 /* The stage: the deck (the card, the peek behind it), the overview, or the end screen. */
 .ib-dm-stage { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; padding: 4px 22px 22px; }
 .ib-dm-deck { position: relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
@@ -7966,6 +7971,24 @@ dialog.ib-lvc .ib-lvc-frame .ib-listcol.ib-lo-list { position: relative; inset: 
 .ib-cro-phone .ib-cro-acts { flex-direction: column-reverse; align-items: stretch; }
 .ib-cro-phone .ib-cro-acts .ib-bsp { display: none; }
 .pn-inbox .ib-cro-phone .ib-cro-acts .ib-btn, dialog.ib-cro-phone .ib-cro-acts .ib-btn { height: 44px; }
+/* The welcome to the code review Inbox (ReviewWelcome.tsx): the offer's shell, then the full Inbox as a switch row under a hairline, and one button on the right. */
+.ib-rwel-full { display: flex; align-items: center; gap: 16px; padding-top: 18px; border-top: 1px solid var(--ib-hair, var(--border)); }
+.ib-rwel-full .ib-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.ib-rwel-full .ib-l { font-size: var(--ib-fs-14, 14px); font-weight: 600; color: var(--foreground); }
+.ib-rwel-full .ib-desc { font-size: var(--ib-fs-13, 13px); line-height: 1.45; color: var(--muted-foreground); }
+dialog.ib-rwel .ib-sw { width: 34px; height: 20px; border-radius: 999px; background: var(--muted); position: relative; border: 1px solid var(--border); flex: none; cursor: pointer; }
+dialog.ib-rwel .ib-sw[aria-checked="true"] { background: var(--primary); border-color: var(--primary); }
+dialog.ib-rwel .ib-sw:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+/* The knob is drawn here with the track, so the phone width's knob rule (inside its media query) never meets the desktop track. */
+dialog.ib-rwel .ib-sw::after { top: 2px; left: 2px; width: 14px; height: 14px; }
+dialog.ib-rwel .ib-sw[aria-checked="true"]::after { left: 16px; }
+/* A phone (`.ib-cro-phone`): the phone's switch, as Settings draws it there, and a hit area of 44 px or more around it. */
+dialog.ib-rwel.ib-cro-phone .ib-sw { width: 50px; height: 30px; }
+dialog.ib-rwel.ib-cro-phone .ib-sw::after { width: 24px; height: 24px; }
+dialog.ib-rwel.ib-cro-phone .ib-sw[aria-checked="true"]::after { left: 22px; }
+dialog.ib-rwel.ib-cro-phone .ib-sw::before { content: ""; position: absolute; inset: -8px -4px; }
+.ib-rwel-failed { margin: -8px 0 0; font-size: var(--ib-fs-12-5, 12.5px); color: var(--destructive); }
+.ib-rwel-acts { justify-content: flex-end; }
 
 /* The tab icon dialog ("Which favicon do you prefer?", components/TabIconChoice.tsx; the owner approved the mock,
    2026-11-09): Code review's .ib-cro shell. Its picture is the browser's own tab strip at real

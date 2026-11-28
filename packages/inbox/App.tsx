@@ -37,7 +37,7 @@ import { useSettingsSaves } from './data/actions/settings';
 import { leaveRecentViewOnEscape, useListShown } from './app/useListView';
 import { useListTags } from './app/useListTags';
 import { useDecideSitting, type DecideSitting } from './app/useDecideSitting';
-import { decideAwayToast, tuckDecide } from './app/decideTuck';
+import { decideAway, tuckDecide } from './app/decideTuck';
 import { useSnoozeBack } from './app/useSnoozeBack';
 import { WarmWindowParts } from './lazyParts';
 import { TooltipProvider, TOOLTIP_SKIP_DELAY_MS } from '@plannotator/ui/components/Tooltip';
@@ -99,6 +99,7 @@ import {
   stopSettle,
   type SettleSnapshot,
 } from './settle';
+import { ReviewWelcome, reviewWelcomeClear, useReviewOnly, useReviewWelcome } from './reviewOnly';
 import { plural, shortAgentName, tildePath } from './format';
 import { copyMarkdown, threadMarkdown } from './copyMarkdown';
 import { shellLine, type ConnectContext } from './harnesses';
@@ -254,7 +255,7 @@ import { usePriorityReveal } from './components/usePriorityReveal';
 import { rulesSet, wantRulesEditor } from './agentRules';
 import { StarAskCard } from '@plannotator/ui/components/StarAskCard';
 import { InboxLaunchDialog } from './launchDialog';
-import { CodeReviewOffer } from './components/CodeReviewOffer';
+import { CodeReviewOfferOpen } from './components/CodeReviewOffer';
 import { useCodeReviewOffer } from './codeReviewOffer';
 import { TabIconChoice } from './components/TabIconChoice';
 import { useTabIconChoice } from './tabIconChoice';
@@ -1650,7 +1651,7 @@ function Inbox() {
         onShow: (threadId, target, page) => {
           if (target !== windowReport().id) return;
           const now = routeRef.current;
-          if (page === 'plans') return void (now.page !== 'plans' && writeRoute({ page: 'plans', project: null, thread: null }));
+          if (page) return void (now.page !== page && writeRoute({ page, project: null, thread: null }));
           if (now.page === 'inbox' && now.thread === threadId && !now.file && !now.guide) return;
           writeRoute({ page: 'inbox', project: now.page === 'inbox' && !now.machine ? now.project : null, thread: threadId });
         },
@@ -3626,7 +3627,7 @@ function Inbox() {
     };
   }, [whatsNewVersion, whatsNewRetry]);
 
-  const { toggleTool, toggleCookieHost, toggleBoard, toggleBro, toggleFloatDrafts, toggleMarkReadWarning, toggleSteps, toggleCodeReview, toggleSystem, toggleChapterDiagrams, toggleScheduled, toggleDecisionMode, toggleExperimental, tailscaleBusy, toggleTailscale, deleteThread, deleteProject } =
+  const { toggleTool, toggleCookieHost, toggleBoard, toggleBro, toggleFloatDrafts, toggleMarkReadWarning, toggleSteps, toggleCodeReview, toggleFullInbox, toggleSystem, toggleChapterDiagrams, toggleScheduled, toggleDecisionMode, toggleExperimental, tailscaleBusy, toggleTailscale, deleteThread, deleteProject } =
     useSettingsSaves({ setSettings, setError: setSettingsError, refresh: refreshSettings, adoptStore, readStore, refreshList });
   const scheduledOn = useScheduledOn(settings, settingsReadFailed);
   const plansOn = usePlansOn(settings, showToast);
@@ -4467,7 +4468,9 @@ function Inbox() {
   // The first-run screen drew without the settings (their read failed or was late): it stays, and once the
   // settings come it gains its quiet "Take the tour" line rather than turning into the entry screen under the person.
   const firstRunDrawnBare = useRef(false);
-  const showTourEntry = firstRun && !!settings?.tour && !tourDecided && !firstRunDrawnBare.current && !tourUnavailable;
+  // The Inbox for code review only (reviewOnly.ts): Reviews is home, and neither the tour's entry screen nor the agent note's dialog shows.
+  const reviewOnly = useReviewOnly(settings, route);
+  const showTourEntry = firstRun && !!settings?.tour && !tourDecided && !firstRunDrawnBare.current && !tourUnavailable && !reviewOnly;
   // The entry screen loads the tour while it shows, so Start is at once; content that cannot be had takes the
   // entry screen away before anyone presses Start (the first-run screen shows instead).
   useEffect(() => {
@@ -4480,21 +4483,21 @@ function Inbox() {
   }, [showTourEntry]);
   // Code review's one-time offer (approval "code-review-offer-card"; codeReviewOffer.ts): the line's day-0 slot, armed
   // from `reveal.next`, at once once the tour's screens are gone and the page is clear; the agent note waits for it.
-  const codeReviewOffer = useCodeReviewOffer({
-    due: lineLatch?.next === 'code_review',
+  // The welcome to the code review Inbox (reviewOnly.ts `useReviewWelcome`) goes the same way, on Reviews, first in the line.
+  const offerMoment = {
     blocked: updatingThisLoad.current || (lineKept ? soundDialog === 'open' || typeof agentNote === 'object' : soundDialog !== 'none' || agentNote !== 'none') || oneTimeDialogShownThisLoad(),
     tourScreen: showTourEntry || tourIntroShown || tourOn,
     thread: route.page === 'inbox' ? (route.thread ?? null) : null,
     rows: snoozeIntroRows,
-    clear: listIntroClear && updateDialog === null && !restarting,
     place: `${route.thread}|${route.project}|${route.machine}`,
     heldBack: revealHeldBack,
     toast: toast !== null,
-    on: settings?.code_review?.on === true,
-  });
-  const offerLinesFree = linesFree && codeReviewOffer.stage !== 'open' && codeReviewOffer.stage !== 'claimed';
+  };
+  const codeReviewOffer = useCodeReviewOffer({ ...offerMoment, due: lineLatch?.next === 'code_review', clear: listIntroClear && updateDialog === null && !restarting, on: settings?.code_review?.on === true });
+  const reviewWelcome = useReviewWelcome({ ...offerMoment, due: lineLatch?.next === 'review_welcome', clear: reviewWelcomeClear(route, { search: searchOpen, compose: compose !== null }) && updateDialog === null && !restarting, on: reviewOnly });
+  const offerLinesFree = linesFree && ![codeReviewOffer.stage, reviewWelcome.stage].some((stage) => stage === 'open' || stage === 'claimed');
   // One of the line's dialogs is claimed or open now: the load arms nothing else meanwhile (`lineLatch`).
-  const stagesBusy = [voiceIntro.stage, snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, agentRulesReveal.stage, routinesReveal.stage, personalAgentsReveal.stage, priorityReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, themeChooser.stage, starReveal.stage, codeReviewOffer.stage].some(
+  const stagesBusy = [voiceIntro.stage, snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, agentRulesReveal.stage, routinesReveal.stage, personalAgentsReveal.stage, priorityReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, themeChooser.stage, starReveal.stage, codeReviewOffer.stage, reviewWelcome.stage].some(
     (stage) => stage === 'claimed' || stage === 'open',
   );
   useEffect(() => setLineStagesBusy(stagesBusy), [stagesBusy]);
@@ -4515,7 +4518,8 @@ function Inbox() {
     !showTourEntry &&
     !tourIntroShown &&
     // Code review's day-0 offer goes first (its claim then keeps the day, so the note waits for the next free one).
-    codeReviewOffer.settled;
+    codeReviewOffer.settled &&
+    !reviewOnly;
   useEffect(() => {
     if (!agentNoteReady || agentNoteDecided.current) return;
     let cancelled = false;
@@ -5053,6 +5057,7 @@ function Inbox() {
         onToggleFloatDrafts={(next) => void toggleFloatDrafts(next)}
         onToggleMarkReadWarning={(next) => void toggleMarkReadWarning(next)}
         onToggleCodeReview={(next) => void toggleCodeReview(next)}
+        onToggleFullInbox={(next) => void toggleFullInbox(next)}
         onToggleSystem={(next) => void toggleSystem(next)}
         onToggleChapterDiagrams={(next) => void toggleChapterDiagrams(next)}
         systemProjects={systemProjects.projects}
@@ -5571,7 +5576,7 @@ function Inbox() {
       {/* The sidebar's Customize panel (approval "inbox-sidebar-customize"): one for the window, beside the sidebar or, on a phone, a bottom sheet. */}
       {!tourOn && (
         <SidebarCustomizer
-          drawn={drawnSidebarItems({ board: Boolean(boardEnabled), plans: plansOn, grid: gridOn, reviews: Boolean(pullsShown), usage: settings?.cswap === true, phone })}
+          drawn={drawnSidebarItems({ board: Boolean(boardEnabled), plans: plansOn, grid: gridOn, reviews: Boolean(pullsShown), usage: settings?.cswap === true, phone, reviewOnly })}
           machines={machines.all.length > 0}
           // Opened from Settings on a desktop, where the sidebar is closed: it opens, so the person sees each change.
           onOpen={() => {
@@ -5640,6 +5645,7 @@ function Inbox() {
             agentFilter={filterAgent ? { id: filterAgent.id, name: filterAgent.name } : null}
             tags={sidebarTags}
             inboxCount={waitingCount(latestSections)}
+            reviewOnly={reviewOnly}
             // One machine's list: that machine's projects only.
             projects={filterMachine ? projects.filter((p) => (p.machine ?? machines.self) === filterMachine.id) : projects}
             machines={machines}
@@ -5851,17 +5857,8 @@ function Inbox() {
           onTurnOn={() => turnOnFromReveal('board', boardReveal.close)}
         />
       )}
-      {codeReviewOffer.stage === 'open' && (
-        <CodeReviewOffer
-          phone={phone}
-          onClose={() => {
-            // Not now (Escape, a click outside): final, and the line's next offer waits three days.
-            void inboxApi.revealNotNow('code_review');
-            codeReviewOffer.close();
-          }}
-          onTurnOn={() => turnOnFromReveal('code_review', codeReviewOffer.close)}
-        />
-      )}
+      {reviewWelcome.stage === 'open' && <ReviewWelcome fullInbox={settings?.full_inbox?.on === true} phone={phone} onClose={reviewWelcome.close} />}
+      {codeReviewOffer.stage === 'open' && <CodeReviewOfferOpen phone={phone} close={codeReviewOffer.close} onTurnOn={() => turnOnFromReveal('code_review', codeReviewOffer.close)} />}
       {stepsReveal.stage === 'open' && (
         <ChecklistIntro
           phone={phone}
@@ -5912,8 +5909,8 @@ function Inbox() {
           onAnswer={(answer) => void inboxApi.starAskAnswer(answer)}
         />
       )}
-      {/* The launch dialog (launchDialog.tsx): ahead of every other one-time dialog, once per computer. */}
-      <InboxLaunchDialog due={settings?.reveal?.launch === true} ready={latest !== null && !firstRun && !tourOn && soonClear} heldBack={oneTimeHeldBack} />
+      {/* The launch dialog (launchDialog.tsx): ahead of every other one-time dialog, once per computer, but after the welcome to the code review Inbox (on its load, only once the line's gap after it has passed). */}
+      <InboxLaunchDialog due={settings?.reveal?.launch === true} ready={latest !== null && !firstRun && !tourOn && soonClear && reviewWelcome.launchMay} heldBack={oneTimeHeldBack} />
       {sidebarTip.stage === 'open' && <SidebarTipCard gone={!sidebarDocked || !listIntroClear || sidebarCustomizing} onSay={say} onLeave={sidebarTip.close} />}
       {listViewChoiceOpen && (
         <ListViewIntro
@@ -6215,6 +6212,7 @@ function Inbox() {
           onReadAgain={sittingRead.retry}
           scope={decide.title}
           rows={latestRows}
+          outbox={outbox}
           start={decide.start}
           startNonce={decide.startNonce}
           phone={phone}
@@ -6222,8 +6220,7 @@ function Inbox() {
           subscribeQuestions={subscribeQuestions}
           onLeft={setDecideLeft}
           onTuck={(threadId, fileId, question) => tuckDecide({ setDecide, routeRef, decideLanding, searchLanding }, threadId, fileId, question)}
-          // A Send or a save that fails once the dialog is closed or tucked away: the window's toast says so.
-          onAway={(notice) => showToast(decideAwayToast(notice))}
+          onAway={decideAway(showToast)}
           onClose={closeDecide}
         />
       )}

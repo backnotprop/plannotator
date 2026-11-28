@@ -15,6 +15,7 @@ import { afterEach, describe, expect, mock, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { FileTree } from './FileTree';
+import { newTreeMemory } from './treeMemory';
 import { markFirstCodePainted } from '../utils/firstCodePaint';
 import { useReviewFileFilter } from '../hooks/useReviewFileFilter';
 import { compileReviewFileFilter } from '@plannotator/shared/review-file-filter';
@@ -256,6 +257,48 @@ describe.skipIf(!hasDom)('FileTree: Changes | All files', () => {
     const el = await mount(<Tree />);
     expect(el.querySelector('[data-review-panel-header]')).toBeNull();
     expect(el.querySelector('[data-repo-file-tree]')).not.toBeNull();
+  });
+
+  test('reopening All files restores manually opened and closed folders with its scroll position', async () => {
+    const offsets = new WeakMap<Element, number>();
+    const original = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop')!;
+    Object.defineProperty(Element.prototype, 'scrollTop', {
+      configurable: true,
+      get() { return offsets.get(this) ?? 0; },
+      set(value: number) { offsets.set(this, value); },
+    });
+    const many = Array.from({ length: 200 }, (_, i) => `zlong/f${String(i).padStart(3, '0')}.ts`);
+    const repoFiles = repo(ready({ paths: [...LISTING, ...many].sort() }));
+    try {
+      const memory = newTreeMemory();
+      const el = await mount(<Tree repoMemory={memory} repoFiles={repoFiles} />);
+      await settle();
+      await act(async () => repoRow(el, 'packages/').click());
+      await settle();
+      await act(async () => repoRow(el, 'apps/').click());
+      await settle();
+      await act(async () => repoRow(el, 'zlong/').click());
+      await settle();
+      expect(visibleRows(el)).toContain('dir:apps/hook');
+      expect(visibleRows(el)).not.toContain('dir:packages/review-editor');
+      const scroller = () => repoShadow(el).querySelector<HTMLElement>('[data-file-tree-virtualized-scroll]')!;
+      scroller().scrollTop = 120;
+      scroller().dispatchEvent(new Event('scroll'));
+      await act(async () => root?.render(null));
+      await act(async () => root?.render(<Tree repoMemory={memory} repoFiles={repoFiles} />));
+      await settle();
+      expect(visibleRows(el)).toContain('dir:apps/hook');
+      expect(visibleRows(el)).not.toContain('dir:packages/review-editor');
+      expect(scroller().scrollTop).toBe(120);
+
+      await act(async () => root?.render(null));
+      await act(async () => root?.render(<Tree repoMemory={newTreeMemory()} repoFiles={repoFiles} />));
+      await settle();
+      expect(visibleRows(el)).not.toContain('dir:apps/hook');
+      expect(visibleRows(el)).toContain('dir:packages/review-editor');
+    } finally {
+      Object.defineProperty(Element.prototype, 'scrollTop', original);
+    }
   });
 
   test('All files opens on the paths that lead to changes; changed rows keep their controls', async () => {

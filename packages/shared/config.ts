@@ -30,7 +30,7 @@ import { isFaviconStyle, type FaviconStyle } from './favicon';
 import { isAnnotateAgentTerminalSide, type AnnotateAgentTerminalSide } from './agent-terminal';
 import { parseAgentSwitchConfig, agentSwitchConfigValue, type AgentSwitchConfigValue } from './agent-switch';
 import { isLocalhostSubdomain } from './loopback-host';
-import { INBOX_TOOL_NAME, inboxReminderCustomText, inboxReminderFor, inboxReminderRulesText } from './inbox/connection';
+import { INBOX_TOOL_NAME, inboxAgentWords, inboxReminderCustomText, inboxReminderFor, inboxReminderRulesText } from './inbox/connection';
 import { parseAnnotateView, type AnnotateView } from '@plannotator/core/config-types';
 export type { DefaultDiffType, DiffLineBgIntensity, DiffOptions, DisplayOptions, JjDefaultDiffType, ReviewDefaults, ThemeConfig, FaviconStyle };
 
@@ -644,6 +644,32 @@ export interface PlannotatorConfig {
    */
   inboxCodeReview?: boolean;
   /**
+   * The Inbox for code review only (docs/agent-guides/inbox-review-only.md): `true` while the person uses it only for
+   * code review, `false` once they turned the full Inbox on, unset for everyone who never chose (the full Inbox). This
+   * computer's own: never shared with a linked computer. While true, Code review is on whatever `inboxCodeReview`
+   * says. Written by `plannotator inbox --review` on a computer where the Inbox was never on, and by Settings →
+   * Capabilities → Full Inbox and the welcome dialog's switch (`POST /api/inbox/settings` `{ full_inbox: { on } }`).
+   * Every host reads it through `inboxAgentWords` (packages/shared/inbox/connection.ts), once per session start.
+   */
+  inboxReviewOnly?: boolean;
+  /**
+   * Machine state: the Inbox notes code review only takes out of agents' instructions files and puts back
+   * (packages/server/inbox-review-only-notes.ts). Saved before any file or record changes, so a pass that stops halfway
+   * is finished by the next one. `for`: the mode the files are being made to match; `back`: the agents whose note goes
+   * back with the full Inbox (the person's last choice: a note they turn on or off meanwhile leaves the list); `out`:
+   * those whose note is still to come out; `edited`: each section a person edited, by the file it came out of
+   * (resolved through links), put back there as they left it.
+   */
+  inboxReviewOnlyNotes?: { for: "review_only" | "full"; back: string[]; out: string[]; edited?: Record<string, string> };
+  /**
+   * Machine state: an edited section from `inboxReviewOnlyNotes.edited` that could not be put back (no agent reads its
+   * file any more, or the file holds another section now), kept here rather than lost. The 16 newest (`file`, `text`,
+   * `at`); nothing reads them back by itself.
+   */
+  inboxNoteSectionsKept?: { file: string; text: string; at: string }[];
+  /** Machine state: the welcome dialog `plannotator inbox --review` asked for on a first run (`dueAt`); its one showing is the line's (`inboxReveals.review_welcome`). */
+  inboxReviewWelcome?: { dueAt?: string };
+  /**
    * PR risk ranking in the Inbox (approval "code-review-launch-build", item 4),
    * under Code review: the person's "no slop zone rules" and the agent that judges
    * each new pull request against them. Empty or unset `rules`: nothing runs.
@@ -734,13 +760,15 @@ export interface PlannotatorConfig {
     notNowAt?: string;
     shownLoad?: string;
     agentNote?: { shownFor?: string[] };
-    waitingSince?: { theme_chooser?: string; code_review?: string; sound?: string; list_intro?: string; voice?: string; tab_icon?: string; snooze?: string; bro?: string; grill_me_tip?: string; board?: string; steps?: string; agent_rules?: string; list_view?: string; view_choice?: string; personal_agents?: string; priority?: string; routines?: string };
+    waitingSince?: { review_welcome?: string; theme_chooser?: string; code_review?: string; sound?: string; list_intro?: string; voice?: string; tab_icon?: string; snooze?: string; bro?: string; grill_me_tip?: string; board?: string; steps?: string; agent_rules?: string; list_view?: string; view_choice?: string; personal_agents?: string; priority?: string; routines?: string };
     /**
      * Code review's one-time offer (approval "inbox-code-review-offer"), decided as the tab icon's: `dueAt` for someone
      * who used an earlier Inbox, `freshAt` for a fresh install (never due), both written at the first release start that
      * shows it (packages/server/inbox-code-review-offer.ts); then claimed once, as the Board's.
      */
     code_review?: { dueAt?: string; freshAt?: string; shownAt?: string; key?: string };
+    /** The welcome to the code review Inbox (reveals.ts `review_welcome`): claimed once, as the Board's. */
+    review_welcome?: { shownAt?: string; key?: string };
     board?: { shownAt?: string; key?: string };
     steps?: { shownAt?: string; key?: string };
     agent_rules?: { shownAt?: string; key?: string };
@@ -1131,7 +1159,8 @@ function getStatePath(): string {
  */
 const MACHINE_STATE_KEYS = [
   "inboxAgentNotes", "inboxTour", "inboxBoardIntro", "inboxListIntro", "inboxVoiceIntro", "inboxSnoozeIntro",
-  "inboxReveals", "starAsk", "inboxThemeChooser", "inboxPriorityIntro", "launch",
+  "inboxReveals", "starAsk", "inboxThemeChooser", "inboxPriorityIntro", "launch", "inboxReviewWelcome", "inboxReviewOnlyNotes",
+  "inboxNoteSectionsKept",
 ] as const;
 type MachineStateKey = (typeof MACHINE_STATE_KEYS)[number];
 /** Machine-state fields inside a key whose other fields are settings (`inboxSound.enabled` / `volume`). */
@@ -2510,7 +2539,8 @@ export function resolveInboxReminder(
   env: NodeJS.ProcessEnv,
   host: InboxToolHost,
 ): boolean {
-  return INBOX_REMINDER_HOSTS.includes(host) && resolveInboxTool(config, env, host) && (configuredInboxReminder(config, host) ?? true);
+  // Code review only (inboxAgentWords): no reminder, whatever the person's own switch says.
+  return INBOX_REMINDER_HOSTS.includes(host) && resolveInboxTool(config, env, host) && inboxAgentWords(config).reminder && (configuredInboxReminder(config, host) ?? true);
 }
 
 /**
