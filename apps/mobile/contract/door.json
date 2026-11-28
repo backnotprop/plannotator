@@ -1077,6 +1077,24 @@
       "relay": true
     },
     {
+      "name": "POST messages/:id/reopen",
+      "method": "POST",
+      "path": "messages/{message}/reopen",
+      "params": [
+        "message"
+      ],
+      "call": "postMessageReopen",
+      "window": "/api/inbox/messages/{message}/reopen",
+      "grant": "phone",
+      "auth": "token",
+      "kind": "hold",
+      "write": "set",
+      "key": "body",
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
       "name": "POST messages/:id/handoff/undo",
       "method": "POST",
       "path": "messages/{message}/handoff/undo",

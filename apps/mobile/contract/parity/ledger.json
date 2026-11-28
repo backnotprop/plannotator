@@ -23841,6 +23841,174 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-door-post-messages-id-reopen",
+      "title": "door:POST messages/:id/reopen",
+      "surface": [
+        "door:POST messages/:id/reopen"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-28",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-messages-id-reopen",
+      "title": "window:/api/inbox/messages/:id/reopen",
+      "surface": [
+        "window:/api/inbox/messages/:id/reopen"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-28",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxquestionstate-answered-in-reply",
+      "title": "enum:InboxQuestionState.answered_in_reply",
+      "surface": [
+        "enum:InboxQuestionState.answered_in_reply"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-28",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxansweredinreply-at",
+      "title": "field:InboxAnsweredInReply.at",
+      "surface": [
+        "field:InboxAnsweredInReply.at"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-28",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxansweredinreply-message-id",
+      "title": "field:InboxAnsweredInReply.message_id",
+      "surface": [
+        "field:InboxAnsweredInReply.message_id"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-28",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxansweredinreply-quote",
+      "title": "field:InboxAnsweredInReply.quote",
+      "surface": [
+        "field:InboxAnsweredInReply.quote"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-28",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxansweredinreply-reply-id",
+      "title": "field:InboxAnsweredInReply.reply_id",
+      "surface": [
+        "field:InboxAnsweredInReply.reply_id"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-28",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxansweredinreplyrequest-question",
+      "title": "field:InboxAnsweredInReplyRequest.question",
+      "surface": [
+        "field:InboxAnsweredInReplyRequest.question"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-28",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxansweredinreplyrequest-quote",
+      "title": "field:InboxAnsweredInReplyRequest.quote",
+      "surface": [
+        "field:InboxAnsweredInReplyRequest.quote"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-28",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxansweredinreplyrequest-reply",
+      "title": "field:InboxAnsweredInReplyRequest.reply",
+      "surface": [
+        "field:InboxAnsweredInReplyRequest.reply"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-28",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxmessagewire-answered-in-reply",
+      "title": "field:InboxMessageWire.answered_in_reply",
+      "surface": [
+        "field:InboxMessageWire.answered_in_reply"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-28",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxquestion-answered-in-reply",
+      "title": "field:InboxQuestion.answered_in_reply",
+      "surface": [
+        "field:InboxQuestion.answered_in_reply"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-28",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }

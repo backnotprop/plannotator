@@ -3245,6 +3245,78 @@ public struct InboxAnnotationRecord: Codable, Hashable, Sendable {
   }
 }
 
+/// From `packages/core/inbox-types.ts`.
+public struct InboxAnsweredInReply: Codable, Hashable, Sendable {
+  public var replyId: String
+  public var quote: String
+  public var messageId: MessageID
+  public var at: String
+  /// Fields this app does not know: kept, and written back when encoded.
+  public var unknownFields: [String: JSONValue] = [:]
+
+  static let knownKeys: Set<String> = ["reply_id", "quote", "message_id", "at"]
+
+  public init(replyId: String, quote: String, messageId: MessageID, at: String, unknownFields: [String: JSONValue] = [:]) {
+    self.replyId = replyId
+    self.quote = quote
+    self.messageId = messageId
+    self.at = at
+    self.unknownFields = unknownFields
+  }
+
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: WireKey.self)
+    self.replyId = try c.decode(String.self, forKey: WireKey("reply_id"))
+    self.quote = try c.decode(String.self, forKey: WireKey("quote"))
+    self.messageId = try c.decode(MessageID.self, forKey: WireKey("message_id"))
+    self.at = try c.decode(String.self, forKey: WireKey("at"))
+    self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: WireKey.self)
+    try c.encode(self.replyId, forKey: WireKey("reply_id"))
+    try c.encode(self.quote, forKey: WireKey("quote"))
+    try c.encode(self.messageId, forKey: WireKey("message_id"))
+    try c.encode(self.at, forKey: WireKey("at"))
+    try WireKey.write(unknownFields, to: &c)
+  }
+}
+
+/// From `packages/core/inbox-types.ts`.
+public struct InboxAnsweredInReplyRequest: Codable, Hashable, Sendable {
+  public var question: String
+  public var reply: String?
+  public var quote: String?
+  /// Fields this app does not know: kept, and written back when encoded.
+  public var unknownFields: [String: JSONValue] = [:]
+
+  static let knownKeys: Set<String> = ["question", "reply", "quote"]
+
+  public init(question: String, reply: String? = nil, quote: String? = nil, unknownFields: [String: JSONValue] = [:]) {
+    self.question = question
+    self.reply = reply
+    self.quote = quote
+    self.unknownFields = unknownFields
+  }
+
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: WireKey.self)
+    self.question = try c.decode(String.self, forKey: WireKey("question"))
+    self.reply = try c.decodeIfPresent(String.self, forKey: WireKey("reply"))
+    self.quote = try c.decodeIfPresent(String.self, forKey: WireKey("quote"))
+    self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: WireKey.self)
+    try c.encode(self.question, forKey: WireKey("question"))
+    try c.encodeIfPresent(self.reply, forKey: WireKey("reply"))
+    try c.encodeIfPresent(self.quote, forKey: WireKey("quote"))
+    try WireKey.write(unknownFields, to: &c)
+  }
+}
+
 /// From `packages/core/inbox-attachments.ts`.
 public struct InboxAttachment: Codable, Hashable, Sendable {
   public var id: String
@@ -6326,6 +6398,7 @@ public struct InboxMessageWire: Codable, Hashable, Sendable {
   public var wakes: Bool?
   public var supersedes: [String]?
   public var done: [String]?
+  public var answeredInReply: [InboxAnsweredInReplyRequest]?
   public var actionReport: [String]?
   public var subjectQuestion: String?
   public var startedByPerson: Bool?
@@ -6352,9 +6425,9 @@ public struct InboxMessageWire: Codable, Hashable, Sendable {
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
-  static let knownKeys: Set<String> = ["questions", "actions", "seq", "sent_annotations", "id", "project_id", "thread_id", "reply_to", "author", "subject", "body", "created_at", "resolved_at", "moved_to", "removed", "idempotency_key", "thread_name", "person_seen_seq", "person_read_seq", "person_read_at", "person_seen_before_read", "set_aside", "ship_note", "moved_note", "reopened", "ack_of", "ack_reaction", "reask", "tidy", "agent_checked_seq", "agent_checked_at", "agent_checked_by", "attachments", "inline_images", "combine_left", "live_sites", "picture_it", "delivery", "taken_back_at", "read_by_agent", "cloud_wake", "t3_wait", "deliver_now_at", "deliver_now_by", "wait_started_at", "sent_again_to", "turn_error", "launch_note", "guide", "guide_reviewed", "guide_viewed", "review_verdict", "review_comments_of", "quote", "to", "base_path", "from_project", "wakes", "supersedes", "done", "action_report", "subject_question", "started_by_person", "board_request", "decision_ask", "rows_ask", "viewing", "sent_from", "launch", "scheduled_run", "scheduled_change", "named_by", "reply_thread", "thread_naming", "ack", "tags", "handoff", "took_over", "review_live", "review_anchor", "review_batch", "review_resolved", "skill_reaction"]
+  static let knownKeys: Set<String> = ["questions", "actions", "seq", "sent_annotations", "id", "project_id", "thread_id", "reply_to", "author", "subject", "body", "created_at", "resolved_at", "moved_to", "removed", "idempotency_key", "thread_name", "person_seen_seq", "person_read_seq", "person_read_at", "person_seen_before_read", "set_aside", "ship_note", "moved_note", "reopened", "ack_of", "ack_reaction", "reask", "tidy", "agent_checked_seq", "agent_checked_at", "agent_checked_by", "attachments", "inline_images", "combine_left", "live_sites", "picture_it", "delivery", "taken_back_at", "read_by_agent", "cloud_wake", "t3_wait", "deliver_now_at", "deliver_now_by", "wait_started_at", "sent_again_to", "turn_error", "launch_note", "guide", "guide_reviewed", "guide_viewed", "review_verdict", "review_comments_of", "quote", "to", "base_path", "from_project", "wakes", "supersedes", "done", "answered_in_reply", "action_report", "subject_question", "started_by_person", "board_request", "decision_ask", "rows_ask", "viewing", "sent_from", "launch", "scheduled_run", "scheduled_change", "named_by", "reply_thread", "thread_naming", "ack", "tags", "handoff", "took_over", "review_live", "review_anchor", "review_batch", "review_resolved", "skill_reaction"]
 
-  public init(questions: [InboxQuestion]? = nil, actions: [InboxQuestion]? = nil, seq: Int64? = nil, sentAnnotations: Double? = nil, id: MessageID, projectId: ProjectID, threadId: ThreadID, replyTo: String? = nil, author: InboxAuthor, subject: String? = nil, body: String, createdAt: String, resolvedAt: String? = nil, movedTo: InboxMovedTo? = nil, removed: [InboxRemoval]? = nil, idempotencyKey: String? = nil, threadName: String? = nil, personSeenSeq: Int64? = nil, personReadSeq: Int64? = nil, personReadAt: String? = nil, personSeenBeforeRead: Double? = nil, setAside: [String]? = nil, shipNote: InboxMessageWireShipNote? = nil, movedNote: InboxMovedNote? = nil, reopened: [String]? = nil, ackOf: String? = nil, ackReaction: InboxReaction? = nil, reask: [String]? = nil, tidy: InboxTidyMark? = nil, agentCheckedSeq: Int64? = nil, agentCheckedAt: String? = nil, agentCheckedBy: String? = nil, attachments: [InboxAttachment]? = nil, inlineImages: [InboxInlineImage]? = nil, combineLeft: InboxCombineLeft? = nil, liveSites: [InboxLiveSiteRef]? = nil, pictureIt: InboxPictureItPage? = nil, delivery: InboxDelivery? = nil, takenBackAt: String? = nil, readByAgent: InboxMessageWireReadByAgent? = nil, cloudWake: InboxCloudWake? = nil, t3Wait: InboxMessageWireT3Wait? = nil, deliverNowAt: String? = nil, deliverNowBy: InboxMessageWireDeliverNowBy? = nil, waitStartedAt: String? = nil, sentAgainTo: String? = nil, turnError: Bool? = nil, launchNote: Bool? = nil, guide: InboxGuideRef? = nil, guideReviewed: [Bool]? = nil, guideViewed: [String]? = nil, reviewVerdict: InboxReviewVerdictRecord? = nil, reviewCommentsOf: [String]? = nil, quote: InboxReplyQuote? = nil, to: InboxAddressee? = nil, basePath: String? = nil, fromProject: InboxMessageWireFromProject? = nil, wakes: Bool? = nil, supersedes: [String]? = nil, done: [String]? = nil, actionReport: [String]? = nil, subjectQuestion: String? = nil, startedByPerson: Bool? = nil, boardRequest: Bool? = nil, decisionAsk: Bool? = nil, rowsAsk: Bool? = nil, viewing: InboxReplyViewing? = nil, sentFrom: InboxMessageWireSentFrom? = nil, launch: InboxLaunchRecord? = nil, scheduledRun: InboxScheduledRun? = nil, scheduledChange: InboxScheduledChange? = nil, namedBy: InboxMessageWireNamedBy? = nil, replyThread: String? = nil, threadNaming: InboxMessageWireThreadNaming? = nil, ack: InboxAck? = nil, tags: [InboxTag]? = nil, handoff: InboxHandoff? = nil, tookOver: Bool? = nil, reviewLive: InboxReviewLive? = nil, reviewAnchor: InboxReviewAnchor? = nil, reviewBatch: InboxReviewBatch? = nil, reviewResolved: InboxReviewResolved? = nil, skillReaction: InboxSkillReaction? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(questions: [InboxQuestion]? = nil, actions: [InboxQuestion]? = nil, seq: Int64? = nil, sentAnnotations: Double? = nil, id: MessageID, projectId: ProjectID, threadId: ThreadID, replyTo: String? = nil, author: InboxAuthor, subject: String? = nil, body: String, createdAt: String, resolvedAt: String? = nil, movedTo: InboxMovedTo? = nil, removed: [InboxRemoval]? = nil, idempotencyKey: String? = nil, threadName: String? = nil, personSeenSeq: Int64? = nil, personReadSeq: Int64? = nil, personReadAt: String? = nil, personSeenBeforeRead: Double? = nil, setAside: [String]? = nil, shipNote: InboxMessageWireShipNote? = nil, movedNote: InboxMovedNote? = nil, reopened: [String]? = nil, ackOf: String? = nil, ackReaction: InboxReaction? = nil, reask: [String]? = nil, tidy: InboxTidyMark? = nil, agentCheckedSeq: Int64? = nil, agentCheckedAt: String? = nil, agentCheckedBy: String? = nil, attachments: [InboxAttachment]? = nil, inlineImages: [InboxInlineImage]? = nil, combineLeft: InboxCombineLeft? = nil, liveSites: [InboxLiveSiteRef]? = nil, pictureIt: InboxPictureItPage? = nil, delivery: InboxDelivery? = nil, takenBackAt: String? = nil, readByAgent: InboxMessageWireReadByAgent? = nil, cloudWake: InboxCloudWake? = nil, t3Wait: InboxMessageWireT3Wait? = nil, deliverNowAt: String? = nil, deliverNowBy: InboxMessageWireDeliverNowBy? = nil, waitStartedAt: String? = nil, sentAgainTo: String? = nil, turnError: Bool? = nil, launchNote: Bool? = nil, guide: InboxGuideRef? = nil, guideReviewed: [Bool]? = nil, guideViewed: [String]? = nil, reviewVerdict: InboxReviewVerdictRecord? = nil, reviewCommentsOf: [String]? = nil, quote: InboxReplyQuote? = nil, to: InboxAddressee? = nil, basePath: String? = nil, fromProject: InboxMessageWireFromProject? = nil, wakes: Bool? = nil, supersedes: [String]? = nil, done: [String]? = nil, answeredInReply: [InboxAnsweredInReplyRequest]? = nil, actionReport: [String]? = nil, subjectQuestion: String? = nil, startedByPerson: Bool? = nil, boardRequest: Bool? = nil, decisionAsk: Bool? = nil, rowsAsk: Bool? = nil, viewing: InboxReplyViewing? = nil, sentFrom: InboxMessageWireSentFrom? = nil, launch: InboxLaunchRecord? = nil, scheduledRun: InboxScheduledRun? = nil, scheduledChange: InboxScheduledChange? = nil, namedBy: InboxMessageWireNamedBy? = nil, replyThread: String? = nil, threadNaming: InboxMessageWireThreadNaming? = nil, ack: InboxAck? = nil, tags: [InboxTag]? = nil, handoff: InboxHandoff? = nil, tookOver: Bool? = nil, reviewLive: InboxReviewLive? = nil, reviewAnchor: InboxReviewAnchor? = nil, reviewBatch: InboxReviewBatch? = nil, reviewResolved: InboxReviewResolved? = nil, skillReaction: InboxSkillReaction? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.questions = questions
     self.actions = actions
     self.seq = seq
@@ -6415,6 +6488,7 @@ public struct InboxMessageWire: Codable, Hashable, Sendable {
     self.wakes = wakes
     self.supersedes = supersedes
     self.done = done
+    self.answeredInReply = answeredInReply
     self.actionReport = actionReport
     self.subjectQuestion = subjectQuestion
     self.startedByPerson = startedByPerson
@@ -6503,6 +6577,7 @@ public struct InboxMessageWire: Codable, Hashable, Sendable {
     self.wakes = try c.decodeIfPresent(Bool.self, forKey: WireKey("wakes"))
     self.supersedes = try c.decodeIfPresent([String].self, forKey: WireKey("supersedes"))
     self.done = try c.decodeIfPresent([String].self, forKey: WireKey("done"))
+    self.answeredInReply = try c.decodeIfPresent([InboxAnsweredInReplyRequest].self, forKey: WireKey("answered_in_reply"))
     self.actionReport = try c.decodeIfPresent([String].self, forKey: WireKey("action_report"))
     self.subjectQuestion = try c.decodeIfPresent(String.self, forKey: WireKey("subject_question"))
     self.startedByPerson = try c.decodeIfPresent(Bool.self, forKey: WireKey("started_by_person"))
@@ -6591,6 +6666,7 @@ public struct InboxMessageWire: Codable, Hashable, Sendable {
     try c.encodeIfPresent(self.wakes, forKey: WireKey("wakes"))
     try c.encodeIfPresent(self.supersedes, forKey: WireKey("supersedes"))
     try c.encodeIfPresent(self.done, forKey: WireKey("done"))
+    try c.encodeIfPresent(self.answeredInReply, forKey: WireKey("answered_in_reply"))
     try c.encodeIfPresent(self.actionReport, forKey: WireKey("action_report"))
     try c.encodeIfPresent(self.subjectQuestion, forKey: WireKey("subject_question"))
     try c.encodeIfPresent(self.startedByPerson, forKey: WireKey("started_by_person"))
@@ -7338,6 +7414,7 @@ public struct InboxQuestion: Codable, Hashable, Sendable {
   public var sentReplyId: String?
   public var messageId: MessageID
   public var supersededBy: InboxSupersededBy?
+  public var answeredInReply: InboxAnsweredInReply?
   public var setAsideAt: String?
   public var action: InboxActionFacts?
   public var actionResult: InboxActionResult?
@@ -7351,9 +7428,9 @@ public struct InboxQuestion: Codable, Hashable, Sendable {
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
-  static let knownKeys: Set<String> = ["key", "position", "kind", "prompt", "context", "choices", "recommendation", "suggested_text", "stopped", "holds_up", "asked_by_agent_id", "orphaned", "state", "answer", "revision", "sent_revision", "picked_by", "picked_at", "sent_reply_id", "message_id", "superseded_by", "set_aside_at", "action", "action_result", "attachment", "stakes", "shows", "why", "reversible", "prototype", "scenarios"]
+  static let knownKeys: Set<String> = ["key", "position", "kind", "prompt", "context", "choices", "recommendation", "suggested_text", "stopped", "holds_up", "asked_by_agent_id", "orphaned", "state", "answer", "revision", "sent_revision", "picked_by", "picked_at", "sent_reply_id", "message_id", "superseded_by", "answered_in_reply", "set_aside_at", "action", "action_result", "attachment", "stakes", "shows", "why", "reversible", "prototype", "scenarios"]
 
-  public init(key: String, position: Int64, kind: InboxQuestionKind, prompt: String, context: String? = nil, choices: [InboxQuestionChoice], recommendation: String? = nil, suggestedText: String? = nil, stopped: String? = nil, holdsUp: [String], askedByAgentId: String? = nil, orphaned: Bool, state: InboxQuestionState, answer: QuestionAnswer? = nil, revision: Int64, sentRevision: Int64, pickedBy: InboxPicker? = nil, pickedAt: String? = nil, sentReplyId: String? = nil, messageId: MessageID, supersededBy: InboxSupersededBy? = nil, setAsideAt: String? = nil, action: InboxActionFacts? = nil, actionResult: InboxActionResult? = nil, attachment: InboxQuestionAttachment? = nil, stakes: String? = nil, shows: InboxQuestionShows? = nil, why: String? = nil, reversible: InboxQuestionReversible? = nil, prototype: InboxQuestionPrototype? = nil, scenarios: InboxQuestionScenarios? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(key: String, position: Int64, kind: InboxQuestionKind, prompt: String, context: String? = nil, choices: [InboxQuestionChoice], recommendation: String? = nil, suggestedText: String? = nil, stopped: String? = nil, holdsUp: [String], askedByAgentId: String? = nil, orphaned: Bool, state: InboxQuestionState, answer: QuestionAnswer? = nil, revision: Int64, sentRevision: Int64, pickedBy: InboxPicker? = nil, pickedAt: String? = nil, sentReplyId: String? = nil, messageId: MessageID, supersededBy: InboxSupersededBy? = nil, answeredInReply: InboxAnsweredInReply? = nil, setAsideAt: String? = nil, action: InboxActionFacts? = nil, actionResult: InboxActionResult? = nil, attachment: InboxQuestionAttachment? = nil, stakes: String? = nil, shows: InboxQuestionShows? = nil, why: String? = nil, reversible: InboxQuestionReversible? = nil, prototype: InboxQuestionPrototype? = nil, scenarios: InboxQuestionScenarios? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.key = key
     self.position = position
     self.kind = kind
@@ -7375,6 +7452,7 @@ public struct InboxQuestion: Codable, Hashable, Sendable {
     self.sentReplyId = sentReplyId
     self.messageId = messageId
     self.supersededBy = supersededBy
+    self.answeredInReply = answeredInReply
     self.setAsideAt = setAsideAt
     self.action = action
     self.actionResult = actionResult
@@ -7411,6 +7489,7 @@ public struct InboxQuestion: Codable, Hashable, Sendable {
     self.sentReplyId = try c.decodeIfPresent(String.self, forKey: WireKey("sent_reply_id"))
     self.messageId = try c.decode(MessageID.self, forKey: WireKey("message_id"))
     self.supersededBy = try c.decodeIfPresent(InboxSupersededBy.self, forKey: WireKey("superseded_by"))
+    self.answeredInReply = try c.decodeIfPresent(InboxAnsweredInReply.self, forKey: WireKey("answered_in_reply"))
     self.setAsideAt = try c.decodeIfPresent(String.self, forKey: WireKey("set_aside_at"))
     self.action = try c.decodeIfPresent(InboxActionFacts.self, forKey: WireKey("action"))
     self.actionResult = try c.decodeIfPresent(InboxActionResult.self, forKey: WireKey("action_result"))
@@ -7447,6 +7526,7 @@ public struct InboxQuestion: Codable, Hashable, Sendable {
     try c.encode(self.sentReplyId, forKey: WireKey("sent_reply_id"))
     try c.encode(self.messageId, forKey: WireKey("message_id"))
     try c.encode(self.supersededBy, forKey: WireKey("superseded_by"))
+    try c.encodeIfPresent(self.answeredInReply, forKey: WireKey("answered_in_reply"))
     try c.encodeIfPresent(self.setAsideAt, forKey: WireKey("set_aside_at"))
     try c.encodeIfPresent(self.action, forKey: WireKey("action"))
     try c.encodeIfPresent(self.actionResult, forKey: WireKey("action_result"))
@@ -7880,6 +7960,7 @@ public enum InboxQuestionShowsKind: Codable, Hashable, Sendable, RawRepresentabl
 
 /// From `packages/core/inbox-types.ts`.
 public enum InboxQuestionState: Codable, Hashable, Sendable, RawRepresentable {
+  case answeredInReply
   case closed
   case openValue
   case picked
@@ -7888,10 +7969,11 @@ public enum InboxQuestionState: Codable, Hashable, Sendable, RawRepresentable {
   /// A value this app does not know (a newer Inbox).
   case unknown(String)
 
-  public static let known: [InboxQuestionState] = [.closed, .openValue, .picked, .sent, .superseded]
+  public static let known: [InboxQuestionState] = [.answeredInReply, .closed, .openValue, .picked, .sent, .superseded]
 
   public init(rawValue: String) {
     switch rawValue {
+    case "answered_in_reply": self = .answeredInReply
     case "closed": self = .closed
     case "open": self = .openValue
     case "picked": self = .picked
@@ -7903,6 +7985,7 @@ public enum InboxQuestionState: Codable, Hashable, Sendable, RawRepresentable {
 
   public var rawValue: String {
     switch self {
+    case .answeredInReply: return "answered_in_reply"
     case .closed: return "closed"
     case .openValue: return "open"
     case .picked: return "picked"
@@ -12126,6 +12209,7 @@ public enum WireErrorCode: Codable, Hashable, Sendable, RawRepresentable {
   case initiativePersonOnly
   case internalError
   case introductionPending
+  case invalidAnsweredInReply
   case invalidDone
   case invalidSupersedes
   case lanUnavailable
@@ -12169,6 +12253,7 @@ public enum WireErrorCode: Codable, Hashable, Sendable, RawRepresentable {
   case projectNotFound
   case projectUnresolved
   case questionAlreadySent
+  case questionAnsweredInReply
   case questionNotFound
   case questionOpen
   case questionRevisionConflict
@@ -12204,7 +12289,7 @@ public enum WireErrorCode: Codable, Hashable, Sendable, RawRepresentable {
   /// A value this app does not know (a newer Inbox).
   case unknown(String)
 
-  public static let known: [WireErrorCode] = [.ackAfterReply, .ackNotAllowed, .ackSent, .ackStale, .actionAlreadySent, .actionClosed, .agentHasIt, .agentNotAcceptedHere, .agentUnavailable, .alreadyCombined, .alreadyDelivered, .alreadyOwner, .annotationClosed, .annotationNotAllowed, .annotationNotFound, .appNotAvailable, .artifactNotFound, .artifactPinsNewer, .askBusy, .askDamaged, .askFull, .askNoBridge, .askNoLivePath, .askNoOwner, .askUnreadable, .attachmentChangedType, .attachmentMissing, .attachmentNotAudio, .attachmentNotFound, .attachmentNotHtml, .attachmentNotImage, .attachmentNotText, .attachmentNotVideo, .attachmentTooLarge, .batchIdReused, .cannotTakeBack, .cardBacklogPersonOnly, .cardDroppedByPerson, .cardNoProject, .cardNotFound, .cardOtherProject, .cardPersonOnly, .codeNotAcceptedHere, .codeReviewOff, .configNotSaved, .cookieHostEnvDecides, .cookieHostUrlHostInUse, .crossOrigin, .deviceNotFound, .deviceRevoked, .deviceRouteNotFound, .deviceTokenInvalid, .deviceTokenMissing, .draftConflict, .experimentalEnvDecides, .folderMissing, .folderUnavailable, .guideNotFound, .handoffSettled, .idempotencyKeyReused, .initiativeExists, .initiativeNotFound, .initiativePersonOnly, .internalError, .introductionPending, .invalidDone, .invalidSupersedes, .lanUnavailable, .lastAgent, .launchInRex, .launchNotFound, .launchOff, .linkFailed, .linkToSelf, .linkedPageMissing, .linkedPageNotHtml, .linkedPageOutside, .linkedPageRefused, .linkedPageTooLarge, .liveNotAnswering, .liveSiteNotFound, .liveUnavailable, .localOnly, .machineMismatch, .machineNeedsUpdate, .machineNotAcceptedHere, .machineNotLinked, .machineUnreachable, .machinesViewRefused, .markupTooLarge, .messageNotFound, .modeNeedsLive, .noWayBack, .notAddressed, .notInThread, .nothingToReask, .nothingToTidy, .offerExpired, .openNotAllowed, .openUnavailable, .originNotAllowed, .ownerOnly, .pairingCodeWrong, .pinsNewer, .priorityNewer, .projectNotFound, .projectUnresolved, .questionAlreadySent, .questionNotFound, .questionOpen, .questionRevisionConflict, .questionSetAside, .questionSuperseded, .relayUploadUnavailable, .scratchUnavailable, .sendNowUnavailable, .sessionNotLive, .sessionStillLive, .snoozePast, .snoozesNewer, .systemOff, .tagHostMismatch, .tagNeedsUpdate, .tagsNewer, .tailnetUnavailable, .tailscaleEnvDecides, .tailscaleUnavailable, .takenBack, .threadMovedOn, .threadNameTaken, .threadNotFound, .threadResolved, .trustFailed, .trustWarningChanged, .uploadNoSpace, .uploadNotFound, .uploadRefused, .uploadTooLarge, .validationError, .windowOnly]
+  public static let known: [WireErrorCode] = [.ackAfterReply, .ackNotAllowed, .ackSent, .ackStale, .actionAlreadySent, .actionClosed, .agentHasIt, .agentNotAcceptedHere, .agentUnavailable, .alreadyCombined, .alreadyDelivered, .alreadyOwner, .annotationClosed, .annotationNotAllowed, .annotationNotFound, .appNotAvailable, .artifactNotFound, .artifactPinsNewer, .askBusy, .askDamaged, .askFull, .askNoBridge, .askNoLivePath, .askNoOwner, .askUnreadable, .attachmentChangedType, .attachmentMissing, .attachmentNotAudio, .attachmentNotFound, .attachmentNotHtml, .attachmentNotImage, .attachmentNotText, .attachmentNotVideo, .attachmentTooLarge, .batchIdReused, .cannotTakeBack, .cardBacklogPersonOnly, .cardDroppedByPerson, .cardNoProject, .cardNotFound, .cardOtherProject, .cardPersonOnly, .codeNotAcceptedHere, .codeReviewOff, .configNotSaved, .cookieHostEnvDecides, .cookieHostUrlHostInUse, .crossOrigin, .deviceNotFound, .deviceRevoked, .deviceRouteNotFound, .deviceTokenInvalid, .deviceTokenMissing, .draftConflict, .experimentalEnvDecides, .folderMissing, .folderUnavailable, .guideNotFound, .handoffSettled, .idempotencyKeyReused, .initiativeExists, .initiativeNotFound, .initiativePersonOnly, .internalError, .introductionPending, .invalidAnsweredInReply, .invalidDone, .invalidSupersedes, .lanUnavailable, .lastAgent, .launchInRex, .launchNotFound, .launchOff, .linkFailed, .linkToSelf, .linkedPageMissing, .linkedPageNotHtml, .linkedPageOutside, .linkedPageRefused, .linkedPageTooLarge, .liveNotAnswering, .liveSiteNotFound, .liveUnavailable, .localOnly, .machineMismatch, .machineNeedsUpdate, .machineNotAcceptedHere, .machineNotLinked, .machineUnreachable, .machinesViewRefused, .markupTooLarge, .messageNotFound, .modeNeedsLive, .noWayBack, .notAddressed, .notInThread, .nothingToReask, .nothingToTidy, .offerExpired, .openNotAllowed, .openUnavailable, .originNotAllowed, .ownerOnly, .pairingCodeWrong, .pinsNewer, .priorityNewer, .projectNotFound, .projectUnresolved, .questionAlreadySent, .questionAnsweredInReply, .questionNotFound, .questionOpen, .questionRevisionConflict, .questionSetAside, .questionSuperseded, .relayUploadUnavailable, .scratchUnavailable, .sendNowUnavailable, .sessionNotLive, .sessionStillLive, .snoozePast, .snoozesNewer, .systemOff, .tagHostMismatch, .tagNeedsUpdate, .tagsNewer, .tailnetUnavailable, .tailscaleEnvDecides, .tailscaleUnavailable, .takenBack, .threadMovedOn, .threadNameTaken, .threadNotFound, .threadResolved, .trustFailed, .trustWarningChanged, .uploadNoSpace, .uploadNotFound, .uploadRefused, .uploadTooLarge, .validationError, .windowOnly]
 
   public init(rawValue: String) {
     switch rawValue {
@@ -12273,6 +12358,7 @@ public enum WireErrorCode: Codable, Hashable, Sendable, RawRepresentable {
     case "initiative_person_only": self = .initiativePersonOnly
     case "internal_error": self = .internalError
     case "introduction_pending": self = .introductionPending
+    case "invalid_answered_in_reply": self = .invalidAnsweredInReply
     case "invalid_done": self = .invalidDone
     case "invalid_supersedes": self = .invalidSupersedes
     case "lan_unavailable": self = .lanUnavailable
@@ -12316,6 +12402,7 @@ public enum WireErrorCode: Codable, Hashable, Sendable, RawRepresentable {
     case "project_not_found": self = .projectNotFound
     case "project_unresolved": self = .projectUnresolved
     case "question_already_sent": self = .questionAlreadySent
+    case "question_answered_in_reply": self = .questionAnsweredInReply
     case "question_not_found": self = .questionNotFound
     case "question_open": self = .questionOpen
     case "question_revision_conflict": self = .questionRevisionConflict
@@ -12419,6 +12506,7 @@ public enum WireErrorCode: Codable, Hashable, Sendable, RawRepresentable {
     case .initiativePersonOnly: return "initiative_person_only"
     case .internalError: return "internal_error"
     case .introductionPending: return "introduction_pending"
+    case .invalidAnsweredInReply: return "invalid_answered_in_reply"
     case .invalidDone: return "invalid_done"
     case .invalidSupersedes: return "invalid_supersedes"
     case .lanUnavailable: return "lan_unavailable"
@@ -12462,6 +12550,7 @@ public enum WireErrorCode: Codable, Hashable, Sendable, RawRepresentable {
     case .projectNotFound: return "project_not_found"
     case .projectUnresolved: return "project_unresolved"
     case .questionAlreadySent: return "question_already_sent"
+    case .questionAnsweredInReply: return "question_answered_in_reply"
     case .questionNotFound: return "question_not_found"
     case .questionOpen: return "question_open"
     case .questionRevisionConflict: return "question_revision_conflict"
@@ -12570,6 +12659,7 @@ extension WireErrorCode {
     "initiative_person_only": 403,
     "internal_error": 500,
     "introduction_pending": 403,
+    "invalid_answered_in_reply": 422,
     "invalid_done": 422,
     "invalid_supersedes": 422,
     "lan_unavailable": 409,
@@ -12613,6 +12703,7 @@ extension WireErrorCode {
     "project_not_found": 404,
     "project_unresolved": 503,
     "question_already_sent": 409,
+    "question_answered_in_reply": 409,
     "question_not_found": 404,
     "question_open": 409,
     "question_revision_conflict": 409,
@@ -12837,6 +12928,8 @@ public enum DoorRoutes {
   public static let postMessageTakeBack = DoorRoute(name: "POST messages/:id/take-back", method: .post, path: "messages/{message}/take-back", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `POST messages/:id/reask`: the window's `/api/inbox/messages/{message}/reask`.
   public static let postMessageReask = DoorRoute(name: "POST messages/:id/reask", method: .post, path: "messages/{message}/reask", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  /// `POST messages/:id/reopen`: the window's `/api/inbox/messages/{message}/reopen`.
+  public static let postMessageReopen = DoorRoute(name: "POST messages/:id/reopen", method: .post, path: "messages/{message}/reopen", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `POST messages/:id/handoff/undo`: the window's `/api/inbox/messages/{message}/handoff/undo`.
   public static let postMessageHandoffUndo = DoorRoute(name: "POST messages/:id/handoff/undo", method: .post, path: "messages/{message}/handoff/undo", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `POST threads/:id/remove-agent`: the window's `/api/inbox/threads/{thread}/remove-agent`.
@@ -13041,7 +13134,7 @@ public enum DoorRoutes {
   public static let getUpdate = DoorRoute(name: "GET update", method: .get, path: "update", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `POST update`.
   public static let postUpdate = DoorRoute(name: "POST update", method: .post, path: "update", grant: .machine, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
-  public static let all: [DoorRoute] = [getHealth, getThreads, getProjects, getWhatsNew, getWhatsNewReleases, getWhatsNewImage, getProjectPicture, getThreadsArchived, getThread, postThreadSeen, postGridSeen, postThreadRead, postThreadUnread, postThreadMarkUnread, postThreadSnooze, postThreadPin, postPins, postThreadPriority, postAgentFaces, postThreadTags, postInitiative, postProjectTags, postTagColours, getCards, getCard, getCardRefs, postCard, postCardsSeen, postCardsDroppedSeen, getPulls, getReviewsBranches, getPullsRisk, getPullsPull, getPullsDetails, getPullsDiff, getPullsFile, getPullsRepoFiles, getPullsRepoFile, getPullsAvatar, getPullsMedia, getPullsMediaSizes, postPullsClose, postPullsReopen, postPullsMerge, postPullsOwner, getShips, getShipsLog, postShips, postShipsStop, postShipsNewer, postPullsLooked, getThreadPulls, postThreadPulls, postArtifactPins, getArtifacts, getEvents, postMessagePicks, postMessageReply, postMessageResolve, postMessageTo, postMessageAck, postMessageSendNow, postMessageTakeBack, postMessageReask, postMessageHandoffUndo, postThreadRemoveAgent, postThreadRemoveAgentUndo, postMessageAction, getMessageRun, postMessageRun, postMessageSecret, postThreadDelete, getThreadDraft, postThreadDraft, postThreadDraftDelete, getThreadAttachments, getThreadDecisions, getAttachmentView, getAttachmentImage, getAttachmentVideo, getAttachmentAudio, getAttachmentDownload, getAttachmentMarkdownImage, getAttachmentLinkedPage, getMarkup, getMessageImage, getHtmlAsset, postAnnotations, postAnnotationRemove, getMessageGuide, postMessageGuideReviewed, postMessageGuideAnnotations, getMessageGuideFile, getMessageGuideReviewImage, getMessageGuideReviewMarkdownImage, getMessageGuidePackageChanges, postMessageGuideViewed, getThreadSteps, postMessageAnnotations, getThreadSessions, getThreadTaggable, postThreadMessage, getSessions, postMessages, getSearch, postProjectRead, postProjectUnread, postProjectResolve, getSkills, getSkillsContent, postUploadsReuse, postUploads, postMarkups, getUploadText, getUploadImage, getTidy, postTidy, getCombine, postCombine, postCombineCancel, postCombineUndo, postCombineHold, postLaunchStop, postLaunchRetry, postLaunchTrust, postLaunchDelete, postRexShow, getOpenInFileView, getOpenInFileRaw, getOpenInFileCode, getOpenInFile, postOpenInFileAttach, getLaunchFolders, getLaunchClone, getLaunchCloneCheck, getScheduled, getRoutine, postScheduled, postScheduledPreview, postRoutine, postRoutineOn, postRoutineOff, postRoutineRun, postRoutineStop, postRoutineDelete, postRoutineRestore, getCapabilities, postCapabilities, postPair, postRevoke, getAccounts, getAgentRead, getAgentFile, getAgentSearch, getAgentThreads, getTaggableAgents, postFarWake, postAgentReply, postFarDelivered, postLinkBack, postUnlink, postLinkThroughAsk, postLinkThroughOffer, postLinkThroughIntroduce, getUpdate, postUpdate]
+  public static let all: [DoorRoute] = [getHealth, getThreads, getProjects, getWhatsNew, getWhatsNewReleases, getWhatsNewImage, getProjectPicture, getThreadsArchived, getThread, postThreadSeen, postGridSeen, postThreadRead, postThreadUnread, postThreadMarkUnread, postThreadSnooze, postThreadPin, postPins, postThreadPriority, postAgentFaces, postThreadTags, postInitiative, postProjectTags, postTagColours, getCards, getCard, getCardRefs, postCard, postCardsSeen, postCardsDroppedSeen, getPulls, getReviewsBranches, getPullsRisk, getPullsPull, getPullsDetails, getPullsDiff, getPullsFile, getPullsRepoFiles, getPullsRepoFile, getPullsAvatar, getPullsMedia, getPullsMediaSizes, postPullsClose, postPullsReopen, postPullsMerge, postPullsOwner, getShips, getShipsLog, postShips, postShipsStop, postShipsNewer, postPullsLooked, getThreadPulls, postThreadPulls, postArtifactPins, getArtifacts, getEvents, postMessagePicks, postMessageReply, postMessageResolve, postMessageTo, postMessageAck, postMessageSendNow, postMessageTakeBack, postMessageReask, postMessageReopen, postMessageHandoffUndo, postThreadRemoveAgent, postThreadRemoveAgentUndo, postMessageAction, getMessageRun, postMessageRun, postMessageSecret, postThreadDelete, getThreadDraft, postThreadDraft, postThreadDraftDelete, getThreadAttachments, getThreadDecisions, getAttachmentView, getAttachmentImage, getAttachmentVideo, getAttachmentAudio, getAttachmentDownload, getAttachmentMarkdownImage, getAttachmentLinkedPage, getMarkup, getMessageImage, getHtmlAsset, postAnnotations, postAnnotationRemove, getMessageGuide, postMessageGuideReviewed, postMessageGuideAnnotations, getMessageGuideFile, getMessageGuideReviewImage, getMessageGuideReviewMarkdownImage, getMessageGuidePackageChanges, postMessageGuideViewed, getThreadSteps, postMessageAnnotations, getThreadSessions, getThreadTaggable, postThreadMessage, getSessions, postMessages, getSearch, postProjectRead, postProjectUnread, postProjectResolve, getSkills, getSkillsContent, postUploadsReuse, postUploads, postMarkups, getUploadText, getUploadImage, getTidy, postTidy, getCombine, postCombine, postCombineCancel, postCombineUndo, postCombineHold, postLaunchStop, postLaunchRetry, postLaunchTrust, postLaunchDelete, postRexShow, getOpenInFileView, getOpenInFileRaw, getOpenInFileCode, getOpenInFile, postOpenInFileAttach, getLaunchFolders, getLaunchClone, getLaunchCloneCheck, getScheduled, getRoutine, postScheduled, postScheduledPreview, postRoutine, postRoutineOn, postRoutineOff, postRoutineRun, postRoutineStop, postRoutineDelete, postRoutineRestore, getCapabilities, postCapabilities, postPair, postRevoke, getAccounts, getAgentRead, getAgentFile, getAgentSearch, getAgentThreads, getTaggableAgents, postFarWake, postAgentReply, postFarDelivered, postLinkBack, postUnlink, postLinkThroughAsk, postLinkThroughOffer, postLinkThroughIntroduce, getUpdate, postUpdate]
 }
 
 /// The door's routes as requests: `Door.postThreadSeen(thread: id)`.
@@ -13124,6 +13217,7 @@ public enum Door {
   public static func postMessageSendNow(message: MessageID) -> DoorRequest { DoorRequest(route: DoorRoutes.postMessageSendNow, path: "messages/\(segment(message.rawValue))/send-now") }
   public static func postMessageTakeBack(message: MessageID) -> DoorRequest { DoorRequest(route: DoorRoutes.postMessageTakeBack, path: "messages/\(segment(message.rawValue))/take-back") }
   public static func postMessageReask(message: MessageID) -> DoorRequest { DoorRequest(route: DoorRoutes.postMessageReask, path: "messages/\(segment(message.rawValue))/reask") }
+  public static func postMessageReopen(message: MessageID) -> DoorRequest { DoorRequest(route: DoorRoutes.postMessageReopen, path: "messages/\(segment(message.rawValue))/reopen") }
   public static func postMessageHandoffUndo(message: MessageID) -> DoorRequest { DoorRequest(route: DoorRoutes.postMessageHandoffUndo, path: "messages/\(segment(message.rawValue))/handoff/undo") }
   public static func postThreadRemoveAgent(thread: ThreadID) -> DoorRequest { DoorRequest(route: DoorRoutes.postThreadRemoveAgent, path: "threads/\(segment(thread.rawValue))/remove-agent") }
   public static func postThreadRemoveAgentUndo(thread: ThreadID) -> DoorRequest { DoorRequest(route: DoorRoutes.postThreadRemoveAgentUndo, path: "threads/\(segment(thread.rawValue))/remove-agent/undo") }
