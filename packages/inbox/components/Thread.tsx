@@ -537,7 +537,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     debugNote('send_press', { thread: id });
     return () => debugNote('send_clear', { thread: id });
   }, [sending]);
-  const [error, setError] = useState<string | null>(null);
+  const { error, setError } = replyComposer.handle.wired; // the line under the box: the controller's, cleared as files come in
   /** A failed Send's own words, behind Details on its line (decision D3), for as long as that line is the error shown. */
   const [errorDetails, setErrorDetails] = useState<{ for: string; text: string } | null>(null);
   /** The error line names a machine that needs an update (a Delete it refused): its Update follows the words. */
@@ -4544,7 +4544,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     recipients: rcptBox,
     voice: { handle: voice, parts: replyVoiceParts },
     skills: { onOpen: openSkillsFromBox, noneHint: noSkillsHint, filter: skillFilter, commands: replyCommands },
-    errorLine: lineError && errorLine, draftNotSaved: stampTooLong || stampFailed, change: changeReply,
+    errorLine: lineError && errorLine, change: changeReply,
     // ⌘/Ctrl+Enter: with the choice open, the shortcut goes to it; else Send (the thread's own Send key never sees it).
     chord: () => {
       if (route.open) setRoute((current) => ({ ...current, focus: current.focus + 1 }));
@@ -4555,12 +4555,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       return false;
     },
     escape: () => (route.open ? routeBack : setAside)(),
-    close: setAside, discard: discardReply, added: () => setError(null),
-    attach: (list) => {
-      if (phone) replyFiles.attach(list);
-      else replyFiles.add(list);
-      setError(null);
-    },
+    close: setAside, discard: discardReply,
+    attach: (list) => (phone ? replyFiles.attach(list) : replyFiles.add(list)),
   });
   return (
     <CommentPictures thread={thread.thread_id} records={records}>

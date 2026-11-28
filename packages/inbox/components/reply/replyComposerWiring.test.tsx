@@ -89,7 +89,6 @@ function WiredBox({ store, uploader, seen, out }: { store: ReplyDraftStore; uplo
         sendingWords: false,
         slots: { placeholder: 'Write to harbor', replyToNames: 'harbor' },
         errorLine: null,
-        draftNotSaved: false,
         change: (text) => {
           seen.calls.push(`change ${text}`);
           composer.handle.replyText.set(text);
@@ -110,7 +109,6 @@ function WiredBox({ store, uploader, seen, out }: { store: ReplyDraftStore; uplo
           seen.calls.push(`attach ${list.length}`);
           composer.handle.wired!.files.add(list);
         },
-        added: () => seen.calls.push('added'),
       }),
     },
   };

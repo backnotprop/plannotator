@@ -21,7 +21,8 @@
  *   it, exactly one `discard(threadId, { base: result.draft })`, and none when `result.draft` is null. The box is free
  *   at once; its next words are saved once that discard answers (a rejected one shows in `handle.draft.clearFailed`).
  * - "Not saved" (a save that did not land, words longer than a draft holds) is drawn only when the host gives a
- *   `draftStamp` slot to draw it in; with none, nothing shows (`handle.draft.failed` / `tooLong` still say so).
+ *   `draftStamp` slot to draw it in; with none, nothing shows (`handle.draft.failed` / `tooLong` still say so). It is
+ *   never drawn while a conflict is raised, and a save that did not land shows it only while the box holds words or files.
  * - A save refused as `draft_conflict` never replaces or drops the box's words: saving pauses, `onDraftConflict` gets
  *   the store's own error and its newer draft, and `handle.draft.keepMine()` / `takeTheirs()` resume.
  *   `handle.draft.reload()` is how a host says the draft changed elsewhere: an untouched box takes the newer words,
