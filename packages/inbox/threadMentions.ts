@@ -136,6 +136,17 @@ export interface ThreadMentionsOptions {
    * Mention in reply after a reload. Default true (the Inbox). False: kept in the page only.
    */
   keepInBrowser?: boolean;
+  /**
+   * How a pasted or dropped thread id becomes a mention. Absent (the Inbox): from what the window holds, else one
+   * read of the thread (data/threadMentionRefs.ts). A host gives its own, or one that knows none (nothing is read).
+   */
+  refs?: MentionRefs;
+}
+
+/** A host's way to name a thread as a mention: from what it holds (`known`), or by asking (`resolve`). Null: no thread. */
+export interface MentionRefs {
+  known(id: string): MentionRef | null;
+  resolve(id: string): Promise<MentionRef | null>;
 }
 
 /**
@@ -143,7 +154,7 @@ export interface ThreadMentionsOptions {
  * last written in, keyed by thread id. The Inbox has one (`inboxThreadMentions`, the names below); a host makes one
  * per box, so two boxes on the same thread share nothing.
  */
-export function createThreadMentions({ keepInBrowser = true }: ThreadMentionsOptions = {}) {
+export function createThreadMentions({ keepInBrowser = true, refs }: ThreadMentionsOptions = {}) {
 // ── The mentions of each reply ─────────────────────────────────────────────────────────────────────────────────────
 
 type Held = { text: string; mentions: readonly InboxReplyMention[] };
@@ -479,6 +490,7 @@ function mentionInReply(target: string, refs: readonly MentionRef[]): void {
 }
 
   return {
+    refs,
     subscribeReplyMentions,
     replyMentionsVersion,
     mentionsFor,
