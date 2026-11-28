@@ -14,8 +14,11 @@
  * - The reply arrives late, after the read back said it was not there: a read of the thread that shows it says it went
  *   and empties the box and its draft (only while the box holds the words sent; edited words stay, as a new reply);
  *   Send again before it arrives carries the same key, also after leaving the thread, after a Send again that did not
- *   go (refused, or stopped before its words), and after a reload (a day at most); the Inbox holds one reply. A read of
- *   the thread while Send again is on its way does not end that Send halfway.
+ *   go (refused, stopped before its words, or failed with its look up failing too), after a reload (a day at most, its
+ *   record back while another thread sends too), and after going to another thread during Send again's look for it
+ *   (nothing goes there); the Inbox holds one reply. A read of the thread while Send again is on its way does not end
+ *   that Send halfway. One that landed before a reload is seen as gone once its record is back: new words are a new
+ *   reply. Discard takes its words out of the browser, and a long one never pushes another thread's kept words out.
  * - A refusal (4xx) or a connection refused says "was not sent", and nothing watches for that reply.
  * - A draft save that never answers no longer holds the Send that waits for it.
  * - A conflict retry (another client saved the same answer, sendSameAnswers.ts) still goes, with the same key, and a
@@ -605,6 +608,198 @@ test.skipIf(!hasDom)('a read of the thread that shows the late reply while Send 
   const after = state(el);
   expect(after.words === null || after.words === '').toBe(true);
   expect(after.line).toBe(null);
+});
+
+/** The browser's copies of Sends given up (replyWordsKept.ts `keepLate`). */
+const lateCopies = () => Object.keys(localStorage).filter((key) => key.startsWith('plannotator-inbox-reply-kept:') && key.endsWith(':late'));
+
+test.skipIf(!hasDom)('a Send given up that landed before a reload is seen as gone once the new page takes its record back: no "may have gone", and new words go as a new reply', async () => {
+  replyMode = 'hang';
+  let el = await open();
+  await pressSend(el);
+  await until(() => state(el).line !== null, LIMIT * 6);
+  const first = replyPosts[0]!.key;
+  // It lands (its clear_draft empties the draft), then the page reloads: the thread is drawn with it before the record comes back.
+  landLate();
+  await reload();
+  el = await mount();
+  await settle(6);
+  expect(unconfirmed.has(THREAD)).toBe(false);
+  expect(lateCopies()).toEqual([]);
+  expect(liveText(el)).toContain('Your reply went.');
+  act(() => [...el.querySelectorAll<HTMLButtonElement>('.ib-pfoot button')].find((b) => b.textContent?.trim() === 'Reply')!.click());
+  await settle(2);
+  type(el, 'eu-west first');
+  await settle(2);
+  expect(state(el).line === EDITED_MAY).toBe(false);
+  // The same words again (a "continue" sent twice): a new reply, never taken for the one that went.
+  type(el, WORDS);
+  await settle(2);
+  replyMode = 'ok';
+  await readAgain();
+  expect(state(el).words).toBe(WORDS);
+  await pressSend(el);
+  await until(() => state(el).words === null || state(el).words === '', LIMIT * 6);
+  expect(replyPosts.length).toBe(2);
+  expect(replyPosts[1]!.key === first).toBe(false);
+  expect(stored.size).toBe(2);
+});
+
+const OTHER = 'msg_01M7SA0000000000000000009';
+const OTHER_ASKED = 'msg_01M7SA0000000000000000010';
+const OTHER_WORDS = 'Bill monthly.';
+const otherThread = (): InboxThread => ({
+  thread_id: OTHER,
+  project: PROJECT,
+  subject: 'Billing',
+  thread_name: null,
+  resolved_at: null,
+  messages: [
+    { ...agentMessage(THREAD, 'Billing is next.'), id: OTHER, thread_id: OTHER, subject: 'Billing' },
+    { ...agentMessage(ASKED, 'Monthly or yearly?'), id: OTHER_ASKED, thread_id: OTHER, reply_to: OTHER },
+  ],
+});
+const otherPane = () => (
+  <div className="pn-inbox">
+    <ThreadPane thread={otherThread()} sent={null} onQuestions={() => {}} onChanged={async () => {}} onClose={() => {}} file={null} onOpenFile={() => {}} onOpenGuide={() => {}} phone />
+  </div>
+);
+/** A second thread, with its own draft; its replies never answer (`otherPosts` counts them). */
+let otherPosts = 0;
+function withOther(): void {
+  const inner = globalThis.fetch;
+  otherPosts = 0;
+  const draft = { v: 1, thread_id: OTHER, body: OTHER_WORDS, created_at: '2026-11-27T10:05:00.000Z', updated_at: '2026-11-27T10:05:00.000Z' };
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const at = String(input);
+    if (at.includes(`/messages/${OTHER_ASKED}/reply`)) {
+      otherPosts += 1;
+      return silent(init);
+    }
+    if (at.endsWith(`/threads/${OTHER}`)) return Response.json({ serverSession: 's', thread: otherThread() });
+    if (at.includes(`/threads/${OTHER}/draft`)) return Response.json({ serverSession: 's', draft });
+    return inner(input, init);
+  }) as typeof fetch;
+}
+
+test.skipIf(!hasDom)('Send again whose person goes to another thread during its look for the first reply sends nothing there; back, Send carries the first key: one reply', async () => {
+  replyMode = 'hang';
+  const el = await open();
+  await pressSend(el);
+  await until(() => state(el).line !== null, LIMIT * 6);
+  const first = replyPosts[0]!.key;
+  withOther();
+  replyMode = 'ok';
+  let open_ = () => {};
+  threadGate = new Promise<void>((resolve) => (open_ = resolve));
+  const reads = threadReads;
+  await pressSend(el);
+  await until(() => threadReads > reads, LIMIT * 4);
+  act(() => root!.render(otherPane()));
+  await settle(2);
+  threadGate = null;
+  open_();
+  await until(() => replyPosts.length > 1, LIMIT * 2);
+  await settle(4);
+  // Nothing went for it while away, under the other thread's keys or any.
+  expect(replyPosts.length).toBe(1);
+  act(() => root!.render(pane(false)));
+  await settle(4);
+  expect(state(el).words).toBe(WORDS);
+  await pressSend(el);
+  await until(() => state(el).words === null || state(el).words === '', LIMIT * 6);
+  landLate();
+  expect(wordKeys()).toEqual([first, first]);
+  expect(stored.size).toBe(1);
+});
+
+test.skipIf(!hasDom)('a reload whose record comes back while another thread is sending: the next Send of this thread carries its key, so a late landing is one reply', async () => {
+  replyMode = 'hang';
+  let el = await open();
+  await pressSend(el);
+  await until(() => state(el).line !== null, LIMIT * 6);
+  const first = replyPosts[0]!.key;
+  const hung = hungBody;
+  await reload();
+  withOther();
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  act(() => {
+    root = createRoot(host!);
+    root.render(otherPane());
+  });
+  await settle();
+  el = host;
+  await pressSend(el);
+  await until(() => otherPosts === 1, LIMIT * 4);
+  // Back to the thread while the other thread's Send is on its way: its record comes back then.
+  act(() => root!.render(pane(false)));
+  await settle(4);
+  await until(() => sendErrors.has(OTHER), LIMIT * 8);
+  await settle(2);
+  replyMode = 'ok';
+  expect(state(el).words).toBe(WORDS);
+  await pressSend(el);
+  await until(() => state(el).words === null || state(el).words === '', LIMIT * 6);
+  hungBody = hung;
+  landLate();
+  expect(wordKeys()).toEqual([first, first]);
+  expect(stored.size).toBe(1);
+});
+
+test.skipIf(!hasDom)('Send again that fails on the network and cannot look its reply up keeps the first one watched, in the browser too: after leaving and coming back, one reply', async () => {
+  replyMode = 'hang';
+  let el = await open();
+  await pressSend(el);
+  await until(() => state(el).line !== null, LIMIT * 6);
+  const first = replyPosts[0]!.key;
+  // Send again: the look for the first reply answers (not there), its POST fails on the network, and the look after it fails too.
+  const inner = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).endsWith('/reply') && init?.method === 'POST') threadFails = true;
+    return inner(input, init);
+  }) as typeof fetch;
+  replyModes = ['refused'];
+  replyMode = 'ok';
+  await pressSend(el);
+  await until(() => threadFails && !busy(el) && state(el).line !== null, LIMIT * 6);
+  expect(!!unconfirmed.get(THREAD)?.late).toBe(true);
+  expect(lateCopies().length).toBe(1);
+  threadFails = false;
+  leave();
+  el = await open();
+  await pressSend(el);
+  await until(() => state(el).words === null || state(el).words === '', LIMIT * 6);
+  landLate();
+  expect(wordKeys()).toEqual([first, first, first]);
+  expect(stored.size).toBe(1);
+});
+
+test.skipIf(!hasDom)('Discard after a Send given up takes its words out of the browser; a late landing is still said to have gone', async () => {
+  replyMode = 'hang';
+  const el = await open();
+  await pressSend(el);
+  await until(() => state(el).line !== null, LIMIT * 6);
+  expect(lateCopies().length).toBe(1);
+  act(() => el.querySelector<HTMLButtonElement>('[data-draft-discard]')!.click());
+  await settle(4);
+  expect(lateCopies()).toEqual([]);
+  landLate();
+  await readAgain();
+  expect(liveText(el)).toContain('Your reply went.');
+  expect(stored.size).toBe(1);
+});
+
+test.skipIf(!hasDom)("a long reply's record given up never pushes another thread's kept words out of the browser", async () => {
+  const kept = await import('./replyWordsKept');
+  // Another thread's words whose save failed: this browser holds the only copy.
+  kept.keepWords('msg_kept_failed', { kind: 'failed', words: 'f'.repeat(90_000), base: null });
+  const long = 'l'.repeat(40_000);
+  kept.keepLate('msg_kept_late', long, { words: long, late: { contents: [['w', { value: long, answers: [] }]] } });
+  const keys = Object.keys(localStorage);
+  expect(keys.some((key) => key.endsWith(':msg_kept_failed'))).toBe(true);
+  kept.forgetWords('msg_kept_failed');
+  kept.forgetWords('msg_kept_late', ':late');
 });
 
 for (const [mode, line, reads] of [

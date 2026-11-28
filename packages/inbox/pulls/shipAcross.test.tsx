@@ -283,6 +283,44 @@ test.skipIf(!hasDom)("a linked computer's agent ships in a new thread on its com
   expect(calls.some((c) => c.url.startsWith('/api/inbox/ships') || c.url.startsWith('/api/inbox/messages'))).toBe(false);
 });
 
+test.skipIf(!hasDom)("a Ship whose new session's start got no answer in time sends the same start again on the next press: one thread, one agent", async () => {
+  const { setWriteIdleForTests } = await import('../apiWrite');
+  const lone: ShipTarget = { ...TARGET, threadId: null, agent: null };
+  const fresh = shipOptions(HERE, lone).options.find((o) => o.row.start && 'launch' in o.to)!;
+  expect(fresh).toBeTruthy();
+  stub({
+    'POST /api/inbox/pulls/owner': (call: Call) => (call.body?.validate_only ? { ok: true, owner: null } : { ok: true }),
+    'POST /api/inbox/ships': { ok: true, ship: ship({ thread_id: 'msg_new' }) },
+    'GET /api/inbox/ships': { ships: [], projects: {} },
+  });
+  const answered = globalThis.fetch;
+  let starts = 0;
+  // The first start lands on the Inbox but its answer never comes back (the phone changed networks); the second answers.
+  globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input) !== '/api/inbox/messages') return answered(input, init);
+    calls.push({ url: String(input), method: 'POST', body: JSON.parse(String(init!.body)) });
+    starts += 1;
+    if (starts > 1) return Promise.resolve(Response.json({ thread_id: 'msg_new', message: {}, replayed: true }));
+    return new Promise<Response>((_, reject) => init!.signal!.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))));
+  }) as typeof fetch;
+  setWriteIdleForTests(20);
+  try {
+    await act(async () => {
+      await expect(shipPull(lone, fresh)).rejects.toThrow('no answer');
+    });
+    await act(async () => {
+      expect(await shipPull(lone, fresh)).toBe('msg_new');
+    });
+  } finally {
+    setWriteIdleForTests(null);
+  }
+  const startsSent = calls.filter((c) => c.url === '/api/inbox/messages');
+  expect(startsSent).toHaveLength(2);
+  expect(startsSent[0]!.body).toMatchObject({ to: fresh.to });
+  expect(startsSent[1]!.body!.idempotency_key).toBe(startsSent[0]!.body!.idempotency_key);
+  expect(startsSent[1]!.body!.body).toBe(startsSent[0]!.body!.body);
+});
+
 const THREAD_VIEW = { thread_id: THREAD, subject: 'Send a receipt after checkout', project: { id: 'prj_fern', name: 'fern-api' }, messages: [{ id: THREAD, questions: [] }], pull_keys: [KEY] } as unknown as InboxThread;
 const LOG = [
   { at: ago(60_000), by: 'agent', kind: 'step', text: 'Pushed a fix', sha: 'a3f9c21' },

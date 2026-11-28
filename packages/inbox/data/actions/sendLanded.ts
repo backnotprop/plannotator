@@ -84,10 +84,11 @@ function sendOf(kept: unknown): UnconfirmedSend | null {
 
 /**
  * The thread opens: `apply` gets the keys of a Send given up there (its `late`), or null. With none in this page, one a
- * page now gone kept (a reload, a tab the browser ended) comes back, under a day old, while `still()` (the same thread
- * open, no Send started): it is the record again, and `apply` gets its keys.
+ * page now gone kept (a reload, a tab the browser ended) comes back, under a day old: it is the record again, and
+ * `restored()` says so (the thread, drawn before it came back, is looked at for its reply again). `apply` gets its
+ * keys while `still()` (the same thread open, no Send started); else the next Send of that thread takes them.
  */
-export function lateKeysOf(threadId: string, still: () => boolean, apply: (late: UnconfirmedSend['late'] | null) => void): void {
+export function lateKeysOf(threadId: string, still: () => boolean, apply: (late: UnconfirmedSend['late'] | null) => void, restored: () => void = () => {}): void {
   const here = unconfirmed.get(threadId);
   apply(here?.late ?? null);
   if (here) return;
@@ -98,8 +99,23 @@ export function lateKeysOf(threadId: string, still: () => boolean, apply: (late:
     if (!send || Date.now() - send.at > LATE_KEPT_MS || unconfirmed.has(threadId)) return;
     unconfirmed.set(threadId, send);
     if (still()) apply(send.late ?? null);
+    restored();
   });
 }
+
+/** The thread's record when the thread as drawn holds its reply (it went), else null. */
+export function landedRecord(thread: { thread_id: string; messages: readonly { author: { kind: string }; idempotency_key?: string | null }[] }): UnconfirmedSend | null {
+  const earlier = unconfirmed.get(thread.thread_id);
+  return earlier && thread.messages.some((m) => m.author.kind === 'person' && m.idempotency_key === earlier.key) ? earlier : null;
+}
+
+/** The thread is left: its record goes, unless it was given up with no answer (`late`: it may still land). */
+export function forgetUnlessLate(threadId: string): void {
+  if (!unconfirmed.get(threadId)?.late) unconfirmed.delete(threadId);
+}
+
+/** The words of a Send given up leave the browser (its draft was discarded); the page's record stays, to say if it went. */
+export const forgetLateCopy = (threadId: string): void => forgetWords(threadId, ':late');
 
 export const REPLY_LANDED_MS = 10_000;
 

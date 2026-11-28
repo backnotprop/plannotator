@@ -11,8 +11,8 @@
  * every few seconds and as it hides or shows, and removes it as it goes for good: another page's words are taken back
  * only once its heartbeat is gone or older than KEPT_ALIVE_MS.
  *
- * Kept at most 14 days, at most 20 entries and 200 KB in all (the oldest go first); a full or blocked storage keeps
- * nothing (the page still has the words). The words are never logged.
+ * Kept at most 14 days, at most 20 entries and 200 KB in all (the oldest go first, a Send's record before any words);
+ * a full or blocked storage keeps nothing (the page still has the words). The words are never logged.
  *
  * A Send given up with no answer (sendLanded.ts `late`) keeps its record here too, in its own slot (`keepLate`): a
  * reload before Send again still sends that reply under its keys, never a second one.
@@ -188,7 +188,9 @@ function trim(storage: Storage): void {
     remove(storage, key);
     return false;
   });
-  kept.sort((a, b) => a.entry!.at - b.entry!.at);
+  // A Send's record (`late`) goes before any words: it is a copy of what its page holds, while the words kept here may
+  // be the only copy there is (a failed save's), so a long reply's record never pushes another thread's words out.
+  kept.sort((a, b) => Number(b.entry!.kind === 'late') - Number(a.entry!.kind === 'late') || a.entry!.at - b.entry!.at);
   let total = kept.reduce((sum, { size }) => sum + size, 0);
   for (let count = kept.length; count > 0 && (count > MAX_ENTRIES || total > MAX_TOTAL); count -= 1) {
     const oldest = kept[kept.length - count]!;
