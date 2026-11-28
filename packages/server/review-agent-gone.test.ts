@@ -83,6 +83,44 @@ async function openStream(url: string) {
 }
 
 describe("Send when the agent is gone (Bun)", () => {
+  test("a recoverable host resumes before accepting feedback; a failed resume keeps the draft", async () => {
+    let presence: "gone" | "here" = "gone";
+    let recover = false;
+    const server = await startReviewServer({
+      rawPatch: patch(), gitRef: "HEAD", htmlContent: MINIMAL_HTML,
+      agentPresence: () => presence,
+      reviveAgent: async () => { if (recover) presence = "here"; },
+    });
+    try {
+      await saveDraft(server.url);
+      expect((await send(server.url)).status).toBe(410);
+      expect((await (await fetch(`${server.url}/api/draft`)).json()).codeAnnotations).toEqual(DRAFT_COMMENTS);
+      recover = true;
+      expect((await send(server.url)).status).toBe(200);
+      expect(await server.waitForDecision()).toMatchObject({ feedback: "Fix a.ts" });
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("two Sends while a host resumes start one wake and take only one decision", async () => {
+    let presence: "gone" | "here" = "gone";
+    let wakes = 0;
+    const server = await startReviewServer({
+      rawPatch: patch(), gitRef: "HEAD", htmlContent: MINIMAL_HTML,
+      agentPresence: () => presence,
+      reviveAgent: async () => { wakes++; await Bun.sleep(50); presence = "here"; },
+    });
+    try {
+      const replies = await Promise.all([send(server.url), send(server.url)]);
+      expect(wakes).toBe(1);
+      expect(replies.map((reply) => reply.status).sort()).toEqual([200, 409]);
+      expect(await server.waitForDecision()).toMatchObject({ feedback: "Fix a.ts" });
+    } finally {
+      server.stop();
+    }
+  });
+
   test("is refused with agent_gone; the draft stays, nothing is archived, nothing is decided", async () => {
     const server = await startReviewServer({ rawPatch: patch(), gitRef: "HEAD", htmlContent: MINIMAL_HTML, project: "demo", agentPresence: () => "gone" });
     let decided = false;

@@ -456,6 +456,7 @@ export async function startReviewServer(options: {
 	 * draft, unarchived. Absent: every decision is taken as before.
 	 */
 	agentPresence?: () => AgentPresence;
+	reviveAgent?: () => Promise<void>;
 }): Promise<ReviewServerResult> {
 	// The daily ping (server/daily-ping.ts): in the background, never awaited.
 	schedulePiDailyPing("review");
@@ -1969,6 +1970,7 @@ export async function startReviewServer(options: {
 	const pasteApiUrl =
 		(options.pasteApiUrl ?? process.env.PLANNOTATOR_PASTE_URL) || undefined;
 	let reviewDecided = false;
+	let agentRevival: Promise<void> | undefined;
 	let resolveDecision!: (result: {
 		approved: boolean;
 		feedback: string;
@@ -4259,7 +4261,16 @@ export async function startReviewServer(options: {
 					return;
 				}
 				// Nobody left to receive it: keep the draft, archive nothing.
-				const refusal = agentRefusal(body, options.agentPresence);
+				let refusal = agentRefusal(body, options.agentPresence);
+				if (refusal?.body.code === "agent_gone" && options.reviveAgent) {
+					agentRevival ??= Promise.resolve().then(() => options.reviveAgent!()).catch(() => {}).finally(() => { agentRevival = undefined; });
+					await agentRevival;
+					if (reviewDecided) {
+						reviewAlreadyDecided(res);
+						return;
+					}
+					refusal = agentRefusal(body, options.agentPresence);
+				}
 				if (refusal) {
 					json(res, refusal.body, refusal.status);
 					return;

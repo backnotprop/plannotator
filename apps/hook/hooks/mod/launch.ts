@@ -92,7 +92,10 @@ export const LAUNCH_SCRIPT = [
   '      n=0',
   '      for a in "$dir" "$@"; do export "PLANNOTATOR_SCOPE_ARG_$n=$a"; n=$((n + 1)); done',
   '      export PLANNOTATOR_SCOPE_ARGC=$n',
-  `      exec systemd-run --user --scope --quiet --collect -- /bin/sh -c '${SCOPED_WORKER}' plannotator-scope`,
+  `      set -- systemd-run --user --scope --quiet --collect -- /bin/sh -c '${SCOPED_WORKER}' plannotator-scope`,
+  // T3 also terminates Claude's process group, independently of its systemd scope.
+  '      if command -v setsid >/dev/null 2>&1; then set -- setsid --wait "$@"; fi',
+  '      exec "$@"',
   '    ) && exit 0',
   '    { [ -e "$dir/scope-started" ] || [ ! -e "$dir/stdin" ]; } && exit 0',
   '  fi',

@@ -46,7 +46,8 @@ import { runInboxRowsCommand } from "./inbox-rows-command";
 import { runInboxIconCommand } from "./inbox-icon-command";
 import { ANNOTATION_HIGHLIGHT_CSS, BRIDGE_SCRIPT, LIVE_BRIDGE_BOOTSTRAP } from "@plannotator/ui/components/html-viewer/bridge-script";
 import { spawn } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, openSync, rmSync, statSync, utimesSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync, utimesSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
@@ -115,6 +116,42 @@ const DETACHED_ENV = "PLANNOTATOR_INBOX_DETACHED";
 const START_TIMEOUT_MS = 20_000;
 const RETURN_WAIT_MAX_MS = 5 * 60_000;
 
+// Keep the detached Inbox out of an agent's systemd scope as well as its process group.
+const INBOX_SCOPE_WORKER = [
+  ': > "$PLANNOTATOR_INBOX_SCOPE_MARKER" || exit 1',
+  'command=$PLANNOTATOR_INBOX_SCOPE_COMMAND; script=$PLANNOTATOR_INBOX_SCOPE_SCRIPT; tail=$PLANNOTATOR_INBOX_SCOPE_TAILSCALE',
+  'unset PLANNOTATOR_INBOX_SCOPE_MARKER PLANNOTATOR_INBOX_SCOPE_COMMAND PLANNOTATOR_INBOX_SCOPE_SCRIPT PLANNOTATOR_INBOX_SCOPE_TAILSCALE',
+  'set -- inbox --no-open',
+  'if [ "$tail" = 1 ]; then set -- "$@" --tailscale; fi',
+  'if [ -n "$script" ]; then set -- "$script" "$@"; fi',
+  'exec "$command" "$@"',
+].join("\n");
+
+const INBOX_SCOPE_LAUNCH = [
+  'marker=$PLANNOTATOR_INBOX_SCOPE_MARKER',
+  `systemd-run --user --scope --quiet --collect -- /bin/sh -c '${INBOX_SCOPE_WORKER}' inbox-scope &`,
+  'runner=$!',
+  'while kill -0 "$runner" 2>/dev/null; do',
+  '  if [ -e "$marker" ]; then rm -f "$marker"; exit 0; fi',
+  '  sleep 0.05',
+  'done',
+  'wait "$runner"',
+  'if [ -e "$marker" ]; then rm -f "$marker"; exit 0; fi',
+  'unset PLANNOTATOR_INBOX_SCOPE_MARKER PLANNOTATOR_INBOX_SCOPE_COMMAND PLANNOTATOR_INBOX_SCOPE_SCRIPT PLANNOTATOR_INBOX_SCOPE_TAILSCALE',
+  'exec "$@"',
+].join("\n");
+
+function inboxNeedsOwnScope(): boolean {
+  if (process.platform !== "linux") return false;
+  try {
+    const lines = readFileSync("/proc/self/cgroup", "utf8").split("\n");
+    const line = lines.find((s) => s.startsWith("0::") || s.includes(":name=systemd:"));
+    return !!line && !/^session-.*\.scope$/.test(line.slice(line.lastIndexOf("/") + 1));
+  } catch {
+    return false;
+  }
+}
+
 /**
  * The argv that runs this same CLI: the compiled binary alone, or bun plus the
  * entry script. Exported for `plannotator inbox --help`, whose agent guide
@@ -132,7 +169,16 @@ function spawnDetachedInbox(dataDir: string, tailscale: boolean): number | undef
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const log = openSync(join(dir, INBOX_LOG_FILE), "a", 0o600);
   const [command, ...rest] = selfCommand();
-  const child = spawn(command!, [...rest, "inbox", "--no-open", ...(tailscale ? ["--tailscale"] : [])], {
+  const args = [...rest, "inbox", "--no-open", ...(tailscale ? ["--tailscale"] : [])];
+  const env = detachedInboxEnv(process.env, dataDir);
+  const scoped = inboxNeedsOwnScope();
+  if (scoped) {
+    env.PLANNOTATOR_INBOX_SCOPE_MARKER = join(dir, `.scope-started-${randomUUID()}`);
+    env.PLANNOTATOR_INBOX_SCOPE_COMMAND = command;
+    env.PLANNOTATOR_INBOX_SCOPE_SCRIPT = rest[0] ?? "";
+    env.PLANNOTATOR_INBOX_SCOPE_TAILSCALE = tailscale ? "1" : "0";
+  }
+  const child = spawn(scoped ? "/bin/sh" : command!, scoped ? ["-c", INBOX_SCOPE_LAUNCH, "inbox-launch", command!, ...args] : args, {
     detached: true,
     // Never the starter's folder: a long-lived process would hold the agent's
     // project as its working directory (on Windows that blocks deleting or
@@ -140,7 +186,7 @@ function spawnDetachedInbox(dataDir: string, tailscale: boolean): number | undef
     cwd: dir,
     windowsHide: true,
     stdio: ["ignore", log, log],
-    env: detachedInboxEnv(process.env, dataDir),
+    env,
   });
   child.unref();
   closeSync(log);

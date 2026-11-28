@@ -129,6 +129,54 @@ async function waitDead(pid: number): Promise<void> {
 }
 
 describe("plannotator inbox --background", () => {
+  test.skipIf(process.platform !== "linux" || !Bun.which("systemd-run") || !Bun.which("systemctl") || Bun.spawnSync(["systemd-run", "--user", "--scope", "--quiet", "--collect", "--", "true"], { stdout: "ignore", stderr: "ignore" }).exitCode !== 0)("Inbox opened inside an agent scope survives that scope stopping", async () => {
+    const box = sandbox();
+    const unit = `plannotator-inbox-test-${process.pid}-${crypto.randomUUID()}`;
+    const parent = Bun.spawn(["systemd-run", "--user", "--scope", "--quiet", "--unit", unit, "--", "/bin/sh", "-c", '"$@"; sleep 60', "agent", process.execPath, "run", entry, "inbox", "--open"], {
+      cwd: box.root, env: { ...box.env, XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR, DBUS_SESSION_BUS_ADDRESS: process.env.DBUS_SESSION_BUS_ADDRESS }, stdin: "ignore", stdout: "ignore", stderr: "pipe",
+    });
+    try {
+      let registry = readInboxRegistry(box.dataDir);
+      const deadline = Date.now() + 20_000;
+      while ((!registry || (await inboxStatus(box.dataDir)).state !== "running") && Date.now() < deadline) {
+        if (parent.exitCode !== null) throw new Error(`agent scope exited: ${await new Response(parent.stderr).text()}`);
+        await Bun.sleep(50);
+        registry = readInboxRegistry(box.dataDir);
+      }
+      expect(registry).not.toBeNull();
+      track(box);
+      expect(Bun.spawnSync(["systemctl", "--user", "stop", `${unit}.scope`], { stdout: "ignore", stderr: "ignore" }).exitCode).toBe(0);
+      expect((await inboxStatus(box.dataDir)).state).toBe("running");
+    } finally {
+      Bun.spawnSync(["systemctl", "--user", "stop", `${unit}.scope`], { stdout: "ignore", stderr: "ignore" });
+      parent.kill();
+      await parent.exited;
+    }
+  }, 40_000);
+
+  test.skipIf(process.platform !== "linux" || !Bun.which("systemd-run") || !Bun.which("systemctl") || Bun.spawnSync(["systemd-run", "--user", "--scope", "--quiet", "--collect", "--", "true"], { stdout: "ignore", stderr: "ignore" }).exitCode !== 0)("a failed scoped start falls back to the ordinary Inbox", async () => {
+    const box = sandbox();
+    const bin = join(box.root, "fail-systemd");
+    mkdirSync(bin);
+    writeFileSync(join(bin, "systemd-run"), '#!/bin/sh\necho attempted > "$PLANNOTATOR_DATA_DIR-attempted"\nexit 1\n');
+    chmodSync(join(bin, "systemd-run"), 0o755);
+    const unit = `plannotator-inbox-test-${process.pid}-${crypto.randomUUID()}`;
+    const parent = Bun.spawn([Bun.which("systemd-run")!, "--user", "--scope", "--quiet", "--unit", unit, "--", "/bin/sh", "-c", '"$@"; sleep 60', "agent", process.execPath, "run", entry, "inbox", "--open"], {
+      cwd: box.root, env: { ...box.env, PATH: `${bin}:${box.env.PATH}`, XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR, DBUS_SESSION_BUS_ADDRESS: process.env.DBUS_SESSION_BUS_ADDRESS }, stdin: "ignore", stdout: "ignore", stderr: "pipe",
+    });
+    try {
+      const deadline = Date.now() + 20_000;
+      while ((await inboxStatus(box.dataDir)).state !== "running" && Date.now() < deadline) await Bun.sleep(50);
+      track(box);
+      expect(existsSync(`${box.dataDir}-attempted`)).toBe(true);
+      expect((await inboxStatus(box.dataDir)).state).toBe("running");
+    } finally {
+      Bun.spawnSync(["systemctl", "--user", "stop", `${unit}.scope`], { stdout: "ignore", stderr: "ignore" });
+      parent.kill();
+      await parent.exited;
+    }
+  }, 40_000);
+
   test("starts a detached, loopback-only Inbox without a browser and without a sessions/ entry", async () => {
     const box = sandbox();
     const first = await background(box);

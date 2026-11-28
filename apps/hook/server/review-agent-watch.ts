@@ -38,6 +38,7 @@
 import { readFileSync, writeSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
+import { isT3ThreadId } from "../../../packages/core/inbox-t3";
 import type { AgentPresence } from "@plannotator/shared/review-agent-gone";
 import { AGENT_GONE_CLI_LINE } from "@plannotator/shared/review-agent-gone-words";
 import { takeHostResultPath } from "./host-result";
@@ -171,6 +172,7 @@ export function modLeaseAgentWatch(options: {
   readLease: () => string | null;
   now: () => number;
   pidAlive: (pid: number) => boolean;
+  requireLivePid?: boolean;
 }): AgentWatch {
   let lastLookAt: number | null = null;
   let lastStamp: number | null = null;
@@ -202,7 +204,7 @@ export function modLeaseAgentWatch(options: {
     presence: () => {
       const seen = look();
       if (!seen || !holderGone(seen.lease)) return "here";
-      return !seen.lease.owner || seen.stillFor >= MOD_LEASE_STALE_MS ? "gone" : "here";
+      return options.requireLivePid || !seen.lease.owner || seen.stillFor >= MOD_LEASE_STALE_MS ? "gone" : "here";
     },
     // The page and the end: not renewed for the whole grace, and the holder is
     // gone. Not latched: a resume takes the lease again, and the agent is back.
@@ -238,6 +240,7 @@ export function reviewAgentWatch(input: {
   dataDir: string;
   now?: () => number;
   probeReader?: ReaderProbe;
+  requireLivePid?: boolean;
 }): AgentWatch | null {
   if (input.hostResultFile) {
     if (!isClaudeCodeModLaunch(input.hostResultFile, input.dataDir)) return null;
@@ -252,6 +255,7 @@ export function reviewAgentWatch(input: {
       },
       now: input.now ?? Date.now,
       pidAlive: processExists,
+      requireLivePid: input.requireLivePid,
     });
   }
   if (!watchesParent({ hostResultFile: false, stdoutPiped: input.stdoutPiped, startPpid: input.startPpid })) return null;
@@ -273,6 +277,7 @@ export function cliReviewAgentWatch(): AgentWatch | null {
     startPpid: process.ppid,
     platform: process.platform,
     dataDir: getPlannotatorDataDir(),
+    requireLivePid: process.env.CLAUDE_CODE_ENTRYPOINT === "t3-code" && isT3ThreadId(process.env.T3CODE_THREAD_ID),
   });
   // The probe must see EPIPE as an error, not die of SIGPIPE.
   if (watch?.kind === "parent") process.on("SIGPIPE", () => {});
