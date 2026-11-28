@@ -337,9 +337,9 @@ describe.skipIf(!hasDom)('a text highlight whose text leaves the page', () => {
     expect(holds(record.targets[0], first)).toBe(false);
   });
 
-  // Guards the capped quote: a selection longer than MAX_SELECTION_TEXT is stored cut to it, so a two-node
-  // highlight that long still comes back when its nodes do (the stored quote only has to start its words).
-  test('a long two-node highlight with a capped quote comes back with its nodes', () => {
+  // Guards the capped quote: a selection longer than MAX_SELECTION_TEXT is stored cut to it, so the stored
+  // words cannot confirm where a two-node highlight ends. It stays unanchored even when its nodes return.
+  test('a long two-node highlight with a capped quote stays unanchored when its nodes return', () => {
     const long = 'word '.repeat(Math.ceil(MAX_QUOTE / 5) + 10);
     document.body.innerHTML = '<div id="l"><p id="r0"></p><p id="r1">Tail words.</p></div>';
     const list = byId('l');
@@ -360,10 +360,8 @@ describe.skipIf(!hasDom)('a text highlight whose text leaves the page', () => {
     liveInsert(list, p0, null, [range]);
     liveInsert(list, p1, null, [range]);
     pass(record, b);
-    const back = record.targets[0]!.range!;
-    expect(back.startContainer).toBe(first);
-    expect(back.endContainer).toBe(last);
-    expect(back.endOffset).toBe(4);
+    expect(first.isConnected && last.isConnected).toBe(true);
+    expect(record.targets[0]!.range).toBeNull();
   });
 
   // Guards the bound: a lost highlight lets go of the detached nodes after LOST_PLACE_KEEP_MS (and then stays

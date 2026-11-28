@@ -2399,7 +2399,9 @@ ${SANDBOX_SHIM_SCRIPT}
     var words = String(rangeText).replace(/\\s+/g, '');
     var quoted = String(quote || '').replace(/\\s+/g, '');
     if (!quoted) return false;
-    return String(quote).length >= MAX_SELECTION_TEXT - 1 ? words.indexOf(quoted) === 0 : words === quoted;
+    // A quote at the cap was cut short, so it cannot confirm where the highlight ends: refuse.
+    if (String(quote).length >= MAX_SELECTION_TEXT - 1) return false;
+    return words === quoted;
   }
 
   function rangeCollapsed(range) {
