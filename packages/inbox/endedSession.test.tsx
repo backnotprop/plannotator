@@ -1206,6 +1206,56 @@ test.skipIf(!hasDom)('picked: the pill reads "to New Claude Code session", and S
   expect(replies()[0]!.body.to).toEqual({ launch: { agent: 'claude-code', project_id: PROJECT.id, model: 'opus' } });
 });
 
+// A reply that starts a session on a connection that died without a word (a phone between networks): Send still ends,
+// at the start's longer limit, and Send again is the same reply under the same key, which the Inbox answers again and
+// starts nothing (inbox-reply-launch.ts `prepare`: a key it holds starts no launch). The failure this catches: Send
+// held for good (every other thread saying a reply is still sending), or a second agent started for one reply.
+test.skipIf(!hasDom)('picked, the start\'s POST never answers: Send ends with the line that it may not have gone, and Send again posts the same key, so no second session starts', async () => {
+  const { setWriteIdleForTests } = await import('./apiWrite');
+  const { sendErrors, unconfirmed } = await import('./data/actions/sendLanded');
+  setWriteIdleForTests(40);
+  sessions = { sessions: [], asker: { session: 'ses_asker', live: false } };
+  launchBlock = CAN_START;
+  const thread = threadOf(asking());
+  const base = globalThis.fetch;
+  let hang = true;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = String(input);
+    // The read back by key: the thread as the Inbox holds it (the hung reply not in it).
+    if (!init?.method && path.endsWith(`/threads/${M1}`)) return Response.json({ serverSession: 's', thread });
+    if (path.endsWith('/reply') && hang) {
+      posted.push({ path, body: JSON.parse(String(init!.body)) });
+      return new Promise<Response>((_, reject) => init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true }));
+    }
+    return base(input, init);
+  }) as typeof fetch;
+  try {
+    const el = await render(thread);
+    await writeReply(el);
+    act(() => pill(el)!.click());
+    pickOnly(el, 'new:claude-code');
+    await settle();
+    act(() => button(el, 'Send').click());
+    const line = () => el.querySelector('.ib-pfoot .ib-error[role="alert"]')?.textContent ?? '';
+    for (let i = 0; i < 100 && !line().includes('may not have gone'); i++) await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(line()).toContain('The reply may not have gone.');
+    expect(replies()).toHaveLength(1);
+    // Now the Inbox answers: it holds the key, so it answers that reply again (`replayed`) and starts nothing.
+    hang = false;
+    replyAnswer = () => Response.json({ reply: {}, questions: [], replayed: true });
+    act(() => button(el, 'Send').click());
+    for (let i = 0; i < 100 && replies().length < 2; i++) await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
+    await settle();
+    expect(replies()).toHaveLength(2);
+    expect(replies()[1]!.body.to).toEqual({ launch: { agent: 'claude-code', project_id: PROJECT.id, model: 'opus' } });
+    expect(replies()[1]!.body.idempotency_key).toBe(replies()[0]!.body.idempotency_key as string);
+  } finally {
+    setWriteIdleForTests(null);
+    unconfirmed.clear();
+    sendErrors.clear();
+  }
+});
+
 test.skipIf(!hasDom)('the asking agent cannot be started there: the first agent that can; none can, or starting is off: no row, and Send saves at once as before', async () => {
   sessions = { sessions: [], asker: { session: 'ses_asker', live: false } };
   launchBlock = { ...CAN_START, agents: [{ agent: 'pi', name: 'Pi' }] };

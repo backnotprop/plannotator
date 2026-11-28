@@ -20,6 +20,7 @@ import { shipsOf, startShip, useShipTakers, type ShipTo } from '../data/ships';
 import { useComposeSessions } from '../compose/useComposeSessions';
 import { useMachineLaunches } from '../compose/useMachineLaunches';
 import { pullThreadDefault, pullThreadOptions, type PullThreadOption } from './threadTo';
+import { REVIEW_KEY_REUSE_MS } from '../prs/reviewStarts';
 
 /** What a row's Ship is about: one open pull request, and the review thread it ships in, if it has one. */
 export interface ShipTarget {
@@ -128,6 +129,15 @@ export function shipProjectsOf(local: Readonly<Record<string, string[]>>) {
 const whyOf = (cause: unknown, fallback: string) => (cause instanceof Error && cause.message ? cause.message : fallback);
 
 /**
+ * The new thread's start of a Ship that did not come back (no answer in time, the network gone), by computer, PR and
+ * agent, in memory while the window is open: a press again sends that exact start (its key, body and name), so the
+ * Inbox answers the thread it started and never starts a second thread or agent. Forgotten once it started, or was
+ * refused or held and cancelled (nothing started: a press again is a new start), and once `REVIEW_KEY_REUSE_MS` old
+ * (as Start review thread's key): a Ship pressed much later is a new one.
+ */
+const shipStarts = new Map<string, { key: string; body: string; name: string; at: number }>();
+
+/**
  * Ship it with `option`: in the review's thread when the agent is on that thread's computer, else in a new thread on
  * the agent's computer. Answers the thread it ships in. `machineName`: the agent's computer's name, for its errors.
  */
@@ -154,21 +164,28 @@ export async function shipPull(target: ShipTarget, option: ShipOption, machineNa
     return owner;
   }
   const one = { ...target.stack, layers: [target.pull] };
+  const series = `${there ?? ''}\u0000${target.pull.key}\u0000${JSON.stringify(option.to)}`;
+  const kept = shipStarts.get(series);
+  const start = kept && Date.now() - kept.at < REVIEW_KEY_REUSE_MS ? kept : { key: newUuid(), body: shipMessage(target.pull), name: pullHandoffThreadName(one, null), at: Date.now() };
+  shipStarts.set(series, start);
   let thread: Awaited<ReturnType<typeof inboxApi.startThread>>;
   try {
     thread = await inboxApi.startThread(
       {
         to: option.to,
-        body: shipMessage(target.pull),
-        idempotency_key: newUuid(),
-        thread_name: pullHandoffThreadName(one, null),
+        body: start.body,
+        idempotency_key: start.key,
+        thread_name: start.name,
         thread_name_auto: true,
         thread_name_numbered: true,
       },
       there,
     );
   } catch (cause) {
-    if (!(cause instanceof InboxHeldError)) throw cause;
+    if (!(cause instanceof InboxHeldError)) {
+      if (cause instanceof InboxApiError && cause.status >= 400 && cause.status < 500) shipStarts.delete(series);
+      throw cause;
+    }
     // Never held: a ship that starts days later, when nobody is looking, is not what was pressed.
     const name = cause.machine?.name ?? machineName ?? 'The other computer';
     try {
@@ -176,8 +193,10 @@ export async function shipPull(target: ShipTarget, option: ShipOption, machineNa
     } catch (late) {
       throw new Error(whyOf(late, `${name} took it late.`));
     }
+    shipStarts.delete(series);
     throw new Error(`${name} cannot be reached now.`);
   }
+  shipStarts.delete(series);
   if (tie) await inboxApi.pullOwner(keys, thread.thread_id, 'thread', there).catch(() => {});
   await startShip({ key: target.pull.key, thread_id: thread.thread_id, started: true, ...('session' in to ? { to } : {}) }, there);
   return thread.thread_id;
