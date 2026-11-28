@@ -52,4 +52,4 @@ export function composeInboxAnsweredReopenedBody(question: Pick<InboxQuestionRec
 }
 
 export const INBOX_ANSWERED_IN_REPLY_DESCRIPTION =
-  'Your own open questions in this thread (read_thread state open or picked) that the person answered in their reply\'s words instead of on the card: [{"question": "<message id>/<key>"}], with "reply": its message id when it is not their newest reply, and "quote": an exact part of it when it is long. The card shows their words as the answer, and they can reopen it. Send with reply_to into the thread.';
+  'Your own open questions in this thread (read_thread state open or picked) that the person answered in their reply\'s words instead of on the card: [{"question": "<message id>/<key>", "quote": "<the exact part of their reply that answers it>"}]; add "reply": its message id when it is not their newest reply. The card shows their words as the answer, and they can reopen it. Send with reply_to into the thread.';
