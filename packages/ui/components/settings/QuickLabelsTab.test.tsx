@@ -27,6 +27,7 @@ const dropdownModule = hasDom ? await import('../QuickLabelDropdown') : null;
 const viewerModule = hasDom ? await import('../Viewer') : null;
 const parserModule = hasDom ? await import('../../utils/parser') : null;
 const labelsModule = hasDom ? await import('../../utils/quickLabels') : null;
+const configModule = hasDom ? await import('../../config') : null;
 const storageModule = hasDom ? await import('../../utils/storage') : null;
 
 let root: Root | null = null;
@@ -48,12 +49,17 @@ beforeEach(() => {
     setItem: (key, value) => { items.set(key, value); },
     removeItem: (key) => { items.delete(key); },
   });
+  // The labels live in the configStore singleton: keep its writes off the
+  // network and clear the previous test's list from memory.
+  configModule!.configStore.setServerSync(() => {});
+  labelsModule!.resetQuickLabels();
 });
 
 afterEach(async () => {
   await unmount();
   if (hasDom) {
     storageModule!.resetStorageBackend();
+    configModule!.configStore.resetServerSync();
     document.body.replaceChildren();
     window.getSelection()?.removeAllRanges();
   }

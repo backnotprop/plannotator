@@ -41,6 +41,15 @@ export interface CCLabelConfig {
   blocking: boolean;
 }
 
+/** Single Quick Label entry stored in config.json (mirrors QuickLabel in packages/ui) */
+export interface QuickLabelConfig {
+  id: string;
+  emoji: string;
+  text: string;
+  color: string;
+  tip?: string;
+}
+
 export type PromptSectionOverrides = Record<string, string | undefined>;
 
 export type PromptRuntime =
@@ -191,6 +200,8 @@ export interface PlannotatorConfig {
   conventionalComments?: boolean;
   /** null = explicitly cleared (use defaults), undefined = not set */
   conventionalLabels?: CCLabelConfig[] | null;
+  /** null = explicitly cleared (use defaults), undefined = not set */
+  quickLabels?: QuickLabelConfig[] | null;
   /**
    * Where the annotate-mode Agent TUI docks: "left" (the historic default),
    * "right", or "hidden" to keep it out of the layout until the user opens it
@@ -1859,6 +1870,7 @@ export function getServerConfig(
   gitUser?: string;
   conventionalComments?: boolean;
   conventionalLabels?: CCLabelConfig[] | null;
+  quickLabels?: QuickLabelConfig[] | null;
   agentTerminalSide?: PlannotatorConfig["agentTerminalSide"];
   agentTerminalDefaultAgent?: string;
   agentSwitch?: AgentSwitchConfigValue;
@@ -1899,6 +1911,7 @@ export function getServerConfig(
     gitUser: gitUser ?? undefined,
     ...(cfg.conventionalComments !== undefined && { conventionalComments: cfg.conventionalComments }),
     ...(cfg.conventionalLabels !== undefined && { conventionalLabels: cfg.conventionalLabels }),
+    ...(cfg.quickLabels !== undefined && { quickLabels: cfg.quickLabels }),
     ...(isAgentTerminalSide(cfg.agentTerminalSide) && { agentTerminalSide: cfg.agentTerminalSide }),
     ...(typeof cfg.agentTerminalDefaultAgent === "string" &&
       cfg.agentTerminalDefaultAgent !== "" && {

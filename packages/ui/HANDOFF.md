@@ -2220,7 +2220,9 @@ blur). The tab now lives in `components/settings/QuickLabelsTab` and
 
 **The persisted shape is unchanged.** Labels are still saved as
 `QuickLabel[]` under `plannotator-quick-labels` through the storage backend,
-with the same fields; a reorder is just a different array order and an emoji
+with the same fields (since then the list is the `quickLabels` registry
+setting, so the same array is also sent to config.json's `quickLabels`
+through the server sync); a reorder is just a different array order and an emoji
 edit a different `emoji` value. Rows get a stable identity for the editing
 session only (it is never written, so an older reader sees nothing new and the
 cookie does not grow). `QuickLabel.id` keeps its old meaning (derived from the
