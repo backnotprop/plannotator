@@ -2385,9 +2385,9 @@ ${result.text}`);
           const state = stateOf(host);
           // Not available last time: look again (the person may have just installed or updated it).
           let ok = await available(host, state.lastAvailable !== null && !state.lastAvailable.ok);
-          // Its plugin off for the machine but maybe on in a project's own settings: offered when one of the projects
-          // turns it on (Send checks the folder picked). A project on another drive is never read here.
-          if (!ok.ok && ok.code === "plugin_off") {
+          // Its plugin or Inbox tool is off for the machine but maybe enabled in a project's own settings: offered when
+          // one of the projects turns it on (Send checks the folder picked). A project on another drive is never read here.
+          if (!ok.ok && (ok.code === "plugin_off" || ok.code === "tool_off")) {
             const local = projects.filter((p) => p.exists && !outsideHome(options.homeDir, p.root)).map((p) => p.root);
             if (local.length > 0) ok = await availableIn(host, local);
           }
