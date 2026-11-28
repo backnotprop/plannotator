@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import type { InboxMessage } from '@plannotator/core/inbox-types';
+import type { InboxMessage, InboxQuestionRecord } from '@plannotator/core/inbox-types';
+import { inboxOtherStillOpenLine, inboxStillOpenLine } from '@plannotator/core/inbox-questions';
 import { LiveComposer } from './LiveComposer';
 import { LiveThreadCard } from './LiveThreadCard';
+import { LiveThreadsTab } from './LiveThreadsTab';
 import { placeThreads, type LiveAgent } from './model';
 import type { LiveReviewActions } from './useLiveReview';
 
@@ -163,5 +165,73 @@ describe.skipIf(!hasDom)('who wrote each message', () => {
       return svg ? (svg.getAttribute('data-icon') ?? 'brand') : null;
     };
     expect(['c1', 'a1', 'a2'].map(glyph)).toEqual(['reply', 'brand', 'code']);
+  });
+});
+
+// The still-open sentence in each form the Inbox writes, from the Inbox's own composers: 1 or 2 open, none answered,
+// some answered earlier, and (with answers sent) the others still open.
+const openQ = { answer: null, revision: 0, sent_revision: 0, superseded_by: null, set_aside: false } as unknown as InboxQuestionRecord;
+const sentQ = { answer: { kind: 'choice', value: 'a' }, revision: 1, sent_revision: 1, superseded_by: null, set_aside: false } as unknown as InboxQuestionRecord;
+const STILL_OPEN_FORMS = [
+  inboxStillOpenLine([openQ]),
+  inboxStillOpenLine([openQ, openQ]),
+  inboxStillOpenLine([sentQ, openQ]),
+  inboxStillOpenLine([sentQ, openQ, openQ]),
+];
+const OTHER_OPEN_FORMS = [inboxOtherStillOpenLine([openQ]), inboxOtherStillOpenLine([openQ, openQ])];
+
+describe.skipIf(!hasDom)("a person's reply while an agent's question is open", () => {
+  const asker = { kind: 'agent', host: 'pi', session: 's', name: null } as never;
+  const threadWith = (sentence: string) => [
+    message({ id: 'c1', reply_to: 'ask', body: `Use a RangeError.\n\n${sentence}`, review_anchor: anchor }),
+    message({ id: 'a1', reply_to: 'c1', body: 'Keep both checks?', author: asker, created_at: '2026-11-14T05:01:00.000Z' }),
+    message({ id: 'p1', reply_to: 'a1', body: `Keep both.\n\n${sentence}`, created_at: '2026-11-14T05:02:00.000Z' }),
+  ];
+  const bodyOf = (el: HTMLElement, id: string) => el.querySelector(`[data-live-message="${id}"] [data-live-body]`)?.textContent?.trim();
+
+  test("shows the person's words and never the Inbox's sentence for the agent, in each of its forms; the agent's message as written", async () => {
+    expect(new Set(STILL_OPEN_FORMS).size).toBe(4);
+    for (const sentence of STILL_OPEN_FORMS) {
+      const messages = threadWith(sentence);
+      const [thread] = placeThreads(messages, []);
+      const el = await render(<LiveThreadCard thread={thread!} messages={messages} actions={actionsRef()} />);
+      expect(bodyOf(el, 'c1')).toBe('Use a RangeError.');
+      expect(bodyOf(el, 'p1')).toBe('Keep both.');
+      expect(bodyOf(el, 'a1')).toBe('Keep both checks?');
+      expect(el.textContent).not.toContain(sentence);
+      await act(async () => root?.unmount());
+      root = null;
+      host?.remove();
+    }
+  });
+
+  test("the resolved thread's line and the Threads tab's row show the comment's words only", async () => {
+    const sentence = STILL_OPEN_FORMS[0]!;
+    const messages = threadWith(sentence).map((m) => (m.id === 'c1' ? { ...m, review_resolved: { at } } : m));
+    const [thread] = placeThreads(messages, []);
+    const card = await render(<LiveThreadCard thread={thread!} messages={messages} actions={actionsRef()} />);
+    expect(card.querySelector('[data-live-thread][data-resolved]')?.textContent).toContain('Use a RangeError.');
+    expect(card.textContent).not.toContain(sentence);
+    await act(async () => root?.unmount());
+    host?.remove();
+    const tab = await render(<LiveThreadsTab placed={[thread!]} unsent={[]} order={[]} focused={null} onStep={() => {}} threadUrl={null} pr={null} actions={actionsRef()} />);
+    expect(tab.querySelector('[data-live-row="c1"]')?.textContent).toContain('Use a RangeError.');
+    expect(tab.textContent).not.toContain(sentence);
+  });
+
+  test('a reply that sent answers keeps them on the page; only the sentence about the other open questions goes', async () => {
+    for (const sentence of OTHER_OPEN_FORMS) {
+      const answered = `Answered 1 question.\n\nKeep both.\n\n${sentence}\n\n## Answers to your questions\n\n1 of 2 questions answered.\n\n### Q1. Keep both checks?\nAnswer: Yes`;
+      const messages = [...threadWith(STILL_OPEN_FORMS[0]!).slice(0, 2), message({ id: 'p1', reply_to: 'a1', body: answered, created_at: '2026-11-14T05:02:00.000Z' })];
+      const [thread] = placeThreads(messages, []);
+      const el = await render(<LiveThreadCard thread={thread!} messages={messages} actions={actionsRef()} />);
+      const reply = el.querySelector('[data-live-message="p1"] [data-live-body]')?.textContent ?? '';
+      expect(reply).toContain('Keep both.');
+      expect(reply).toContain('Answer: Yes');
+      expect(reply).not.toContain(sentence);
+      await act(async () => root?.unmount());
+      root = null;
+      host?.remove();
+    }
   });
 });

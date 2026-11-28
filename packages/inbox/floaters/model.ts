@@ -7,7 +7,8 @@
  * that decide it. Everything here is plain functions, so the rules are tested without a window.
  */
 import { useSyncExternalStore } from 'react';
-import type { InboxReplyDraft, InboxReplyDraftRow } from '@plannotator/core/inbox-types';
+import type { InboxMessageWire, InboxReplyDraft, InboxReplyDraftRow } from '@plannotator/core/inbox-types';
+import { replyWords } from '@plannotator/core/inbox-folding';
 
 const SET_KEY = 'plannotator-reply-floaters';
 
@@ -169,6 +170,11 @@ export function peekText(body: string): string {
     .replace(/[ \t]+/g, ' ')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
+}
+
+/** The peek of the thread's latest message: a person's reply in their words (`replyWords`), never the Inbox's sentence for the agent. */
+export function messagePeekText(message: Pick<InboxMessageWire, 'author' | 'body'>): string {
+  return peekText(message.author.kind === 'person' ? replyWords(message.body) : message.body);
 }
 
 /** What a draft is called: the thread's name when it has one, else its subject. */

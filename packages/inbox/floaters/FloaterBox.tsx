@@ -37,7 +37,7 @@ import { INBOX_REPLY_SKILL_AUDIENCE, inboxSkillFilter, inboxSkillsBlock, withSki
 import { activeHandoff, threadParticipants } from '../tags';
 import { errorText } from '../toastError';
 import { useVoiceSession } from '../voice';
-import { floaterName, onFloaterEvent, peekText } from './model';
+import { floaterName, messagePeekText, onFloaterEvent } from './model';
 import { quoteLineText, quoteToSend } from '../replyQuote';
 import { whenTime } from '../format';
 
@@ -339,7 +339,7 @@ export function FloaterBox({ row, phone, frame, takeFocus, onMinimize, onPutAway
   // A draft that quotes a message (approval "inbox-reply-quote"): the peek is that message, or the words quoted.
   const draftQuote = draft.draft?.quote ?? null;
   const quoted = draftQuote && thread ? thread.messages.find((m) => m.id === draftQuote.of) : undefined;
-  const peek = quoted ? quoteLineText(quoted, draftQuote?.words) : latest ? peekText(latest.body) : '';
+  const peek = quoted ? quoteLineText(quoted, draftQuote?.words) : latest ? messagePeekText(latest) : '';
   const questions = quoted ? 0 : (latest?.questions ?? []).filter((q) => q.state === 'open').length;
   const conflictId = `ib-rf-conflict-${threadId}`;
   const peekId = `ib-rf-peek-${threadId}`;

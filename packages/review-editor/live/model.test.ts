@@ -65,6 +65,13 @@ describe('comments not sent yet', () => {
     const placed = placeThreads([msg({ id: 'c', body: 'Use RangeError.', review_anchor: anchorOfComment(comment, files) })], files);
     expect(unsentComments([comment, other, general], placed)).toEqual([other]);
   });
+
+  test("a comment sent while an agent's question was open is not offered again: the Inbox's sentence for the agent after its words does not make it a new comment", () => {
+    const stillOpen = "No new answers in this reply; 1 question is still open. Don't re-ask it; the person will answer in the Inbox.";
+    const comment = { filePath: 'src/billing.ts', lineStart: 4, lineEnd: 4, side: 'new' as const, text: 'Use RangeError.' };
+    const placed = placeThreads([msg({ id: 'c', body: `Use RangeError.\n\n${stillOpen}`, review_anchor: anchorOfComment(comment, files) })], files);
+    expect(unsentComments([comment], placed)).toEqual([]);
+  });
 });
 
 describe('a pull request thread on the diff', () => {

@@ -1,7 +1,7 @@
 import { newSideLines, oldSideLines } from '@plannotator/core/line-anchor';
 import { reviewAnchorNow, reviewConversations, REVIEW_ANCHOR_CODE_LINES_MAX, type InboxReviewAnchor, type ReviewConversation, type ReviewThreadNow } from '@plannotator/core/review-threads';
 import type { InboxMessage } from '@plannotator/core/inbox-types';
-import { splitInboxReplyBody } from '@plannotator/core/inbox-questions';
+import { INBOX_STILL_OPEN_LINE, splitInboxReplyBody } from '@plannotator/core/inbox-questions';
 
 export type LiveMessage = InboxMessage;
 
@@ -152,7 +152,8 @@ export function threadLines(now: ReviewThreadNow): string {
 export function unsentComments<C extends CommentLike & { text?: string }>(comments: readonly C[], placed: readonly PlacedThread[]): C[] {
   const sent = new Set(placed.map(({ conversation }) => {
     const first = conversation.messages[0];
-    return JSON.stringify([conversation.anchor.file, conversation.anchor.side, conversation.anchor.line_start, conversation.anchor.line_end, first?.body.trim() ?? '']);
+    // The comment as the person wrote it: a sent one whose body carries the Inbox's still-open sentence is not unsent.
+    return JSON.stringify([conversation.anchor.file, conversation.anchor.side, conversation.anchor.line_start, conversation.anchor.line_end, first ? liveWords(first).trim() : '']);
   }));
   return comments.filter((c) => {
     if ((c.scope ?? 'line') === 'general' || !c.filePath || !c.text?.trim()) return false;
@@ -178,6 +179,17 @@ function liveWords(message: LiveMessage): string {
   if (message.author.kind !== 'person') return message.body;
   const parts = splitInboxReplyBody(message.body);
   return [parts.words, parts.rest].filter((part) => part !== '').join('\n\n');
+}
+
+/**
+ * What the live page shows for a message: a person's words without the Inbox's still-open sentence for the agent
+ * (`liveWords`, as the Inbox's thread view draws them). The thread view lists a reply's answers from the questions
+ * themselves; this page has no such list, so a reply that carried answers keeps its answers and only the sentence goes.
+ */
+export function liveShownText(message: LiveMessage): string {
+  if (message.author.kind !== 'person') return message.body;
+  if (!splitInboxReplyBody(message.body).answers) return liveWords(message);
+  return message.body.split('\n\n').filter((paragraph) => !INBOX_STILL_OPEN_LINE.test(paragraph)).join('\n\n');
 }
 
 export interface ForgeThreadComments {

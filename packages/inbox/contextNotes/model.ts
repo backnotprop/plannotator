@@ -22,6 +22,7 @@
 import { diffHunkLines, isLineRangeInPatch } from '@plannotator/core/diff-files';
 import type { GuideSnapshot } from '@plannotator/core/guide-format';
 import { inboxNoteBlocks, type InboxNoteSide } from '@plannotator/core/inbox-context-notes';
+import { replyWords } from '@plannotator/core/inbox-folding';
 import type { InboxPullRiskJudgment } from '@plannotator/core/inbox-types';
 import { anchorLines, shiftLines } from '@plannotator/core/line-anchor';
 import { agentName } from '../format';
@@ -208,7 +209,8 @@ export function threadNotes(input: {
         agent: input.agent(message),
         message: message.id,
         ...(message.created_at ? { at: message.created_at } : {}),
-        ...(asked ? { asked: firstWords(asked.body) } : {}),
+        // The person's words only: never the sentence the Inbox wrote after them for the agent.
+        ...(asked ? { asked: firstWords(replyWords(asked.body ?? '')) } : {}),
       };
       if (drawnOn === reviewId) {
         if (inDiff(files, block.file, block.side, block.lineStart, block.lineEnd)) out.push(base);

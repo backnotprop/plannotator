@@ -3,7 +3,7 @@ import type { CodeAnnotation } from '@plannotator/ui/types';
 import type { LiveReviewActions } from './useLiveReview';
 import { LiveComposer } from './LiveComposer';
 import type { PRReviewThread } from '@plannotator/shared/pr-types';
-import { agentLabel, authorName, threadLines, type PlacedThread } from './model';
+import { agentLabel, authorName, liveShownText, threadLines, type PlacedThread } from './model';
 import { prThreadPlace } from './PRThreadCard';
 import { LiveAuthorMark } from './LiveMark';
 
@@ -44,7 +44,7 @@ function ThreadRow({ thread, focused, posted, onOpen }: { thread: PlacedThread; 
           {state ? <span>· {state}</span> : null}
           {posted ? <span>· On the forge</span> : null}
         </span>
-        <span className={`line-clamp-2 text-[13px] leading-5 ${conversation.resolved ? 'text-muted-foreground' : 'text-foreground'}`}>{conversation.messages[0]!.body}</span>
+        <span className={`line-clamp-2 text-[13px] leading-5 ${conversation.resolved ? 'text-muted-foreground' : 'text-foreground'}`}>{liveShownText(conversation.messages[0]!)}</span>
         {conversation.messages.length > 1 ? (
           <span className="flex min-w-0 max-w-full items-center gap-1 text-[12px] text-muted-foreground">
             <span className="shrink-0 whitespace-nowrap">{conversation.messages.length - 1} {conversation.messages.length === 2 ? 'reply' : 'replies'}, last from</span>

@@ -6,7 +6,7 @@
  */
 import { expect, test } from 'bun:test';
 import type { InboxReplyDraftRow } from '@plannotator/core/inbox-types';
-import { FLOAT_MAX_AGE_MS, FLOAT_SETTLE_MS, floatingDrafts, floatsAfterVisit, staleFloats } from './model';
+import { FLOAT_MAX_AGE_MS, FLOAT_SETTLE_MS, floatingDrafts, floatsAfterVisit, messagePeekText, staleFloats } from './model';
 
 const AT = '2026-11-07T10:00:00.000Z';
 const LATER = '2026-11-07T10:05:00.000Z';
@@ -60,4 +60,11 @@ test('a draft stops floating once sent or discarded anywhere, or a day untouched
     { id: 'thr_edited', at: now - FLOAT_MAX_AGE_MS - 1 },
   ];
   expect(staleFloats(entries, rows, ['thr_open'], now).sort()).toEqual(['thr_old', 'thr_sent', 'thr_words_gone']);
+});
+
+test("the peek of a person's reply is their words, never the sentence the Inbox wrote after them for the agent; an agent's message as written", () => {
+  const stillOpen = "No new answers in this reply; 2 questions are still open. Don't re-ask them; the person will answer in the Inbox.";
+  expect(messagePeekText({ author: { kind: 'person' }, body: `Later today.\n\n${stillOpen}` } as never)).toBe('Later today.');
+  expect(messagePeekText({ author: { kind: 'person' }, body: stillOpen } as never)).toBe('');
+  expect(messagePeekText({ author: { kind: 'agent', host: 'pi', session: 's' }, body: 'Which rule wins?' } as never)).toBe('Which rule wins?');
 });

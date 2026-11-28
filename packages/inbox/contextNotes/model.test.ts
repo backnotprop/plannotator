@@ -33,6 +33,15 @@ describe('the thread agent’s `:::note` blocks', () => {
     ]);
   });
 
+  test("what the person asked is their words, never the sentence the Inbox wrote after them for the agent; with no words, nothing is quoted", () => {
+    const stillOpen = "No question answered yet; it is still open. Don't re-ask it; the person will answer in the Inbox.";
+    const note = 'Because.\n:::note a.ts#L2\nThe retry lives here.\n:::';
+    const withWords = [review('r1'), person('q1', `Why does this retry?\n\n${stillOpen}`), agent('a1', note, { reply_to: 'q1' })];
+    expect(notesOn(withWords, 'r1', ROUND_1)[0]?.asked).toBe('Why does this retry?');
+    const noWords = [review('r1'), person('q1', stillOpen), agent('a1', note, { reply_to: 'q1' })];
+    expect(notesOn(noWords, 'r1', ROUND_1)[0]?.asked).toBeUndefined();
+  });
+
   test('an Ask’s answer with no `:::note` block is never pinned, even when it answers lines', () => {
     const messages = [review('r1'), person('q1', 'a.ts lines 2–3: why this?'), agent('a1', 'Lines 2–3 of a.ts retry because the token can expire.', { reply_to: 'q1' })];
     expect(notesOn(messages, 'r1', ROUND_1)).toEqual([]);
