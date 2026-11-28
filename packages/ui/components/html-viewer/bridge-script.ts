@@ -2335,13 +2335,17 @@ ${SANDBOX_SHIM_SCRIPT}
   // alive, and the target stays unanchored.
   var LOST_PLACE_KEEP_MS = 300000;
 
-  function notePlace(target) {
+  // anchored: the record has an anchor; its place only marks that the
+  // highlight was in place (refreshRecordTargets then searches only inside
+  // the anchor element), so no nodes are kept for it.
+  function notePlace(target, anchored) {
     var place = target.place || (target.place = {
       startNode: null, startOffset: 0, startText: '', endNode: null, endOffset: 0, endText: '', lostSince: -1
     });
     place.lostSince = -1;
     place.startNode = null;
     place.endNode = null;
+    if (anchored) return;
     try {
       var range = target.range;
       var s = range.startContainer;
@@ -2358,7 +2362,7 @@ ${SANDBOX_SHIM_SCRIPT}
     } catch (ex) {}
   }
 
-  function rangeAtPlace(place) {
+  function rangeAtPlace(place, quote) {
     var now = monotonicNow();
     if (place.lostSince < 0) place.lostSince = now;
     if (now - place.lostSince > LOST_PLACE_KEEP_MS) {
@@ -2375,11 +2379,27 @@ ${SANDBOX_SHIM_SCRIPT}
       var range = document.createRange();
       range.setStart(s, place.startOffset);
       range.setEnd(e, place.endOffset);
+      // Nodes back in another order give an empty Range: not restored (and
+      // the lost timer keeps running, so the bound still drops them).
+      if (range.collapsed) return null;
+      // Two nodes can come back apart with other content between them: the
+      // Range must still cover exactly the quoted words.
+      if (s !== e && !sameWords(range.toString(), quote)) return null;
       place.lostSince = -1;
       return range;
     } catch (ex) {
       return null;
     }
+  }
+
+  // A selection's text and its Range's text differ in whitespace (block
+  // breaks, trimming), so both drop it. A quote capped at MAX_SELECTION_TEXT
+  // (capSelectionText) only has to start the Range's text.
+  function sameWords(rangeText, quote) {
+    var words = String(rangeText).replace(/\\s+/g, '');
+    var quoted = String(quote || '').replace(/\\s+/g, '');
+    if (!quoted) return false;
+    return String(quote).length >= MAX_SELECTION_TEXT - 1 ? words.indexOf(quoted) === 0 : words === quoted;
   }
 
   function rangeCollapsed(range) {
@@ -2392,9 +2412,9 @@ ${SANDBOX_SHIM_SCRIPT}
 
   // Re-resolve stale live targets from durable data. Element targets
   // re-acquire through their anchor; range targets re-run the text search
-  // (anchor-scoped first), except a highlight of a record without an anchor
-  // that was in place and got lost: that one comes back only by identity
-  // (rangeAtPlace). Unresolvable targets stay hidden — never guessed
+  // (anchor-scoped first), except a highlight that was in place and got
+  // lost: without an anchor it comes back only by identity (rangeAtPlace),
+  // with one only from inside the anchor element. Unresolvable targets stay hidden — never guessed
   // — and each failed search is gated by the generation of its last attempt
   // PLUS the wall-clock backoff and per-pass budget above, so they retry
   // only after the document could actually have changed, and never per
@@ -2416,18 +2436,20 @@ ${SANDBOX_SHIM_SCRIPT}
         if (target.place && target.range && !rangeCollapsed(target.range)) target.place = null;
         target.range = null;
         if (target.place && !anchored) {
-          target.range = rangeAtPlace(target.place);
+          target.range = rangeAtPlace(target.place, target.text);
         } else if (target.text) {
           if (!deadSearchAllowed(target)) continue;
           var scopeEl = record.params && record.params.anchor
             ? resolveAnchorElement(record.params.anchor)
             : null;
+          // An anchored highlight that was in place searches only inside its
+          // anchor element: never the whole document.
           target.range = (scopeEl && findTextRange(target.text, scopeEl))
-            || findTextRange(target.text, null);
+            || (target.place ? null : findTextRange(target.text, null));
           noteDeadSearchResult(target, !!target.range);
         }
-      } else if (!anchored) {
-        notePlace(target);
+      } else {
+        notePlace(target, anchored);
       }
     }
   }

@@ -41,6 +41,7 @@ const constant = (name: string): number => {
 };
 
 const KEEP_MS = constant('LOST_PLACE_KEEP_MS');
+const MAX_QUOTE = constant('MAX_SELECTION_TEXT');
 
 type Target = { kind: 'range'; range: Range | null; text: string; markerless: boolean; searchBackoffUntil?: number };
 type Record = { id: string; params: { anchor: { id: string } | null }; targets: Target[] };
@@ -53,6 +54,7 @@ function bridge() {
     'DEAD_SEARCH_BACKOFF_MS',
     'DEAD_SEARCH_BACKOFF_MAX_MS',
     'LOST_PLACE_KEEP_MS',
+    'MAX_SELECTION_TEXT',
     `var domGeneration = 1;
      var deadSearchBudget = Infinity;
      var deadSearchSkipped = false;
@@ -60,14 +62,14 @@ function bridge() {
      function monotonicNow() { return clock; }
      function isViewerOverlayNode() { return false; }
      function resolveAnchorElement(anchor) { return anchor ? document.getElementById(anchor.id) : null; }
-     ${['rangeAlive', 'findTextRange', 'notePlace', 'rangeAtPlace', 'rangeCollapsed', 'deadSearchAllowed', 'noteDeadSearchResult', 'refreshRecordTargets'].map(extractFunction).join('\n')}
+     ${['rangeAlive', 'findTextRange', 'notePlace', 'rangeAtPlace', 'sameWords', 'rangeCollapsed', 'deadSearchAllowed', 'noteDeadSearchResult', 'refreshRecordTargets'].map(extractFunction).join('\n')}
      return {
        rangeAlive: rangeAlive,
        refresh: function(record) { deadSearchBudget = Infinity; refreshRecordTargets(record); },
        pageChanged: function() { domGeneration += 1; },
        advance: function(ms) { clock += ms; },
      };`,
-  )(document, NodeFilter, constant('DEAD_SEARCH_BACKOFF_MS'), constant('DEAD_SEARCH_BACKOFF_MAX_MS'), KEEP_MS) as {
+  )(document, NodeFilter, constant('DEAD_SEARCH_BACKOFF_MS'), constant('DEAD_SEARCH_BACKOFF_MAX_MS'), KEEP_MS, MAX_QUOTE) as {
     rangeAlive: (range: Range | null) => boolean;
     refresh: (record: Record) => void;
     pageChanged: () => void;
@@ -251,24 +253,16 @@ describe.skipIf(!hasDom)('a text highlight whose text leaves the page', () => {
     }
   });
 
-  // Guards: a highlight of an annotation with an anchor keeps main's restore ladder when its Range collapses: the
-  // anchor-scoped text search runs (finding the word inside the anchored element, not the earlier "Revenue grew.");
-  // the identity rule does not pre-empt it.
-  test('an anchored annotation keeps the anchor-scoped search', () => {
-    document.body.innerHTML = '<p id="r0">Revenue grew.</p><div id="card"><p id="r1">Revenue fell.</p></div>';
-    const card = byId('card');
-    const range = document.createRange();
-    range.setStart(byId('r1').firstChild!, 0);
-    range.setEnd(byId('r1').firstChild!, 7);
-    const b = bridge();
-    const record: Record = {
-      id: 'anchored', params: { anchor: { id: 'card' } },
-      targets: [{ kind: 'range', range, text: 'Revenue', markerless: true }],
-    };
-    b.refresh(record);
-    expect(record.targets[0]!.range).toBe(range);
-    // The card re-renders its paragraph with different words around the quote.
+  // Guards: an anchored highlight that was in place and collapsed is searched for only inside its anchor element.
+  // Its row removed from the still-present anchor: unanchored, never on "Revenue grew." outside the anchor. A row
+  // with the quoted word added inside the anchor again: found there (the same search a reload runs first).
+  test('an anchored highlight, its row removed inside the anchor: unanchored, then found when the anchor has it again', () => {
+    const { card, range, record, b } = anchoredSetup();
     liveRemove(byId('r1'), [range]);
+    for (let i = 0; i < 3; i += 1) {
+      pass(record, b);
+      expect(record.targets[0]!.range).toBeNull();
+    }
     const fresh = document.createElement('p');
     fresh.id = 'r2';
     fresh.textContent = 'Revenue fell sharply.';
@@ -278,8 +272,20 @@ describe.skipIf(!hasDom)('a text highlight whose text leaves the page', () => {
     expect(record.targets[0]!.range!.toString()).toBe('Revenue');
   });
 
+  // Guards: an anchored highlight that was in place, with its anchor element itself removed, never falls back to
+  // the whole-document search (which would put it on "Revenue grew.").
+  test('an anchored highlight whose anchor element is removed: unanchored, never the other row', () => {
+    const { card, range, record, b } = anchoredSetup();
+    liveRemove(card, [range]);
+    for (let i = 0; i < 3; i += 1) {
+      pass(record, b);
+      expect(rowOf(record)).not.toBe('r0');
+      expect(record.targets[0]!.range).toBeNull();
+    }
+  });
+
   // Guards the reload / late-render path: a target that was never in place (a live restore's placeholder) still
-  // finds its text by the restore search, as on main.
+  // finds its text by the restore search, as on main, with or without an anchor.
   test('a target never in place still finds its text by the restore search', () => {
     document.body.innerHTML = '<p id="r0">Late rendered text.</p>';
     const b = bridge();
@@ -287,6 +293,77 @@ describe.skipIf(!hasDom)('a text highlight whose text leaves the page', () => {
     pass(record, b);
     expect(rowOf(record)).toBe('r0');
     expect(record.targets[0]!.range!.toString()).toBe('rendered');
+
+    const anchored: Record = { id: 'late2', params: { anchor: { id: 'missing' } }, targets: [{ kind: 'range', range: null, text: 'rendered', markerless: true }] };
+    pass(anchored, b);
+    expect(rowOf(anchored)).toBe('r0');
+  });
+
+  // Guards: two text nodes that come back apart, with other content between them, would give a Range over words
+  // the person did not select: not restored.
+  test('a two-node highlight whose nodes come back apart: unanchored', () => {
+    const { list, rows, range, record, b } = twoRowHighlight();
+    liveRemove(rows[0]!, [range]);
+    liveRemove(rows[1]!, [range]);
+    pass(record, b);
+    liveInsert(list, rows[0]!, null, [range]);
+    const between = document.createElement('p');
+    between.textContent = 'Inserted row.';
+    liveInsert(list, between, null, [range]);
+    liveInsert(list, rows[1]!, null, [range]);
+    for (let i = 0; i < 3; i += 1) {
+      pass(record, b);
+      expect(record.targets[0]!.range).toBeNull();
+      expect(reportedUnanchored(record, b)).toBe(true);
+    }
+  });
+
+  // Guards: two text nodes back in reversed order give an empty Range: not restored, and the lost timer keeps
+  // running, so the node references are still dropped after the bound.
+  test('a two-node highlight whose nodes come back reversed: unanchored, references dropped after the bound', () => {
+    const { list, rows, range, record, b } = twoRowHighlight();
+    const first = rows[0]!.firstChild as Text;
+    liveRemove(rows[0]!, [range]);
+    liveRemove(rows[1]!, [range]);
+    pass(record, b);
+    liveInsert(list, rows[1]!, null, [range]);
+    liveInsert(list, rows[0]!, null, [range]);
+    for (let i = 0; i < 3; i += 1) {
+      pass(record, b);
+      expect(record.targets[0]!.range).toBeNull();
+    }
+    b.advance(KEEP_MS + 1000);
+    pass(record, b);
+    expect(holds(record.targets[0], first)).toBe(false);
+  });
+
+  // Guards the capped quote: a selection longer than MAX_SELECTION_TEXT is stored cut to it, so a two-node
+  // highlight that long still comes back when its nodes do (the stored quote only has to start its words).
+  test('a long two-node highlight with a capped quote comes back with its nodes', () => {
+    const long = 'word '.repeat(Math.ceil(MAX_QUOTE / 5) + 10);
+    document.body.innerHTML = '<div id="l"><p id="r0"></p><p id="r1">Tail words.</p></div>';
+    const list = byId('l');
+    const p0 = byId('r0');
+    p0.textContent = long;
+    const first = p0.firstChild as Text;
+    const last = byId('r1').firstChild as Text;
+    const range = document.createRange();
+    range.setStart(first, 0);
+    range.setEnd(last, 4);
+    const b = bridge();
+    const record = makeRecord(range, range.toString().trim().slice(0, MAX_QUOTE));
+    b.refresh(record);
+    const p1 = byId('r1');
+    liveRemove(p0, [range]);
+    liveRemove(p1, [range]);
+    pass(record, b);
+    liveInsert(list, p0, null, [range]);
+    liveInsert(list, p1, null, [range]);
+    pass(record, b);
+    const back = record.targets[0]!.range!;
+    expect(back.startContainer).toBe(first);
+    expect(back.endContainer).toBe(last);
+    expect(back.endOffset).toBe(4);
   });
 
   // Guards the bound: a lost highlight lets go of the detached nodes after LOST_PLACE_KEEP_MS (and then stays
@@ -393,6 +470,36 @@ function setup(html: string, rowId: string, start: number, end: number, text: st
   b.refresh(record);
   expect(record.targets[0]!.range).toBe(range);
   return { list: byId(rowId).parentElement!, range, record, b };
+}
+
+/** "Revenue grew." outside, and an anchored card holding "Revenue fell." with a markerless highlight on "Revenue". */
+function anchoredSetup() {
+  document.body.innerHTML = '<p id="r0">Revenue grew.</p><div id="card"><p id="r1">Revenue fell.</p></div>';
+  const range = document.createRange();
+  range.setStart(byId('r1').firstChild!, 0);
+  range.setEnd(byId('r1').firstChild!, 7);
+  const b = bridge();
+  const record: Record = {
+    id: 'anchored', params: { anchor: { id: 'card' } },
+    targets: [{ kind: 'range', range, text: 'Revenue', markerless: true }],
+  };
+  b.refresh(record);
+  expect(record.targets[0]!.range).toBe(range);
+  return { card: byId('card'), range, record, b };
+}
+
+/** A highlight from "row." in the first row to "Beta" in the second (two text nodes), painted once. */
+function twoRowHighlight() {
+  document.body.innerHTML = '<div id="l"><p id="r0">Alpha row.</p><p id="r1">Beta row.</p><p id="r2">Gamma.</p></div>';
+  const rows = [byId('r0'), byId('r1')];
+  const range = document.createRange();
+  range.setStart(rows[0]!.firstChild!, 6);
+  range.setEnd(rows[1]!.firstChild!, 4);
+  const b = bridge();
+  const record = makeRecord(range, 'row.\n\nBeta');
+  b.refresh(record);
+  expect(record.targets[0]!.range).toBe(range);
+  return { list: byId('l'), rows, range, record, b };
 }
 
 /** A later reconcile pass after the page changed, past any failed search's backoff. */
