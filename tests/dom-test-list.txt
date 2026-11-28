@@ -106,6 +106,7 @@ packages/inbox/paneFailureKeepsReply.test.tsx
 packages/inbox/replyFootPhone.test.tsx
 packages/inbox/sendAlwaysEnds.test.tsx
 packages/inbox/replyDraftNeverLost.test.tsx
+packages/inbox/replyBoxSharedLines.test.tsx
 packages/inbox/farReplyDrafts.test.tsx
 packages/inbox/composeAutosave.test.tsx
 packages/inbox/issueRefs.test.tsx
