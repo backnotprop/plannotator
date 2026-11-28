@@ -33,7 +33,7 @@ import { changeNotice } from '../utils/changeNotice';
 import { FileCommentBanner } from './FileCommentBanner';
 import { DiffBottomBar } from './DiffBottomBar';
 import { OversizedFileNotice } from './OversizedFileNotice';
-import { isContentlessBinaryPatch, isImagePreviewCandidate, isOversizedReviewStubPatch } from '@plannotator/shared/diff-paths';
+import { isContentlessBinaryPatch, isImagePreviewCandidate, isOversizedReviewStubPatch, parseLfsPointerDiff } from '@plannotator/shared/diff-paths';
 import { ImageDiffPreview } from './ImageDiffPreview';
 import { ImageViewMenu } from './image-diff/ImageViewMenu';
 import { differencesSupported } from './image-diff/differences';
@@ -221,6 +221,7 @@ interface DiffViewerProps {
   /** Server advertised `imagePreviewSupported`: a hunkless image chunk renders
    *  as a Before/After preview instead of the binary notice. Absent = off. */
   imagePreviewAvailable?: boolean;
+  lfsImagePreviewAvailable?: boolean;
   /** Snapshot the image preview binds its requests to (set in PR mode too,
    *  where `reviewSnapshotId` is not). Falls back to `reviewSnapshotId`. */
   imageSnapshotId?: string;
@@ -352,6 +353,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   reviewBase,
   reviewSnapshotId,
   imagePreviewAvailable = false,
+  lfsImagePreviewAvailable = false,
   packageChangesAvailable = false,
   imageSnapshotId,
   contextExpansionAvailable = true,
@@ -1114,9 +1116,13 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   // A hunkless chunk for an image path previews the images instead (#1598);
   // the notices above stay its fallback.
   const isImagePreview = useMemo(
-    () => imagePreviewAvailable && isImagePreviewCandidate(patch, filePath, oldPath),
-    [imagePreviewAvailable, patch, filePath, oldPath],
+    () => imagePreviewAvailable && isImagePreviewCandidate(patch, filePath, oldPath, lfsImagePreviewAvailable),
+    [imagePreviewAvailable, patch, filePath, oldPath, lfsImagePreviewAvailable],
   );
+  const isLfsImage = isImagePreview && parseLfsPointerDiff(patch) !== null;
+  const previewKey = `${imageSnapshotId ?? reviewSnapshotId}:${filePath}`;
+  const [lfsPreview, setLfsPreview] = useState<{ key: string; shown: boolean } | null>(null);
+  const hideLfsSource = isLfsImage && (lfsPreview?.key !== previewKey || lfsPreview.shown);
   const svgViewChoice = useSvgView(filePath);
   const isSvgImage = imagePreviewAvailable && !isImagePreview && (isSvgPath(filePath) || isSvgPath(oldPath));
   const svgShown = isSvgImage && svgViewChoice === 'image';
@@ -1248,6 +1254,8 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
                   a card with no hunks to draw says why instead of reading as empty. */}
               {isImagePreview || svgShown ? (
                 <ImageDiffPreview
+                  key={previewKey}
+                  lfsSupported={lfsImagePreviewAvailable}
                   filePath={filePath}
                   patch={patch}
                   status={status ?? 'modified'}
@@ -1256,6 +1264,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
                   compact={compactTouchLayout}
                   fallback={isOversizedStub ? <OversizedFileNotice /> : isContentlessBinary ? <BinaryFileNotice /> : null}
                   tooLargeFallback={isOversizedStub ? <OversizedFileNotice /> : undefined}
+                  onPreviewChange={isLfsImage ? (shown) => setLfsPreview((previous) => previous?.key === previewKey && previous.shown === shown ? previous : { key: previewKey, shown }) : undefined}
                 />
               ) : (
                 <>
@@ -1283,7 +1292,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
                 agentFindingSources={agentFindingSources}
                 explainDisabled={isAILoading}
               />
-              <div ref={diffContentRef} data-diff-content="" hidden={svgShown || undefined}>
+              <div ref={diffContentRef} data-diff-content="" hidden={svgShown || hideLfsSource || undefined}>
                 <div ref={splitSurfaceRef} className="relative min-w-0" style={splitGridStyle}>
                   {isSplitLayout && diffOverflow !== 'wrap' && (
                     <div

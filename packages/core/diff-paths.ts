@@ -296,9 +296,44 @@ export function isImagePreviewCandidate(
   patch: string,
   path: string,
   oldPath?: string,
+  lfsSupported = false,
 ): boolean {
   if (!isReviewImagePath(path) && !isReviewImagePath(oldPath)) return false;
-  return !patch.split("\n").some((line) => line.startsWith("@@ "));
+  return !patch.split("\n").some((line) => line.startsWith("@@ ")) || (lfsSupported && parseLfsPointerDiff(patch) !== null);
+}
+
+export interface LfsPointer {
+  oid: string;
+  size: number;
+}
+
+export function parseLfsPointer(text: string): LfsPointer | null {
+  const match = /^version https:\/\/git-lfs\.github\.com\/spec\/v1\noid sha256:([a-fA-F0-9]{64})\nsize (0|[1-9][0-9]*)\n?$/.exec(text);
+  if (!match) return null;
+  const size = Number(match[2]);
+  return Number.isSafeInteger(size) ? { oid: match[1].toLowerCase(), size } : null;
+}
+
+/** Only a complete, single-hunk replacement proves both image identities. */
+export function parseLfsPointerDiff(patch: string): { old?: LfsPointer; new?: LfsPointer } | null {
+  const lines = patch.split("\n");
+  const hunks = lines.flatMap((line, index) => line.startsWith("@@ ") ? [index] : []);
+  if (hunks.length !== 1) return null;
+  const header = /^@@ -(0,0|1,3) \+(0,0|1,3) @@(?: .*)?$/.exec(lines[hunks[0]]);
+  if (!header || (header[1] === "0,0" && header[2] === "0,0")) return null;
+  const old: string[] = [];
+  const next: string[] = [];
+  for (const [index, line] of lines.slice(hunks[0] + 1).entries()) {
+    if (line === "" && index === lines.length - hunks[0] - 2) continue;
+    if (line === "\\ No newline at end of file") continue;
+    if (line[0] === " " || line[0] === "-") old.push(line.slice(1));
+    if (line[0] === " " || line[0] === "+") next.push(line.slice(1));
+    if (![" ", "-", "+"].includes(line[0])) return null;
+  }
+  const before = header[1] === "0,0" ? undefined : parseLfsPointer(old.join("\n"));
+  const after = header[2] === "0,0" ? undefined : parseLfsPointer(next.join("\n"));
+  if ((header[1] === "0,0" ? old.length !== 0 : !before) || (header[2] === "0,0" ? next.length !== 0 : !after)) return null;
+  return { ...(before ? { old: before } : {}), ...(after ? { new: after } : {}) };
 }
 
 export function parseDiffMetadataPathLines(lines: string[]): DiffPathPair {

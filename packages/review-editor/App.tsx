@@ -825,6 +825,7 @@ const ReviewApp: React.FC = () => {
   // bytes of changed images? Absent (old server, demo) reads as false, so no
   // preview renders and no /api/review-image request is ever issued.
   const [imagePreviewSupported, setImagePreviewSupported] = useState(false);
+  const [lfsImagePreviewSupported, setLfsImagePreviewSupported] = useState(false);
   // Markdown preview capability advert: the server can hand both sides of a
   // file in full (and serve a Markdown file's own images). Absent (old
   // server, demo) reads as false: no preview UI at all.
@@ -2868,6 +2869,7 @@ const ReviewApp: React.FC = () => {
         approvalNotesSupported?: boolean;
         serverSession?: string;
         imagePreviewSupported?: boolean;
+        lfsImagePreviewSupported?: boolean;
         markdownPreviewSupported?: boolean;
         repoFilesSupported?: boolean;
         diagramEngine?: unknown;
@@ -2957,6 +2959,7 @@ const ReviewApp: React.FC = () => {
         // Stale-tab guard: every decision echoes this server's nonce.
         adoptServerSession(data.serverSession);
         setImagePreviewSupported(data.imagePreviewSupported === true);
+        setLfsImagePreviewSupported(data.lfsImagePreviewSupported === true);
         setMarkdownPreviewSupported(data.markdownPreviewSupported === true);
         setRepoFilesSupported(data.repoFilesSupported === true);
         setDiagramEngine(parseDiagramEngineUrls(data.diagramEngine));
@@ -3725,6 +3728,7 @@ const ReviewApp: React.FC = () => {
     agentCwd?: string | null;
     approvalNotesSupported?: boolean;
     imagePreviewSupported?: boolean;
+    lfsImagePreviewSupported?: boolean;
     markdownPreviewSupported?: boolean;
     repoFilesSupported?: boolean;
     draftState?: CodeDraftTargetState;
@@ -3741,6 +3745,7 @@ const ReviewApp: React.FC = () => {
       setApprovalNotesSupported(readApprovalNotesAdvert(data.approvalNotesSupported));
     }
     if (data.imagePreviewSupported !== undefined) setImagePreviewSupported(data.imagePreviewSupported === true);
+    setLfsImagePreviewSupported(data.lfsImagePreviewSupported === true);
     if (data.markdownPreviewSupported !== undefined) setMarkdownPreviewSupported(data.markdownPreviewSupported === true);
     if (data.repoFilesSupported !== undefined) setRepoFilesSupported(data.repoFilesSupported === true);
     const nextFiles = parseDiffToFiles(data.rawPatch);
@@ -3855,6 +3860,7 @@ const ReviewApp: React.FC = () => {
         baseBehindRemote?: boolean;
         approvalNotesSupported?: boolean;
         imagePreviewSupported?: boolean;
+        lfsImagePreviewSupported?: boolean;
         markdownPreviewSupported?: boolean;
         repoFilesSupported?: boolean;
         superseded?: boolean;
@@ -3894,6 +3900,7 @@ const ReviewApp: React.FC = () => {
         setApprovalNotesSupported(readApprovalNotesAdvert(data.approvalNotesSupported));
       }
       if (data.imagePreviewSupported !== undefined) setImagePreviewSupported(data.imagePreviewSupported === true);
+      setLfsImagePreviewSupported(data.lfsImagePreviewSupported === true);
       if (data.markdownPreviewSupported !== undefined) setMarkdownPreviewSupported(data.markdownPreviewSupported === true);
       if (data.repoFilesSupported !== undefined) setRepoFilesSupported(data.repoFilesSupported === true);
 
@@ -4685,6 +4692,7 @@ const ReviewApp: React.FC = () => {
     canUseLiveWorkspaceActions,
     contextExpansionAvailable: !isStaticPatch,
     imagePreviewAvailable: imagePreviewSupported && !isStaticPatch,
+    lfsImagePreviewAvailable: lfsImagePreviewSupported && !isStaticPatch,
     snapshotId,
     markdownPreview,
     diagramEngine,
@@ -4829,7 +4837,7 @@ const ReviewApp: React.FC = () => {
   }), [
     files, filteredDiffFiles, matchesFileFilter, fileFilter.input, diffData?.rawPatch, activeFileIndex, guideOpen, isDiffPanelActive, effectiveDiffStyle, handleDiffStyleChange, isCompactTouchLayout, diffOverflow, diffIndicators,
     diffLineDiffType, diffShowLineNumbers, diffShowBackground,
-    diffExpandUnchanged, diffFontFamily, diffFontSize, activeDiffBase, committedBase, feedbackDiffContext, prReviewScopeLabel, prDiffScope, agentCwd, canUseLiveWorkspaceActions, isStaticPatch, imagePreviewSupported, snapshotId, markdownPreview, diagramEngine, semDiffClient, revealInAllChanges, semanticChanges, allFilesLineTarget, jumpTo, powerUp, rejectPowerUpLink, handleAddMarkdownPreviewComment, handleAskAIForMarkdownPreview,
+    diffExpandUnchanged, diffFontFamily, diffFontSize, activeDiffBase, committedBase, feedbackDiffContext, prReviewScopeLabel, prDiffScope, agentCwd, canUseLiveWorkspaceActions, isStaticPatch, imagePreviewSupported, lfsImagePreviewSupported, snapshotId, markdownPreview, diagramEngine, semDiffClient, revealInAllChanges, semanticChanges, allFilesLineTarget, jumpTo, powerUp, rejectPowerUpLink, handleAddMarkdownPreviewComment, handleAskAIForMarkdownPreview,
     diffAnnotations, externalAnnotations,
     visibleDescriptionAnnotations, selectedDescriptionAnnotationId, handleAddDescriptionAnnotation,
     handleSelectDescriptionAnnotation, handleDeleteDescriptionAnnotation, handleAskAIForDescription,

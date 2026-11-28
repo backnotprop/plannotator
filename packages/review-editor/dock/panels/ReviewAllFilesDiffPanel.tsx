@@ -90,6 +90,7 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
         ? ({ file, fallback, tooLargeFallback, onHeightChange }: Parameters<NonNullable<React.ComponentProps<typeof AllFilesCodeView>['renderImagePreview']>>[0]) => (
             <ImageDiffPreview
               key={`${snapshotId ?? ''}:${file.path}`}
+              lfsSupported={state.lfsImagePreviewAvailable}
               filePath={file.path}
               status={file.status}
               patch={file.patch}
@@ -102,7 +103,7 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
             />
           )
         : undefined,
-    [state.imagePreviewAvailable, snapshotId, compact],
+    [state.imagePreviewAvailable, state.lfsImagePreviewAvailable, snapshotId, compact],
   );
 
   // Package changes under each package.json and lockfile header, wherever
@@ -197,8 +198,8 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
   );
 
   const hasImages = useMemo(
-    () => imagesAvailable && state.files.some((file) => isImagePreviewCandidate(file.patch, file.path, file.oldPath) || isSvgPath(file.path)),
-    [imagesAvailable, state.files],
+    () => imagesAvailable && state.files.some((file) => isImagePreviewCandidate(file.patch, file.path, file.oldPath, state.lfsImagePreviewAvailable) || isSvgPath(file.path)),
+    [imagesAvailable, state.files, state.lfsImagePreviewAvailable],
   );
   const imageSizesReady = useImageSizesReady(snapshotId, hasImages);
   const paneWidth = usePaneWidth(hasImages);
@@ -209,7 +210,7 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
       const file = filesByPath.get(path);
       if (!file) return undefined;
       const svg = isSvgPath(file.path) || isSvgPath(file.oldPath);
-      if (svg ? svgViewOf(file.path) !== 'image' : !isImagePreviewCandidate(file.patch, file.path, file.oldPath)) return undefined;
+      if (svg ? svgViewOf(file.path) !== 'image' : !isImagePreviewCandidate(file.patch, file.path, file.oldPath, state.lfsImagePreviewAvailable)) return undefined;
       const settings = imageDiffSettings();
       const preview = imagePreviewHeight({
         sizes: peekImageSizes(snapshotId)?.[path],
@@ -221,7 +222,7 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
       });
       return preview == null ? undefined : (compact ? COMPACT_FILE_HEADER_HEIGHT : FILE_HEADER_HEIGHT) + preview;
     },
-    [hasImages, paneWidth, filesByPath, snapshotId, compact, svgVersion],
+    [hasImages, paneWidth, filesByPath, snapshotId, compact, svgVersion, state.lfsImagePreviewAvailable],
   );
   if (!imageSizesReady) return null;
 
@@ -254,6 +255,7 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
       onPowerUpStatus={state.onPowerUpStatus}
       contextExpansionAvailable={state.contextExpansionAvailable}
       renderImagePreview={renderImagePreview}
+      lfsImagePreviewAvailable={state.lfsImagePreviewAvailable}
       renderImageViewControl={renderImageViewControl}
       renderPackageChanges={renderPackageChanges}
       markdownPreview={markdownPreview}

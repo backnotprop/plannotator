@@ -33,7 +33,7 @@ export interface ReviewImageError {
 }
 
 export type ReviewImageResult =
-  | { ok: true; image: ReviewImageData }
+  | { ok: true; image: ReviewImageData | null }
   | { ok: false; error: ReviewImageError };
 
 const MAX_CACHED_IMAGES = 64;
@@ -181,6 +181,8 @@ export async function fetchReviewImage(
       },
     };
   }
+
+  if (response.status === 204) return { ok: true, image: null };
 
   const buffer = await response.arrayBuffer();
   const contentType = response.headers.get('content-type') ?? 'application/octet-stream';

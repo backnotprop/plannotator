@@ -22,6 +22,7 @@ export function knownTooLarge(patch: string | undefined, knownBytes?: Partial<Re
 
 export type SideState =
   | { state: 'loading' }
+  | { state: 'unchanged' }
   | { state: 'ok'; image: ReviewImageData }
   | { state: 'error'; error: ReviewImageError };
 
@@ -82,7 +83,10 @@ export function useImageSides(options: { snapshotId?: string; filePath: string; 
       fetchReviewImage(snapshotId, filePath, side, controller.signal, fetchImpl)
         .then((result) => {
           if (controller.signal.aborted) return;
-          setStates((prev) => ({ ...prev, [side]: result.ok ? { state: 'ok', image: result.image } : { state: 'error', error: result.error } }));
+          const next: SideState = result.ok
+            ? result.image ? { state: 'ok', image: result.image } : { state: 'unchanged' }
+            : { state: 'error', error: result.error };
+          setStates((prev) => ({ ...prev, [side]: next }));
         })
         .catch(() => undefined);
     }

@@ -82,6 +82,7 @@ import {
   handleReviewImageRequest,
   handleReviewImageSizesRequest,
   readPRImageSide,
+  createLocalLfsImageReader,
   reviewImageSizesAdvert,
 } from "@plannotator/shared/review-image";
 import {
@@ -89,7 +90,7 @@ import {
   handleReviewMarkdownImageRequest,
 } from "@plannotator/shared/review-markdown-image";
 import type { DiffSide, FileBytesRead } from "@plannotator/shared/review-core";
-import { listGitSideFiles, readDiffSideBytes, compareRepoPaths, type RepoFileListing } from "@plannotator/shared/review-core";
+import { listGitSideFiles, readDiffSideBytes, resolveDiffSideSources, compareRepoPaths, type RepoFileListing } from "@plannotator/shared/review-core";
 import {
   REPO_FILE_ENDPOINT,
   REPO_FILES_ENDPOINT,
@@ -455,6 +456,7 @@ export async function startReviewServer(
   // every diff payload. Off where nothing can be read: a static patch has
   // no repository, and P4 drops binary files from its patch entirely.
   const imagePreviewSupported = !isStaticPatchMode && gitContext?.vcsType !== "p4";
+  const lfsImagePreviewSupported = imagePreviewSupported && (!gitContext?.vcsType || gitContext.vcsType === "git");
   // Markdown preview capability advert: the preview renders the full file, so
   // it is offered wherever /api/file-content can read one (never a static
   // patch). Its images (/api/review-markdown-image) follow imagePreviewSupported.
@@ -465,6 +467,7 @@ export async function startReviewServer(
   // cannot list, a listing that failed); the tree then says why.
   const repoFilesSupported = !isStaticPatchMode && gitContext?.vcsType !== "p4";
   const runImageRead = createConcurrencyLimiter(REVIEW_IMAGE_READ_CONCURRENCY);
+  const readLocalLfsImage = createLocalLfsImageReader(gitRuntime);
   const sourceKindAdvert = isStaticPatchMode
     ? ({ sourceKind: "patch" } as const)
     : ({} as Record<string, never>);
@@ -2166,6 +2169,21 @@ export async function startReviewServer(
     }
     return { kind: "unavailable" };
   };
+  const readReviewLfs: NonNullable<Parameters<typeof handleReviewImageRequest>[0]["readLfsSide"]> = async (pointer, side, filePath, oldPath, signal) => {
+    if (workspace) {
+      const target = workspace.resolveFileTarget(filePath, oldPath);
+      const sources = await resolveDiffSideSources(gitRuntime, target.diffType, target.defaultBranch, target.filePath, target.oldPath, target.cwd);
+      return readLocalLfsImage({ cwd: sources?.cwd ?? target.cwd, pointer, worktreePath: sources?.[side]?.kind === "worktree" ? sources[side]!.path : undefined, signal });
+    }
+    if (isPRMode) {
+      const cwd = resolvePRLocalCwd();
+      if (!cwd) return { kind: "missing" };
+      const head = side === "new" ? await gitRuntime.runGit(["rev-parse", "HEAD"], { cwd }) : null;
+      return readLocalLfsImage({ cwd, pointer, worktreePath: head?.stdout.trim() === prMetadata?.headSha ? filePath : undefined, signal });
+    }
+    const sources = await resolveDiffSideSources(gitRuntime, currentDiffType as DiffType, currentBase, filePath, oldPath, gitContext?.cwd);
+    return readLocalLfsImage({ cwd: sources?.cwd ?? gitContext?.cwd, pointer, worktreePath: sources?.[side]?.kind === "worktree" ? sources[side]!.path : undefined, signal });
+  };
   const imageSizesAdvert = (patch: string) =>
     reviewImageSizesAdvert({
       available: imagePreviewSupported,
@@ -2592,6 +2610,7 @@ export async function startReviewServer(
 
               serverSession,
               imagePreviewSupported,
+              lfsImagePreviewSupported,
               ...(await imageSizesAdvert(servedPatch)),
               markdownPreviewSupported,
               repoFilesSupported,
@@ -3011,6 +3030,7 @@ export async function startReviewServer(
 
                   serverSession,
                   imagePreviewSupported,
+                  lfsImagePreviewSupported,
                   ...(await imageSizesAdvert(currentPatch)),
                   markdownPreviewSupported,
                   repoFilesSupported,
@@ -3191,6 +3211,7 @@ export async function startReviewServer(
 
                 serverSession,
                 imagePreviewSupported,
+                lfsImagePreviewSupported,
                 ...(await imageSizesAdvert(currentPatch)),
                 markdownPreviewSupported,
                 repoFilesSupported,
@@ -3260,6 +3281,7 @@ export async function startReviewServer(
 
                   serverSession,
                   imagePreviewSupported,
+                  lfsImagePreviewSupported,
                   ...(await imageSizesAdvert(currentPatch)),
                   markdownPreviewSupported,
                   repoFilesSupported,
@@ -3325,6 +3347,7 @@ export async function startReviewServer(
 
                   serverSession,
                   imagePreviewSupported,
+                  lfsImagePreviewSupported,
                   ...(await imageSizesAdvert(currentPatch)),
                   markdownPreviewSupported,
                   repoFilesSupported,
@@ -3381,6 +3404,7 @@ export async function startReviewServer(
 
                 serverSession,
                 imagePreviewSupported,
+                lfsImagePreviewSupported,
                 ...(await imageSizesAdvert(currentPatch)),
                 markdownPreviewSupported,
                 repoFilesSupported,
@@ -3518,6 +3542,7 @@ export async function startReviewServer(
 
                 serverSession,
                 imagePreviewSupported,
+                lfsImagePreviewSupported,
                 ...(await imageSizesAdvert(currentPatch)),
                 markdownPreviewSupported,
                 repoFilesSupported,
@@ -3681,6 +3706,8 @@ export async function startReviewServer(
               patch: currentPatch,
               isCurrentSnapshot: (snapshot) => snapshot === currentSnapshotId(),
               signal: req.signal,
+              readLfsSide: lfsImagePreviewSupported ? (pointer, side, path, oldPath, signal) =>
+                runImageRead(() => readReviewLfs(pointer, side, path, oldPath, signal), signal) : undefined,
               readSide: (side, filePath, oldPath, maxBytes, signal) =>
                 runImageRead(() => readReviewSide(side, filePath, oldPath, maxBytes, signal), signal),
             });

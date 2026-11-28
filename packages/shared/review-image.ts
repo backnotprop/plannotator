@@ -13,7 +13,9 @@ import {
   MAX_REVIEW_IMAGE_PREVIEW_BYTES,
   MAX_REVIEW_IMAGE_PREVIEW_PIXELS,
   isReviewImagePath,
+  type LfsPointer,
 } from "./diff-paths";
+import { ReviewLfsMismatchError } from "./review-lfs";
 import {
   type DiffSide,
   type FileBytesRead,
@@ -23,6 +25,7 @@ import {
   readDiffSideBytes,
   validateFilePath,
 } from "./review-core";
+export { createLocalLfsImageReader } from "./review-lfs";
 import { parseDiffToFiles } from "@plannotator/core/diff-files";
 
 export const REVIEW_IMAGE_ENDPOINT = "/api/review-image";
@@ -40,6 +43,7 @@ export type ReviewImageErrorReason =
   | "too-large"
   | "not-image"
   | "lfs-pointer"
+  | "lfs-mismatch"
   | "fetch-failed"
   | "aborted"
   /** `/api/review-markdown-image` only: the source climbs above the repository root. */
@@ -408,6 +412,7 @@ export interface ReviewImageRequest {
     maxBytes: number,
     signal?: AbortSignal,
   ) => Promise<FileBytesRead>;
+  readLfsSide?: (pointer: LfsPointer, side: DiffSide, filePath: string, oldPath: string | undefined, signal?: AbortSignal) => Promise<FileBytesRead>;
 }
 
 const IMAGE_RESPONSE_CSP = "sandbox; default-src 'none'; style-src 'unsafe-inline'";
@@ -452,7 +457,8 @@ export async function handleReviewImageRequest(request: ReviewImageRequest): Pro
   }
 
   const entry = findPatchFileEntry(request.patch, path);
-  if (!entry || !isEligibleEntry(entry)) {
+  const lfsEntry = entry?.lfsPointers && request.readLfsSide && (isReviewImagePath(entry.newPath) || isReviewImagePath(entry.oldPath));
+  if (!entry || (!isEligibleEntry(entry) && !lfsEntry)) {
     return reviewImageErrorResponse(404, { reason: "not-in-diff", error: "No previewable image by that path in this diff" });
   }
   const sidePath = side === "old" ? entry.oldPath : entry.newPath;
@@ -468,21 +474,33 @@ export async function handleReviewImageRequest(request: ReviewImageRequest): Pro
 
   let read: FileBytesRead;
   try {
-    // The display path keys the new side; a deleted file's only path is its old one.
-    read = await request.readSide(
-      side,
-      entry.newPath ?? sidePath,
-      entry.oldPath,
-      MAX_REVIEW_IMAGE_PREVIEW_BYTES,
-      request.signal,
-    );
+    if (entry.lfsPointers && request.readLfsSide) {
+      if (entry.lfsPointers.old?.oid === entry.lfsPointers.new?.oid) {
+        return { status: 204, headers: { "Cache-Control": "no-store" }, body: null };
+      }
+      const pointer = entry.lfsPointers[side];
+      if (!pointer) return reviewImageErrorResponse(404, { reason: "absent", error: "This side has no image" });
+      read = await request.readLfsSide(pointer, side, entry.newPath ?? sidePath, entry.oldPath, request.signal);
+    } else {
+      // The display path keys the new side; a deleted file's only path is its old one.
+      read = await request.readSide(
+        side,
+        entry.newPath ?? sidePath,
+        entry.oldPath,
+        MAX_REVIEW_IMAGE_PREVIEW_BYTES,
+        request.signal,
+      );
+    }
+    if (request.signal?.aborted) throw new ReviewImageAbortError();
+    if (!request.isCurrentSnapshot(snapshot)) return reviewImageErrorResponse(409, { reason: "stale", error: "Diff snapshot is stale; refresh the review" });
+    if (lfsEntry && read.kind === "missing") return reviewImageErrorResponse(415, { reason: "lfs-pointer", error: "The Git LFS image is not available locally" });
   } catch (error) {
     if (error instanceof ReviewImageAbortError || request.signal?.aborted) {
       // Nobody is listening; the status only matters to logs.
       return reviewImageErrorResponse(499, { reason: "aborted", error: "The request was aborted" });
     }
     return reviewImageErrorResponse(502, {
-      reason: "fetch-failed",
+      reason: error instanceof ReviewLfsMismatchError ? "lfs-mismatch" : "fetch-failed",
       error: error instanceof Error ? error.message : "Failed to read the image",
     });
   }
@@ -590,7 +608,7 @@ type ReviewImageSizesSource = Pick<ReviewImageRequest, "available" | "patch" | "
 function eligibleImageEntries(patch: string): PatchFileEntry[] {
   return parseDiffToFiles(patch)
     .map((file) => findPatchFileEntry(patch, file.path))
-    .filter((entry): entry is PatchFileEntry => !!entry && isEligibleEntry(entry))
+    .filter((entry): entry is PatchFileEntry => !!entry && !entry.lfsPointers && isEligibleEntry(entry))
     .slice(0, MAX_REVIEW_IMAGE_SIZE_FILES);
 }
 

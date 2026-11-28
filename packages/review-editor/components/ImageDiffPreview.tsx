@@ -8,6 +8,7 @@ import { SinglePane, StackedStage, StageLabelRow, type StageImage } from './imag
 import { peekImageSizes } from './image-diff/imageSizes';
 import { computeDifferences, differencesSupported, type DifferenceMask } from './image-diff/differences';
 import { describeImageError, imageCaption, sizeChange } from './image-diff/imageWords';
+import { parseLfsPointerDiff } from '@plannotator/core/diff-paths';
 
 
 export interface ImageDiffPreviewProps {
@@ -20,6 +21,8 @@ export interface ImageDiffPreviewProps {
   tooLargeFallback?: React.ReactNode;
   onHeightChange?: () => void;
   patch?: string;
+  lfsSupported?: boolean;
+  onPreviewChange?: (shown: boolean) => void;
   /**
    * Where the image reads go: absent, code review's own `/api/review-image`. A host with its own routes (the Inbox)
    * passes a fetch that sends `/api/review-image?path=…&side=…&snapshot=…` there; `snapshotId` must then be its own.
@@ -62,8 +65,12 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
   tooLargeFallback,
   onHeightChange,
   patch,
+  lfsSupported = false,
+  onPreviewChange,
   fetchImpl,
 }) => {
+  const lfs = lfsSupported && patch ? parseLfsPointerDiff(patch) : null;
+  const lfsUnchanged = !!lfs?.old && lfs.old.oid === lfs.new?.oid;
   const sides = sidesFor(status);
   const [rootRef, visible] = useNearViewport();
   const knownEntry = peekImageSizes(snapshotId)?.[filePath];
@@ -71,7 +78,7 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
     snapshotId,
     filePath,
     status,
-    visible,
+    visible: visible && !lfsUnchanged,
     patch,
     knownBytes: { old: knownEntry?.old?.bytes, new: knownEntry?.new?.bytes },
     ...(fetchImpl ? { fetchImpl } : {}),
@@ -102,7 +109,9 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
   const afterSize = sizeOf('new', after);
   const beforeBytes = bytesOf('old', before);
   const afterBytes = bytesOf('new', after);
-  const unchanged = sides.length === 2 && !!before && !!after && before.digest === after.digest;
+  const unchanged = lfsUnchanged || (sides.length === 2 && (
+    (!!before && !!after && before.digest === after.digest) || sides.every((side) => states[side].state === 'unchanged')
+  ));
   const comparable = sides.length === 2 && !unchanged && !!beforeSize && !!afterSize && states.old.state !== 'error' && states.new.state !== 'error';
   const mode = comparable ? settings.mode : 'side';
   const maxHeight = variant === 'all-files' ? ALL_FILES_IMAGE_MAX_HEIGHT : 640;
@@ -144,9 +153,10 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
 
   let shown: 'preview' | 'fallback' | 'too-large' = snapshotId ? 'preview' : 'fallback';
   if (shown === 'preview' && errors.length === sides.length) {
-    if (errors.every((e) => e.error.reason === 'not-image')) shown = 'fallback';
+    if (lfs || errors.every((e) => e.error.reason === 'not-image')) shown = 'fallback';
     else if (tooLargeFallback && errors.every((e) => e.error.reason === 'too-large' && !(e.error as { width?: number }).width)) shown = 'too-large';
   }
+  useEffect(() => { onPreviewChange?.(shown === 'preview'); }, [shown, onPreviewChange]);
 
   const heightChangeRef = React.useRef(onHeightChange);
   heightChangeRef.current = onHeightChange;
@@ -188,7 +198,7 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
     const label = sideLabel(side);
     return (
       <figure key={side} className="m-0 min-w-0" data-image-side={side}>
-        {image && layout ? (
+        {lfsUnchanged || state.state === 'unchanged' ? null : image && layout ? (
           <SinglePane
             image={stageImage(side, image, label)}
             side={side}

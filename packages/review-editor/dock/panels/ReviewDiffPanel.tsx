@@ -175,6 +175,7 @@ export const ReviewDiffBody: React.FC<{
         reviewBase={state.reviewBase}
         reviewSnapshotId={state.feedbackDiffContext?.snapshotId}
         imagePreviewAvailable={state.imagePreviewAvailable}
+        lfsImagePreviewAvailable={state.lfsImagePreviewAvailable}
         imageSnapshotId={state.snapshotId}
         contextExpansionAvailable={state.contextExpansionAvailable}
         packageChangesAvailable={state.contextExpansionAvailable !== false}

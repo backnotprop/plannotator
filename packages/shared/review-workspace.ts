@@ -461,7 +461,7 @@ export class WorkspaceReviewSession implements WorkspaceReviewState {
   }
 
   /** Map workspace display paths onto one child repository's diff. */
-  private resolveFileTarget(filePath: string, oldPath?: string) {
+  resolveFileTarget(filePath: string, oldPath?: string) {
     const resolved = resolveWorkspaceFilePath(this.repos, filePath);
     if (!resolved) throw new Error("File is not part of this workspace review");
 
