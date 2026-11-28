@@ -405,12 +405,17 @@ describe("Inbox over your tailnet", () => {
     const set = (on: boolean) => fetch(`${main}/api/inbox/settings`, { method: "POST", body: JSON.stringify({ tailscale: { on } }) });
     const turnedOn = (await (await set(true)).json()) as Json;
     expect(turnedOn.tailscale).toMatchObject({ on: true, source: "config", url: `https://${MAGIC}:${inbox.port}/` });
+    expect(inbox.browserUrl).toBe(`https://${MAGIC}:${inbox.port}/`);
+    const publishedSettings = await (await fetch(`${main}/api/inbox/settings`)).json() as Json;
+    expect(publishedSettings.url).toBe(inbox.browserUrl);
+    expect(publishedSettings.mcp_url).toBe(`http://127.0.0.1:${inbox.port}/mcp`);
     expect(JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")).inboxTailscale).toBe(true);
     const listener = inbox.tailscale.listenerPort()!;
     expect(ts.serve.get(inbox.port)).toBe(`http://127.0.0.1:${listener}`);
 
     const turnedOff = (await (await set(false)).json()) as Json;
     expect(turnedOff.tailscale).toMatchObject({ on: false, url: null });
+    expect(inbox.browserUrl).toBe(inbox.url);
     expect(ts.serve.size).toBe(0);
     expect(await fetch(`http://127.0.0.1:${listener}/`).then(() => "answered", () => "closed")).toBe("closed");
     expect(registryOf(dataDir).tailscale).toBeUndefined();

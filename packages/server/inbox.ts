@@ -814,6 +814,7 @@ export const INBOX_ARCHIVED_PAGE_MAX = 200;
 export interface InboxServer {
   port: number;
   url: string;
+  readonly browserUrl: string;
   token: string;
   serverSession: string;
   /** The last port could not be reused: notifications must be re-allowed once. */
@@ -1357,6 +1358,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const follows = inboxSessionLineage(previous, home);
   let port = 0;
   let baseUrl = "";
+  let tailscale: InboxTailscale;
+  const browserUrl = () => tailscale?.state().url || baseUrl;
   let portChanged = false;
   const statusListeners = new Set<(restartAgents: InboxRestartAgents) => void>();
   /**
@@ -1907,7 +1910,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
   const mcpContext: InboxMcpContext = {
     store,
-    baseUrl: () => baseUrl,
+    baseUrl: browserUrl,
     resolveProject,
     projectRootOf: (path) => projectRoots.resolve(path),
     recordAttachments: (paths, project, base) =>
@@ -4274,7 +4277,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     via,
     version,
     port,
-    url: baseUrl,
+    url: browserUrl(),
     mcp_url: `http://127.0.0.1:${port}/mcp`,
     /** The stdio MCP entry as argv: `<this CLI> inbox mcp`. */
     mcp_command: [...selfCommand, "inbox", "mcp"],
@@ -4802,7 +4805,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         reply_to: reply.reply_to,
         subject,
         body: inboxHandedAwayLine(to),
-        url: threadPageUrl(baseUrl, reply.thread_id),
+        url: threadPageUrl(browserUrl(), reply.thread_id),
         handed_away: { to },
       };
     }
@@ -4814,7 +4817,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         reply_to: reply.reply_to,
         subject,
         body: inboxBodyForAgent(reply, store.reviewBatchOf(reply), store.reviewAnchorAbove(reply)),
-        url: threadPageUrl(baseUrl, reply.thread_id),
+        url: threadPageUrl(browserUrl(), reply.thread_id),
         tagged: { owner: hostAgentName(store.recipientOf(reply)?.host) },
         // Added to the thread ("Add instead"): it works alongside the owner.
         ...(tag.joined ? { added: true } : {}),
@@ -4829,7 +4832,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const ownerCommand = (reply: InboxMessage, sendNow: boolean, subject: string | null): InboxReplyCommand => {
     // Tidy: the note's body is the whole wake (inboxWakeText words it); never a reply to anything.
     if (reply.tidy) {
-      return { type: "message", id: reply.id, thread_id: reply.thread_id, reply_to: null, subject: isInboxCombineRun(reply.tidy.id) ? "Combine" : "Tidy", body: reply.body, url: threadPageUrl(baseUrl, reply.thread_id), tidy: true };
+      return { type: "message", id: reply.id, thread_id: reply.thread_id, reply_to: null, subject: isInboxCombineRun(reply.tidy.id) ? "Combine" : "Tidy", body: reply.body, url: threadPageUrl(browserUrl(), reply.thread_id), tidy: true };
     }
     // A reply the person sent to another session because the one that asked
     // had ended: the wake says so, naming the agent that asked.
@@ -4848,7 +4851,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       reply_to: reply.reply_to,
       subject,
       body: inboxBodyForAgent(reply, store.reviewBatchOf(reply), store.reviewAnchorAbove(reply)),
-      url: threadPageUrl(baseUrl, reply.thread_id),
+      url: threadPageUrl(browserUrl(), reply.thread_id),
       ...(redirected ? { redirected_from: redirected } : {}),
       // A thread the person started: the wake says so (INBOX_NEW_THREAD_INSTRUCTION).
       ...(reply.started_by_person && reply.thread_id === reply.id ? { new_thread: true } : {}),
@@ -5263,7 +5266,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     store: farHosts.store,
     agents: cloudAgents,
     pin: (session, root, name, host) => live.pinCloud(session, root, name, host),
-    threadUrl: (threadId) => threadPageUrl(baseUrl, threadId),
+    threadUrl: (threadId) => threadPageUrl(browserUrl(), threadId),
     ...options.cloudWake,
   });
 
@@ -5974,7 +5977,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   let machines: InboxMachines;
   let relay: ReturnType<typeof createInboxRelay> | null = null;
   // Over your tailnet (packages/server/inbox-tailscale.ts), made once the port is known.
-  let tailscale: InboxTailscale;
   let cfAccess: InboxCfAccess | null = null;
   let cfRoutes: ReturnType<typeof createCfAccessRoutes> | null = null;
   const fromCfDoor = new WeakSet<Request>();
@@ -9063,7 +9065,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // for one of them (kept until it polls, inbox-far-wakes.ts), and that computer's sessions' answers and deliveries here.
       farTags: {
         agents: () => json({ sessions: tagsRoute.liveHere() }),
-        wake: (machine, body) => farWakes.receive(machine, body, (threadId) => threadPageUrl(baseUrl, threadId)),
+        wake: (machine, body) => farWakes.receive(machine, body, (threadId) => threadPageUrl(browserUrl(), threadId)),
         reply: (machine, body) => farTags.agentReply(machine, body),
         delivered: (machine, body) => farTags.delivered(machine, body),
       },
@@ -9258,19 +9260,19 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     cfAccess?.stop();
   };
 
-  return { port, url: baseUrl, token, serverSession, portChanged, store, registry, tailscale, connectAgents, search: search.index, imageCapture, codexWake, liveSites: { running: liveSites.running, sweep: liveSites.sweep }, qwenWake, t3Wake, antigravityWake, cloudWake, stop };
+  return { port, url: baseUrl, get browserUrl() { return browserUrl(); }, token, serverSession, portChanged, store, registry, tailscale, connectAgents, search: search.index, imageCapture, codexWake, liveSites: { running: liveSites.running, sweep: liveSites.sweep }, qwenWake, t3Wake, antigravityWake, cloudWake, stop };
 }
 
 /** Print where the Inbox is, and open it when a person asked for it. */
 export async function handleInboxServerReady(
-  inbox: Pick<InboxServer, "url" | "portChanged">,
+  inbox: Pick<InboxServer, "url" | "portChanged"> & Partial<Pick<InboxServer, "browserUrl">>,
   options: { open: boolean },
 ): Promise<void> {
-  process.stderr.write(`Plannotator Inbox: ${inbox.url}\n`);
+  process.stderr.write(`Plannotator Inbox: ${inbox.browserUrl ?? inbox.url}\n`);
   if (inbox.portChanged) {
     process.stderr.write("The Inbox could not reuse its last port; allow notifications again when the page asks.\n");
   }
-  if (options.open && process.env.PLANNOTATOR_SKIP_BROWSER_OPEN !== "1") await openBrowser(inbox.url);
+  if (options.open && process.env.PLANNOTATOR_SKIP_BROWSER_OPEN !== "1") await openBrowser(inbox.browserUrl ?? inbox.url);
 }
 
 

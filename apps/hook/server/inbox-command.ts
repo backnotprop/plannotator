@@ -54,6 +54,7 @@ import { INBOX_OFF_LINE } from "@plannotator/shared/inbox/connection";
 import { isInboxTurnedOn, markInboxTurnedOn } from "@plannotator/shared/inbox/turned-on";
 import {
   acquireInboxStartLock,
+  inboxBrowserUrl,
   inboxStartLockStale,
   inboxReturnRunning,
   joinInboxStartLock,
@@ -413,9 +414,9 @@ async function serveInbox(dataDir: string, open: boolean, htmlContent: string | 
       process.stderr.write("Another Plannotator Inbox is starting and did not come up; try again.\n");
       process.exit(1);
     }
-    process.stderr.write(`Plannotator Inbox: ${running.url}\n`);
     if (tailscale) await publishRunningInbox(running);
-    if (open) await openBrowser(running.url);
+    process.stderr.write(`Plannotator Inbox: ${inboxBrowserUrl(readInboxRegistry(dataDir) ?? running)}\n`);
+    if (open) await openBrowser(inboxBrowserUrl(readInboxRegistry(dataDir) ?? running));
     if (connect) await connectRunningInbox(running);
     process.exit(0);
   }
@@ -425,9 +426,9 @@ async function serveInbox(dataDir: string, open: boolean, htmlContent: string | 
     if (status.state === "running" || status.state === "busy") {
       trace.step(status.state === "running" ? "already_running" : "busy_wait", { inbox: status.entry.pid });
       const entry = status.state === "running" ? status.entry : await waitForBusyInbox(dataDir, status.entry.pid);
-      process.stderr.write(`Plannotator Inbox: ${entry.url}\n`);
       if (tailscale) await publishRunningInbox(entry);
-      if (open) await openBrowser(entry.url);
+      process.stderr.write(`Plannotator Inbox: ${inboxBrowserUrl(readInboxRegistry(dataDir) ?? entry)}\n`);
+      if (open) await openBrowser(inboxBrowserUrl(readInboxRegistry(dataDir) ?? entry));
       if (connect) await connectRunningInbox(entry);
       process.exit(0);
     }
@@ -742,7 +743,7 @@ async function restartCommand(dataDir: string, tailscale: boolean): Promise<numb
     const entry = await startDetachedInbox(dataDir, release, tailscale || (stopped.state === "stopped" && stopped.tailscaleRunOnly));
     process.stderr.write(`Started the Plannotator Inbox (pid ${entry.pid}, version ${entry.version}).\n`);
     reportTailnet(readInboxRegistry(dataDir)?.tailscale ?? entry.tailscale, tailscale);
-    process.stdout.write(`${entry.url}\n`);
+    process.stdout.write(`${inboxBrowserUrl(readInboxRegistry(dataDir) ?? entry)}\n`);
     return 0;
   } catch (error) {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
@@ -918,11 +919,11 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
     try {
       const before = await inboxStatus(dataDir);
       const entry = await ensureInboxRunning(dataDir, { tailscale });
-      // Stdout stays the local URL alone (agents read it); the tailnet goes to stderr.
+      // Browser links follow the current publication; API traffic stays on the local port.
       if (tailscale && (before.state === "running" || before.state === "busy")) await publishRunningInbox(entry);
       else reportTailnet(readInboxRegistry(dataDir)?.tailscale ?? entry.tailscale, tailscale);
       // --open <thread>: the window open on this computer shows the thread; with none open, a new one opens at it.
-      let url = entry.url;
+      let url = inboxBrowserUrl(readInboxRegistry(dataDir) ?? entry);
       let opened = false;
       if (open && thread) {
         const shown = await showInRunningInbox(entry, thread);
@@ -930,7 +931,7 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
           process.stderr.write(`${shown.unknown}\n`);
           process.exit(1);
         }
-        url = `${entry.url}#thread=${encodeURIComponent(shown.thread ?? thread)}`;
+        url = `${inboxBrowserUrl(readInboxRegistry(dataDir) ?? entry)}#thread=${encodeURIComponent(shown.thread ?? thread)}`;
         opened = shown.shown;
       }
       // --open: the person asked for the window (the /plannotator-inbox
@@ -961,9 +962,9 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
       process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
       process.exit(1);
     }
-    process.stderr.write(`Plannotator Inbox: ${entry.url}\n`);
     if (tailscale) await publishRunningInbox(entry);
-    if (!noOpen) await openBrowser(entry.url);
+    process.stderr.write(`Plannotator Inbox: ${inboxBrowserUrl(readInboxRegistry(dataDir) ?? entry)}\n`);
+    if (!noOpen) await openBrowser(inboxBrowserUrl(readInboxRegistry(dataDir) ?? entry));
     if (connect) await connectRunningInbox(entry);
     process.exit(0);
   }
