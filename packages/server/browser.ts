@@ -335,6 +335,28 @@ export async function openBrowserDetached(
   return (await tryVscodeIpc(url, { timeoutMs: DETACHED_IPC_TIMEOUT_MS })) ? "opened" : "failed";
 }
 
+/**
+ * Run the `cmd.exe /c start` opener on Windows with no stdio and windowsHide,
+ * so cmd.exe gets its own hidden console. Bun Shell (`$`) would attach it to
+ * the caller's console: inside OpenCode's process (the embedded plan review)
+ * that is the TUI's console, and cmd.exe resetting its modes breaks the TUI
+ * (#1893). `start` still opens the browser window normally.
+ */
+function runHiddenCmdOpener(argv: string[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(argv[0]!, argv.slice(1), {
+      stdio: "ignore",
+      windowsHide: true,
+      env: { ...process.env, PATH: childPath() },
+    });
+    child.once("error", reject);
+    child.once("close", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`${argv[0]} exited with code ${code}`));
+    });
+  });
+}
+
 export async function openBrowser(
   url: string,
   options?: { isRemote?: boolean; useGlimpse?: boolean }
@@ -364,8 +386,13 @@ export async function openBrowser(
       }
     }
 
-    // windows-hide-guard: starts the app window the person asked for, which windowsHide would start hidden.
-    await $`${await browserLaunchArgv(url, browser, plannotatorBrowser)}`.quiet();
+    const argv = await browserLaunchArgv(url, browser, plannotatorBrowser);
+    if (process.platform === "win32" && argv[0] === "cmd.exe") {
+      await runHiddenCmdOpener(argv);
+    } else {
+      // windows-hide-guard: starts the app window the person asked for, which windowsHide would start hidden.
+      await $`${argv}`.quiet();
+    }
     return true;
   } catch (error) {
     // An explicitly configured browser that fails is otherwise invisible:

@@ -231,6 +231,42 @@ describe("WSL configured browser launch", () => {
   });
 });
 
+// --- Windows default opener (#1893) ---
+
+describe("Windows default browser launch", () => {
+  afterEach(() => {
+    restoreHostPlatform();
+  });
+
+  // In OpenCode's embedded plan review openBrowser runs inside the TUI's
+  // process: cmd.exe must not share its stdio (or, with windowsHide, its
+  // console), or it breaks the TUI's rendering.
+  test("cmd.exe start runs with the URL and none of the caller's stdio", async () => {
+    const dir = makeTempDir();
+    const log = join(dir, "cmd.txt");
+    writeExecutable(
+      dir,
+      "cmd.exe",
+      `printf '%s\n' "$*" "$(readlink /proc/$$/fd/0)" "$(readlink /proc/$$/fd/1)" "$(readlink /proc/$$/fd/2)" > '${log}'`,
+    );
+    const originalPath = process.env.PATH;
+    try {
+      process.env.PATH = `${dir}${delimiter}${originalPath ?? ""}`;
+      clearEnv();
+      Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+
+      expect(await openBrowser(URL)).toBe(true);
+      const [args, ...stdio] = readFileSync(log, "utf8").trim().split("\n");
+      expect(args).toBe(`/c start ${URL}`);
+      expect(stdio).toEqual(["/dev/null", "/dev/null", "/dev/null"]);
+    } finally {
+      if (originalPath === undefined) delete process.env.PATH;
+      else process.env.PATH = originalPath;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("tryVscodeIpc, module imported before PLANNOTATOR_DATA_DIR is set (#1502)", () => {
   const dataDirEnv = createTestEnvironment(["PLANNOTATOR_DATA_DIR"], "plannotator-browser-ipc-");
 
