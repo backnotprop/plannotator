@@ -4,6 +4,7 @@ import { isTextCut, ProjectTipText, Tip } from '../components/Tip';
 import { tildePath } from '../format';
 import { splitPath } from '../agents';
 import type { InboxComposeLaunch } from '@plannotator/core/inbox-types';
+import { INBOX_OFF_LABEL } from '@plannotator/core/inbox-delivery-line';
 import { busyWord, hostLabel, splitProjectName, type ComposeGroup, type ComposeStart, type ComposeTarget } from './model';
 import { MachineSwitch } from './MachineSwitch';
 import { asleepSince, HERE, inParts, pickable, toItemOn, toItems, type ToItem, type ToMachine } from './toMachines';
@@ -315,8 +316,8 @@ export function ToPicker({
                   {target.place ? <bdi>{`· ${target.place.line}`}</bdi> : started ? `· ${started}` : null}
                 </span>
               </Tip>
-              <span className="ib-cp-check" aria-hidden="true" data-compose-state={parts && !chosenRow ? '' : undefined}>
-                {chosenRow ? <Icon name="check" size={15} /> : parts ? (asleep ? 'asleep' : busyWord(target)) : null}
+              <span className="ib-cp-check" aria-hidden="true" data-compose-state={(parts || target.inbox_off) && !chosenRow ? '' : undefined}>
+                {chosenRow ? <Icon name="check" size={15} /> : parts ? (asleep ? 'asleep' : busyWord(target)) : target.inbox_off ? INBOX_OFF_LABEL : null}
               </span>
             </div>
           );
