@@ -51,12 +51,17 @@ class StubEventSource {
   onmessage: ((event: MessageEvent) => void) | null = null;
   onerror: ((event: Event) => void) | null = null;
   onopen: ((event: Event) => void) | null = null;
+  constructor(url: string) {
+    if (url === "/api/pr-context/stream") {
+      queueMicrotask(() => this.onerror?.(new Event("error")));
+    }
+  }
   addEventListener(): void {}
   removeEventListener(): void {}
   close(): void {}
 }
 
-function makeFetch(): typeof fetch {
+function makeFetch(pullRequest: boolean): typeof fetch {
   // SAFETY: the app only ever calls fetch(input, init); the double implements
   // that call signature and not `fetch.preconnect`.
   const impl = async (input: RequestInfo | URL) => {
@@ -72,6 +77,22 @@ function makeFetch(): typeof fetch {
         diffType: "uncommitted",
         hideWhitespace: false,
         repoInfo: { display: "acme/payments-service", branch: "add-refund-flow" },
+        ...(pullRequest ? {
+          prMetadata: {
+            platform: "github", host: "github.com", owner: "acme", repo: "payments-service",
+            number: 42, title: "Refund flow", author: "review-author", baseBranch: "main",
+            headBranch: "add-refund-flow", baseSha: "a".repeat(40), headSha: "b".repeat(40),
+            url: "https://github.com/acme/payments-service/pull/42",
+          },
+        } : {}),
+      });
+    }
+    if (url.pathname === "/api/pr-context") {
+      return Response.json({
+        body: "Add refunds to the payment ledger.",
+        reviewDecision: "", mergeable: "MERGEABLE", mergeStateStatus: "CLEAN",
+        state: "OPEN", isDraft: false, labels: [], comments: [], checks: [],
+        reviews: [], reviewThreads: [], linkedIssues: [],
       });
     }
     if (url.pathname === "/api/diff/fresh") return Response.json({ fresh: true });
@@ -120,13 +141,13 @@ function seedUnrelatedAnnouncementsSeen(): void {
   memory.set("plannotator-review-dest-spotlight-seen", "1");
 }
 
-async function mount(): Promise<void> {
+async function mount(pullRequest = false): Promise<void> {
   setStorageBackend(memoryBackend);
   seedUnrelatedAnnouncementsSeen();
   configStore.loadFromBackend();
   configStore.set("diffStyle", "split");
   window.matchMedia = phoneMatchMedia;
-  globalThis.fetch = makeFetch();
+  globalThis.fetch = makeFetch(pullRequest);
   // SAFETY: the App only uses EventSource's constructor, handlers, and close.
   globalThis.EventSource = StubEventSource as unknown as typeof EventSource;
   host = document.createElement("div");
@@ -135,8 +156,8 @@ async function mount(): Promise<void> {
   await act(async () => {
     root?.render(<App />);
   });
-  // The header's repository label: /api/diff has been applied.
-  await waitFor(() => document.body.textContent?.includes("add-refund-flow") ?? false, "the review to load");
+  const headerLabel = pullRequest ? "Refund flow" : "add-refund-flow";
+  await waitFor(() => document.body.textContent?.includes(headerLabel) ?? false, "the review to load");
   await settle();
 }
 
@@ -161,6 +182,19 @@ const sheet = () => document.querySelector<HTMLElement>('[data-review-navigation
 const sheetOpen = () => sheet() !== null;
 
 describe.if(hasDom)("phone width: one thing on screen at a time", () => {
+  test("a pull request opens its description after dismissing navigation", async () => {
+    await mount(true);
+    await waitFor(sheetOpen, "the review navigation to open");
+    await act(async () => {
+      sheet()?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    await waitFor(() => !sheetOpen(), "the review navigation to close");
+    await waitFor(
+      () => document.body.textContent?.includes("Add refunds to the payment ledger.") ?? false,
+      "the PR description",
+    );
+  });
+
   test("nothing viewed yet: the file sheet opens on load; picking a file closes it; the saved split setting is left alone", async () => {
     await mount();
     await waitFor(sheetOpen, "the file sheet to open on first load");

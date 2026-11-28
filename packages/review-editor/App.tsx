@@ -2746,17 +2746,13 @@ const ReviewApp: React.FC = () => {
     if (!dockMounted) setDockApi(null);
   }, [dockMounted]);
 
-  // Open the All files overview on first load. Semantic diff stays available via
-  // the file-tree nav entry, but it's no longer the default landing view.
+  // Open the PR description for pull requests and All changes for other reviews.
   useEffect(() => {
     if (!dockApi || !needsInitialDiffPanel.current || files.length === 0) return;
     needsInitialDiffPanel.current = false;
-    // Wide PR reviews keep the combined overview landing. Compact-touch
-    // sessions arrive directly in the review artifact; PR context remains one
-    // tap away in the transient navigator.
-    if (prMetadata && !isCompactTouchLayout) openPROverviewPanel();
+    if (prMetadata) openPROverviewPanel();
     else openAllFilesPanel();
-  }, [dockApi, files, isCompactTouchLayout, openAllFilesPanel, openPROverviewPanel, prMetadata]);
+  }, [dockApi, files, openAllFilesPanel, openPROverviewPanel, prMetadata]);
 
   // Global keyboard shortcuts
   useEffect(() => {
