@@ -26,6 +26,7 @@ import { readInboxQuestionKind } from '@plannotator/core/inbox-types';
 import { whenTime } from '@plannotator/core/inbox-format';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
 import { InboxApiError, InboxHeldError, inboxApi, type OutboxView } from '../api';
+import { sendReadMs } from '../apiWrite';
 import { awayThreadRead, farMachine, heldSendLine, outboxNotApplied, type HeldMark } from './farThread';
 import { machineOf } from '../inboxUrl';
 import { replyKeysToRenew, type SendTarget, type SentContents } from '../sendTargets';
@@ -529,7 +530,7 @@ export function DecisionMode(props: DecisionModeProps) {
       let draft: { draft: unknown };
       let model: Awaited<ReturnType<typeof inboxApi.thread>>;
       try {
-        [draft, model] = await Promise.all([inboxApi.replyDraft(first.thread.id), inboxApi.thread(first.thread.id)]);
+        [draft, model] = await Promise.all([inboxApi.replyDraft(first.thread.id), inboxApi.thread(first.thread.id, sendReadMs())]);
       } catch (cause) {
         // Its linked computer away: sent from the thread as held here, and the reply waits for it (farThread.ts).
         const kept = awayThreadRead(cause, first.thread.id, heldRef.current, { picks: saves.heldPicks(), marks: [...heldMarks.current.values()] }, rowsRef.current.get(first.thread.id)?.unsent?.reply_at ?? null);

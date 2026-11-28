@@ -100,7 +100,7 @@ import { drawMessageHead } from '../parts/MessageHead';
 import { drawMessageBody } from '../parts/MessageBodyView';
 import type { MessageActs } from '../parts/messageActs';
 import { useSendReply } from '../data/actions/send';
-import { replyLanded, sendErrors, unconfirmed, UNCONFIRMED_MS, type UnconfirmedSend } from '../data/actions/sendLanded';
+import { gaveUp, replyLanded, sendErrors, unconfirmed, unconfirmedSend, UNCONFIRMED_MS, type UnconfirmedSend } from '../data/actions/sendLanded';
 import { useDrawSend, useSendsDrawn } from '../data/actions/sendDraw';
 import { SendingReply } from '../parts/SendingReply';
 import { pickComposerMode } from '../fullScreenComposer';
@@ -127,7 +127,7 @@ import { reaskedIn, reaskNoteAgent, reaskOffered, reaskTargets, reaskTooltip } f
 import { StaleGuard, replacedBy, replacementOf, type JumpTarget } from './ReplacedQuestion';
 import type { ComposerCommand } from './ComposerField';
 import { ReplyBox } from './reply/ReplyBox';
-import { sendFailure } from '../sendFailure';
+import { SEND_MAY_NOT_HAVE_GONE, sendFailure } from '../sendFailure';
 import { ReplyRecipientControl } from '../parts/ReplyRecipientControl';
 import { aimable, headFolder, knownRecipients, latestBy, RECIPIENTS_MAX, sessionFolder, toggleRecipient, type RecipientRow } from '../replyRecipients';
 import { replyRecipientList } from '../thread/recipientList';
@@ -1549,8 +1549,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     setGuard(false);
     setRoute(CLOSED_ROUTE);
     setSkipArmed(null);
-    sendKeys.current = null;
-    sendContents.current = null;
+    // A Send given up with no answer may still land: its keys stay with its words (`late`), so Send again is that reply.
+    sendKeys.current = unconfirmed.get(thread.thread_id)?.late?.keys ?? null;
+    sendContents.current = unconfirmed.get(thread.thread_id)?.late?.contents ?? null;
     revisions.current.clear();
     savedQuestions.current.clear();
     lastAnswers.current.clear();
@@ -2835,9 +2836,12 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
    */
   const forgetUnconfirmed = (earlier: UnconfirmedSend, after: 'edited' | 'emptied' | 'closed') => {
     const id = threadRef.current.thread_id;
-    unconfirmed.delete(id);
     replyDraft.expectOwnClear(earlier.words);
     const edited = after === 'edited';
+    // One given up with no answer may land later: still watched (the thread read that shows it says it went), so only the line changes.
+    if (earlier.late && after !== 'closed') setError(edited ? 'Your earlier reply may have gone; Send sends your edited words as another reply.' : null);
+    if (earlier.late) return;
+    unconfirmed.delete(id);
     setError(edited ? 'Your earlier reply may have gone; Send sends your edited words as another reply.' : null);
     void replyLanded(id, earlier.key).then(async (landed) => {
       if (threadRef.current.thread_id !== id) return;
@@ -2874,11 +2878,12 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [thread]);
 
-  // Leaving the thread forgets it: a later Send is always an ordinary one.
+  // Leaving the thread forgets it: a later Send is always an ordinary one. Not one given up with no answer (`late`):
+  // it may still land, and a read of the thread when it is open again finishes it.
   useEffect(() => {
     const id = thread.thread_id;
     return () => {
-      unconfirmed.delete(id);
+      if (!unconfirmed.get(id)?.late) unconfirmed.delete(id);
     };
   }, [thread.thread_id]);
 
@@ -3046,6 +3051,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     let sendClears = false;
     const requests: { messageId: string; input: Parameters<typeof inboxApi.reply>[1] }[] = [];
     let sentUploads: string[] = [];
+    let sentKeys: NonNullable<UnconfirmedSend['late']> = { keys: null, contents: null }; // this Send's keys, kept if it may land late
     /** Opens the line of saves again once this Send's replies have left. */
     let releasePicks: (() => void) | null = null;
     const commentWrites = watchCommentWrites();
@@ -3214,6 +3220,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       );
       for (const id of replyKeysToRenew(sendContents.current, contents)) sendKeys.current.set(id, newUuid());
       sendContents.current = contents;
+      sentKeys = { keys: sendKeys.current, contents };
       // The words and the annotations ride the last reply, after its picks;
       // a comment on another session's message rides the reply to it. The
       // skills each reply's words and comments reference ride it too, as one
@@ -3375,20 +3382,13 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         } else if (wentAnyway === 'gone') {
           replyDraft.release(sendThread);
           fail(THREAD_GONE_TEXT);
-        } else if (wentAnyway === 'unknown') {
-          // Not known (the Inbox may be down): the draft stays as it is on the server, the box keeps the
+        } else if (wentAnyway === 'unknown' || (checks && gaveUp(failure))) {
+          // Not known (the Inbox may be down), or not there yet after a POST given up with no answer (it may still be
+          // on its way: `late`, watched for, its keys kept): the draft stays as it is on the server, the box keeps the
           // words, and the next Send of them first looks for this reply (unconfirmed).
           replyDraft.release(sendThread);
-          unconfirmed.set(sendThread, {
-            key: wordsKey!,
-            words: sendWords,
-            uploads: sentUploads,
-            comments: requests.flatMap((r) => r.input.annotation_ids ?? []),
-            // The picks a reply carries are the questions it names (their saved picks go with it).
-            picks: requests.flatMap((r) => (r.input.questions ?? []).map((q) => `${r.messageId}/${q.key}`)),
-            at: Date.now(),
-          });
-          fail('The reply may not have gone. Send again: it looks for this one first, so it is not sent twice.');
+          unconfirmed.set(sendThread, unconfirmedSend(wordsKey!, sendWords, sentUploads, requests, gaveUp(failure) ? sentKeys : undefined));
+          fail(SEND_MAY_NOT_HAVE_GONE);
         } else {
           replyDraft.release(sendThread);
           const text = textRef.current && here() ? replyText.get() : '';
