@@ -9,6 +9,7 @@
 
 import { join, resolve, sep } from "path";
 import { mkdirSync, writeFileSync, readFileSync, readdirSync, statSync, existsSync, rmSync } from "fs";
+import { planTextLines } from "@plannotator/core/plans";
 import { sanitizeTag } from "./project";
 import { resolveUserPath } from "./resolve-file";
 import { getPlannotatorDataDir } from "./data-dir";
@@ -246,12 +247,12 @@ export function saveToHistory(
   const historyDir = getHistoryDir(project, slug);
   const nextVersion = getNextVersionNumber(historyDir);
 
-  // Deduplicate: check if latest version has identical content
+  // Compare editor text but preserve the submitted line endings on disk.
   if (nextVersion > 1) {
     const latestPath = join(historyDir, `${String(nextVersion - 1).padStart(3, "0")}.md`);
     try {
       const existing = readFileSync(latestPath, "utf-8");
-      if (existing === plan) {
+      if (planTextLines(existing) === planTextLines(plan)) {
         return { version: nextVersion - 1, path: latestPath, isNew: false };
       }
     } catch {

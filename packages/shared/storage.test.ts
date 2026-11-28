@@ -37,6 +37,21 @@ describe("storage data directory", () => {
   });
 });
 
+test("line ending changes alone reuse a history version and preserve its original text", () => {
+  env.reset();
+  process.env.PLANNOTATOR_DATA_DIR = env.makeTempDir();
+  const windows = "# Plan\r\nFirst step\r\n";
+  const editor = "# Plan\nFirst step\n";
+  const first = saveToHistory("proj", "slug", windows);
+  expect(saveToHistory("proj", "slug", editor)).toEqual({ ...first, isNew: false });
+  expect(readFileSync(first.path, "utf8")).toBe(windows);
+
+  const edited = saveToHistory("proj", "slug", editor + "Next step\n");
+  expect(edited.version).toBe(2);
+  expect(edited.isNew).toBe(true);
+  expect(getVersionCount("proj", "slug")).toBe(2);
+});
+
 describe("the agent that submitted a version", () => {
   test("written beside it, before it; none known, none written (and none left from a version number used before)", () => {
     env.reset();
