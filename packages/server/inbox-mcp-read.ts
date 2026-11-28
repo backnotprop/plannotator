@@ -102,6 +102,7 @@ export interface AgentQuestionRef {
   answer?: AgentAnswer;
   /** `<message id>/<key>` of the question that replaced it, or `<message id>` when nothing did. */
   superseded_by?: string;
+  answered_in_reply?: { reply: string; quote: string };
   /**
    * On an action item (`kind: "action"`, key `a-…`, numbered A1, A2…): what came of
    * it, in words: `done`, `done, note: "…"`, `can't do it: "…"`, or `you saw
@@ -423,6 +424,7 @@ function questionRef(q: InboxQuestion, n: number): AgentQuestionRef {
     ...(answer ? { answer } : {}),
     ...(result ? { result } : {}),
     ...(q.superseded_by ? { superseded_by: q.superseded_by.key ? `${q.superseded_by.message_id}/${q.superseded_by.key}` : q.superseded_by.message_id } : {}),
+    ...(q.answered_in_reply ? { answered_in_reply: { reply: q.answered_in_reply.reply_id, quote: q.answered_in_reply.quote } } : {}),
   };
 }
 
@@ -439,6 +441,7 @@ export function questionWords(q: AgentQuestionRef, withPrompt = false): string {
   // An action item (key `a-…`) reads A1, A2…: the reply's "Action items you asked for" numbers it so.
   const head = `${q.key.startsWith("a-") ? "A" : "Q"}${q.q}${q.file ? ` in your file ${q.file}` : ""} ${q.key}${withPrompt && q.prompt ? ` (${JSON.stringify(q.prompt)})` : ""}`;
   if (q.result) return `${head} ${q.result}`;
+  if (q.state === "answered_in_reply") return `${head} answered in the person's reply ${q.answered_in_reply?.reply ?? ""}: ${JSON.stringify(q.answered_in_reply?.quote ?? "")}`;
   if (q.state === "superseded") return `${head} ${q.superseded_by?.includes("/") ? `replaced by ${q.superseded_by}` : "no longer applies"}`;
   const answer = answerWords(q.answer);
   if (q.state === "picked") return `${head} picked, not sent${answer ? `: ${answer}` : ""}`;

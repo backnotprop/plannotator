@@ -914,6 +914,8 @@ const ERROR_STATUS: Record<string, number> = {
   action_already_sent: 409,
   action_closed: 409,
   invalid_done: 422,
+  invalid_answered_in_reply: 422,
+  question_answered_in_reply: 409,
   // The project menu: a batch_id already answered another project or action.
   batch_id_reused: 409,
   config_not_saved: 500,
@@ -8605,7 +8607,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         return isWindowRequest(request, body, serverSession);
       };
 
-      const messageMatch = /^\/api\/inbox\/messages\/([A-Za-z0-9_]+)\/(picks|reply|reask|resolve)$/.exec(path);
+      const messageMatch = /^\/api\/inbox\/messages\/([A-Za-z0-9_]+)\/(picks|reply|reask|resolve|reopen)$/.exec(path);
       if (messageMatch) {
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         const body = await readBody(req);
@@ -8622,6 +8624,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           return json({ error: "A permission prompt is answered in the Inbox window.", code: "window_only" }, 403);
         }
         switch (messageMatch[2]) {
+          case "reopen": {
+            if (typeof body.key !== "string") throw new InboxError("validation_error", "key: required.", { field: "key" });
+            return json({ message_id: messageId, questions: store.reopenAnswered(messageId, body.key) });
+          }
           case "picks": {
             // `unsent_only` (decision mode): a pick that raced the Send of its reply never reopens what went.
             if (body.unsent_only !== undefined && typeof body.unsent_only !== "boolean") {

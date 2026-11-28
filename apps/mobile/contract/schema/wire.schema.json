@@ -2173,6 +2173,50 @@
       "additionalProperties": true,
       "x-source": "packages/core/inbox-attachments.ts"
     },
+    "InboxAnsweredInReply": {
+      "type": "object",
+      "properties": {
+        "reply_id": {
+          "type": "string"
+        },
+        "quote": {
+          "type": "string"
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "at": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "reply_id",
+        "quote",
+        "message_id",
+        "at"
+      ],
+      "additionalProperties": true,
+      "x-source": "packages/core/inbox-types.ts"
+    },
+    "InboxAnsweredInReplyRequest": {
+      "type": "object",
+      "properties": {
+        "question": {
+          "type": "string"
+        },
+        "reply": {
+          "type": "string"
+        },
+        "quote": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "question"
+      ],
+      "additionalProperties": true,
+      "x-source": "packages/core/inbox-types.ts"
+    },
     "InboxAttachment": {
       "type": "object",
       "properties": {
@@ -4522,6 +4566,12 @@
             "type": "string"
           }
         },
+        "not_marked": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "ack_of": {
           "type": "string"
         },
@@ -4835,6 +4885,12 @@
           "type": "array",
           "items": {
             "type": "string"
+          }
+        },
+        "answered_in_reply": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/InboxAnsweredInReplyRequest"
           }
         },
         "action_report": {
@@ -5505,6 +5561,16 @@
             }
           ]
         },
+        "answered_in_reply": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InboxAnsweredInReply"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "set_aside_at": {
           "anyOf": [
             {
@@ -5819,6 +5885,7 @@
     "InboxQuestionState": {
       "type": "string",
       "enum": [
+        "answered_in_reply",
         "closed",
         "open",
         "picked",

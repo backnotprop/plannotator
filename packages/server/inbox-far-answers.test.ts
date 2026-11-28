@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { createInboxFarTags, TAG_ACROSS_MARK } from "./inbox-far-tags";
 import { createInboxFarWakes } from "./inbox-far-wakes";
-import { farAgentReply, type FarReplyDeps } from "./inbox-mcp-far-reply";
+import { FAR_REPLY_WORDS, farAgentReply, type FarReplyDeps } from "./inbox-mcp-far-reply";
 import { InboxOutbox, OUTBOX_KEEP_NOTICE_MS, type OutboxAnswer, type OutboxEntry } from "./inbox-outbox";
 import type { PeerLink } from "./inbox-peer-link";
 
@@ -92,6 +92,24 @@ describe("an agent's answer in another computer's thread", () => {
     unknown.state.online = false;
     const held = await farAgentReply(unknown.deps, { body: "x", reply_to: THREAD, agent_session: "ses_one" }, next, undefined);
     expect(held!.structured).toMatchObject({ held: true });
+  });
+
+  test("answered_in_reply goes only to a computer that lists its mark; an older one gets the message without it and the agent is told; a retry after it updated is the first send", async () => {
+    const answered = [{ question: `${THREAD}/q-1`, quote: "Keep Jenkins for a week" }];
+    const newer = laptop(writes, { answersInReply: () => true });
+    const sentNew = await farAgentReply(newer.deps, { body: "Got it.", reply_to: THREAD, agent_session: "ses_one", idempotency_key: "a-1", answered_in_reply: answered }, next, undefined);
+    expect((newer.sent[0]!.body.args as { answered_in_reply?: unknown }).answered_in_reply).toEqual(answered);
+    expect(sentNew!.text).toBe("Wrote: Got it.");
+    const older = laptop(writes, { answersInReply: () => false });
+    const sentOld = await farAgentReply(older.deps, { body: "Got it.", reply_to: THREAD, agent_session: "ses_one", idempotency_key: "a-1", answered_in_reply: answered }, next, undefined);
+    expect(older.sent).toHaveLength(1);
+    expect("answered_in_reply" in (older.sent[0]!.body.args as object)).toBe(false);
+    expect(sentOld!.text).toBe(`${FAR_REPLY_WORDS.notMarked("Studio")}\nWrote: Got it.`);
+    expect(sentOld!.structured).toMatchObject({ answered_in_reply_not_marked: true });
+    older.deps.answersInReply = () => true;
+    const again = await farAgentReply(older.deps, { body: "Got it.", reply_to: THREAD, agent_session: "ses_one", idempotency_key: "a-1", answered_in_reply: answered }, next, undefined);
+    expect(again!.text).toBe(sentOld!.text);
+    expect(older.sent).toHaveLength(1);
   });
 
   test("held while the thread's computer was away and refused there later: the window is told; refused while the agent waited: it is not", async () => {

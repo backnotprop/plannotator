@@ -42,6 +42,7 @@ export interface FarReplyDeps {
   nameOf: (machine: string) => string | null;
   /** Whether that computer's list says it takes an agent's answer (mark `tag-across`); null while this Inbox holds no list of it. */
   takes: (machine: string) => boolean | null;
+  answersInReply?: (machine: string) => boolean;
   holdWrite: (machine: string, route: string, body: Record<string, unknown>, thread: string | null, waitMs: number, own?: { notify?: boolean; files?: readonly OutboxFile[] }) => Promise<OutboxEntry | null> | null;
   /** A held write of this Inbox's own, by its key (null: never held). */
   heldWrite: (key: string) => OutboxEntry | null;
@@ -86,6 +87,7 @@ export function farReplyDeps(machines: FarReplyMachines, wakes: { placeOf: (id: 
       if (!link) return false;
       return link.list ? link.list.marks.includes(TAG_ACROSS_MARK) : null;
     },
+    answersInReply: (machine) => peer(machine)?.list?.marks.includes(ANSWERED_IN_REPLY_MARK) ?? false,
     holdWrite: machines.holdWrite,
     heldWrite: machines.heldWrite,
     dismissHeld: machines.dismissHeld,
@@ -99,7 +101,10 @@ export function farReplyDeps(machines: FarReplyMachines, wakes: { placeOf: (id: 
  */
 export const FAR_REPLY_WORDS = {
   held: (thread: string, machine: string) => `Waiting for ${machine}: your message goes into thread ${thread} when ${machine} is back.`,
+  notMarked: (machine: string) => `No question was marked answered: ${machine}, which holds this thread, runs an older Plannotator, so the card stays open there.`,
 };
+
+export const ANSWERED_IN_REPLY_MARK = "answered-in-reply";
 
 /** A branch report's head and remote, read from this computer's git where the agent works, when it did not name them. */
 function branchHere(value: unknown, folder: string | undefined): unknown {
@@ -126,7 +131,7 @@ function farCall(args: Record<string, unknown>): InboxSendCall {
   const ids = (value: unknown) => (Array.isArray(value) ? value.map((id) => (typeof id === "string" ? id.trim() : JSON.stringify(id))) : value === undefined || value === null ? [] : [JSON.stringify(value)]);
   const guide = args.guide && typeof args.guide === "object" ? text((args.guide as { input_sha256?: unknown }).input_sha256) : text(args.guide);
   const live = ids(Array.isArray(args.live_sites) ? args.live_sites.map((site) => (site && typeof site === "object" ? (site as { id?: unknown }).id : site)) : args.live_sites);
-  return { body: text(args.body) ?? "", reply_to: text(args.reply_to), thread_name: null, reply_thread: text(args.thread)?.trim() || null, guide, supersedes: ids(args.supersedes), done: ids(args.done), live };
+  return { body: text(args.body) ?? "", reply_to: text(args.reply_to), thread_name: null, reply_thread: text(args.thread)?.trim() || null, guide, supersedes: ids(args.supersedes), done: ids(args.done), answered: ids(Array.isArray(args.answered_in_reply) ? args.answered_in_reply.map((entry) => (entry && typeof entry === "object" ? (entry as { question?: unknown }).question : entry)) : args.answered_in_reply), live };
 }
 
 export async function farAgentReply(
@@ -158,6 +163,12 @@ export async function farAgentReply(
   const heldKey = `far-reply:${scoped(session, place.thread_id, key)}`;
   const before = deps.heldWrite(heldKey);
   const was = before?.body.args && typeof before.body.args === "object" ? (before.body.args as Record<string, unknown>) : null;
+  const asks = Array.isArray(input.answered_in_reply) && input.answered_in_reply.length > 0;
+  const unmarked = asks && (was ? !Array.isArray(was.answered_in_reply) : !deps.answersInReply?.(place.machine));
+  if (unmarked) {
+    const { answered_in_reply: _answered, ...without } = input;
+    input = without as typeof input;
+  }
   if (before && !sameInboxSend(farCall(was ?? {}), farCall({ ...input, body: pictures.body, reply_to: replyTo }))) {
     throw new InboxError("idempotency_key_reused", "This idempotency_key was already used for a different message.");
   }
@@ -190,7 +201,8 @@ export async function farAgentReply(
     // That computer's own send_message answer: its words and its fields, as a local send's.
     const answer = (entry.answer ?? {}) as { text?: unknown; structured?: unknown };
     const structured = answer.structured && typeof answer.structured === "object" ? (answer.structured as Record<string, unknown>) : {};
-    return { text: typeof answer.text === "string" ? answer.text : `${await nextStep()}`, structured: { ...structured, machine } };
+    const text = typeof answer.text === "string" ? answer.text : `${await nextStep()}`;
+    return { text: unmarked ? `${FAR_REPLY_WORDS.notMarked(name)}\n${text}` : text, structured: { ...structured, machine, ...(unmarked ? { answered_in_reply_not_marked: true } : {}) } };
   }
   if (entry && (entry.state === "refused" || entry.state === "dropped" || entry.state === "cancelled")) {
     // The agent is told now: the window has nothing to add.
@@ -198,5 +210,5 @@ export async function farAgentReply(
     const answer = (entry.answer ?? {}) as { code?: unknown; error?: unknown };
     throw new InboxError(typeof answer.code === "string" ? answer.code : "machine_refused", typeof answer.error === "string" ? answer.error : `${name} did not take the message.`);
   }
-  return { text: `${FAR_REPLY_WORDS.held(place.thread_id, name)} ${await nextStep()}`, structured: { thread_id: place.thread_id, held: true, machine } };
+  return { text: `${unmarked ? `${FAR_REPLY_WORDS.notMarked(name)}\n` : ""}${FAR_REPLY_WORDS.held(place.thread_id, name)} ${await nextStep()}`, structured: { thread_id: place.thread_id, held: true, machine, ...(unmarked ? { answered_in_reply_not_marked: true } : {}) } };
 }

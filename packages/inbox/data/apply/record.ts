@@ -23,10 +23,11 @@ export function withQuestion(message: InboxMessageWire, question: InboxQuestion)
 
 const questionsAndActions = (m: InboxMessageWire) => [...(m.questions ?? []), ...(m.actions ?? [])];
 const hasClosedQuestion = (m: InboxMessageWire) => questionsAndActions(m).some((q) => q.state === 'closed');
-const closeQuestion = (q: InboxQuestion): InboxQuestion => (q.state === 'superseded' || q.state === 'closed' ? q : { ...q, state: 'closed' });
+const keepsState = (q: InboxQuestion) => q.state === 'superseded' || q.state === 'closed' || q.state === 'answered_in_reply';
+const closeQuestion = (q: InboxQuestion): InboxQuestion => (keepsState(q) ? q : { ...q, state: 'closed' });
 
 function closedByArchive(message: InboxMessageWire, archiveSeq: number): InboxMessageWire {
-  if ((message.seq ?? archiveSeq) >= archiveSeq || questionsAndActions(message).every((q) => q.state === 'superseded' || q.state === 'closed')) return message;
+  if ((message.seq ?? archiveSeq) >= archiveSeq || questionsAndActions(message).every(keepsState)) return message;
   return { ...message, ...(message.questions ? { questions: message.questions.map(closeQuestion) } : {}), ...(message.actions ? { actions: message.actions.map(closeQuestion) } : {}) };
 }
 

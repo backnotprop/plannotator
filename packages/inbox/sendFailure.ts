@@ -30,7 +30,8 @@ export const UPLOADING_LINE = 'Wait for the files to finish uploading.';
 /** A Send whose reply may have gone: its next Send looks for it first (`unconfirmed` in data/actions/sendLanded.ts). */
 export const SEND_MAY_NOT_HAVE_GONE = 'The reply may not have gone. Send again: it looks for this one first, so it is not sent twice.';
 
-export function sendFailure(cause: unknown): SendFailure {
+export function sendFailure(cause: unknown, reread?: () => unknown): SendFailure {
+  if (cause instanceof InboxApiError && cause.code === 'question_answered_in_reply') void reread?.();
   if (!(cause instanceof InboxApiError)) {
     const words = cause instanceof Error && cause.message ? cause.message : null;
     const line = cause instanceof InboxWriteTimeout ? SEND_MAY_NOT_HAVE_GONE : SEND_NOT_SENT;

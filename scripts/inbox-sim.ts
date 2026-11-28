@@ -85,6 +85,7 @@ export class SimAgent {
     supersedes?: string[];
     /** Its own action items (`:::action`) of the thread it saw done: `<message id>/<key>` or `<message id>`. */
     done?: string[];
+    answered_in_reply?: { question: string; reply?: string; quote?: string }[];
     /** Pull requests the thread is responsible for: `owner/repo#123`, `group/project!45` or a URL. */
     pulls?: string[];
   }, options: { wakes?: boolean } = {}): Promise<Structured> {

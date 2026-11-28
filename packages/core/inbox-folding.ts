@@ -63,7 +63,7 @@ export function newSinceLook(messages: readonly InboxMessageWire[], boundary: nu
 }
 
 /** A question that still asks something: not replaced, not orphaned. */
-const live = (q: InboxQuestion) => q.state !== 'superseded' && !q.orphaned;
+const live = (q: InboxQuestion) => q.state !== 'superseded' && q.state !== 'answered_in_reply' && !q.orphaned;
 
 /** The message holds a pick the person has not sent. */
 export function holdsUnsentPick(message: InboxMessageWire): boolean {

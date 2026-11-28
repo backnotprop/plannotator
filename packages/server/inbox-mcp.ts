@@ -23,6 +23,7 @@ import { checkSendPrototypes } from "./inbox-prototypes";
 import { prototypesNotFramedText } from "./inbox-web-prototypes";
 import { questionsToCheckText } from "@plannotator/shared/inbox/questions-to-check";
 import { INBOX_ACTION_EXAMPLE, INBOX_ACTION_GUIDE, INBOX_DONE_DESCRIPTION } from "@plannotator/core/inbox-actions";
+import { INBOX_ANSWERED_IN_REPLY_DESCRIPTION } from "@plannotator/shared/inbox/answered-words";
 import { INBOX_RUN_TOOL_TEXT } from "@plannotator/core/inbox-run-guide";
 import { INBOX_NOTE_BLOCK_LINE } from "@plannotator/core/inbox-review";
 import { antigravityConversationOfCall, checkInboxSubject, INBOX_ANTIGRAVITY_HOST, INBOX_CARD_ACTION_ON, INBOX_MCP_WAKING_HOSTS, INBOX_T3_HOST, inboxTidyMcpLine, isInboxCombineRun, INBOX_NAME_THIS_THREAD_HINT, INBOX_SECTIONS, isInboxNote, INBOX_THREAD_NAME_MAX, type InboxGuideRef, type InboxSectionId, type InboxMessage, type InboxProject } from "@plannotator/core/inbox-types";
@@ -122,12 +123,18 @@ export const SEND_MESSAGE_DESCRIPTION = [
   QUESTION_AUTHORING_GUIDE,
 ].join("\n");
 
+export const answeredSkippedText = (skipped: readonly { question: string; reason: string }[] | undefined): string =>
+  skipped?.length ? `\nNot marked answered (the message itself went): ${skipped.map((s) => s.reason).join(" ")}` : "";
+
+export const answeredMarksText = (marks: readonly { question: string; reply: string; quote: string }[] | undefined): string =>
+  marks?.length ? `\nMarked answered: ${marks.map((m) => `${m.question} with reply ${m.reply}: ${JSON.stringify(m.quote)}`).join("; ")}.` : "";
+
 /**
  * `supersedes`, as an agent reads it (a field description reaches the model
  * whole; send_message's own description is cut at 2,048 characters).
  */
 export const SUPERSEDES_DESCRIPTION =
-  `Earlier questions in this thread that no longer apply, so the person cannot answer them any more. Withdraw your own questions that are still open (read_thread state open or picked; a sent, skipped or closed one is left as it is, and the result says so) this way as the thread moves on: when this message replaces them, makes them moot or follows up on them, or the person's reply settled them in words, so they stop keeping the thread at the top of the person's list. "<message id>/<key>" for one question (read_thread gives each question's key) or "<message id>" for every open question of that message, as a list of strings, e.g. ["msg_…/q-…"]. With exactly one question in this message, it replaces them; otherwise they read \"No longer applies\". To replace one with a particular new question, put \`Replaces: <message id>/<key>\` in that question's block instead. The person's pick on a superseded question is never sent. Every id must name a question of the thread this message lands in (use reply_to); otherwise nothing is sent and the refusal, invalid_supersedes, lists the thread's open questions. ${INBOX_MOVED_TO_RULE}`;
+  `Earlier questions in this thread that no longer apply, so the person cannot answer them any more. Withdraw your own questions that are still open (read_thread state open or picked; a sent, skipped or closed one is left as it is, and the result says so) this way as the thread moves on: when this message replaces them, makes them moot or follows up on them, so they stop keeping the thread at the top of the person's list. "<message id>/<key>" for one question (read_thread gives each question's key) or "<message id>" for every open question of that message, as a list of strings, e.g. ["msg_…/q-…"]. With exactly one question in this message, it replaces them; otherwise they read \"No longer applies\". To replace one with a particular new question, put \`Replaces: <message id>/<key>\` in that question's block instead. The person's pick on a superseded question is never sent. Every id must name a question of the thread this message lands in (use reply_to); otherwise nothing is sent and the refusal, invalid_supersedes, lists the thread's open questions. ${INBOX_MOVED_TO_RULE}`;
 
 /**
  * read_thread, as a raw MCP client reads it (the agent tool words its lead
@@ -617,6 +624,7 @@ export type AgentSendInput = {
   supersedes?: string[];
   /** Its own action items of the thread the agent saw done (`<message id>/<key>`, or `<message id>`). */
   done?: string[];
+  answered_in_reply?: { question: string; reply?: string; quote?: string }[];
   /** send_message only: mark (`true`) or unmark (`false`) the thread in the person's Priority (inbox-mcp-priority.ts). */
   priority?: boolean;
   agent_session?: string;
@@ -898,7 +906,7 @@ export async function sendAgentMessage(
   input: AgentSendInput,
   guide?: InboxGuideRef,
   wakes = false,
-): Promise<{ structured: Record<string, unknown>; replayed: boolean; notFramed: string[]; questions: number; asked: { key: string; prompt: string }[]; attachments: number; superseded: number; actions: number; done: number; imagesNotShown: ImageNotShown[]; mediaNotShown: MediaNotShown[]; linksNotFound: LinkNotFound[]; questionMediaNotShown: QuestionMediaNotShown[]; pagesNotShown: PageNotShown[]; attachedImagesNotInBody: string[]; questionOpenersWithText: QuestionOpenerWithText[]; noStakes: number; recommendedInLabel: number; questionsToCheck: InboxQuestionToCheck[]; choicesWithoutPictures: { keys: string[]; pictures: number }; naming: InboxSendResult["naming"] | null; priority: boolean | null }> {
+): Promise<{ structured: Record<string, unknown>; replayed: boolean; notFramed: string[]; questions: number; asked: { key: string; prompt: string }[]; attachments: number; superseded: number; actions: number; done: number; answered: number; imagesNotShown: ImageNotShown[]; mediaNotShown: MediaNotShown[]; linksNotFound: LinkNotFound[]; questionMediaNotShown: QuestionMediaNotShown[]; pagesNotShown: PageNotShown[]; attachedImagesNotInBody: string[]; questionOpenersWithText: QuestionOpenerWithText[]; noStakes: number; recommendedInLabel: number; questionsToCheck: InboxQuestionToCheck[]; choicesWithoutPictures: { keys: string[]; pictures: number }; naming: InboxSendResult["naming"] | null; priority: boolean | null }> {
   const { store } = context;
   refuseIdShapedThread(input.thread, input.reply_to);
   refuseBadSubject(input.subject);
@@ -988,6 +996,7 @@ export async function sendAgentMessage(
       from_project: fromProject,
       supersedes: input.supersedes ?? null,
       done: input.done ?? null,
+      ...(input.answered_in_reply ? { answered_in_reply: input.answered_in_reply } : {}),
       ...(wakes ? { wakes: true } : {}),
     });
   } catch (error) {
@@ -1007,6 +1016,7 @@ export async function sendAgentMessage(
   const actions = (message.questions ?? []).filter((q) => q.kind === "action").map((q) => ({ key: q.key, prompt: q.prompt }));
   const superseded = store.supersededBy(message.id);
   const markedDone = result.done ?? [];
+  const markedAnswered = result.answered_in_reply ?? [];
   const notShown = imagesNotShown(input.body, captured?.failures ?? []);
   const notPlayed = await mediaNotShown(input.body, { root: project.root, base: basePath });
   // Links to a file that opens nothing in the window (a session on another computer names its own disk: not checked).
@@ -1066,6 +1076,7 @@ export async function sendAgentMessage(
     superseded: superseded.length,
     actions: actions.length,
     done: markedDone.length,
+    answered: markedAnswered.length,
     replayed: result.replayed,
     naming: result.naming ?? null,
     priority,
@@ -1086,6 +1097,8 @@ export async function sendAgentMessage(
       superseded,
       /** The action items this message marked done (`done`). */
       ...(markedDone.length > 0 ? { done: markedDone } : {}),
+      ...(markedAnswered.length > 0 ? { answered_in_reply: markedAnswered, answered_in_reply_marks: result.answered_in_reply_marks ?? [] } : {}),
+      ...(result.answered_in_reply_skipped?.length ? { answered_in_reply_skipped: result.answered_in_reply_skipped } : {}),
       ...(result.skipped ? { skipped: result.skipped } : {}),
       replayed: result.replayed,
       cursor: store.messageCursor(message.id) ?? store.cursor(),
@@ -1326,6 +1339,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
             .describe(
               `Files to show the person beside your message, e.g. ["docs/plan.md", "proto/admin.html", "src/retry.mjs"]: absolute (anywhere you can read) or relative to project_path. ${INBOX_ATTACHMENTS_PICTURES_LINE} Any regular file, any size. Markdown, plain text, config and data files, Mermaid and Graphviz sources and HTML (its frames load from its folder; its images from anywhere on this computer, or the web) open in Plannotator's viewers; images (PNG, JPEG, GIF, WebP, SVG, AVIF, BMP, ICO) show below the message; videos (MP4, MOV, WebM) play beside it, and the person comments at moments (each comment comes back with its time and the paused frame's path); source code, scripts and other text open as code with line comments; PDFs and anything else are offered as a download. Folders and .env files are refused. The Inbox keeps the version you sent and shows the file as it is now, saying when it changed. The person's annotations, including comments on images and code lines, come back in their reply. Each attachment's kind in the result is markdown, text, html, mermaid, graphviz, code, image, video, pdf or file; treat any other as file. A markdown link to an attached file in the body, e.g. [the mock](proto/admin.html), opens it beside the thread; ${INBOX_ATTACHMENTS_PROTOTYPE_CLAUSE}`,
             ),
+          answered_in_reply: z.array(z.object({ question: z.string(), reply: z.string().optional(), quote: z.string().optional() }).strict()).optional().describe(INBOX_ANSWERED_IN_REPLY_DESCRIPTION),
           // A thread's PRs (approval "inbox-pr-binding"): added to the thread the message lands in. Always on.
           pulls: PULLS_FIELD.optional(),
           // The person's Priority: the agent marks or unmarks the thread (inbox-mcp-priority.ts). Always on.
@@ -1415,7 +1429,8 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           (sent.attachments > 0 ? ` with ${sent.attachments} attachment${sent.attachments === 1 ? "" : "s"}` : "") +
           (sent.actions > 0 ? `${sent.questions > 0 ? " and" : " with"} ${sent.actions} action item${sent.actions === 1 ? "" : "s"}` : "") +
           supersededWords(sent.structured.superseded as string[]) +
-          (sent.done > 0 ? `, marking ${sent.done} action item${sent.done === 1 ? "" : "s"} done` : "");
+          (sent.done > 0 ? `, marking ${sent.done} action item${sent.done === 1 ? "" : "s"} done` : "") +
+          (sent.answered > 0 ? `, marking ${sent.answered} question${sent.answered === 1 ? "" : "s"} answered in the person's reply` : "");
         // The picture-choices advice, on every send it holds for: it fires only when the choices are shown by pictures outside the question.
         const pictureChoices = choicesWithoutPicturesText(String(sent.structured.message_id), sent.choicesWithoutPictures);
         // The hints after the sent line, in this order, each "" when it has nothing to say.
@@ -1435,6 +1450,8 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           prototypesNotFramedText(sent.notFramed),
           questionOpenersWithTextText(sent.questionOpenersWithText),
           inboxSupersedeSkipsText(sent.structured.skipped as InboxSupersedeSkip[] | undefined),
+          answeredMarksText(sent.structured.answered_in_reply_marks as { question: string; reply: string; quote: string }[] | undefined),
+          answeredSkippedText(sent.structured.answered_in_reply_skipped as { question: string; reason: string }[] | undefined),
           removedFromThreadText(store, sent.structured, input.agent_session),
         ];
         if (stale) hints.push(`\n${staleThreadText(stale, shortTime)}`);

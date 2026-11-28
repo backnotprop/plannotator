@@ -342,6 +342,7 @@ export function isInboxNote(message: {
   set_aside?: readonly string[] | null;
   moved_note?: { thread_id: string } | null;
   reopened?: readonly string[] | null;
+  not_marked?: readonly string[] | null;
   ack_of?: string | null;
   tidy?: InboxTidyMark | null;
   scheduled_run?: { run?: number } | null;
@@ -354,6 +355,7 @@ export function isInboxNote(message: {
       !!message.moved_note ||
       (!!message.scheduled_run && message.scheduled_run.run === undefined) ||
       (message.reopened?.length ?? 0) > 0 ||
+      (message.not_marked?.length ?? 0) > 0 ||
       (typeof message.ack_of === "string" && message.ack_of !== "") ||
       (typeof message.tidy === "object" && message.tidy !== null))
   );
@@ -373,6 +375,7 @@ export function inboxPersonAnsweredSince(
     ack?: { at: string } | null;
     set_aside?: readonly string[] | null;
     reopened?: readonly string[] | null;
+    not_marked?: readonly string[] | null;
     ack_of?: string | null;
     tidy?: InboxTidyMark | null;
   }[],
@@ -684,6 +687,11 @@ export interface InboxMessage {
    */
   reopened?: string[];
   /**
+   * On a person's note: the questions a linked computer's held message asked to mark answered in the
+   * person's reply that could no longer be marked when it arrived. Absent on every other message.
+   */
+  not_marked?: string[];
+  /**
    * On the note that carries a 👍 Looks good to the agent (amended
    * 2026-10-16): the agent message the person marked. Written once the
    * ack's Undo window passed (its body is `inboxAckLine`), as a reply to
@@ -903,6 +911,7 @@ export interface InboxMessage {
    * (`action_result` with `by: "agent"`). Absent otherwise and on older records.
    */
   done?: string[];
+  answered_in_reply?: InboxAnsweredInReplyRequest[];
   /**
    * On a person's reply that reports action items (Done, Can't do it): the action items
    * it reports (`<message id>/<key>`), sent once the Undo window passed.
@@ -1264,6 +1273,19 @@ export interface InboxAck {
 export interface InboxSupersededBy {
   message_id: string;
   key: string | null;
+}
+
+export interface InboxAnsweredInReply {
+  reply_id: string;
+  quote: string;
+  message_id: string;
+  at: string;
+}
+
+export interface InboxAnsweredInReplyRequest {
+  question: string;
+  reply?: string;
+  quote?: string;
 }
 
 /** The agent session a person's New message is addressed to (`InboxMessage.to`). */
@@ -1697,6 +1719,7 @@ export interface InboxQuestionRecord {
    * it stands. Added for replaced questions: older records lack it.
    */
   superseded_by?: InboxSupersededBy | null;
+  answered_in_reply?: InboxAnsweredInReply | null;
   /**
    * The person's Mark read closed this question unanswered: it reads as
    * `closed` with a skip for its answer. `previous`
@@ -1838,7 +1861,7 @@ export interface InboxQuestionSetAside {
  * card still says what replaced it. `closed`: the thread is archived, or the
  * person's Mark read closed the question (`set_aside_at`).
  */
-export type InboxQuestionState = "open" | "picked" | "sent" | "closed" | "superseded";
+export type InboxQuestionState = "open" | "picked" | "sent" | "closed" | "superseded" | "answered_in_reply";
 
 /**
  * A question as the window and the agents read it: Workspaces' `Question`
@@ -1869,6 +1892,7 @@ export interface InboxQuestion extends InboxQuestionContract {
   message_id: string;
   /** What superseded it (`state: "superseded"`), or null. */
   superseded_by: InboxSupersededBy | null;
+  answered_in_reply?: InboxAnsweredInReply | null;
   /**
    * When the person's Mark read closed it unanswered (`state: "closed"`,
    * answer a skip), or null. Absent from an older Inbox.
@@ -3844,7 +3868,7 @@ export const INBOX_DRAFT_PASTED_LEAD_MAX = 2;
  * there (`GET decisions`; inbox-decisions-merged.ts in the server). A Can't do it's reason stays the window's own
  * Inbox's comment draft, named by that machine (no door route). A machine without it is never asked: its threads offer no "Decide these N".
  */
-export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked", "branches", "project-tags", "agent-read", "agent-search", "combine-across", "remove-agent", "artifact-pins", "routines", "capabilities", "capability-note", "ships", "tag-across", "capability-set", "link-through", "linked-reads", "reply-drafts", "decisions"] as const;
+export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked", "branches", "project-tags", "agent-read", "agent-search", "combine-across", "remove-agent", "artifact-pins", "routines", "capabilities", "capability-note", "ships", "tag-across", "capability-set", "link-through", "linked-reads", "reply-drafts", "decisions", "answered-in-reply"] as const;
 export type InboxLinkedMark = (typeof INBOX_LINKED_MARKS)[number];
 /** The mark of an Inbox whose door serves a linked machine's window its reads (`linked-reads` above). */
 export const INBOX_LINKED_READS_MARK: InboxLinkedMark = "linked-reads";

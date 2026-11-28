@@ -34,7 +34,6 @@ import {
   parseInboxQuestionBlocks,
   parseInboxBareKey,
   parseInboxSupersedeRef,
-  splitInboxReplyBody,
   summarizeInboxQuestions,
   toInboxQuestion,
   type InboxAnswerRefusal,
@@ -42,9 +41,10 @@ import {
 } from "@plannotator/core/inbox-questions";
 import type { InboxPictureItPage } from "@plannotator/core/picture-it-page";
 import { inboxStoredSkips, inboxSupersedeSkipState, type InboxStoredMessage, type InboxSupersedeSkip } from "./supersede-skips";
+import { planInboxAnsweredInReply, type InboxAnsweredView } from "./answered-in-reply";
+import { composeInboxAnsweredReopenedBody, composeInboxNotMarkedBody, normalizeInboxAnsweredRequests } from "./answered-words";
 import { inboxFileQuestionTwin } from "@plannotator/core/inbox-file-question-twin";
 import { inboxTwinChoicesRefusal } from "@plannotator/core/inbox-choice-twins";
-import { withoutInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
 import type { InboxReviewAnchor, InboxReviewBatch, InboxReviewLive } from "@plannotator/core/review-threads";
 import { inboxRowPreview, inboxRowPreviewWords } from "@plannotator/core/inbox-folding";
 import {
@@ -54,7 +54,6 @@ import {
   withInboxActionsSection,
   parseInboxActionBlocks,
   parseInboxDoneRef,
-  INBOX_ACTIONS_HEADING,
 } from "@plannotator/core/inbox-actions";
 import {
   inboxId,
@@ -251,8 +250,7 @@ import {
 } from "@plannotator/core/inbox-types";
 import type { InboxReviewVerdictRecord } from "@plannotator/core/inbox-review";
 import type { InboxScheduledChange, InboxScheduledRun, InboxScheduledThread } from "@plannotator/core/inbox-scheduled-types";
-import { INBOX_ATTACHMENT_FEEDBACK_TITLE, INBOX_GUIDE_FEEDBACK_TITLE, INBOX_MESSAGE_FEEDBACK_TITLE, INBOX_OWN_MESSAGE_FEEDBACK_TITLE } from "@plannotator/core/inbox-review";
-import { codeFenceCloseIndex } from "@plannotator/core/markdown-structure";
+import { personWords } from "./person-words";
 import { InboxError, inboxDir } from "./schema";
 import type { InboxLog, InboxLogFactory } from "./store-log/log";
 import { agentNamesHere, archiveSeqAfter, cardAfter, firstLineName, firstLineTagKeys, movesAddress, pullEventOf, threadNameIndexKey } from "./store-log/history";
@@ -333,6 +331,7 @@ export interface InboxSendInput {
    * the whole send (`invalid_done`).
    */
   done?: readonly string[] | null;
+  answered_in_reply?: unknown;
   /**
    * The send came through a connection that wakes its session with the
    * person's reply (the Claude Code mod, Pi, OpenCode 2): kept on the message
@@ -356,6 +355,10 @@ export interface InboxSendResult {
   naming?: InboxThreadNaming;
   /** The action items this send marked done (`done`), `<message id>/<key>`. Absent when none. */
   done?: string[];
+  answered_in_reply?: string[];
+  /** Each question marked answered, with the reply and the words it used. */
+  answered_in_reply_marks?: { question: string; reply: string; quote: string }[];
+  answered_in_reply_skipped?: { question: string; reason: string }[];
   skipped?: InboxSupersedeSkip[];
 }
 
@@ -634,9 +637,14 @@ function isMovedNote(message: InboxMessage): boolean {
  */
 const INBOX_MOVED_WITHDRAWN_HOST = "plannotator-inbox";
 
-/** A note a thread never lists: the 👍's note and the moved-questions note. */
+/** The Inbox's note to an agent that a held send's marks of answered questions were skipped (`not_marked`): agent only, as a moved note. */
+function isNotMarkedNote(message: InboxMessage): boolean {
+  return message.author.kind === "person" && (message.not_marked?.length ?? 0) > 0;
+}
+
+/** A note a thread never lists: the 👍's note, the moved-questions note and the not-marked note. */
 function isUnlistedNote(message: InboxMessage): boolean {
-  return isAckNote(message) || isMovedNote(message);
+  return isAckNote(message) || isMovedNote(message) || isNotMarkedNote(message);
 }
 
 /** Two tray reactions are the same emoji with the same name (null is 👍 Looks good). */
@@ -858,35 +866,6 @@ function guideCommentFields(fields: Record<string, unknown>, scope: "line" | "ge
   const createdAt = fields.createdAt;
   kept.createdAt = typeof createdAt === "number" && Number.isFinite(createdAt) ? createdAt : Date.now();
   return kept;
-}
-
-/** The headings a Send appends after the person's words (the action items, the annotations' feedback). */
-const SEND_APPENDED_HEADINGS: ReadonlySet<string> = new Set([
-  `## ${INBOX_ACTIONS_HEADING}`,
-  `# ${INBOX_MESSAGE_FEEDBACK_TITLE}`,
-  `# ${INBOX_OWN_MESSAGE_FEEDBACK_TITLE}`,
-  `# ${INBOX_ATTACHMENT_FEEDBACK_TITLE}`,
-  `# ${INBOX_GUIDE_FEEDBACK_TITLE}`,
-]);
-
-/**
- * The person's own words in a reply as stored (approval "board-hashtags"), for a card made later for its
- * thread (`threadTaggedInitiative`): without the reply's first line, the still-open line and the answers
- * section (`splitInboxReplyBody`) and the skills block, cut where a Send appends its own sections (the
- * action items, the annotations' feedback, which quote plans and files): only at those headings, each after
- * a blank line, never inside a code fence. The person's own headings and fenced `# comments` stay words.
- * At send time the reply's words are read directly (`sendReply`), and a New message's body is its words.
- */
-function personWords(body: string): string {
-  const lines = splitInboxReplyBody(withoutInboxSkillsBlock(body)).words.split("\n");
-  for (let i = 0; i < lines.length; i++) {
-    if (/^\s*```/.test(lines[i]!)) {
-      i = codeFenceCloseIndex(lines, i);
-      continue;
-    }
-    if (SEND_APPENDED_HEADINGS.has(lines[i]!.trimEnd()) && (i === 0 || lines[i - 1]!.trim() === "")) return lines.slice(0, i).join("\n");
-  }
-  return lines.join("\n");
 }
 
 export class InboxStore {
@@ -4610,6 +4589,9 @@ export class InboxStore {
 
     const supersedes = this.normalizeSupersedes(input.supersedes);
     const done = this.normalizeDone(input.done);
+    const answeredRequests = normalizeInboxAnsweredRequests(input.answered_in_reply);
+    if (!answeredRequests.ok) throw new InboxError("invalid_answered_in_reply", `answered_in_reply: ${answeredRequests.reason}`, { field: "answered_in_reply" });
+    const answered = answeredRequests.requests;
     const key = input.idempotency_key?.trim() || null;
     if (key) {
       for (const message of this.messages.values()) {
@@ -4625,8 +4607,8 @@ export class InboxStore {
         const naming = !!message.thread_naming;
         const liveIds = (sites: readonly { id: string }[] | undefined) => (sites ?? []).map((site) => site.id);
         const same = sameInboxSend(
-          { body: message.body, reply_to: message.reply_to, thread_name: message.thread_name ?? null, reply_thread: naming ? (message.reply_thread ?? null) : null, guide: message.guide?.input_sha256 ?? null, supersedes: message.supersedes ?? [], done: message.done ?? [], live: liveIds(message.live_sites) },
-          { body, reply_to: replyTo, thread_name: threadName, reply_thread: naming ? replyThread : null, guide: input.guide?.input_sha256 ?? null, supersedes, done, live: liveIds(input.live_sites) },
+          { body: message.body, reply_to: message.reply_to, thread_name: message.thread_name ?? null, reply_thread: naming ? (message.reply_thread ?? null) : null, guide: message.guide?.input_sha256 ?? null, supersedes: message.supersedes ?? [], done: message.done ?? [], answered: (message.answered_in_reply ?? []).map((r) => r.question), live: liveIds(message.live_sites) },
+          { body, reply_to: replyTo, thread_name: threadName, reply_thread: naming ? replyThread : null, guide: input.guide?.input_sha256 ?? null, supersedes, done, answered: answered.map((r) => r.question), live: liveIds(input.live_sites) },
         );
         if (!same) {
           throw new InboxError(
@@ -4637,11 +4619,14 @@ export class InboxStore {
         }
         const markedDone = this.doneBy(message.id);
         const keptSkips = inboxStoredSkips(message);
+        const markedAnswered = this.answeredInReplyBy(message.id);
         return {
           message: this.wire(message),
           replayed: true,
           ...(message.thread_naming ? { naming: message.thread_naming } : {}),
           ...(markedDone.length > 0 ? { done: markedDone } : {}),
+          ...(markedAnswered.length > 0 ? { answered_in_reply: markedAnswered, answered_in_reply_marks: this.answeredMarksBy(message.id) } : {}),
+          ...this.answeredSkippedOnReplay(message, markedAnswered),
           ...(keptSkips ? { skipped: keptSkips } : {}),
         };
       }
@@ -4694,6 +4679,7 @@ export class InboxStore {
     if (twins) throw new InboxError("validation_error", twins.message, { field: twins.field });
     const { plan: superseding, skipped } = this.planSupersede(threadId, id, supersedes, [...parsed, ...fileQuestions.map((f) => ({ key: f.key, replaces: f.question.replaces }))], actions);
     const doneIds = this.planDone(threadId, done, superseding, input.author);
+    const answering = planInboxAnsweredInReply(this.answeredView(), threadId, answered, input.author, new Set(superseding.keys()), id, at, replyTo);
     const agentSubject = subjectCheck.subject;
     const message: InboxStoredMessage = {
       id,
@@ -4706,6 +4692,7 @@ export class InboxStore {
       ...(threadId ? {} : { subject_question: !agentSubject && (parsed[0] ?? actions[0]) ? `${id}/${(parsed[0] ?? actions[0])!.key}` : null }),
       ...(supersedes.length > 0 ? { supersedes } : {}),
       ...(done.length > 0 ? { done } : {}),
+      ...(answered.length > 0 ? { answered_in_reply: answered } : {}),
       body,
       created_at: at,
       resolved_at: null,
@@ -4813,6 +4800,26 @@ export class InboxStore {
       const record = this.questions.get(questionId)!;
       this.appendQuestion({ ...record, superseded_by: by }, at);
     }
+    for (const [questionId, answer] of answering.marks) this.appendQuestion({ ...this.questions.get(questionId)!, answered_in_reply: answer }, at);
+    if (answering.skipped.length > 0) {
+      const noteAt = this.stamp();
+      this.appendMessage(
+        {
+          id: inboxId("msg"),
+          project_id: message.project_id,
+          thread_id: message.thread_id,
+          reply_to: message.id,
+          author: { kind: "person" },
+          subject: null,
+          body: composeInboxNotMarkedBody(answering.skipped),
+          created_at: noteAt,
+          resolved_at: null,
+          idempotency_key: null,
+          not_marked: answering.skipped.map((s) => s.question),
+        },
+        noteAt,
+      );
+    }
     // The action items the agent saw done: closed, nothing sent. A Done or Can't do it the person
     // had waiting in their draft is kept under `person`: its note still goes with their Send (Q3). A skip
     // the person already sent is kept the same way (nothing of it is left to send).
@@ -4871,6 +4878,8 @@ export class InboxStore {
       replayed: false,
       ...(naming ? { naming } : {}),
       ...(doneIds.length > 0 ? { done: doneIds } : {}),
+      ...(answering.marks.size > 0 ? { answered_in_reply: [...answering.marks.keys()], answered_in_reply_marks: [...answering.marks].map(([question, mark]) => ({ question, reply: mark.reply_id, quote: mark.quote })) } : {}),
+      ...(answering.skipped.length > 0 ? { answered_in_reply_skipped: answering.skipped } : {}),
       ...(skipped.length > 0 ? { skipped } : {}),
     };
   }
@@ -5042,6 +5051,88 @@ export class InboxStore {
       if (!out.includes(id)) out.push(id);
     }
     return out;
+  }
+
+  private answeredView(): InboxAnsweredView {
+    return {
+      message: (id) => this.messages.get(id),
+      threadMessages: (threadId) => this.threadMessages(threadId),
+      questionRecords: (messageId) => this.questionRecords(messageId),
+      closedByArchive: (message) => this.closedByArchive(message),
+      openQuestionsOf: (threadId) => this.openQuestionsOf(threadId),
+      sentTo: (message, session) => this.isFor(message, session),
+      reachedSession: (message, session) => {
+        if (!this.isFor(message, session)) return false;
+        if (this.isOwner(message, session)) {
+          const holder = this.heldBy(message);
+          if (holder?.session === session) return true;
+        }
+        const tag = tagOf(message, session);
+        return tag !== null && (!!tag.delivery || !!tag.read_at);
+      },
+    };
+  }
+
+  private answeredSkippedOnReplay(message: InboxMessage, marked: readonly string[]): { answered_in_reply_skipped?: { question: string; reason: string }[] } {
+    const left = (message.answered_in_reply ?? []).filter((r) => !marked.includes(r.question));
+    if (left.length === 0) return {};
+    const members = this.threadMessages(message.thread_id);
+    const at = members.findIndex((m) => m.id === message.id);
+    const reopened = (q: string) => members.slice(at + 1).some((m) => m.reopened?.includes(q));
+    const told = (q: string) =>
+      members
+        .slice(at + 1)
+        .find((m) => m.reply_to === message.id && m.not_marked?.includes(q))
+        ?.body.split("\n")
+        .find((line) => line.startsWith(`- ${q}`))
+        ?.slice(2);
+    const reason = (q: string) =>
+      reopened(q) ? `${q}: the person reopened it after this message marked it answered.` : (told(q) ?? `${q}: it was no longer open to mark when this message arrived.`);
+    return { answered_in_reply_skipped: left.map((r) => ({ question: r.question, reason: reason(r.question) })) };
+  }
+
+  /** Each question a message marked answered, with the reply and the words it used. */
+  answeredMarksBy(messageId: string): { question: string; reply: string; quote: string }[] {
+    const message = this.messages.get(messageId);
+    if (!message) return [];
+    return this.threadMessages(message.thread_id).flatMap((member) =>
+      this.questionRecords(member.id).flatMap((r) => (r.answered_in_reply?.message_id === messageId ? [{ question: r.id, reply: r.answered_in_reply.reply_id, quote: r.answered_in_reply.quote }] : [])),
+    );
+  }
+
+  answeredInReplyBy(messageId: string): string[] {
+    const message = this.messages.get(messageId);
+    if (!message) return [];
+    return this.threadMessages(message.thread_id).flatMap((member) =>
+      this.questionRecords(member.id).filter((r) => r.answered_in_reply?.message_id === messageId).map((r) => r.id),
+    );
+  }
+
+  reopenAnswered(messageId: string, key: string): InboxQuestion[] {
+    const message = this.messages.get(messageId);
+    if (!message) throw new InboxError("message_not_found", `No message ${messageId}.`);
+    const record = this.questionRecords(messageId).find((r) => r.key === key);
+    if (!record) throw new InboxError("question_not_found", `No question ${key} on message ${messageId}.`, { key, message_id: messageId });
+    if (!record.answered_in_reply) return this.questionsOf(messageId);
+    const at = this.stamp();
+    this.appendQuestion({ ...record, answered_in_reply: null }, at);
+    this.appendMessage(
+      {
+        id: inboxId("msg"),
+        project_id: message.project_id,
+        thread_id: message.thread_id,
+        reply_to: message.id,
+        author: { kind: "person" },
+        subject: null,
+        body: composeInboxAnsweredReopenedBody(record),
+        created_at: at,
+        resolved_at: null,
+        idempotency_key: null,
+        reopened: [record.id],
+      },
+      at,
+    );
+    return this.questionsOf(messageId);
   }
 
   /** The questions a message superseded (`<message id>/<key>`), in thread order. */
@@ -5359,6 +5450,9 @@ export class InboxStore {
       if (record.superseded_by) {
         const by = { message_id: record.superseded_by.message_id, key: record.superseded_by.key ?? null };
         throw refusalError({ code: "question_superseded", key: entry.key, superseded_by: by });
+      }
+      if (record.answered_in_reply) {
+        throw new InboxError("question_answered_in_reply", "This question was marked answered from the reply. Reopen it on its card to answer it there.", { key: entry.key });
       }
       // Mark read closed it: Move back reopens it, pick included.
       if (record.set_aside) {
@@ -7376,7 +7470,7 @@ export class InboxStore {
     // agent's read; so is a reply that tags agents. One sent again (`sendAgain`) waits whatever was read.
     // So is the note telling a session its questions moved: no read shows it (it is never listed), so only its wake
     // to that session settles it.
-    if (!message.to && !hasTags(message) && !isMovedNote(message) && message.sent_again_to !== session && (this.messages.get(message.thread_id)?.agent_checked_seq ?? 0) >= seq) return false;
+    if (!message.to && !hasTags(message) && !isMovedNote(message) && !isNotMarkedNote(message) && message.sent_again_to !== session && (this.messages.get(message.thread_id)?.agent_checked_seq ?? 0) >= seq) return false;
     return true;
   }
 
@@ -7496,7 +7590,7 @@ export class InboxStore {
   recordOwnRead(threadId: string, session: string, shown?: ReadonlySet<string>, markThrough?: number): void {
     for (const message of this.threadMessages(threadId)) {
       // A moved note is never shown by a read (it is not listed), so a read never settles it: its wake does.
-      if (message.author.kind !== "person" || message.tidy || isMovedNote(message) || (shown && !shown.has(message.id))) continue;
+      if (message.author.kind !== "person" || message.tidy || isMovedNote(message) || isNotMarkedNote(message) || (shown && !shown.has(message.id))) continue;
       const owner = this.isOwner(message, session);
       const tag = owner ? null : tagOf(message, session);
       if (!owner && !tag) continue;
@@ -7717,7 +7811,7 @@ export class InboxStore {
     const marked: InboxMessage[] = [];
     for (const item of this.pendingReplies(session, { tags: options.tags })) {
       // The Inbox's own notes wait for the turn to end, the moved-questions note too: never pushed into a busy turn.
-      if ((item.set_aside?.length ?? 0) > 0 || (item.reopened?.length ?? 0) > 0 || item.moved_note) continue;
+      if ((item.set_aside?.length ?? 0) > 0 || (item.reopened?.length ?? 0) > 0 || (item.not_marked?.length ?? 0) > 0 || item.moved_note) continue;
       if (!INBOX_AUTO_SEND_ACK_NOTES && item.ack_of) continue;
       // Tidy goes to a busy session when its turn ends, never into it.
       if (item.tidy) continue;
@@ -7780,7 +7874,9 @@ export class InboxStore {
   recordAgentRead(ids: Iterable<string>, reader: string | null): void {
     for (const id of ids) {
       const message = this.messages.get(id);
-      if (message?.author.kind !== "person" || isInboxNote(message) || message.taken_back_at || this.heldBy(message)) continue;
+      if (message?.author.kind !== "person" || isInboxNote(message) || message.taken_back_at) continue;
+      const owner = reader !== null && this.isOwner(message, reader);
+      if (owner ? !!message.delivery || message.read_by_agent?.session === reader : !!message.read_by_agent || !!this.heldBy(message)) continue;
       const at = this.stamp();
       this.appendMessage({ ...message, read_by_agent: { session: reader, at } }, at);
     }

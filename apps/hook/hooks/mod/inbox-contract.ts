@@ -676,7 +676,7 @@ export const INBOX_AGENT_FIELD_DESCRIPTIONS: Readonly<Record<string, Readonly<Re
     ].join('\n'),
     reply_to: `A message id: post this as a reply in that message's thread. ${INBOX_REPLY_TO_CHECK}`,
     thread: `A short thread name, one line: the same name in this project is the same open thread, across sessions. With no thread and no reply_to, the message starts a new thread; to add to a thread, reply_to its latest message or use the same thread name. Ignored with reply_to, except when you are asked to name a thread the person started: then it names that thread, once. ${INBOX_THREAD_NEW_ISSUE_RULE}`,
-    supersedes: `Your own questions in this thread that are still open (read_thread state open or picked) and no longer apply: a newer message replaces them, or the reply settled them in words. "<message id>/<key>" for one, "<message id>" for all of that message's, as a list of strings, e.g. ["msg_…/q-…"]; send with reply_to into their thread. With one question in this message it replaces them, otherwise they read "No longer applies". ${INBOX_MOVED_TO_RULE}`,
+    supersedes: `Your own questions in this thread that are still open (read_thread state open or picked) and no longer apply: a newer message replaces them. "<message id>/<key>" for one, "<message id>" for all of that message's, as a list of strings, e.g. ["msg_…/q-…"]; send with reply_to into their thread. With one question in this message it replaces them, otherwise they read "No longer applies". ${INBOX_MOVED_TO_RULE}`,
     done: 'Your own open action items (`:::action`) in this thread that you saw done yourself, e.g. the deploy you watch is Ready: "<message id>/<key>" (key a-…); send with reply_to into their thread. The card says you saw it done; nothing is sent to the person.',
     attachments: `Files to show the person beside the message, absolute or relative to project_path: a plan, an HTML mock, code, a video, any file. ${INBOX_ATTACHMENTS_PICTURES_LINE} Link one from the body (\`[the mock](mock.html)\`) to open it beside the thread; ${INBOX_ATTACHMENTS_PROTOTYPE_CLAUSE} Their comments on the files come back in the reply. Folders and .env files are refused.`,
   },
@@ -2028,7 +2028,7 @@ export function inboxWakeDetailsLine(threadId: unknown, context: unknown, option
   const actions = wakeCount(open_actions)
   if (count === null || questions === null || actions === null) return ''
   const open: string[] = []
-  if (questions > 0) open.push(`${wakePlural(questions, 'question')} open${options.reask ? '' : `, don't re-ask ${questions === 1 ? 'it' : 'them'}`}`)
+  if (questions > 0) open.push(`${wakePlural(questions, 'question')} open${options.reask ? '' : `, don't re-ask ${questions === 1 ? 'it' : 'them'}; if the reply answers ${questions === 1 ? 'it' : 'one'}, use answered_in_reply`}`)
   if (actions > 0) open.push(`${wakePlural(actions, 'action item')} open`)
   const state = open.join(', ') || (options.queued ? '' : 'nothing open')
   const ago = inboxWakeAgo(last_agent_at, options.now)

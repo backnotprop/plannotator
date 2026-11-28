@@ -85,7 +85,7 @@ test("the viewing line in the wake: after the words, under the details line, bef
   const [command] = await poll(server, "ses-a", project);
   const line = `(They sent this while viewing \`b-labels.png\`, from the 8:47 PM message ${sent.message_id}.)`;
   const expected = [
-    `[Thread ${sent.thread_id}: 2 messages, 1 question open, don't re-ask it. Your last message was just now]`,
+    `[Thread ${sent.thread_id}: 2 messages, 1 question open, don't re-ask it; if the reply answers it, use answered_in_reply. Your last message was just now]`,
     "",
     WORDS,
     "",

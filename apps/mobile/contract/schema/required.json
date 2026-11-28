@@ -314,6 +314,15 @@
       "updated_at",
       "version"
     ],
+    "InboxAnsweredInReply": [
+      "at",
+      "message_id",
+      "quote",
+      "reply_id"
+    ],
+    "InboxAnsweredInReplyRequest": [
+      "question"
+    ],
     "InboxAttachment": [
       "id",
       "kind",

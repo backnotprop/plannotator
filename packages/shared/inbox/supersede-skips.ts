@@ -20,6 +20,7 @@ export function inboxSupersedeSkipState(record: InboxQuestionRecord, resolved: b
   if (personMarked) return "marked";
   const state = inboxQuestionState(record, resolved);
   if (state === "superseded") return record.superseded_by?.key ? "replaced" : "dropped";
+  if (state === "answered_in_reply") return "answered";
   if (state === "sent") return record.kind === "action" ? "marked_sent" : record.answer?.skipped === true ? "skipped" : "answered";
   return "closed";
 }

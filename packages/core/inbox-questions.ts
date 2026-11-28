@@ -347,10 +347,11 @@ function waitsOf(context: string): { stopped: string | null; holds_up: string[] 
  */
 export function inboxQuestionState(
   record: Pick<InboxQuestionRecord, "answer" | "revision" | "sent_revision" | "superseded_by" | "set_aside"> &
-    Partial<Pick<InboxQuestionRecord, "kind" | "action_result">>,
+    Partial<Pick<InboxQuestionRecord, "kind" | "action_result" | "answered_in_reply">>,
   threadResolved: boolean,
 ): InboxQuestionState {
   if (record.superseded_by) return "superseded";
+  if (record.answered_in_reply) return "answered_in_reply";
   // An action item the agent saw done itself is closed: nothing waits on the person, nothing is sent.
   if (record.kind === "action" && record.action_result?.by === "agent") return "closed";
   if (threadResolved || record.set_aside) return "closed";
@@ -491,6 +492,7 @@ export function toInboxQuestion(record: InboxQuestionRecord, threadResolved: boo
     message_id: record.message_id,
     superseded_by: record.superseded_by ? { message_id: record.superseded_by.message_id, key: record.superseded_by.key ?? null } : null,
     set_aside_at: record.set_aside?.at ?? null,
+    ...(record.answered_in_reply ? { answered_in_reply: { ...record.answered_in_reply } } : {}),
     ...wireContract(record.parsed),
     ...(record.kind === "action"
       ? {
