@@ -1397,7 +1397,7 @@ export interface InboxReplyCommand {
    * made, or a clone). Absent on every later command and on every session
    * the Inbox did not launch; an older connection ignores it.
    */
-  launched?: { agent: 'claude-code' | 'pi' | 'codex' | 'opencode'; project: boolean }
+  launched?: { agent: 'claude-code' | 'pi' | 'codex' | 'opencode' | 'mistral-vibe'; project: boolean }
   /**
    * The person pressed Send now in the Inbox: deliver it at once, into the
    * running turn when one runs (Claude Code: `$.session.append`; Pi: a
@@ -1647,7 +1647,7 @@ export function inboxHandedAwayLine(to: string): string {
  * Every name in core's INBOX_HOST_NAMES must be here (this contract may not
  * import it); `connection-tags.test.ts` fails when one is missing.
  */
-export const INBOX_WAKE_AGENT_NAMES: readonly string[] = ['Claude Code', 'Pi', 'Oh My Pi', 'OpenCode', 'Codex', 'Cursor', 'Grok Build', 'Qwen Code', 'DeepSeek Harness', 'T3 Code', 'Antigravity', 'Cline', 'Muse Code', 'OpenClaw', 'Hermes Agent', 'Orca', 'Cloud agent', 'Claude Code routine', 'Grok Bot', 'Muse by Meta', 'Hermes Agent server', 'OpenClaw server']
+export const INBOX_WAKE_AGENT_NAMES: readonly string[] = ['Claude Code', 'Pi', 'Oh My Pi', 'OpenCode', 'Codex', 'Cursor', 'Grok Build', 'Qwen Code', 'DeepSeek Harness', 'T3 Code', 'Antigravity', 'Cline', 'Muse Code', 'Vibe', 'OpenClaw', 'Hermes Agent', 'Orca', 'Cloud agent', 'Claude Code routine', 'Grok Bot', 'Muse by Meta', 'Hermes Agent server', 'OpenClaw server']
 
 /** An agent name a wake line carries: one of INBOX_WAKE_AGENT_NAMES (spacing folded), else '' (the caller says "another agent"). */
 function wakeName(value: unknown): string {

@@ -9,8 +9,11 @@
  *   inbox-launch-pi.ts                 Pi (`pi --mode rpc`, one process per session, owned by the Inbox)
  *   inbox-launch-codex.ts              Codex (`codex app-server`, one process per thread, owned by the Inbox)
  *   inbox-launch-codex-permission.ts   Codex's approval requests on the permission card
+ *   inbox-launch-opencode.ts           OpenCode (`opencode2 serve`, one per session, owned by the Inbox)
+ *   inbox-launch-vibe.ts               Mistral Vibe (`vibe-acp`, one process per session, owned by the Inbox)
+ *   inbox-launch-vibe-permission.ts    Mistral Vibe's approval requests on the permission card
  *
- * The engine holds `{ "claude-code": claude, pi, codex }`. Adding an agent is one host
+ * The engine holds `{ "claude-code": claude, pi, codex, opencode, "mistral-vibe": vibe }`. Adding an agent is one host
  * file and its entry there. No host reads another host's state, and nothing
  * outside a host names its CLI.
  */

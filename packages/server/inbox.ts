@@ -74,6 +74,7 @@ import {
   type InboxTourChange,
   type InboxTourState,
   INBOX_CODEX_HOST,
+  INBOX_VIBE_HOST,
   INBOX_QWEN_HOST,
   isQwenSessionId,
   INBOX_T3_HOST,
@@ -260,6 +261,7 @@ import { withRuntimeAgentName } from "./inbox-runtime-name";
 import { inboxAgentsEndedSince, inboxAgentsGroup, inboxFolderProject, inboxMergedAgents, inboxStartOfDay, type InboxAgentWait } from "./inbox-agents-list";
 import { createInboxFirstSeen } from "./inbox-first-seen";
 import { createInboxCodexWake, type InboxCodexWake } from "./inbox-codex-wake";
+import { createInboxVibeWake } from "./inbox-vibe-wake";
 import { createT3Local, INBOX_T3_PROBE_MS, type T3Route } from "./inbox-t3-local";
 import { t3SettingsStatus } from "./inbox-t3-settings";
 import { createInboxVoice } from "./inbox-voice";
@@ -1928,7 +1930,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       (await codexWake.wakes(host, session, meta)) ||
       (await qwenWake.wakes(host, session, meta)) ||
       (await t3Wake.wakes(host, session)) ||
-      (await antigravityWake.wakes(host, session, meta)),
+      (await antigravityWake.wakes(host, session, meta)) ||
+      vibeWake.wakes(host, session),
     bridgePolls: (host, session) => pollingWakeHost(host) && live.pollsNow(host, session),
     sessionName: (session) => live.labelOf(session) ?? live.titleOf(session),
     t3WakeReaches: (session) => t3Wake.wakes(INBOX_T3_HOST, session),
@@ -5127,9 +5130,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     autoSendAfterMs: options.autoSendAfterMs ?? INBOX_AUTO_SEND_AFTER_MS,
     // A Codex thread has no connection that polls: it is there until Codex says its thread is gone.
     // A Qwen Code session too, until its registry record goes (inbox-qwen-wake.ts).
-    wakeOnlyStatus: (session) => codexWake.status(session) ?? qwenWake.status(session) ?? t3Wake.status(session) ?? antigravityWake.status(session) ?? cloudWake.status(session),
+    wakeOnlyStatus: (session) => codexWake.status(session) ?? qwenWake.status(session) ?? t3Wake.status(session) ?? antigravityWake.status(session) ?? vibeWake.status(session) ?? cloudWake.status(session),
     pollsItself: (session) => cloudPollsItself(session),
-    uncertainItemsOf: (session) => [...codexWake.uncertainItems(session), ...qwenWake.uncertainItems(session), ...t3Wake.uncertainItems(session), ...antigravityWake.uncertainItems(session)],
+    uncertainItemsOf: (session) => [...codexWake.uncertainItems(session), ...qwenWake.uncertainItems(session), ...t3Wake.uncertainItems(session), ...antigravityWake.uncertainItems(session), ...vibeWake.uncertainItems(session)],
     // A session that is an agent with a face (its conversation's earlier id, its launch): its threads show that face too.
     firstSeen: agentFirstSeen,
     onSent: noteSend,
@@ -5179,6 +5182,23 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     ...(options.codexWake?.extraClis ? { extraClis: options.codexWake.extraClis } : {}),
     ...(options.codexWake?.now ? { now: options.codexWake.now } : {}),
     ...(options.codexWake?.queueTimeoutMs ? { queueTimeoutMs: options.codexWake.queueTimeoutMs } : {}),
+  });
+
+  // The Mistral Vibe wake: the person's items for a Vibe session this Inbox launched go in as a turn over the
+  // `vibe-acp` its host runs (inbox-vibe-wake.ts). A Vibe session the person started has no way in: it reads.
+  const launchedVibe = (): Set<string> =>
+    new Set(
+      [...store.launchedRoots(), ...store.scheduledRunLaunches()]
+        .filter((m) => m.launch?.agent === INBOX_VIBE_HOST && !m.launch.deleted_at && m.to?.host === INBOX_VIBE_HOST)
+        .map((m) => m.to!.session),
+    );
+  const vibeWake = createInboxVibeWake({
+    store: farHosts.store,
+    commandOf: wakeCommandOf,
+    // Until the launch engine exists (it is made below), a launched session's item waits.
+    deliver: (session, text) => (launchReady ? launch.deliver(INBOX_VIBE_HOST, session, text) : Promise.resolve("hold" as const)),
+    launched: launchedVibe,
+    skip: (item) => withdrawnTidy(item),
   });
 
   // The Qwen Code wake: the person's items for a running Qwen session go in over Qwen's cross-session
@@ -5320,7 +5340,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     onePass: (read) => launch.onePass(read),
     hostOf: live.hostOf,
     // A Codex reply whose `codex queue` ran out of time may not have gone: its row says it is saved, not queued.
-    uncertain: (session, itemId) => codexWake.uncertain(session, itemId) || qwenWake.uncertain(session, itemId) || t3Wake.uncertain(session, itemId) || antigravityWake.uncertain(session, itemId),
+    uncertain: (session, itemId) => codexWake.uncertain(session, itemId) || qwenWake.uncertain(session, itemId) || t3Wake.uncertain(session, itemId) || antigravityWake.uncertain(session, itemId) || vibeWake.uncertain(session, itemId),
     // Claimed by its session's connection and never to be delivered there (a wake killed mid-delivery).
     stuck: live.stuck,
     autoSendAfterMs: live.autoSendAfterMs,
@@ -5544,6 +5564,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     hosts: options.launchHosts,
   });
   launchReady = true;
+  // A launched Vibe session's items held while the engine did not exist yet (left from before a restart) go now.
+  void vibeWake.sweep();
   // Routines (inbox-scheduled.ts): a run is a launch. The clock and the login item follow the switch.
   const underTest = !!process.env.PLANNOTATOR_TEST_SANDBOX || process.env.NODE_ENV === "test";
   const scheduledCap = scheduledSwitch({
@@ -9238,6 +9260,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     t3Wake.stop();
     t3Local.stop();
     antigravityWake.stop();
+    vibeWake.stop();
     cloudWake.stop();
     voice.stop();
     codexAccount.stop();

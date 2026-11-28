@@ -44,6 +44,7 @@ export * from "./inbox-delivery";
 export * from "./inbox-codex";
 export * from "./inbox-qwen";
 export * from "./inbox-muse";
+export * from "./inbox-vibe";
 export * from "./inbox-t3";
 export * from "./inbox-antigravity";
 // The Board's cards (approval "inbox-board"), the same way.
@@ -473,6 +474,7 @@ export const INBOX_HOST_NAMES: Readonly<Record<string, string>> = {
   antigravity: "Antigravity",
   cline: "Cline",
   muse: "Muse Code",
+  "mistral-vibe": "Vibe",
   openclaw: "OpenClaw",
   hermes: "Hermes Agent",
   orca: "Orca",
@@ -1278,13 +1280,15 @@ export interface InboxAddressee {
 /**
  * Launch (start an agent from compose): the agents the Inbox can start a
  * session of, one per line: Claude Code (`claude --bg`), Pi (`pi --mode rpc`, owned by the Inbox), Codex
- * (`codex app-server`, owned by the Inbox).
+ * (`codex app-server`, owned by the Inbox), OpenCode (`opencode2 serve`, owned by the Inbox), Mistral Vibe
+ * (`vibe-acp`, owned by the Inbox).
  */
 export type InboxLaunchAgent =
   | "claude-code"
   | "pi"
   | "codex"
-  | "opencode";
+  | "opencode"
+  | "mistral-vibe";
 
 /** One Codex usage limit (`account/rateLimits/read`): how much of it is used, its length, and when it resets. */
 export interface InboxCodexLimit {

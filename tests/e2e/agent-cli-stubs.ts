@@ -37,12 +37,12 @@ import { delimiter, join } from 'node:path';
  * AGENT_SPECS) and Codex wake, the review servers' AI engines (ai-runtime.ts, review.ts, agent-jobs.ts,
  * marker-review.ts MARKER_ENGINES, `agent` being Cursor's other name), uninstall's plugin removals
  * (uninstall.ts, `code` being VS Code's), the agent terminal's BUILT_IN_AGENTS
- * (@plannotator/webtui/core), and `cswap` (inbox-accounts.ts). tests/agent-cli-stubs.test.ts fails
+ * (@plannotator/webtui/core), Mistral Vibe's `vibe-acp` (inbox-launch-vibe.ts), and `cswap` (inbox-accounts.ts). tests/agent-cli-stubs.test.ts fails
  * when one of those gains a name missing here.
  */
 export const AGENT_CLIS = [
   // The Inbox's agents, the review engines and uninstall.
-  'claude', 'codex', 'gemini', 'opencode', 'opencode2', 'pi', 'omp', 'amp', 'cline', 'cursor', 'cursor-agent', 'agent', 'devin', 'kiro-cli', 'copilot', 'droid', 'code', 'qwen', 'dsh', 'muse',
+  'claude', 'codex', 'gemini', 'opencode', 'opencode2', 'pi', 'omp', 'amp', 'cline', 'cursor', 'cursor-agent', 'agent', 'devin', 'kiro-cli', 'copilot', 'droid', 'code', 'qwen', 'dsh', 'muse', 'vibe-acp',
   // The agent terminal's built-in agents not listed above.
   'openclaude', 'autohand', 'agy', 'aider', 'goose', 'kilo', 'crush', 'auggie', 'codebuff', 'command-code', 'cn', 'kimi', 'vibe', 'qwen-code', 'rovo', 'hermes', 'openclaw', 'grok',
   // Not an agent: claude-swap, which every Inbox window reads usage through, and which goes to the Keychain.
