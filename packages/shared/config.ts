@@ -855,6 +855,13 @@ export interface PlannotatorConfig {
    * when the Inbox starts. Default: none (nothing may frame it).
    */
   inboxFrameAncestors?: string[];
+  /**
+   * Exact HTTPS origins with DNS hosts that may frame the Inbox, merged with
+   * inboxFrameAncestors. No IP literals, wildcards, paths or credentials.
+   * Applies only to the window's own port, never the tailnet or device door.
+   * Config only, read once at start. Default: none.
+   */
+  inboxFrameAncestorsRemote?: string[];
   gitlabHosts?: string[];
   /**
    * Launch agents from the Inbox (New message's "New session" rows;

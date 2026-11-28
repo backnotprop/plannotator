@@ -1349,7 +1349,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // Read once per start: the phone surface stays hidden until the iPhone app ships.
   const phonesOn = options.phones ?? resolveInboxPhones(loadConfig());
   // Read once per start, as the phones: a change applies at the next Restart.
-  const frameAncestors = resolveInboxFrameAncestors(options.frameAncestors !== undefined ? options.frameAncestors : loadConfig().inboxFrameAncestors, (line) => process.stderr.write(line));
+  const framingConfig = loadConfig();
+  const frameAncestors = resolveInboxFrameAncestors(options.frameAncestors !== undefined ? options.frameAncestors : framingConfig.inboxFrameAncestors, (line) => process.stderr.write(line), framingConfig.inboxFrameAncestorsRemote);
   const hostGuard = createRequestHostGuard({ localOnly: true });
   const previous = readInboxRegistry(dataDir);
   // The store is open, so the folder exists: its identity, and the earlier runs of this same folder (registry.ts).
