@@ -4,6 +4,7 @@ import { Icon } from '../icons';
 import { launchEffortsFor } from '@plannotator/core/inbox-launch-choice';
 import { launchChoiceButton, launchChoiceButtonParts, launchChoiceMenuName, launchChoiceNotice, launchDefaultRow, launchModelRows, pickLaunchModel, shortLaunchModel } from './launchChoice';
 import { filterLaunchModels, LAUNCH_MODEL_FILTER_FROM } from './modelFilter';
+import { holdsImeEscape, isImeCompositionKey } from '@plannotator/ui/utils/commentSubmitKey';
 
 export function LaunchChoiceButton({ choice, choices, open, onToggle, className }: { choice: InboxLaunchChoice; choices: InboxLaunchChoices; open: boolean; onToggle: () => void; className: string }) {
   const words = launchChoiceButton(choice, choices);
@@ -80,7 +81,7 @@ export function LaunchChoiceMenu({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kind]);
   const onKey = (event: ReactKeyboardEvent) => {
-    if (event.key !== 'Escape' || event.nativeEvent.isComposing) return;
+    if (event.key !== 'Escape' || isImeCompositionKey(event)) return;
     event.preventDefault();
     event.stopPropagation();
     back();
@@ -198,7 +199,7 @@ function ModelFilterColumn({ models, picked, choices, onPick }: { models: string
     onPick(value);
   };
   const onKey = (event: ReactKeyboardEvent<HTMLInputElement>) => {
-    if (event.nativeEvent.isComposing) return;
+    if (holdsImeEscape(event) || isImeCompositionKey(event)) return;
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
       const step = event.key === 'ArrowDown' ? 1 : -1;

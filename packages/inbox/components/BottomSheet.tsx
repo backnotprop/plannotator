@@ -16,6 +16,7 @@
  */
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { isImeCompositionKey } from '@plannotator/ui/utils/commentSubmitKey';
 
 /** The way out, ms: the sheet stays in the DOM this long after `open` goes false (phoneComposer.css's transition). */
 export const BOTTOM_SHEET_MS = 260;
@@ -102,7 +103,7 @@ export function BottomSheet({
   useEffect(() => {
     if (!open) return;
     const key = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.isComposing) return;
+      if (event.key !== 'Escape' || isImeCompositionKey(event)) return;
       event.preventDefault();
       event.stopPropagation();
       onClose();

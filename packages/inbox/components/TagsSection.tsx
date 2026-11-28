@@ -27,6 +27,7 @@ import { tintAttrs } from '../tagColours';
 import type { TagColourControls } from '../useThreadTagsHost';
 import { setTagSort, sortTags, tagSortControl, useTagSort } from '../tagSort';
 import { SectionSortToggle } from './SectionSortToggle';
+import { holdsImeEscape, isImeCompositionKey } from '@plannotator/ui/utils/commentSubmitKey';
 
 export interface TagsSectionProps {
   /** The live tags, oldest first. */
@@ -307,12 +308,13 @@ function TagNameField(props: { name: string; label: string; onSave: (name: strin
         close(false);
       }}
       onKeyDown={(event) => {
+        if (holdsImeEscape(event)) return;
         if (event.key === 'Escape') {
           // The field's own Escape: nothing above it (the phone's sheet, the list) takes this press.
           event.preventDefault();
           event.stopPropagation();
           if (!busy) close(true);
-        } else if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+        } else if (event.key === 'Enter' && !isImeCompositionKey(event)) {
           event.preventDefault();
           if (!busy) void save();
         }

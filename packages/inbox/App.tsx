@@ -37,7 +37,7 @@ import { useSettingsSaves } from './data/actions/settings';
 import { leaveRecentViewOnEscape, useListShown } from './app/useListView';
 import { useListTags } from './app/useListTags';
 import { useDecideSitting, type DecideSitting } from './app/useDecideSitting';
-import { decideAwayToast, tuckDecide } from './app/decideTuck';
+import { decideAway, tuckDecide } from './app/decideTuck';
 import { useSnoozeBack } from './app/useSnoozeBack';
 import { WarmWindowParts } from './lazyParts';
 import { TooltipProvider, TOOLTIP_SKIP_DELAY_MS } from '@plannotator/ui/components/Tooltip';
@@ -6212,6 +6212,7 @@ function Inbox() {
           onReadAgain={sittingRead.retry}
           scope={decide.title}
           rows={latestRows}
+          outbox={outbox}
           start={decide.start}
           startNonce={decide.startNonce}
           phone={phone}
@@ -6219,8 +6220,7 @@ function Inbox() {
           subscribeQuestions={subscribeQuestions}
           onLeft={setDecideLeft}
           onTuck={(threadId, fileId, question) => tuckDecide({ setDecide, routeRef, decideLanding, searchLanding }, threadId, fileId, question)}
-          // A Send or a save that fails once the dialog is closed or tucked away: the window's toast says so.
-          onAway={(notice) => showToast(decideAwayToast(notice))}
+          onAway={decideAway(showToast)}
           onClose={closeDecide}
         />
       )}

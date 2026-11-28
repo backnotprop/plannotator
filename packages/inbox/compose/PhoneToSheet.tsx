@@ -18,6 +18,7 @@ import { Icon } from '../icons';
 import { busyWord, hostLabel, type ComposeGroup, type ComposeStart, type ComposeTarget } from './model';
 import { MachineChips } from './MachineSwitch';
 import { asleepSince, HERE, inParts, pickable, toItemOn, toItems, type ToItem, type ToMachine } from './toMachines';
+import { holdsImeEscape, isImeCompositionKey } from '@plannotator/ui/utils/commentSubmitKey';
 
 export function PhoneToSheet({
   open,
@@ -89,7 +90,7 @@ export function PhoneToSheet({
     else if (option?.type === 'more') setExpanded((had) => new Set([...had, option.machine.key]));
   };
   const onKey = (event: ReactKeyboardEvent) => {
-    if (event.nativeEvent.isComposing) return;
+    if (holdsImeEscape(event) || isImeCompositionKey(event)) return;
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
       if (options.length === 0) return;

@@ -71,6 +71,7 @@
   "inbox-copy-highlight.spec.ts": 4,
   "inbox-copy-message.spec.ts": 11,
   "inbox-debug-log.spec.ts": 64,
+  "inbox-decision-mode-linked.spec.ts": 60,
   "inbox-decision-mode.spec.ts": 75,
   "inbox-dictation-paste.spec.ts": 26,
   "inbox-draft-after-send-webkit.spec.ts": 24,
@@ -339,5 +340,7 @@
   "toolstrip-rtl.spec.ts": 9,
   "toolstrip-stacking.spec.ts": 31,
   "vscode-guides-answer.spec.ts": 3,
-  "vscode-guides-sanitize.spec.ts": 9
+  "vscode-guides-sanitize.spec.ts": 9,
+  "compact-navigation-scroll.spec.ts": 20,
+  "compact-panel-swipe.spec.ts": 60
 }

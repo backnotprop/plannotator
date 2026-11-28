@@ -12,6 +12,7 @@ import {
 } from '../utils/skillReferences';
 import { fetchSkillCatalog, getCachedSkillCatalog, onSkillCatalogReload } from '../utils/skillCatalog';
 import { replaceUndoably } from '../utils/undoableEdit';
+import { isImeCompositionKey } from '../utils/commentSubmitKey';
 
 export interface SkillReferenceMenuState {
   items: SkillCatalogEntry[];
@@ -292,7 +293,7 @@ export function useSkillReferenceAutocomplete(options: {
       // candidate list. Never consume keys mid-composition. With bare
       // triggers opening the menu, this guard is MORE load-bearing than
       // before: the menu is open during more compositions.
-      if (e.nativeEvent.isComposing) return false;
+      if (isImeCompositionKey(e)) return false;
       if (e.metaKey || e.ctrlKey || e.altKey) return false;
       switch (e.key) {
         case 'ArrowDown':

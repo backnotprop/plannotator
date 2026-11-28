@@ -4,7 +4,7 @@ import { cn } from '../../lib/utils';
 import type { ScreenRect } from '../../utils/diagram-projection';
 import { SparklesIcon } from '../SparklesIcon';
 import { Button } from '../ui/button';
-import { isCommentSubmitKey } from '../../utils/commentSubmitKey';
+import { holdsImeEscape, isCommentSubmitKey } from '../../utils/commentSubmitKey';
 import type { DiagramComposerDraft } from './useDiagramComments';
 import { getCommentCardEnabled } from '../../utils/commentCardPolicy';
 import { Icon } from '../inbox-thread/icons';
@@ -137,6 +137,7 @@ export function DiagramComposer({
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (holdsImeEscape(event)) return;
     if (event.key === 'Escape') {
       // Ours: the canvas and whatever holds it (a popout) must not also
       // act on this Escape.

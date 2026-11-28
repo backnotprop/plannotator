@@ -44,6 +44,7 @@ import { CountBadge, countBadgeText } from '../components/CountBadge';
 import { isPhone } from '../phone';
 import { HostMark, Icon } from '../icons';
 import { labelOfKey, pullExtras, pullHeadline, pullsHead, pullsMarkWords, pullStateWord, pullsSummaryOf, threadPullsBus, type PullReviewLink } from './model';
+import { isImeCompositionKey } from '@plannotator/ui/utils/commentSubmitKey';
 
 const WIDTH = 400;
 const EDGE = 12;
@@ -241,7 +242,7 @@ function PullsPopover({ anchor, sheet, label, onClose, cardHover, children }: { 
   // Escape closes (focus back on the anchor), and so do a press outside, a scroll outside and a resize.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
+      if (e.key !== 'Escape' || isImeCompositionKey(e)) return;
       e.preventDefault();
       e.stopPropagation();
       onClose(true);

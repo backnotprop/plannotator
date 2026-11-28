@@ -12,6 +12,7 @@ import { CommentPopover } from '@plannotator/ui/components/CommentPopover';
 import { useReviewState } from '../dock/ReviewStateContext';
 import { proxiesGitHubImages } from '../utils/prImage';
 import { Avatar } from './Avatar';
+import { holdsImeEscape } from '@plannotator/ui/utils/commentSubmitKey';
 
 type AnnotateFn = (commentId: string, author: string, body: string, anchorEl: HTMLElement) => void;
 
@@ -265,6 +266,7 @@ export const PRCommentsTab: React.FC<PRCommentsTabProps> = React.memo(({ context
 
   // --- Search input keyboard ---
   const handleSearchKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (holdsImeEscape(e)) return;
     if (e.key === 'Escape') {
       if (searchQuery) {
         setSearchQuery('');

@@ -1,5 +1,6 @@
 import React from 'react';
 import { ChevronDown, ChevronUp, Search, X } from 'lucide-react';
+import { holdsImeEscape, isImeCompositionKey } from '@plannotator/ui/utils/commentSubmitKey';
 
 export function CallFlowSearchControls({
   inputRef,
@@ -40,10 +41,11 @@ export function CallFlowSearchControls({
           value={query}
           onChange={(event) => onQueryChange(event.target.value)}
           onKeyDown={(event) => {
+            if (holdsImeEscape(event)) return;
             if (event.key === 'Escape') {
               event.preventDefault();
               onClose();
-            } else if (event.key === 'Enter') {
+            } else if (event.key === 'Enter' && !isImeCompositionKey(event)) {
               event.preventDefault();
               onMoveMatch(event.shiftKey ? -1 : 1);
             }

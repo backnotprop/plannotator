@@ -8,6 +8,7 @@
 import { isTouchPhone } from '../phone';
 import { selectionToolbarShowing, STRANGERS_MARKUP } from '../selectionToolbar';
 import { shortcutPrefs } from './prefs';
+import { isImeCompositionKey } from '@plannotator/ui/utils/commentSubmitKey';
 
 /**
  * Whether single keys (letters, J / K and Shift+J / Shift+K, `[` `]`, `/`, G) act at all: Single-key shortcuts on,
@@ -57,7 +58,7 @@ export function isEditableTarget(target: EventTarget | null): boolean {
 
 /** The key belongs to an input method mid-composition (a Japanese or Chinese IME): never a shortcut. */
 export function isComposingKey(event: KeyboardEvent): boolean {
-  return event.isComposing || event.keyCode === 229;
+  return isImeCompositionKey(event);
 }
 
 /** A bare key held down repeats: a step or a toggle fires once per press. */

@@ -23843,6 +23843,20 @@
       }
     },
     {
+      "id": "undecided-door-get-decisions",
+      "title": "door:GET decisions",
+      "surface": [
+        "door:GET decisions"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-28",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
       "id": "undecided-setting-full-inbox",
       "title": "setting:full_inbox",
       "surface": [
@@ -23851,7 +23865,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-27",
+      "since": "2026-11-28",
       "ios": {
         "state": "not-started"
       }

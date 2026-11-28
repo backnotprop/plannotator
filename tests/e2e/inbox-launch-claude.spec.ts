@@ -57,6 +57,7 @@ import { FAKE_LOGIN_CLAUDE_VALUE, installFakeClaude, type FakeClaude } from '../
 import { installFakeCodexLaunch } from '../helpers/fake-codex-launch';
 import { installFakeOpenCodeLaunch } from '../helpers/fake-opencode-launch';
 import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
+import { nextPostAnswer } from './page-answer';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -154,9 +155,9 @@ async function launchFrom(page: Page, words: string, options: { folder?: string;
     await d.locator(`[data-compose-folder-option="${options.folder}"]`).click();
   }
   await d.getByRole('textbox', { name: 'Message' }).fill(words);
-  const answer = page.waitForResponse((r) => r.url().endsWith('/api/inbox/messages') && r.request().method() === 'POST');
+  const answer = await nextPostAnswer<{ thread_id: string; launch?: { id: string; state: string } }>(page, '/api/inbox/messages');
   await d.locator('[data-compose-send]').click();
-  const body = (await (await answer).json()) as { thread_id: string; launch?: { id: string; state: string } };
+  const body = await answer();
   expect(body.launch?.id).toMatch(/^lch_/);
   await expect(d).toHaveCount(0);
   return body.thread_id;
@@ -339,9 +340,9 @@ test('the journey: To rows, the To sentence, the folder menu; Send writes the th
   // Send: a slow first poll, so "Starting" shows; a gap between taking the turn and reporting busy
   // (as the real mod has); the turn is held so "Working" stays.
   fake.configure({ startDelayMs: 3500, busyDelayMs: 2500, hold: true });
-  const answer = page.waitForResponse((r) => r.url().endsWith('/api/inbox/messages') && r.request().method() === 'POST');
+  const answer = await nextPostAnswer<{ thread_id: string; launch: { id: string; state: string } }>(page, '/api/inbox/messages');
   await d.locator('[data-compose-send]').click();
-  const sent = (await (await answer).json()) as { thread_id: string; launch: { id: string; state: string } };
+  const sent = await answer();
   expect(sent.launch.state).toBe('starting');
   const threadId = sent.thread_id;
   const launchId = sent.launch.id;
@@ -513,9 +514,9 @@ test('model and effort: picked on To\'s line, they go on --bg and show in the he
     await pick(d);
     await d.getByRole('textbox', { name: 'Message' }).fill(words);
     const before = fake.starts().length;
-    const answer = page.waitForResponse((r) => r.url().endsWith('/api/inbox/messages') && r.request().method() === 'POST');
+    const answer = await nextPostAnswer<{ thread_id: string }>(page, '/api/inbox/messages');
     await d.locator('[data-compose-send]').click();
-    const threadId = ((await (await answer).json()) as { thread_id: string }).thread_id;
+    const threadId = (await answer()).thread_id;
     return { threadId, start: await waitFor('claude --bg', () => fake.starts()[before]) };
   };
   const first = await send('Tidy the README.', async (d) => {
@@ -844,9 +845,9 @@ test('phone: the To picker, the To sentence, the working line, the permission pr
     await expect(d.locator('[data-compose-to="start"]')).toBeVisible();
     await shot(page, '02-new-session-ready-phone');
     fake.configure({ hold: true, startDelayMs: 0 });
-    const answer = page.waitForResponse((r) => r.url().endsWith('/api/inbox/messages') && r.request().method() === 'POST');
+    const answer = await nextPostAnswer<{ thread_id: string }>(page, '/api/inbox/messages');
     await d.locator('[data-compose-send]').click();
-    const { thread_id } = (await (await answer).json()) as { thread_id: string };
+    const { thread_id } = await answer();
     await page.goto(`${world.url}#thread=${thread_id}`);
     await expect(page.locator('[data-run="working"]')).toBeVisible({ timeout: 20_000 });
     // The "Starting Claude Code" toast is not what this picture is about.
@@ -891,9 +892,9 @@ test('Codex: its own models with each one\'s levels; the pick goes on thread/sta
     await page.keyboard.press('Escape');
     await expect(d.locator('[data-compose-choice]')).toHaveText('gpt-5.5 · high');
     await d.getByRole('textbox', { name: 'Message' }).fill('Bump the parser.');
-    const answer = page.waitForResponse((r) => r.url().endsWith('/api/inbox/messages') && r.request().method() === 'POST');
+    const answer = await nextPostAnswer<{ thread_id: string }>(page, '/api/inbox/messages');
     await d.locator('[data-compose-send]').click();
-    const { thread_id } = (await (await answer).json()) as { thread_id: string };
+    const { thread_id } = await answer();
     const started = await waitFor('thread/start', () => codex.rpc('thread/start')[0]);
     expect(started.params.model).toBe('gpt-5.5');
     expect(started.params.config.model_reasoning_effort).toBe('high');
@@ -967,9 +968,9 @@ test('OpenCode: the picked model and variant go on the new session, its plugin t
     await page.keyboard.press('Escape');
     await expect(d.locator('[data-compose-choice]')).toHaveText('flint-40b-free · high');
     await d.getByRole('textbox', { name: 'Message' }).fill('Bump the parser.');
-    const answer = page.waitForResponse((r) => r.url().endsWith('/api/inbox/messages') && r.request().method() === 'POST');
+    const answer = await nextPostAnswer<{ thread_id: string }>(page, '/api/inbox/messages');
     await d.locator('[data-compose-send]').click();
-    const { thread_id } = (await (await answer).json()) as { thread_id: string };
+    const { thread_id } = await answer();
     const created = await waitFor('the session', () => opencode.http('POST', /^\/api\/session$/)[0]);
     expect(created.body.model).toEqual({ providerID: 'opencode', id: 'flint-40b-free', variant: 'high' });
     await openThread(page, thread_id);

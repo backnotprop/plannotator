@@ -174,7 +174,12 @@ import { useSidebar } from '@plannotator/ui/hooks/useSidebar';
 import { useViewportEnvironment } from '@plannotator/ui/hooks/useViewportEnvironment';
 import { opensNavigatorOnLoad, phoneDiffStyle } from './utils/phoneLayout';
 import { CompactLayoutQueryProvider, PHONE_REVIEW_LAYOUT_MEDIA_QUERY, useCompactTouchLayout } from '@plannotator/ui/hooks/useIsMobile';
+import { useEdgeSwipe } from '@plannotator/ui/hooks/useEdgeSwipe';
+import { usePanelDrag } from '@plannotator/ui/hooks/usePanelDrag';
+import { usePanelPresence } from '@plannotator/ui/hooks/usePanelPresence';
+import { usePanelScrollLock } from '@plannotator/ui/hooks/usePanelScrollLock';
 import { FileTree } from './components/FileTree';
+import { newTreeMemory } from './components/treeMemory';
 import { StackedPRLabel } from './components/StackedPRLabel';
 import { PRSelector } from './components/PRSelector';
 import { PRSwitchOverlay } from './components/PRSwitchOverlay';
@@ -287,6 +292,7 @@ import {
   type ReviewSubmissionRecovery,
   type ReviewRecoveryStorage,
 } from './utils/reviewSubmissionRecovery';
+import { isImeCompositionKey } from '@plannotator/ui/utils/commentSubmitKey';
 
 declare const __APP_VERSION__: string;
 
@@ -384,23 +390,28 @@ type ReviewHistoryAction =
 const reviewItemId = (item: { id: string }): string => item.id;
 
 interface CompactReviewOverlayProps {
+  closing?: boolean;
   title: string;
   context?: React.ReactNode;
   children: React.ReactNode;
 }
 
 /** Full-stage transient surface used for review navigation on touch layouts. */
-function CompactReviewOverlay({ title, context, children }: CompactReviewOverlayProps) {
+function CompactReviewOverlay({ title, context, children, closing = false }: CompactReviewOverlayProps) {
   const sheetRef = useRef<HTMLElement>(null);
   useEffect(() => {
-    sheetRef.current?.focus({ preventScroll: true });
-  }, []);
+    if (!closing) sheetRef.current?.focus({ preventScroll: true });
+  }, [closing]);
   return (
     <section
       ref={sheetRef}
       tabIndex={-1}
       data-pn-review-transient-overlay
-      data-review-navigation-sheet=""
+      data-review-navigation-sheet={closing ? undefined : ''}
+      data-pn-panel-side="left"
+      data-pn-panel-state={closing ? 'closed' : 'open'}
+      aria-hidden={closing || undefined}
+      inert={closing || undefined}
       role="dialog"
       aria-label={title}
       className="absolute inset-0 z-40 flex min-w-0 flex-col bg-background outline-none"
@@ -414,6 +425,7 @@ function CompactReviewOverlay({ title, context, children }: CompactReviewOverlay
 }
 
 interface ReviewNavigatorContainerProps {
+  closing?: boolean;
   isCompactTouchLayout: boolean;
   onClose: () => void;
   context?: React.ReactNode;
@@ -422,6 +434,7 @@ interface ReviewNavigatorContainerProps {
 }
 
 function ReviewNavigatorContainer({
+  closing = false,
   isCompactTouchLayout,
   context,
   resizeHandle,
@@ -429,7 +442,7 @@ function ReviewNavigatorContainer({
 }: ReviewNavigatorContainerProps) {
   if (isCompactTouchLayout) {
     return (
-      <CompactReviewOverlay title="Review navigation" context={context}>
+      <CompactReviewOverlay title="Review navigation" context={context} closing={closing}>
         {children}
       </CompactReviewOverlay>
     );
@@ -627,8 +640,19 @@ const ReviewApp: React.FC = () => {
   const [isFileTreeOpen, setIsFileTreeOpen] = useState(true);
   const closeFileTree = useCallback(() => setIsFileTreeOpen(false), []);
   const [isCompactNavigatorOpen, setIsCompactNavigatorOpen] = useState(false);
+  const navigationScrollPositions = useRef(new Map<string, number>());
+  const [changesTreeMemory] = useState(newTreeMemory);
   const isNavigatorOpen = isCompactTouchLayout ? isCompactNavigatorOpen : isFileTreeOpen;
   useOneSidePanelWhenNarrow(isFileTreeOpen && !isCompactTouchLayout, reviewSidebar.isOpen && !isCompactTouchLayout, closeFileTree, closeReviewSidebar);
+  const navigatorSelector = '[data-pn-review-transient-overlay][aria-label="Review navigation"]';
+  const navigatorDrag = usePanelDrag({
+    selector: navigatorSelector,
+    onClose: () => setIsCompactNavigatorOpen(false),
+  });
+  const navigatorPresence = usePanelPresence(isCompactNavigatorOpen, isCompactTouchLayout);
+  const sidebarPresence = usePanelPresence(reviewSidebar.isOpen, isCompactTouchLayout);
+  usePanelScrollLock(isCompactTouchLayout && (navigatorPresence.present || sidebarPresence.present));
+  const isNavigatorPresented = isCompactTouchLayout ? navigatorPresence.present : isFileTreeOpen;
   const isCompactTransientSurfaceOpen = isCompactTouchLayout && (isCompactNavigatorOpen || reviewSidebar.isOpen);
   const toggleNavigator = useCallback(() => {
     if (isCompactTouchLayout) {
@@ -742,6 +766,7 @@ const ReviewApp: React.FC = () => {
   // Echoed on every freshness probe so the server can answer per-client:
   // "your snapshot moved" is independent of whether the VCS changed.
   const [snapshotId, setSnapshotId] = useState<string | undefined>(undefined);
+  const repoTreeMemory = useMemo(() => newTreeMemory(), [snapshotId]);
   const [localDraftTarget, setLocalDraftTarget] = useState<string | null>(null);
   // A fresh id per mount: a reloaded page no longer holds other targets' comments.
   const [localDraftClientId] = useState(() => `${Date.now()}-${generateId()}`);
@@ -1399,6 +1424,18 @@ const ReviewApp: React.FC = () => {
     (reviewMode === 'workspace' && !!workspaceDiffOptions?.length) ||
     !!gitContext?.diffOptions?.length ||
     !!gitContext?.worktrees?.length;
+
+  useEdgeSwipe({
+    enabled: isCompactTouchLayout && (!guideOpen || isCompactTransientSurfaceOpen),
+    drag: { left: navigatorDrag.gesture },
+    panel: isCompactNavigatorOpen ? {
+      side: 'left', selector: navigatorSelector, trackDrag: true,
+      onClose: () => setIsCompactNavigatorOpen(false),
+    } : reviewSidebar.isOpen ? {
+      side: 'right', selector: '[data-pn-review-transient-overlay][aria-label="Review sidebar"]',
+      onClose: reviewSidebar.close,
+    } : undefined,
+  });
 
   // Merge local + SSE annotations, deduping draft-restored externals against
   // live SSE versions. Prefer the SSE version when both exist (same source,
@@ -2760,6 +2797,7 @@ const ReviewApp: React.FC = () => {
   // Global keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (isImeCompositionKey(e)) return;
       // Cmd/Ctrl+F to focus file search when diff files are available.
       // Bail while the guide takeover is open (file tree isn't rendered) and
       // don't intercept in the Commits view (its rail has no search input) —
@@ -5937,6 +5975,7 @@ const ReviewApp: React.FC = () => {
         ref={refCardRootRef}
         className="pn-app-viewport flex flex-col bg-background overflow-hidden"
         data-pn-compact-touch-layout={isCompactTouchLayout ? 'true' : undefined}
+        data-pn-swipe-surface={isCompactTouchLayout || undefined}
         data-pn-compact-review-shell={isCompactTouchLayout || undefined}
         data-pn-browser-canvas="background"
       >
@@ -6331,13 +6370,15 @@ const ReviewApp: React.FC = () => {
 
         {/* Main content */}
         <div className={`relative flex-1 flex overflow-hidden ${isResizing ? 'select-none' : ''}`}>
-          {!guideOpen && shouldShowFileTree && isNavigatorOpen && showCommitsPanel && (
+          {!guideOpen && shouldShowFileTree && isNavigatorPresented && showCommitsPanel && (
             <ReviewNavigatorContainer
+              closing={navigatorPresence.closing}
               isCompactTouchLayout={isCompactTouchLayout}
               onClose={() => setIsCompactNavigatorOpen(false)}
               resizeHandle={fileTreeResizeHandle}
             >
               <CommitsPanel
+                scrollMemory={isCompactTouchLayout ? { positions: navigationScrollPositions.current, key: 'commits' } : undefined}
                 header={panelHeader}
                 width={fileTreeResize.width}
                 commits={commitsView.commits}
@@ -6354,8 +6395,9 @@ const ReviewApp: React.FC = () => {
               />
             </ReviewNavigatorContainer>
           )}
-          {!guideOpen && shouldShowFileTree && isNavigatorOpen && !showCommitsPanel && (
+          {!guideOpen && shouldShowFileTree && isNavigatorPresented && !showCommitsPanel && (
             <ReviewNavigatorContainer
+              closing={navigatorPresence.closing}
               isCompactTouchLayout={isCompactTouchLayout}
               onClose={() => setIsCompactNavigatorOpen(false)}
               context={compactNavigatorContext}
@@ -6363,6 +6405,8 @@ const ReviewApp: React.FC = () => {
             >
               <FileTree
                 visiblePaths={visiblePaths}
+                changesMemory={isCompactTouchLayout ? changesTreeMemory : undefined}
+                repoMemory={isCompactTouchLayout ? repoTreeMemory : undefined}
                 header={panelHeader}
                 treeScope={repoFilesSupported ? treeScope : 'changes'}
                 repoFiles={filteredRepoFiles}
@@ -6582,12 +6626,13 @@ const ReviewApp: React.FC = () => {
           </div>
 
           {/* Resize Handle + Sidebar */}
-          {reviewSidebar.isOpen && (
+          {sidebarPresence.present && (
             <div className="contents group/sidebar">
               {!isCompactTouchLayout && (
                 <ResizeHandle {...panelResize.handleProps} className="z-10" side="right" hideHoverTrack tooltip={RESIZE_HANDLE_TOOLTIP} onCollapse={() => reviewSidebar.close()} />
               )}
               <ReviewSidebar
+                closing={sidebarPresence.closing}
                 isOpen
                 onClose={reviewSidebar.close}
                 onSelectTab={reviewSidebar.open}

@@ -24,6 +24,7 @@ import { questionWaits } from './footAck';
 import { followTextPresses } from './facePress';
 import { SkillPreviewCard } from './SkillPreviewCard';
 import { sendSkillReaction, type SkillReactionHost } from './skillReaction';
+import { isImeCompositionKey } from '@plannotator/ui/utils/commentSubmitKey';
 
 type OnAck = (messageId: string, on: boolean, agent: string, reaction?: InboxReaction | null, was?: InboxReaction | null) => void;
 
@@ -202,7 +203,7 @@ export function MessageReactHost({ body, api, copy, phone, takeBackOf }: { body:
       if (!slot || !(e.target instanceof Node) || !slot.contains(e.target)) faceHover.close();
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
+      if (e.key !== 'Escape' || isImeCompositionKey(e)) return;
       e.stopPropagation();
       faceHover.close();
     };

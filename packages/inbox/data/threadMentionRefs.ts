@@ -7,7 +7,7 @@ import type { QueryClient } from '@tanstack/react-query';
 import { displayInboxSubject, type InboxListRow, type InboxThread } from '@plannotator/core/inbox-types';
 import { inboxThreadMentionTitle, isInboxThreadMentionId } from '@plannotator/core/inbox-thread-mention';
 import { machineOf, selfMachineId } from '../inboxUrl';
-import type { MentionRef } from '../threadMentions';
+import type { MentionRef, MentionRefs } from '../threadMentions';
 import { heldList } from './queries/list';
 import { heldThread, readThread } from './queries/thread';
 
@@ -68,6 +68,11 @@ export function knownMentionRef(client: QueryClient, id: string): MentionRef | n
   if (named) return named;
   const held = heldThread(client, id);
   return held ? ofThread(held.thread, held.row) : null;
+}
+
+/** The Inbox's way to name a thread as a mention (threadMentions.ts `MentionRefs`), through its query client. */
+export function clientMentionRefs(client: QueryClient): MentionRefs {
+  return { known: (id) => knownMentionRef(client, id), resolve: (id) => resolveMentionRef(client, id) };
 }
 
 /** The thread as a mention: what the window holds, else one read of it; null when it is no thread of this Inbox. */

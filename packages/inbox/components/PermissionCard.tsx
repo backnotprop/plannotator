@@ -39,6 +39,7 @@ import { InboxApiError, inboxApi } from '../api';
 import { AuthorMark, Icon } from '../icons';
 import { newUuid } from '../uuid';
 import { useMinuteClock } from './Undelivered';
+import { holdsImeEscape, isImeCompositionKey } from '@plannotator/ui/utils/commentSubmitKey';
 
 /** How long the answers ignore activation after the card appears or takes focus (not from a pointer). */
 export const ARM_MS = 600;
@@ -262,7 +263,8 @@ function Reason({ who, busy, onDeny, onCancel }: { who: string; busy: boolean; o
         aria-label={`Why you deny this, for ${who}`}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === 'Enter' && !e.shiftKey && text.trim()) {
+          if (holdsImeEscape(e)) return;
+          if (e.key === 'Enter' && !e.shiftKey && !isImeCompositionKey(e) && text.trim()) {
             e.preventDefault();
             onDeny(text.trim());
           }

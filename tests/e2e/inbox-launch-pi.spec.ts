@@ -40,6 +40,7 @@ import { NO_BROWSER } from '../helpers/no-browser';
 import { markTourDecided } from '../helpers/tour-decided';
 import { installFakePi, type FakePi } from '../helpers/fake-pi';
 import { E2E_GROUP_TIP_SEEN, inboxScratch, rememberInboxOf, removeInboxScratch, stopScratchInbox } from './inbox-scratch';
+import { nextPostAnswer } from './page-answer';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -104,9 +105,9 @@ async function launch(page: Page, words: string): Promise<{ threadId: string; la
   await d.locator('[data-compose-start="pi"]').click();
   await expect(d.locator('[data-compose-to="start"]')).toHaveText(/New Pi session/);
   await d.getByRole('textbox', { name: 'Message' }).fill(words);
-  const answer = page.waitForResponse((r) => r.url().endsWith('/api/inbox/messages') && r.request().method() === 'POST');
+  const answer = await nextPostAnswer<{ thread_id: string; launch: { id: string; state: string } }>(page, '/api/inbox/messages');
   await d.locator('[data-compose-send]').click();
-  const body = (await (await answer).json()) as { thread_id: string; launch: { id: string; state: string } };
+  const body = await answer();
   expect(body.launch.state).toBe('starting');
   await expect(d).toHaveCount(0);
   await page.goto(`${world.url}#thread=${body.thread_id}`);

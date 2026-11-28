@@ -87,6 +87,7 @@ import { NO_BROWSER } from '../helpers/no-browser';
 import { markTourDecided } from '../helpers/tour-decided';
 import { installFakeClaude, type FakeClaude, type FakePermissionPrompt } from '../helpers/fake-claude';
 import { inboxScratch, rememberInboxOf, removeInboxScratch, stopScratchInbox } from './inbox-scratch';
+import { nextPostAnswer } from './page-answer';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -226,9 +227,9 @@ async function launch(page: Page, words: string): Promise<{ threadId: string; la
   await d.locator('[data-compose-to]').click();
   await d.locator('[data-compose-start="claude-code"]').click();
   await d.getByRole('textbox', { name: 'Message' }).fill(words);
-  const answer = page.waitForResponse((r) => r.url().endsWith('/api/inbox/messages') && r.request().method() === 'POST');
+  const answer = await nextPostAnswer<{ thread_id: string; launch: { id: string } }>(page, '/api/inbox/messages');
   await d.locator('[data-compose-send]').click();
-  const body = (await (await answer).json()) as { thread_id: string; launch: { id: string } };
+  const body = await answer();
   await expect(d).toHaveCount(0);
   await page.goto(`${world.url}#thread=${body.thread_id}`);
   await page.reload();

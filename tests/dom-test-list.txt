@@ -371,10 +371,13 @@ packages/inbox/videoAttachment.test.tsx
 packages/inbox/audioAttachment.test.tsx
 packages/inbox/markupAddsToReply.test.tsx
 packages/inbox/commentSubmitKey.test.tsx
+packages/inbox/imeEscape.test.tsx
+packages/inbox/imeDialogCancel.test.tsx
 packages/inbox/commentRowSkills.test.tsx
 packages/inbox/skillReferences.test.tsx
 packages/inbox/skillListRoom.test.tsx
 packages/inbox/pickerOpensOnTyping.test.tsx
+packages/inbox/pickerEscapeFirst.test.tsx
 packages/inbox/fullScreenComposerRenders.test.tsx
 packages/inbox/messageComments.test.tsx
 packages/inbox/messageDelete.test.tsx
@@ -425,6 +428,7 @@ packages/ui/components/Viewer.diagramLazyRestore.test.tsx
 packages/ui/components/Viewer.diagramAnchorHostile.test.tsx
 packages/ui/components/CommentPopover.skillReferences.test.tsx
 packages/ui/components/commentSubmitKey.composers.test.tsx
+packages/ui/components/imeEscape.composers.test.tsx
 packages/ui/components/CommentPopover.mentionChips.test.tsx
 packages/ui/components/SkillReferenceMenu.placement.test.tsx
 packages/ui/components/sidebar/FileBrowser.test.ts
@@ -564,6 +568,7 @@ packages/editor/App.agentTool.test.tsx
 packages/ui/hooks/useFirstRunAnnouncementWindow.test.tsx
 packages/review-editor/components/ReviewSidebar.generalComment.test.tsx
 packages/review-editor/components/commentSubmitKey.review.test.tsx
+packages/review-editor/components/imeEscape.review.test.tsx
 packages/review-editor/components/ReviewSidebar.outdated.test.tsx
 packages/ui/components/HtmlSurfaceControls.test.tsx
 packages/ui/components/AnnotationPanel.unanchored.test.tsx
@@ -669,6 +674,11 @@ packages/ui/components/ThemeProvider.test.tsx
 packages/ui/components/MarkdownEditor.embedPicker.test.ts
 packages/ui/hooks/useViewportEnvironment.test.tsx
 packages/ui/hooks/useIsMobile.test.tsx
+packages/ui/hooks/useEdgeSwipe.test.tsx
+packages/ui/hooks/usePanelPresence.test.tsx
+packages/ui/hooks/usePanelScrollLock.test.tsx
+packages/ui/components/OverlayScrollArea.scrollMemory.test.tsx
+packages/editor/App.edgeSwipe.mobile.test.tsx
 packages/ui/hooks/useVimDocumentFocus.test.tsx
 packages/ui/hooks/useScrollKeyRouting.test.tsx
 packages/ui/hooks/useScrollViewport.test.ts
@@ -986,6 +996,13 @@ packages/inbox/reviewSettings/reviewsSettings.test.tsx
 packages/inbox/guide/usePowerUp.test.tsx
 packages/inbox/guide/useViewedTicks.test.tsx
 packages/inbox/components/reply/replyBoxParity.test.tsx
+packages/inbox/components/reply/replyBoxSeams.test.tsx
+packages/inbox/components/reply/replyComposer.test.tsx
+packages/inbox/components/reply/replyComposerWiring.test.tsx
+packages/inbox/components/reply/replyDraftPages.test.tsx
 packages/inbox/guide/diffFontLoad.test.tsx
 packages/ui/components/diagram/DiagramCanvas.controlsReserve.test.tsx
 packages/ui/components/diagram/diagramSourceAccept.test.tsx
+packages/inbox/decisionHeldRetry.test.tsx
+packages/inbox/decisionUndoStays.test.tsx
+packages/inbox/settingsAfterConnect.test.tsx

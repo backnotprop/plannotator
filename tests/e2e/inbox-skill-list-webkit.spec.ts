@@ -258,7 +258,7 @@ test('257 px left (iPhone 15, keyboard 403): one match shows whole, so do 84', a
   await typeAtEnd(page, field, 'Yea. ', '/');
   await shot(page, 'iphone-tight-all');
   await expectWhole(page, 'all skills');
-  // Escape closes the list, not the box (with a query typed: a bare `/` leaves Escape to the box, as before).
+  // Escape closes the list, not the box (with a query typed here; a bare `/` too: pickerEscapeFirst.test.tsx).
   await field.pressSequentially('b', { delay: 20 });
   await expect(page.locator('[data-skill-menu]')).toHaveCount(1);
   await field.press('Escape');

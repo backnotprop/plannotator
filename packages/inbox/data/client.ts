@@ -29,3 +29,9 @@ let alone: QueryClient | null = null;
 export function useInboxQueryClient(): QueryClient {
   return useContext(QueryClientContext) ?? (alone ??= createInboxQueryClient());
 }
+
+/** `useInboxQueryClient`, or none when the caller has its own data (`off`): then no client is made or read. */
+export function useInboxQueryClientUnless(off: boolean): QueryClient | null {
+  const context = useContext(QueryClientContext);
+  return off ? null : (context ?? (alone ??= createInboxQueryClient()));
+}
