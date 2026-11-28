@@ -88,6 +88,7 @@ import { readPowerUpRejected, writePowerUpRejected, type PowerUpConfig, type Pow
 import { PowerUpStatusSlot } from './semDiff/PowerUpStatusSlot';
 import { usePowerUpConfig } from './semDiff/usePowerUpConfig';
 import { computeReviewSemanticDiff, loadReviewSemanticDiff, setSemanticDiffSource, type ReadFileContents } from './semDiff/semanticDiffSource';
+import { loadReviewFileContents } from './utils/loadReviewFileContents';
 import type { SemanticDiffChange, SemanticDiffResponse } from '@plannotator/shared/semantic-diff-types';
 
 import type { SemDiffAdvert } from '@plannotator/shared/sem-diff-assets';
@@ -906,21 +907,14 @@ const ReviewApp: React.FC = () => {
       setSemanticDiffSource(null);
       return;
     }
-    const read: ReadFileContents = async (file, signal) => {
-      const params = new URLSearchParams({ path: file.path });
-      if (file.oldPath) params.set('oldPath', file.oldPath);
-      const { base, snapshot } = semContentRef.current;
-      if (base) params.set('base', base);
-      if (snapshot) params.set('snapshot', snapshot);
-      const res = await fetch(`/api/file-content?${params}`, { signal });
-      return res.ok ? res.json() : null;
-    };
     let cached: { key: string; promise: Promise<SemanticDiffResponse> } | null = null;
     setSemanticDiffSource(() => {
       const { files, base, snapshot, generated, powerUp: current } = semContentRef.current;
       const opinion = current?.active ? current : undefined;
       const key = `${base ?? ''}|${snapshot ?? ''}|${[...generated].join(',')}|${opinion ? `power:${opinion.settingsRevision}:${opinion.rejected.join(',')}:${opinion.retry}` : 'plain'}|${files.map((file) => `${file.path}#${file.patch.length}`).join('|')}`;
       if (cached?.key === key) return cached.promise;
+      const read: ReadFileContents = async (file, signal) =>
+        (await loadReviewFileContents(file.path, file.oldPath, base, snapshot, signal)).contents;
       const promise = computeReviewSemanticDiff(files, semDiffClient, read, new AbortController().signal, generated, opinion);
       cached = { key, promise };
       return promise;

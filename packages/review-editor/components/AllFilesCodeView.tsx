@@ -74,6 +74,7 @@ import { ToolbarHost, type ToolbarHostHandle } from './ToolbarHost';
 import type { DiffSelectionActions } from './SelectionChooser';
 import { FileHeader } from './FileHeader';
 import { createKeptWholeFiles, warmsUpAtRest, wholeFileLines, type WholeFileText } from '../utils/wholeFileText';
+import { loadReviewFileContents } from '../utils/loadReviewFileContents';
 import { collectHeaderHeightHints, headerHeightFor, type HeaderHeightHint } from '../utils/headerHeightHints';
 import { ReviewStateProvider, useReviewStateOptional, type ReviewState } from '../dock/ReviewStateContext';
 import { DiffBottomBar } from './DiffBottomBar';
@@ -2089,14 +2090,9 @@ const AllFilesCodeViewBody: React.FC<AllFilesCodeViewProps> = ({
   const fetchFileContentRef = useRef(fetchFileContent);
   fetchFileContentRef.current = fetchFileContent;
   const keptWholeFilesRef = useRef(createKeptWholeFiles());
-  const readWholeFileFromReview = useStableCallback((file: DiffFile, signal: AbortSignal): Promise<WholeFileText | null> => {
-    const params = new URLSearchParams({ path: file.path });
-    if (file.oldPath) params.set('oldPath', file.oldPath);
-    const base = reviewBaseRef.current;
-    if (base) params.set('base', base);
-    const snapshot = reviewSnapshotIdRef.current;
-    if (snapshot) params.set('snapshot', snapshot);
-    return fetch(`/api/file-content?${params}`, { signal }).then((res) => (res.ok ? res.json() : null));
+  const readWholeFileFromReview = useStableCallback(async (file: DiffFile, signal: AbortSignal): Promise<WholeFileText | null> => {
+    const { contents } = await loadReviewFileContents(file.path, file.oldPath, reviewBaseRef.current, reviewSnapshotIdRef.current, signal);
+    return contents;
   });
   const wholeFileReader = fetchFileContent ?? (!readOnly && contextExpansionAvailable ? readWholeFileFromReview : undefined);
   const wholeFileReaderRef = useRef(wholeFileReader);
