@@ -19,7 +19,7 @@ const { svg, width, height, description, parts, problems } = await renderDiagram
 
 Save the JSON as `checkout.diagram.json`. With the package installed, run
 `plannotator-diagrams render checkout.diagram.json -o checkout.svg`.
-The CLI writes the SVG and exits with status 1 when the layout has problems. Invalid input reports the offending field. The optional `@plannotator/diagrams/worker` module handles messages of the form `{id, spec}` and replies with `{id, result}` or `{id, error}`.
+The CLI writes the SVG and exits with status 1 when the layout has problems. Link captions try alternate positions along their route to clear group borders and arrowheads. If a caption cannot fit, the diagnostic names the affected parts. Invalid input reports the offending field. The optional `@plannotator/diagrams/worker` module handles messages of the form `{id, spec}` and replies with `{id, result}` or `{id, error}`.
 
 ## Reviewable parts
 

@@ -98,6 +98,31 @@ test("reports layout conflicts with their affected parts, and clears them after 
     assert.ok(narrow.problems.some(p => p.includes("px apart")));
 });
 
+test("places link captions clear of ownership borders, allowing labels inside a group", async () => {
+    const group = {label: "Source team", members: ["Source"]};
+    const spec = {title: "A handoff", columns: [{title: "Source"}, {title: "Sink"}],
+        links: [{from: "Source", to: "Sink", label: "handoff"}], groups: [group]};
+    const result = await renderDiagram({...spec, gap: 85});
+    const frame = result.parts.find(p => p.kind === "group");
+    const label = result.parts.find(p => p.kind === "link").labelBox;
+    assert.deepEqual(result.problems, []);
+    assert.ok(label.x > frame.x + frame.w + 1);
+
+    const cramped = await renderDiagram({...spec, gap: 75});
+    assert.ok(cramped.problems.some(p => p.includes("'handoff'") && p.includes("border of group 'Source team'")));
+    const inside = await renderDiagram({...spec, gap: 75, groups: [{...group, members: ["Source", "Sink"]}]});
+    assert.deepEqual(inside.problems, []);
+});
+
+test("reports an obscured arrow tip even when the caption clears both panels", async () => {
+    const spec = {title: "A handoff", columns: [{title: "Source"}, {title: "Sink"}],
+        links: [{from: "Source", to: "Sink", label: "handoff"}]};
+    const result = await renderDiagram({...spec, gap: 60});
+    assert.equal(result.problems.length, 1);
+    assert.match(result.problems[0], /'handoff'.*arrowhead of line 'Source' -> 'Sink'/);
+    assert.deepEqual((await renderDiagram({...spec, gap: 85})).problems, []);
+});
+
 test("preserves duplicate edges and draws a labelled self-loop", async () => {
     const again = {from: "Ledger", to: "Ledger", label: "retry"};
     const spec = {...simple, links: [flow, {...flow, kind: "planned"}, again]};
