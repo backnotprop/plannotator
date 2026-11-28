@@ -4,7 +4,7 @@
  * says, from data the window already has (the list's `agents`, its rows and the linked machines). No read of its own.
  */
 import { launchInnerWords } from '@plannotator/core/inbox-launch-choice';
-import { INBOX_HOST_NAMES, type InboxAgent, type InboxAgentsGroup, type InboxListRow, type InboxListSection, type InboxParticipant } from '@plannotator/core/inbox-types';
+import { inboxHostName, type InboxAgent, type InboxAgentsGroup, type InboxListRow, type InboxListSection, type InboxParticipant } from '@plannotator/core/inbox-types';
 import { whenTime } from '../format';
 import type { MachineView } from '../api';
 import { awayLine, isAway, type MachinesModel } from '../machines';
@@ -25,8 +25,22 @@ export interface AgentsGroup {
   agents: AgentEntry[];
 }
 
+/** The status order used by the Agents sidebar when "Show agent status" is on. */
+export function sortAgentEntries(entries: readonly AgentEntry[], statusOn: boolean): AgentEntry[] {
+  if (!statusOn) return [...entries];
+  const rank = (entry: AgentEntry): number => {
+    if (entry.agent.status_mark?.state === 'blocked') return 0;
+    if (entry.agent.status_mark?.state === 'working') return 1;
+    return 2;
+  };
+  return entries
+    .map((entry, index) => ({ entry, index }))
+    .sort((a, b) => rank(a.entry) - rank(b.entry) || a.index - b.index)
+    .map(({ entry }) => entry);
+}
+
 /** An agent's host in words ("Claude Code"); "An agent" when nothing said. */
-export const agentHostName = (host: string | null): string => (host ? (INBOX_HOST_NAMES[host] ?? host) : 'An agent');
+export const agentHostName = (host: string | null, runtime?: unknown): string => (host ? inboxHostName(host, runtime) : 'An agent');
 
 const rowName = (row: InboxListRow) => (row.thread_name ?? row.subject ?? '').trim();
 
@@ -87,7 +101,7 @@ export type AgentNameContext = 'list' | 'thread';
  */
 export function agentRowName(agent: InboxAgent, context: AgentNameContext = 'list'): string {
   const fallback = context === 'list' ? agent.first_thread?.name.trim() || agent.project?.name : null;
-  return agentOwnName(agent) || fallback || agentHostName(agent.host);
+  return agentOwnName(agent) || fallback || agentHostName(agent.host, agent.runtime);
 }
 
 /**
@@ -101,8 +115,11 @@ export function agentRowName(agent: InboxAgent, context: AgentNameContext = 'lis
  * the person, so only the continuing one is drawn. Two agents that share a thread and do not continue one another
  * stay two rows.
  */
-export function agentsGroups(groups: readonly InboxAgentsGroup[] | null, machines: MachinesModel, rows: readonly InboxListRow[]): AgentsGroup[] {
-  return sectionGroups(groups, machines).map(({ group, machine, view }) => ({ machine: view, agents: groupEntries(group, machine, machines.self, rows).shown }));
+export function agentsGroups(groups: readonly InboxAgentsGroup[] | null, machines: MachinesModel, rows: readonly InboxListRow[], statusOn = false): AgentsGroup[] {
+  return sectionGroups(groups, machines).map(({ group, machine, view }) => ({
+    machine: view,
+    agents: sortAgentEntries(groupEntries(group, machine, machines.self, rows).shown, statusOn),
+  }));
 }
 
 /** Each group the section draws: one flat group of this Inbox's agents with no machine linked, else one per machine. */
@@ -231,7 +248,8 @@ export function agentFacts(entry: AgentEntry, machine: MachineView | null, now: 
   // An agent the Inbox started in T3 Code: the agent and model T3 runs its thread on ("T3 Code (Claude Code · opus)").
   const inner = launchInnerWords(agent.launch?.inner);
   // Before the thread connects its host is still the person's agent: T3 Code is where it runs, so it says T3 Code.
-  const host = inner ? `${agent.launch?.t3 ? 'T3 Code' : agentHostName(agent.host)} (${inner})` : agentHostName(agent.host);
+  const hostName = agentHostName(agent.host, agent.runtime);
+  const host = inner ? `${agent.launch?.t3 ? 'T3 Code' : hostName} (${inner})` : hostName;
   const sub = [host, agent.project?.name, machine?.name].filter(Boolean).join(' · ');
   const away = machine && isAway(machine) ? awayLine(machine, now) : null;
   const state =
@@ -317,7 +335,7 @@ export function threadSessions(
     // Only a name the session has itself (`agentOwnName`, else the labels' same ladder), else its agent. Never the
     // sidebar's fallbacks (a thread's name, a project), which inside a thread read as the thread's own title.
     const own = Object.hasOwn(labels, p.session) ? labels[p.session]?.trim() : '';
-    const name = (agent && agentOwnName(agent)) || own || p.name || agentHostName(p.host);
+    const name = (agent && agentOwnName(agent)) || own || p.name || agentHostName(p.host, agent?.runtime);
     const same = agent ? out.find((s) => s.agentId === agent!.id) : undefined;
     if (same) {
       if (!same.sessions.includes(p.session)) same.sessions.push(p.session);

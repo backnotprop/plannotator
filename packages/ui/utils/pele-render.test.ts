@@ -52,7 +52,7 @@ describe.if(hasDom)('Pele render integration', () => {
     const paints = await renderDiagram('mermaid', 'styles', 'flowchart TD\n A --> B\n style A fill:#ff0000', theme);
     if (paints.ok === false) throw new Error(paints.message);
     expect(Array.from(paints.svgNode.querySelectorAll('[style]'), (el) => el.getAttribute('style')).join(' ')).toContain('#ff0000');
-    // Pele 1.3.0 refuses the url() itself; the scrub in diagram-render is the belt if a later Pele accepts it.
+    // Pele (1.3.0 through 1.13.0) refuses the url() itself; the scrub in diagram-render is the belt if a later Pele accepts it.
     const fetches = await renderDiagram('mermaid', 'fetches', 'flowchart TD\n A --> B\n style B fill:url(https://example.com/x.png)', theme);
     if (fetches.ok === true) {
       expect(Array.from(fetches.svgNode.querySelectorAll('[style]'), (el) => el.getAttribute('style')).join(' ')).not.toContain('example.com');

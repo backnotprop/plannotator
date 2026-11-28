@@ -55,11 +55,15 @@ export function adoptSavedReviewSettings(next: Pick<SettingsModel, 'diff_options
   adoptSavedReviewAnalysis(next.review_analysis);
 }
 
-/** The page's first settings read (settingsAtLoad.ts): readers wait for it. */
+/**
+ * The page's first settings read (settingsAtLoad.ts): readers wait for it. The diff options come in with it, before
+ * readers are let go, so what waits on this (the semantic client, Power Up) never starts from the cookie's
+ * `diffSemantic` or `diffPowerUp` while config.json says otherwise.
+ */
 export function waitForReviewAnalysis(answer: Promise<object>): void {
   if (adopted) return;
   read = false;
-  answer.then((next) => adoptSavedReviewAnalysis((next as { review_analysis?: InboxReviewAnalysis | null }).review_analysis), settle);
+  answer.then((next) => adoptSavedReviewSettings(next as Parameters<typeof adoptSavedReviewSettings>[0]), settle);
 }
 
 export function reviewAnalysisReadNow(): boolean {

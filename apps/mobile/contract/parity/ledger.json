@@ -17972,11 +17972,13 @@
       "id": "window-only-sem-diff",
       "title": "Window endpoints under sem-diff with no door route",
       "surface": [
-        "window:/api/inbox/sem-diff"
+        "window:/api/inbox/sem-diff",
+        "window:/api/sem-diff/opinion",
+        "window:/api/sem-diff/opinion/settings"
       ],
       "flows": [],
       "mobile": "later",
-      "why": "L-nodoor: the phone reaches these only once a door route is added for them (sem-diff).",
+      "why": "L-nodoor: the phone reaches these only once a door route is added for them (sem-diff; Power Up's ask and its key settings answer the window only, from this computer's key).",
       "reason": "L-nodoor",
       "source": "seed: no SCOPE row names it",
       "ios": {
@@ -23532,6 +23534,315 @@
       }
     },
     {
+      "id": "undecided-settings-reviews",
+      "title": "settings:reviews",
+      "surface": [
+        "settings:reviews"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxagent-runtime-oh-my-pi",
+      "title": "enum:InboxAgent.runtime.oh-my-pi",
+      "surface": [
+        "enum:InboxAgent.runtime.oh-my-pi"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxcomposesession-runtime-oh-my-pi",
+      "title": "enum:InboxComposeSession.runtime.oh-my-pi",
+      "surface": [
+        "enum:InboxComposeSession.runtime.oh-my-pi"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxagent-runtime",
+      "title": "field:InboxAgent.runtime",
+      "surface": [
+        "field:InboxAgent.runtime"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxcomposesession-runtime",
+      "title": "field:InboxComposeSession.runtime",
+      "surface": [
+        "field:InboxComposeSession.runtime"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-pulls-pull",
+      "title": "door:GET pulls/pull",
+      "surface": [
+        "door:GET pulls/pull"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-pulls-pull",
+      "title": "window:/api/inbox/pulls/pull",
+      "surface": [
+        "window:/api/inbox/pulls/pull"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxlistgroupid-tagged",
+      "title": "enum:InboxListGroupId.tagged",
+      "surface": [
+        "enum:InboxListGroupId.tagged"
+      ],
+      "flows": [],
+      "mobile": "v1",
+      "why": "The list: a server that places rows in Tagged you (Spaces) gets them drawn fourth and counted as waiting on the person, never dropped (owner, 2026-11-25: \"A · It counts\").",
+      "decoded": true,
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxsectionid-tagged",
+      "title": "enum:InboxSectionId.tagged",
+      "surface": [
+        "enum:InboxSectionId.tagged"
+      ],
+      "flows": [],
+      "mobile": "v1",
+      "why": "The list: a server that places rows in Tagged you (Spaces) gets them drawn fourth and counted as waiting on the person, never dropped (owner, 2026-11-25: \"A · It counts\").",
+      "decoded": true,
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-messages-id-guide-file",
+      "title": "door:GET messages/:id/guide/file",
+      "surface": [
+        "door:GET messages/:id/guide/file"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-messages-id-guide-package-changes",
+      "title": "door:GET messages/:id/guide/package-changes",
+      "surface": [
+        "door:GET messages/:id/guide/package-changes"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-messages-id-guide-review-image",
+      "title": "door:GET messages/:id/guide/review-image",
+      "surface": [
+        "door:GET messages/:id/guide/review-image"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-messages-id-guide-review-markdown-image",
+      "title": "door:GET messages/:id/guide/review-markdown-image",
+      "surface": [
+        "door:GET messages/:id/guide/review-markdown-image"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-open-in-file",
+      "title": "door:GET open-in/file",
+      "surface": [
+        "door:GET open-in/file"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-open-in-file-code",
+      "title": "door:GET open-in/file/code",
+      "surface": [
+        "door:GET open-in/file/code"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-threads-id-steps",
+      "title": "door:GET threads/:id/steps",
+      "surface": [
+        "door:GET threads/:id/steps"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-messages-id-guide-viewed",
+      "title": "door:POST messages/:id/guide/viewed",
+      "surface": [
+        "door:POST messages/:id/guide/viewed"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-outboxview-viewed",
+      "title": "field:OutboxView.viewed",
+      "surface": [
+        "field:OutboxView.viewed"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-threads-id-draft",
+      "title": "door:POST threads/:id/draft",
+      "surface": [
+        "door:POST threads/:id/draft"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-threads-id-draft-delete",
+      "title": "door:POST threads/:id/draft/delete",
+      "surface": [
+        "door:POST threads/:id/draft/delete"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-machineview-drafts-held",
+      "title": "field:MachineView.drafts_held",
+      "surface": [
+        "field:MachineView.drafts_held"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-launch-switch",
+      "title": "Launch switch: the one-time launch dialog's claim, shown and answer",
+      "surface": [
+        "window:/api/inbox/launch-switch"
+      ],
+      "flows": [],
+      "mobile": "later",
+      "why": "L-size: a one-time launch dialog. The web Inbox draws it at every width, the phone-width page and a session opened from another device included; only the native phone app leaves it out (the owner, 2026-11-25)",
+      "reason": "L-size",
+      "since": "2026-11-26",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
       "id": "undecided-enum-inboxlauncht3-why-no-model",
       "title": "enum:InboxLaunchT3.why.no_model",
       "surface": [
@@ -23540,7 +23851,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-26",
+      "since": "2026-11-28",
       "ios": {
         "state": "not-started"
       }
@@ -23554,7 +23865,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-26",
+      "since": "2026-11-28",
       "ios": {
         "state": "not-started"
       }
@@ -23568,7 +23879,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-26",
+      "since": "2026-11-28",
       "ios": {
         "state": "not-started"
       }
@@ -23582,7 +23893,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-26",
+      "since": "2026-11-28",
       "ios": {
         "state": "not-started"
       }
@@ -23596,7 +23907,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-26",
+      "since": "2026-11-28",
       "ios": {
         "state": "not-started"
       }
@@ -23610,7 +23921,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-26",
+      "since": "2026-11-28",
       "ios": {
         "state": "not-started"
       }
@@ -23624,7 +23935,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-26",
+      "since": "2026-11-28",
       "ios": {
         "state": "not-started"
       }
@@ -23638,7 +23949,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-26",
+      "since": "2026-11-28",
       "ios": {
         "state": "not-started"
       }
@@ -23652,7 +23963,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-26",
+      "since": "2026-11-28",
       "ios": {
         "state": "not-started"
       }
@@ -23666,7 +23977,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-26",
+      "since": "2026-11-28",
       "ios": {
         "state": "not-started"
       }
@@ -23680,7 +23991,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-26",
+      "since": "2026-11-28",
       "ios": {
         "state": "not-started"
       }
@@ -23694,7 +24005,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-26",
+      "since": "2026-11-28",
       "ios": {
         "state": "not-started"
       }
@@ -23708,7 +24019,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-26",
+      "since": "2026-11-28",
       "ios": {
         "state": "not-started"
       }
@@ -23722,7 +24033,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-26",
+      "since": "2026-11-28",
       "ios": {
         "state": "not-started"
       }
@@ -23736,7 +24047,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-26",
+      "since": "2026-11-28",
       "ios": {
         "state": "not-started"
       }
@@ -23750,7 +24061,7 @@
       "flows": [],
       "mobile": "undecided",
       "why": "",
-      "since": "2026-11-26",
+      "since": "2026-11-28",
       "ios": {
         "state": "not-started"
       }

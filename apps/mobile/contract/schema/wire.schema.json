@@ -1803,6 +1803,13 @@
             }
           ]
         },
+        "runtime": {
+          "type": "string",
+          "enum": [
+            "oh-my-pi"
+          ],
+          "x-open": true
+        },
         "label": {
           "type": "string"
         },
@@ -2688,6 +2695,13 @@
         },
         "label": {
           "type": "string"
+        },
+        "runtime": {
+          "type": "string",
+          "enum": [
+            "oh-my-pi"
+          ],
+          "x-open": true
         },
         "place": {
           "$ref": "#/$defs/InboxAgentPlace"
@@ -3818,6 +3832,7 @@
         "sent",
         "snoozed",
         "stopped",
+        "tagged",
         "waiting"
       ],
       "x-open": true,
@@ -6141,10 +6156,10 @@
             "pi": {
               "type": "number"
             },
-            "opencode": {
+            "oh-my-pi": {
               "type": "number"
             },
-            "oh-my-pi": {
+            "opencode": {
               "type": "number"
             }
           },
@@ -7108,6 +7123,7 @@
         "quiet",
         "sent",
         "stopped",
+        "tagged",
         "waiting"
       ],
       "x-open": true,
@@ -8264,6 +8280,9 @@
         "waiting": {
           "type": "number"
         },
+        "drafts_held": {
+          "type": "number"
+        },
         "list_cursor": {
           "anyOf": [
             {
@@ -8436,6 +8455,29 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "viewed": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "viewed": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "path",
+                "viewed"
+              ],
+              "additionalProperties": true
             },
             {
               "type": "null"

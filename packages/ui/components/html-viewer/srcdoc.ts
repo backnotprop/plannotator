@@ -120,6 +120,13 @@ export interface SrcdocInjectionOptions {
    * relative URL onto an attacker-chosen origin.
    */
   bridgeScriptUrl?: string;
+  /**
+   * The page starts in Interact (clicks reach the page) instead of armed
+   * Annotate. The bridge reads it from its tag (`data-plannotator-start`)
+   * before the page paints, so it never waits on the parent's first
+   * `set-annotate-mode` to be in the right mode. Absent: armed, as always.
+   */
+  startInteract?: boolean;
 }
 
 /**
@@ -154,10 +161,11 @@ function escapeAttribute(value: string): string {
  * paths. Inline is the default and Plannotator's only path; the URL form is
  * the opt-in for hosts that serve the generated `bridge-script.asset.js`.
  */
-export function buildBridgeScriptTag(bridgeScriptUrl?: string, linkKey?: string): string {
+export function buildBridgeScriptTag(bridgeScriptUrl?: string, linkKey?: string, startInteract?: boolean): string {
+  const start = startInteract ? ` data-plannotator-start="interact"` : "";
   if (bridgeScriptUrl) {
     const key = linkKey && LINK_KEY_RE.test(linkKey) ? ` data-plannotator-link-key="${linkKey}"` : "";
-    return `<script src="${escapeAttribute(bridgeScriptUrl)}"${key}></script>`;
+    return `<script src="${escapeAttribute(bridgeScriptUrl)}"${key}${start}></script>`;
   }
   if (!BRIDGE_SCRIPT) {
     // Only reachable when a host aliased `./bridge-script` to the generated
@@ -169,7 +177,7 @@ export function buildBridgeScriptTag(bridgeScriptUrl?: string, linkKey?: string)
         + "(bridge-script.lite alias) but no bridgeScriptUrl was passed.",
     );
   }
-  return `<script>${BRIDGE_SCRIPT}</script>`;
+  return `<script${start}>${BRIDGE_SCRIPT}</script>`;
 }
 
 // These defaults live inside the sandbox: host print.css cannot style a
@@ -277,6 +285,7 @@ export function buildSrcdocInjection({
   diffActive,
   bridgeScriptUrl,
   linkKey,
+  startInteract,
 }: SrcdocInjectionOptions): string {
   const payload = buildThemeTokenPayload(tokens, hostTheme);
   let themeCSS = ":root {\n";
@@ -290,7 +299,7 @@ export function buildSrcdocInjection({
     themeCSS += `:root { color-scheme: ${isLight ? "light" : "dark"}; }\n`;
   }
   const diffCSS = diffActive ? DIFF_HIGHLIGHT_CSS : "";
-  return `<style>${themeCSS}${ANNOTATION_HIGHLIGHT_CSS}${diffCSS}</style>${buildBridgeScriptTag(bridgeScriptUrl, linkKey)}`;
+  return `<style>${themeCSS}${ANNOTATION_HIGHLIGHT_CSS}${diffCSS}</style>${buildBridgeScriptTag(bridgeScriptUrl, linkKey, startInteract)}`;
 }
 
 /**

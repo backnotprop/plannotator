@@ -10,7 +10,8 @@
  * gives are drawn by InboxList, opening a row is the window's own step
  * (held.ts `markHeldRowLooked`, before the server's look lands) and then the
  * store's look (`markSeen`). The row stops being bold in its group with its
- * state mark and open count, and an agent's next message makes it bold again.
+ * state mark and open count, its hover action Mark unread (the owner,
+ * 2026-11-25), and an agent's next message makes it bold again, with Mark read.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -101,6 +102,10 @@ describe.if(hasDom)('a thread you have read', () => {
     el = draw(markHeldRowLooked(shown, new Set([ids.waiting])));
     expect(look(el, ids.waiting)).toEqual({ bold: false, group: 'waiting', mark: 'open', open: '1' });
     expect(look(el, ids.holding)!.bold).toBe(true);
+    // The opened row offers Mark unread at once; the one not opened keeps Mark read.
+    expect(el.querySelector(`[data-row="${ids.waiting}"] [data-row-mark-unread]`)).not.toBeNull();
+    expect(el.querySelector(`[data-row="${ids.holding}"] [data-row-mark-read]`)).not.toBeNull();
+    expect(el.querySelector(`[data-row="${ids.holding}"] [data-row-mark-unread]`)).toBeNull();
 
     // The look lands for all three: the server's list draws them read, each where it was.
     for (const id of Object.values(ids)) store.markSeen(id);
@@ -108,9 +113,12 @@ describe.if(hasDom)('a thread you have read', () => {
     expect(look(el, ids.stopped)).toEqual({ bold: false, group: 'stopped', mark: 'stop', open: '1' });
     expect(look(el, ids.holding)).toEqual({ bold: false, group: 'holding', mark: 'hold', open: '1' });
     expect(look(el, ids.waiting)).toEqual({ bold: false, group: 'waiting', mark: 'open', open: '1' });
-    // Read is not answered: the hover action is still Mark read (set the questions aside), never Mark unread.
-    expect(el.querySelector(`[data-row="${ids.waiting}"] [data-row-mark-read]`)).not.toBeNull();
-    expect(el.querySelector(`[data-row="${ids.waiting}"] [data-row-mark-unread]`)).toBeNull();
+    // Read, like every other opened thread (the owner, 2026-11-25): the hover action is Mark unread, in every group;
+    // Mark read (set the questions aside) stays in the row menu and the header. Not opened: Mark read.
+    for (const id of Object.values(ids)) {
+      expect(el.querySelector(`[data-row="${id}"] [data-row-mark-unread]`)).not.toBeNull();
+      expect(el.querySelector(`[data-row="${id}"] [data-row-mark-read]`)).toBeNull();
+    }
 
     // The agent writes again in the Waiting thread: bold again, still in Waiting; the others stay read.
     send('ses_w', 'One more note: the webhook retries for 3 days.', ids.waiting);
@@ -118,5 +126,8 @@ describe.if(hasDom)('a thread you have read', () => {
     expect(look(el, ids.waiting)).toEqual({ bold: true, group: 'waiting', mark: 'open', open: '1' });
     expect(look(el, ids.holding)!.bold).toBe(false);
     expect(look(el, ids.stopped)!.bold).toBe(false);
+    // Bold again: Mark read is its action again.
+    expect(el.querySelector(`[data-row="${ids.waiting}"] [data-row-mark-read]`)).not.toBeNull();
+    expect(el.querySelector(`[data-row="${ids.waiting}"] [data-row-mark-unread]`)).toBeNull();
   });
 });

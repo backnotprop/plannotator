@@ -90,6 +90,10 @@ mock.module('./ToolbarHost', () => ({
 }));
 
 const { AllFilesCodeView } = await import('./AllFilesCodeView');
+const { PowerUpStatusSlot } = await import('../semDiff/PowerUpStatusSlot');
+const { usePowerUpConfig } = await import('../semDiff/usePowerUpConfig');
+type PowerUpStatus = import('../semDiff/powerUp').PowerUpStatus;
+const NO_REJECTED: readonly string[] = [];
 
 const hasDom = typeof document !== 'undefined';
 let root: Root | null = null;
@@ -578,6 +582,55 @@ describe('AllFilesCodeView semantic diffs through a host reader', () => {
     const { read, reads } = hostReader();
     await mount([changed('a.ts'), changed('b.ts')], { fetchFileContent: read });
     expect(reads).toEqual([]);
+  });
+
+  test.skipIf(!hasDom)('Retry on an unavailable Power Up asks the provider again, through the config and slot both hosts use', async () => {
+    const opinionAsks: string[] = [];
+    let refuse = true;
+    const client: SemDiffClient = {
+      supports: (path) => path.endsWith('.ts'),
+      diff: async (path, _old, _new, _signal, opinion) => {
+        if (!opinion) return moved;
+        opinionAsks.push(path);
+        return { ...moved, secondOpinion: (refuse ? { state: 'refusedKey', links: [] } : { state: 'ok', links: [] }) as never };
+      },
+      attempt: async () => ({ result: moved, failed: false }),
+      dispose: () => {},
+    };
+    const { read } = hostReader();
+    const readSettings = async () => ({ configured: true, provider: 'jev' });
+    function Host() {
+      const { powerUp, retry } = usePowerUpConfig({ client, on: true, rejected: NO_REJECTED, readSettings });
+      const [status, setStatus] = React.useState<PowerUpStatus | null>(null);
+      return (
+        <>
+          {status && <PowerUpStatusSlot status={status} provider="jev" onRetry={retry} />}
+          <AllFilesCodeView files={[changed('a.ts')]} diffStyle="unified" annotations={[]} selectedAnnotationId={null} scrollTargetAnnotation={null} pendingSelection={null} onLineSelection={() => {}} onAddAnnotationForFile={() => {}} onEditAnnotation={() => {}} onSelectAnnotation={() => {}} onDeleteAnnotation={() => {}} readOnly contextExpansionAvailable={false} semDiffClient={client} fetchFileContent={read} powerUp={powerUp} onPowerUpStatus={setStatus} />
+        </>
+      );
+    }
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await act(async () => {
+      root!.render(<Host />);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    });
+    const options = lastCodeViewProps?.options as { onPostRender: (node: HTMLElement, instance: unknown, phase: string, context: unknown) => void };
+    await act(async () => {
+      for (const item of items.values()) options.onPostRender(document.createElement('div'), {}, 'mount', { item });
+      await new Promise((resolve) => setTimeout(resolve, 260));
+    });
+    expect(opinionAsks).toEqual(['a.ts']);
+    expect(host.querySelector('[data-power-up-status]')?.getAttribute('data-power-up-status')).toBe('unavailable');
+    refuse = false;
+    const retryButton = [...host.querySelectorAll('button')].find((button) => button.textContent === 'Retry')!;
+    await act(async () => {
+      retryButton.click();
+      await new Promise((resolve) => setTimeout(resolve, 260));
+    });
+    expect(opinionAsks).toEqual(['a.ts', 'a.ts']);
+    expect(host.querySelector('[data-power-up-status]')?.getAttribute('data-power-up-status')).toBe('nothing');
   });
 });
 

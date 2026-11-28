@@ -39,7 +39,7 @@ import { buildGuideSnapshot } from '@plannotator/core/guide-format';
 import { patchBlobIds, type DiffFile } from '@plannotator/core/diff-files';
 import { anchorStillMatches, captureAnchor } from '@plannotator/ui/utils/codeAnnotationAnchor';
 import type { KeptComment } from '../guide/platform-post-types';
-import { inboxPullRepoKey, type InboxPullDiffAnswer, type InboxPullsAnswer } from '@plannotator/core/inbox-types';
+import { inboxPullIsOpen, inboxPullRepoKey, type InboxPullDiffAnswer, type InboxPullsAnswer } from '@plannotator/core/inbox-types';
 import type { CodeAnnotation } from '@plannotator/ui/types';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
 import { DecisionControl, type DecisionHandler } from '@plannotator/ui/components/DecisionControl';
@@ -91,6 +91,10 @@ import { scopeOnPage } from './reviewScope';
 import { liveView } from '../prs/stackRange';
 import { lookedBefore, markLooked, useLooked } from '../prs/looked';
 import { RailScopeRows } from './RailScopeRows';
+import { drawnStackWith, hiddenIn, useKeptStack } from './keptStack';
+import { forgeSaid, loneStack, missingWords, unreadWords, useRoutePull, withForgeState } from './routePull';
+import { pageOffersPost } from './pageState';
+import { shutWord } from './stateWord';
 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
 /** The file rail's width: dragged and kept. */
@@ -302,8 +306,17 @@ function forPost(comments: readonly KeptComment[], screen: Pick<OnScreen, 'stamp
 
 function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLayer, onBack, onSent, onPosted }: PullReviewProps) {
   const phone = usePhone();
-  const item = useMemo(() => (model ? findStack(pullGroups(model, null), stackId) : null), [model, stackId]);
-  const stack = item?.stack ?? null;
+  const live = useMemo(() => (model ? findStack(pullGroups(model, null), stackId) : null), [model, stackId]);
+  // The list no longer naming this layer (merged, closed, a read without it) leaves the review as it is (keptStack.ts);
+  // after a reload or a restart, or a layer of a held stack's page, the stack drawn last or the PR the address names
+  // (routePull.ts). Its state is the forge's when it merged or closed elsewhere.
+  const listed = !!live?.stack.layers.some((l) => l.key === layerKey);
+  const kept = useKeptStack(listed ? live : null, `${stackId}\u0000${layerKey}`, model);
+  const route = useRoutePull(layerKey, model, !listed);
+  const lone = useMemo(() => (route.pull ? loneStack(route.pull) : null), [route.pull]);
+  const [said, setSaid] = useState<ReturnType<typeof forgeSaid>>(null);
+  const found = kept?.stack ?? drawnStackWith(stackId, layerKey, model) ?? (lone && model && !hiddenIn(lone, model) ? lone : null);
+  const stack = useMemo(() => withForgeState(found, layerKey, listed, said, route), [found, layerKey, listed, said, route.pull, route.fresh]); // eslint-disable-line react-hooks/exhaustive-deps
   const layer = stack?.layers.find((l) => l.key === layerKey) ?? null;
   // A range the list no longer holds as one (a layer merged or moved) shows the layer's own diff.
   const scope = stack ? liveView(stack, layerKey, asked) : asked;
@@ -326,6 +339,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
   const diffBase = on?.base;
   const seenId = layer ? `${layer.key}\u0000${scope}\u0000${layer.head_sha ?? layer.updated_at}\u0000${diffBase}` : '';
   const [diff, setDiff] = useState<InboxPullDiffAnswer | null>(() => seenDiff(seenId, layerKey) ?? null);
+  useEffect(() => setSaid(forgeSaid(diff, layerKey)), [diff, layerKey]);
   const [diffError, setDiffError] = useState<string | null>(null);
   // A patch this review read itself named its head. One remembered in `SEEN` can be older than what another window kept.
   const read = useRef(false);
@@ -459,7 +473,8 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
   // a patch whose head the forge did not pin down posts nothing (Open on GitHub instead), and neither does a diff
   // that could not be read (the header then offers Open on GitHub).
   const postHead = diff?.head_sha ?? (scope === 'layer' ? null : (layer?.head_sha ?? null));
-  const canPost = !!postablePull(layer) && !diffError && (!diff || !!postHead);
+  // Not on a PR the forge says it has no such of now (pageState.ts): what shows is its last read.
+  const canPost = !!layer && !!postablePull(layer) && pageOffersPost(layer, listed, route.missing) && !diffError && (!diff || !!postHead);
   // The expand arrows' whole files, at the commits this diff runs between.
   const headMoved = !!diff && !diff.head_sha;
   const patchHead = diff?.head_sha ?? null;
@@ -487,6 +502,12 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
         : {};
     write({ comments: [...comments.filter((c) => c.id !== annotation.id), { ...annotation, ...read }] });
   };
+  // The Post dialog's summary when the PR merged or closed under it (PlatformPost's `onLeft`): kept as a global comment
+  // of this review, readable and copyable on the closed page, never dropped. The latest `save`: it runs as Post goes.
+  const saveNow = useRef(save);
+  saveNow.current = save;
+  const keepSummary = (summary: string) =>
+    saveNow.current({ id: `ann-summary-${typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`}`, type: 'comment', scope: 'general', filePath: '', lineStart: 0, lineEnd: 0, side: 'new', text: summary, createdAt: Date.now() });
   const remove = (id: string) => {
     write({ comments: comments.filter((c) => c.id !== id) });
     // Also where another window's entry still holds it, so it does not come back.
@@ -508,6 +529,8 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
   const [paneRef, folded] = useNarrowerThan<HTMLElement>(REVIEW_FOLD_PANEL_BELOW, true, drawn);
   // Global comment sits in the bar. A phone keeps it in the comments' sheet.
   const [controlsHost, setControlsHost] = useState<HTMLDivElement | null>(null);
+  // A phone's Power Up face (GuideReader's PowerUpMark), in the row under the bar beside Files and the gear.
+  const [powerUpHost, setPowerUpHost] = useState<HTMLSpanElement | null>(null);
   const [railWidth, setRailWidth] = useState(() => {
     try {
       const kept = Number(window.localStorage.getItem(RAIL_WIDTH.key));
@@ -708,7 +731,10 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
   };
   // The unsaved global comment's words are named per layer and scope, not per push: they outlive a push, as the
   // global comments do.
-  const readerComments = canDecide || canPost ? { annotations: here, selectedId, onSelect: setSelectedId, onSave: saveFromReader, onDelete: remove, scrollTarget, draftScope: `${layerKey}:${scope}`, onShowGlobalComment: showGlobalComment } : undefined;
+  // A layer that merged or closed keeps its comments, the one being written and a draft kept since (a reload too):
+  // only Post goes. So does one the forge says it has no such of now (`missing`): its comments are still the person's.
+  const keepComments = !!layer && (!inboxPullIsOpen(layer) || route.missing);
+  const readerComments = canDecide || canPost || keepComments ? { annotations: here, selectedId, onSelect: setSelectedId, onSave: saveFromReader, onDelete: remove, scrollTarget, draftScope: `${layerKey}:${scope}`, onShowGlobalComment: showGlobalComment } : undefined;
 
   // Open in: what is on disk in a clone of this repository, which may not be the PR's version; nothing when no clone holds the file.
   const repoKey = stack ? inboxPullRepoKey(stack.host, stack.repo) : null;
@@ -866,7 +892,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
           </Tip>
         </div>
         <div className="ib-pr-empty" role={modelError || model ? 'alert' : undefined}>
-          {modelError ?? (model ? 'This pull request is no longer in the list.' : 'Reading your pull requests…')}
+          {modelError ?? (model && !route.asking ? (route.rest ?? 'This pull request is no longer in the list.') : 'Reading your pull requests…')}
         </div>
       </section>
     );
@@ -879,6 +905,14 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
 
   const readOnlyParts: Words = layer.mine ? ['No review thread yet'] : layer.author ? ['by ', person(layer.author)] : ['by a deleted account'];
   const readOnlyWords = wordsText(readOnlyParts);
+  // The forge not answering for a PR no list names, or saying it has no such PR now: the page stays as last read,
+  // with one line saying so, on its own line above the diff (its words whole, a phone's too). Only while a diff is on
+  // screen: one never read here (the diff's error shows instead) is no last read.
+  const unreadNote = (route.unread || route.missing) && !!diff && (
+    <p className="ib-prr-note" {...(route.missing ? { 'data-pull-review-missing': '' } : { 'data-pull-review-unread': '' })}>
+      {route.missing ? missingWords(forgeName(layer)) : unreadWords(forgeName(layer))}
+    </p>
+  );
   const readOnlyNote = !canDecide && !posted && !diffError && (
     <Tip cut content={readOnlyWords}>
       <p className="ib-prr-note" data-pull-review-readonly={layer.mine ? 'unlinked' : 'teammate'}>
@@ -887,9 +921,18 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
     </Tip>
   );
   // The title opens the PR's details (the owner's "title only"; with `DETAILS_BUTTON`, the Details button beside it too).
+  // A PR that merged or closed while open here says so beside its mark, in its Reviews row's words, a phone's too.
+  const shut = shutWord(layer.state);
+  const shutMark = shut && (
+    <span className="ib-prr-num" data-pull-review-state={layer.state}>
+      {shut}
+      {/* No break before the dot: a phone's narrow title row never wraps it under the word. */}
+      <span aria-hidden="true">&nbsp;·</span>
+    </span>
+  );
   const title = (
     <DetailsTitle
-      name={scopeTitle ?? `${label} ${layer.title}`}
+      name={`${shut ? `${shut}, ` : ''}${scopeTitle ?? `${label} ${layer.title}`}`}
       tip={`${label} ${layer.title} · ${layer.author ?? 'A teammate'} wants to merge ${layer.head} into ${layer.base}`}
       open={detailsOpen}
       data={details.data}
@@ -898,6 +941,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
       data-pull-review-title=""
     >
       <RefMarkIcon kind="pr" state={layer.state} size={15} />
+      {shutMark}
       {scopeTitle ? (
         <bdi>{scopeTitle}</bdi>
       ) : (
@@ -1030,6 +1074,8 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
             anchor={isCompare(scope) ? 'stack' : 'diff'}
             note={layer.mine && !canDecide ? readOnlyWords : undefined}
             headSha={postHead}
+            onClosed={listed ? undefined : route.again}
+            onLeft={keepSummary}
             busy={sending || !snapshot}
             picked={picked}
             onPick={pick}
@@ -1055,7 +1101,9 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
       <div className="ib-rsplit">
         {phone && (
           <div className="ib-prp-row2">
-            <button type="button" className={`ib-prp-this${detailsOpen ? ' ib-on' : ''}`} aria-expanded={detailsOpen} aria-label={`${stack.layers.length > 1 ? `${stack.layers.findIndex((l) => l.key === layer.key) + 1} of ${stack.layers.length} ` : ''}${scopeTitle ?? layer.title}, opens details`} onClick={toggleDetails} data-pull-review-title="" data-pull-details-button="">
+            <button type="button" className={`ib-prp-this${detailsOpen ? ' ib-on' : ''}`} aria-expanded={detailsOpen} aria-label={`${shut ? `${shut}, ` : ''}${stack.layers.length > 1 ? `${stack.layers.findIndex((l) => l.key === layer.key) + 1} of ${stack.layers.length} ` : ''}${scopeTitle ?? layer.title}, opens details`} onClick={toggleDetails} data-pull-review-title="" data-pull-details-button="">
+              {shut && <RefMarkIcon kind="pr" state={layer.state} size={15} />}
+              {shutMark}
               {stack.layers.length > 1 && <span className="ib-prp-of">{stack.layers.findIndex((l) => l.key === layer.key) + 1} of {stack.layers.length}</span>}
               <bdi className="ib-prp-title">{scopeTitle ?? layer.title}</bdi>
               <Icon name="chevD" size={13} />
@@ -1067,6 +1115,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
               </button>
             )}
             {snapshot && <DiffControls files={files.length} collapseAll={collapseAll} onCollapseAll={() => setCollapseAll(nextCollapseAll)} />}
+            <span ref={setPowerUpHost} className="ib-prp-powerup" data-pull-power-up-host="" />
           </div>
         )}
         {detailsOpen && (
@@ -1127,6 +1176,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
           />
         )}
         <div className="ib-gbody" data-repo-open={repoOpen && repoSha ? '' : undefined}>
+          {unreadNote}
           {repoOpen && repoSha && (
             <PanePart>
               <PullRepoFilePart.Part key={repoOpen} pullKey={layer.key} sha={repoSha} path={repoOpen} />
@@ -1170,6 +1220,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
                 <GuideReader
                   bare
                   controlsHost={controlsHost}
+                  {...(phone ? { powerUpHost } : {})}
                   hostDiffControls
                   {...(collapseAll ? { collapseAll } : {})}
                   snapshot={snapshot}

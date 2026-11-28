@@ -67,6 +67,7 @@ export const ROUTE_FILES = [
   'packages/server/inbox-open-in.ts',
   'packages/server/inbox-pages.ts',
   'packages/server/inbox-pins.ts',
+  'packages/server/inbox-power-up.ts',
   'packages/server/inbox-priority.ts',
   'packages/server/inbox-project-tags.ts',
   'packages/server/inbox-reply-drafts.ts',

@@ -36,7 +36,7 @@
 
 import { homedir } from "node:os";
 import { basename } from "node:path";
-import { INBOX_AUTO_SEND_AFTER_MS, type InboxHostSessions, type InboxMessage, type InboxOpenSession, type InboxProject, type InboxRestartAgents, type InboxSentFrom, type InboxSessionOutdated, type InboxTag, type InboxToolHostId } from "@plannotator/core/inbox-types";
+import { INBOX_AUTO_SEND_AFTER_MS, inboxAgentRuntimeOf, type InboxAgentRuntime, type InboxHostSessions, type InboxMessage, type InboxOpenSession, type InboxProject, type InboxRestartAgents, type InboxSentFrom, type InboxSessionOutdated, type InboxTag, type InboxToolHostId } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { INBOX_BLOCKED_AT_FIELD, INBOX_BLOCKED_FIELD, INBOX_BLOCKED_STALE_MS, parseInboxBlocked, type InboxBlockedKind } from "@plannotator/shared/inbox/connection";
 import { INBOX_ASK_POLL_FIELD, INBOX_AUTO_RELOAD_POLL_FIELD, INBOX_CONTEXT_POLL_FIELD, INBOX_CONTINUES_POLL_FIELD, INBOX_EFFORT_LEVELS, INBOX_EFFORT_POLL_FIELD, INBOX_MODEL_POLL_FIELD, INBOX_PLACE_POLL_FIELD, parseInboxPlace, type InboxPlace, INBOX_FIRST_STARTED_POLL_FIELD, INBOX_HELD_POLL_FIELD, INBOX_RELOAD_FIELD, INBOX_SEND_NOW_POLL_FIELD, INBOX_SESSION_LABEL_INPUT_MAX, INBOX_SESSION_LIVE_MS, INBOX_TAGS_POLL_FIELD, INBOX_TITLE_POLL_FIELD } from "@plannotator/shared/inbox/connection";
@@ -48,6 +48,12 @@ import { createInboxContinuations, parseInboxContinues } from "./inbox-continuat
 import { createInboxFirstSeen, type InboxFirstSeen } from "./inbox-first-seen";
 import { inboxClaimAbandoned } from "./inbox-stuck-delivery";
 import { parseEngine, parseLoadedPlugin, parseSessionFolder, runtimeOf, tagUpdateFix, type LoadedPlugin } from "./inbox-restart";
+
+/** `{ runtime }` for a session that runs in another app than its host's own (Oh My Pi), else nothing. */
+const runtimeField = (entry: { host: string; plugin: LoadedPlugin | null }): { runtime?: InboxAgentRuntime } => {
+  const runtime = inboxAgentRuntimeOf(entry.host, entry.plugin?.host);
+  return runtime ? { runtime } : {};
+};
 
 export function modelIdOf(value: unknown): string | null {
   return typeof value === "string" && /^[\w.:/@\[\]-]{1,120}$/.test(value) ? value : null;
@@ -104,6 +110,8 @@ export interface InboxAgentSession {
   context: number | null;
   /** The title its host generated (INBOX_TITLE_POLL_FIELD); null when it sent none. */
   title: string | null;
+  /** The app it runs in when not its host's own (Oh My Pi); absent otherwise. */
+  runtime?: InboxAgentRuntime;
 }
 
 /**
@@ -961,6 +969,8 @@ export function createInboxLiveSessions(options: {
     label: string | null;
     /** Its connection polls this Inbox (false: a session the Inbox wakes itself, Codex, Qwen, T3, Antigravity). */
     polls: boolean;
+    /** The app it runs in when not its host's own (Oh My Pi). */
+    runtime?: InboxAgentRuntime;
   }[] => {
     const out = [];
     for (const [session, entry] of sessions) {
@@ -978,9 +988,16 @@ export function createInboxLiveSessions(options: {
         sendNow: entry.sendNow,
         // Its name where it has one: the name given in its host, else the title its host generated.
         label: entry.label ?? entry.title ?? null,
+        ...runtimeField(entry),
       });
     }
     return out;
+  };
+
+  /** The app a session runs in when not its host's own (Oh My Pi), as its latest poll said; undefined for any other or an unknown one. */
+  const runtimeOfSession = (session: string): InboxAgentRuntime | undefined => {
+    const entry = sessions.get(session);
+    return entry ? inboxAgentRuntimeOf(entry.host, entry.plugin?.host) : undefined;
   };
 
   /**
@@ -1010,6 +1027,7 @@ export function createInboxLiveSessions(options: {
         effort: live ? entry.effort : null,
         context: live ? entry.context : null,
         title: entry.title ?? null,
+        ...runtimeField(entry),
       });
     }
     return out;
@@ -1553,6 +1571,7 @@ export function createInboxLiveSessions(options: {
     seenOverMcp,
     route,
     allLive,
+    runtimeOfSession,
     agentSessions,
     agentsSignature,
     /** The sessions' clock (ms): "today" for the Agents section is by it. */

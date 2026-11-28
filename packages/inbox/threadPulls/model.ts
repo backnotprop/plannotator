@@ -103,15 +103,17 @@ export function labelOfKey(key: string): string | null {
 /**
  * Where a PR row's "Open review thread" goes: its review thread in the Inbox (`thread`, with the agent the launchpad
  * names), or, with none yet, the PR's page in Reviews (`launchpad`, the stack's id; a stack of several opens its
- * stack page there).
+ * stack page there). `here`: the review thread is the thread the list is in, so the line is "Open in Reviews" (its
+ * page there, where its diff opens) rather than a link back to itself.
  */
-export type PullReviewLink = { kind: 'thread'; threadId: string; agent: { host: string | null; name: string } | null } | { kind: 'launchpad'; stackId: string };
+export type PullReviewLink = { kind: 'thread'; threadId: string; agent: { host: string | null; name: string } | null } | { kind: 'launchpad'; stackId: string; here?: true };
 
 /**
  * Each PR row's review link, read from Reviews' own list the way its launchpad reads it (PullsPage `StackView`): the
  * stack's link (`stackLink`) is its review thread unless that thread only named the PR (its Reviews row is not
  * `reviewed`). Null, no link: a PR that is not open or a draft, one Reviews does not list (no list read yet, a
- * repository that is no project, Bitbucket), and the row whose review thread is `here`, the thread the list is in.
+ * repository that is no project, Bitbucket). The row whose review thread is `here`, the thread the list is in, goes to
+ * its page in Reviews instead (`launchpad` with `here`).
  * A hidden PR (the lists leave it out) keeps its review thread, from its hidden record (`hidden`, its `thread_id`).
  */
 export function pullReviewLinks(model: Pick<InboxPullsAnswer, 'pulls' | 'links' | 'hidden'> | null, reviews: Pick<InboxReviewsAnswer, 'rows'> | null): (pull: Pick<InboxThreadPullWire, 'pull' | 'state'>, here: string) => PullReviewLink | null {
@@ -131,7 +133,7 @@ export function pullReviewLinks(model: Pick<InboxPullsAnswer, 'pulls' | 'links' 
     const ended = link?.agent?.ended === true;
     const mentioned = !!link && !ended && reviews?.rows.find((row) => row.stacks.some((s) => s.id === stack.id))?.reviewed === false;
     if (!link || mentioned) return { kind: 'launchpad', stackId: stack.id };
-    if (link.thread_id === here) return null;
+    if (link.thread_id === here) return { kind: 'launchpad', stackId: stack.id, here: true };
     const name = linkAgentName(link);
     return { kind: 'thread', threadId: link.thread_id, agent: name ? { host: link.agent?.host ?? null, name } : null };
   };

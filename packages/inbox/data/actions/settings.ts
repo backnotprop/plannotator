@@ -3,6 +3,7 @@ import { reloadSkillCatalog } from '@plannotator/ui/utils/skillCatalog';
 import { inboxApi, post, type AgentToolHost, type InboxStorageModel, type SettingsModel } from '../../api';
 import { inboxUrl } from '../../inboxUrl';
 import { scheduledApi } from '../../scheduled/client';
+import { noteDeletedHere } from '../deletedHere';
 
 export interface SettingsHost {
   setSettings: Dispatch<SetStateAction<SettingsModel | null>>;
@@ -99,6 +100,8 @@ export function useSettingsSaves(
   const deleteThread = async (threadId: string) => {
     setSettingsError(null);
     try {
+      // A pane still holding it (off the page) lets it go on its next read, as before (data/deletedHere.ts).
+      noteDeletedHere({ thread: threadId });
       adoptStore((await inboxApi.deleteThread(threadId)).store);
     } catch (cause) {
       setSettingsError(cause instanceof Error ? cause.message : 'The thread was not deleted.');
@@ -109,6 +112,7 @@ export function useSettingsSaves(
   const deleteProject = async (projectId: string) => {
     setSettingsError(null);
     try {
+      noteDeletedHere({ project: projectId });
       adoptStore((await inboxApi.deleteProject(projectId)).store);
     } catch (cause) {
       setSettingsError(cause instanceof Error ? cause.message : 'The project was not deleted.');

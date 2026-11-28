@@ -1,0 +1,148 @@
+/*
+ * The plan page's header (approval "inbox-plan-page-header-a3", PlanChrome.tsx): the document's own title is the
+ * header. Every colour is a theme token, so light and dark follow.
+ */
+
+/* ── The file pane inside the page (parts/paneHost.tsx): no file-name row, the tools in the bottom bar ── */
+.ib-plan-annotate .ib-view[data-host-chrome] { grid-template-rows: 0 auto minmax(0, 1fr) auto auto; }
+.ib-plan-annotate .ib-view[data-host-chrome] > [data-host-head] { overflow: hidden; }
+.ib-plan-annotate .ib-view[data-host-chrome] .ib-docscroll { padding-top: 0; }
+/* The Viewer's own Global comment and Copy file are the page's (its menu, the bar's mark): hidden, still in the DOM,
+   so the document's elements (and the stored comments' places in it) are as before. */
+.ib-plan-annotate .ib-view[data-host-chrome] [data-sticky-actions] { display: none; }
+.ib-plan-annotate .ib-view[data-host-chrome] article > [data-sticky-actions] + h1 { margin-top: 0; }
+
+/* ── The bottom bar: the tools, the comments, Send ── */
+.ib-plan-dock { flex-wrap: wrap; justify-content: flex-start; gap: 8px; padding: 8px 12px; background: var(--card); container: ib-plan-dock / inline-size; }
+.ib-plan-dock-tools, .ib-plan-dock-comments { display: contents; }
+.ib-plan-dock-sp { flex: 1 1 0; min-width: 0; }
+.ib-plan-dock .ib-toolstrip[data-tools-in-bar] { position: static; inset: auto; flex: none; padding: 0; margin: 0; background: transparent; box-shadow: none; border: 0; pointer-events: auto; }
+.ib-plan-dock .ib-plan-send-t { flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* A computer keeps the Send line at every width: it takes the bar's free room, against the comments; where the bar
+   is narrow it is a line of words above the controls (as a failed Send's are on a phone), the controls one row. */
+.ib-plan-dock:has(> [data-plan-send-line="shown"]) > .ib-plan-dock-sp { display: none; }
+.ib-plan-dock .ib-plan-send-t[data-plan-send-line="shown"] { flex: 1 1 0; text-align: end; }
+@container ib-plan-dock (max-width: 640px) {
+  .ib-plan-dock:has(> [data-plan-send-line="shown"]) > .ib-plan-dock-sp { display: block; }
+  .ib-plan-dock .ib-plan-send-t[data-plan-send-line="shown"] { order: -1; flex: 1 0 100%; text-align: start; }
+}
+.ib-plan-dock .ib-vcomments { flex: none; }
+.ib-plan-globalmark { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 34px; height: 32px; border-radius: 8px; color: var(--muted-foreground); background: color-mix(in oklch, var(--muted) 50%, transparent); border: 1px solid color-mix(in oklch, var(--border) 30%, transparent); cursor: pointer; }
+.ib-plan-globalmark:hover { color: var(--foreground); background: var(--muted); }
+
+/* A phone: 44 px targets; the tools are marks; Send is its mark; the Send line is its description, but a failed
+   Send's words are a row of their own above the bar. */
+.ib-plan-page[data-phone] .ib-plan-dock { gap: 8px; padding: 6px 10px calc(6px + env(safe-area-inset-bottom)); }
+.ib-plan-page[data-phone] .ib-plan-dock .ib-plan-send-t[data-plan-send-line="described"] { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.ib-plan-page[data-phone] .ib-plan-dock .ib-plan-send-t[data-plan-send-line="failed"] { order: -1; flex: 1 0 100%; white-space: normal; }
+.ib-plan-page[data-phone] .ib-plan-dock .ib-toolstrip button { min-width: 44px; height: 44px; justify-content: center; }
+.ib-plan-page[data-phone] .ib-plan-dock .ib-toolstrip button svg { width: 18px; height: 18px; }
+.ib-plan-page[data-phone] .ib-plan-dock .ib-vcomments { height: 44px; min-width: 48px; padding: 0 10px; border-radius: 11px; }
+.ib-plan-page[data-phone] .ib-plan-dock [data-plan-send-button] { width: 48px; height: 44px; padding: 0; border-radius: 12px; justify-content: center; }
+.ib-plan-page[data-phone] .ib-plan-dock [data-plan-send-button] svg { width: 18px; height: 18px; margin: 0; }
+/* A narrow phone keeps the bar one row: tighter gaps, and the tools draw narrower while each keeps a 44 px hit area
+   (its ::after; the clip lets it reach past the button's edge). */
+@media (max-width: 392px) {
+  .ib-plan-page[data-phone] .ib-plan-dock { gap: 6px; padding-left: 8px; padding-right: 8px; }
+  .ib-plan-page[data-phone] .ib-plan-dock .ib-toolstrip button { min-width: 40px; overflow: visible; clip-path: inset(-2px -5px); }
+  .ib-plan-page[data-phone] .ib-plan-dock .ib-toolstrip button::after { content: ""; position: absolute; top: 0; left: 50%; width: max(100%, 44px); height: 100%; transform: translateX(-50%); }
+  .ib-plan-page[data-phone] .ib-plan-dock .ib-vcomments { min-width: 44px; padding: 0 8px; }
+  .ib-plan-page[data-phone] .ib-plan-dock [data-plan-send-button] { width: 44px; }
+}
+@media (max-width: 359px) {
+  .ib-plan-page[data-phone] .ib-plan-dock { gap: 4px; }
+  .ib-plan-page[data-phone] .ib-plan-dock .ib-toolstrip button { min-width: 34px; }
+}
+
+/* ── The menu ("Page actions") ── */
+.ib-plan-more { flex: none; color: var(--muted-foreground); }
+.ib-plan-more[aria-expanded="true"], .ib-plan-more[data-popup-open] { background: var(--muted); color: var(--foreground); }
+.ib-plan-page[data-phone] .ib-plan-more { width: 44px; height: 44px; }
+/* The sheet's head is its grab handle alone; its title stays its accessible name. */
+[data-plan-menu] .ib-sheet-title { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.ib-plan-menu-list .ib-sheet-row { width: 100%; min-height: 48px; text-align: left; color: inherit; text-decoration: none; cursor: pointer; }
+.ib-plan-menu-list .ib-sheet-lead { color: var(--muted-foreground); }
+.ib-plan-menu-end { color: var(--muted-foreground); font-variant-numeric: tabular-nums; padding-right: 4px; }
+/* A copy's row says "Copied!" with the check in the success colour, as the Viewer's own Copy does. */
+[data-plan-menu] [data-copied] svg.ib-ic { color: var(--success, currentColor); }
+/* ── The bar (approval A2, PlanBar.tsx): nothing on the left of the newest version; Approve, the decision's mark,
+   the pencil, the clock, the menu at the end ── */
+.ib-plan-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; min-height: 44px; padding: 6px 8px 6px 16px; font-size: 13px; color: var(--muted-foreground); }
+.ib-plan-bar-start { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; flex: 1 1 auto; min-width: 0; }
+.ib-plan-bar-start:empty { display: none; }
+.ib-plan-bar-end { display: flex; align-items: center; gap: 4px; flex: none; margin-left: auto; }
+.ib-plan-bar-end > [data-plan-approve], .ib-plan-bar-end > [data-plan-edit-done] { margin-right: 4px; }
+.ib-plan-bar-older > b { font-weight: 600; color: var(--foreground); }
+/* The marks: a 16 px glyph with a 1.5 px line in a 28 px button (a phone keeps its 44 px target). */
+.ib-plan-mark { flex: none; }
+.pn-inbox .ib-plan-bar .ib-plan-mark, .pn-inbox .ib-plan-bar .ib-plan-more, .pn-inbox .ib-plan-reading .ib-plan-mark { width: 28px; height: 28px; }
+.ib-plan-mark svg.ib-ic { width: 16px; height: 16px; stroke-width: 1.5; }
+.ib-plan-mark svg.ib-ic path { vector-effect: non-scaling-stroke; }
+.ib-plan-mark:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
+.ib-plan-mark:disabled { opacity: 0.45; cursor: default; }
+/* The clock reads pressed while Versions is open; the decision's mark while its card is open. */
+.ib-plan-mark[data-reading-versions][aria-expanded="true"], .ib-plan-decision[data-popup-open] { background: var(--muted); color: var(--foreground); }
+.ib-plan-decision[data-tone="approved"], .ib-plan-decision[data-tone="approved"][data-popup-open] { color: var(--success); }
+.ib-plan-decision[data-tone="changes"], .ib-plan-decision[data-tone="changes"][data-popup-open] { color: var(--warning); }
+.pn-inbox .ib-plan-page[data-phone] .ib-plan-mark { width: 44px; height: 44px; }
+/* The decision's card (PlanDecision.tsx). */
+.ib-plan-dcard { display: flex; flex-direction: column; gap: 6px; min-width: 200px; max-width: min(320px, calc(100vw - 24px)); padding: 10px 12px; font-size: 13px; line-height: 18px; color: var(--foreground); }
+.ib-plan-dcard p { display: flex; align-items: center; gap: 6px; margin: 0; }
+.ib-plan-dcard-line > span:last-child { min-width: 0; }
+.ib-plan-dcard-when { padding-left: 21px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.ib-plan-dcard-when > b { font-weight: 600; color: var(--foreground); }
+.ib-plan-dcard-moved { padding-left: 21px; color: var(--muted-foreground); }
+/* A phone: the Dismiss keeps its 24 px look and a 44 px hit area. */
+.ib-plan-dcard[data-phone] .ib-plan-approval-x { position: relative; }
+.ib-plan-dcard[data-phone] .ib-plan-approval-x::after { content: ""; position: absolute; inset: -10px; }
+.ib-plan-dcard .ib-plans-dmark svg.ib-ic { flex: none; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ── A computer's crumbs: the panel's back arrow first (approval P2) ── */
+.ib-plan-crumbs { display: flex; align-items: center; gap: 6px; flex: 1 1 auto; min-width: 0; }
+.ib-plan-crumb-back { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 28px; height: 28px; margin-left: -4px; border-radius: 7px; color: var(--muted-foreground); }
+.ib-plan-crumb-back:hover { background: var(--muted); color: var(--foreground); }
+.ib-plan-crumb-back:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
+.ib-plan-crumb-back svg.ib-ic { width: 16px; height: 16px; }
+
+/* ── A phone's top bar: the project, Share, the menu ── */
+.ib-plan-page[data-phone] [data-page-account] .ib-shr-btn[data-phone] { height: 44px; }
+.ib-plan-bartitle { position: relative; flex: 1 1 0; min-width: 0; height: 44px; }
+.ib-plan-bartitle > * { position: absolute; inset: 0; }
+/* The cross-fade once the first measurement is in: the page opens on the right one, cut. */
+.ib-plan-bartitle[data-settled] > * { transition: opacity 160ms ease-out, transform 160ms ease-out; }
+.ib-plan-bartitle-rest { padding: 0 6px; line-height: 44px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 15px; font-weight: 500; color: var(--muted-foreground); }
+.ib-plan-titleblock { display: flex; align-items: center; gap: 4px; min-width: 0; padding: 0 6px; border-radius: 10px; text-align: left; cursor: pointer; opacity: 0; transform: translateY(4px); pointer-events: none; }
+.ib-plan-titleblock:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
+.ib-plan-bartitle[data-away] > .ib-plan-bartitle-rest { opacity: 0; transform: translateY(-4px); }
+.ib-plan-bartitle[data-away] > .ib-plan-titleblock { opacity: 1; transform: none; pointer-events: auto; }
+.ib-plan-title-n { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; font-weight: 600; line-height: 20px; color: var(--foreground); }
+.ib-plan-titleblock > svg.ib-ic { flex: none; opacity: 0.7; color: var(--muted-foreground); }
+/* An older version or a comparison: the bar says so in the name's place. */
+.ib-plan-barline { flex: 1 1 0; min-width: 0; padding: 0 6px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 14px; color: var(--muted-foreground); }
+/* A phone's marks at the top bar's end: Approve (or Done and Cancel), the decision, the clock. */
+.ib-plan-topmarks { display: flex; align-items: center; gap: 0; }
+.ib-plan-topmarks:empty { display: none; }
+.ib-plan-topmarks > [data-plan-approve], .ib-plan-topmarks > [data-plan-edit-done], .ib-plan-topmarks > [data-plan-edit-cancel] { margin: 0 2px; position: relative; }
+.ib-plan-topmarks > button[data-plan-approve]::after, .ib-plan-topmarks > [data-plan-edit-done]::after, .ib-plan-topmarks > [data-plan-edit-cancel]::after { content: ""; position: absolute; inset: -10px -4px; }
+/* Done and Cancel are the bar's controls, not a block that fills it: 32 px to see, 44 px to hit (as the list's pill). */
+.ib-plan-topmarks > [data-plan-edit-done], .ib-plan-topmarks > [data-plan-edit-cancel] { height: 32px; min-height: 32px; }
+.ib-plan-topmarks > [data-plan-edit-done]::after, .ib-plan-topmarks > [data-plan-edit-cancel]::after { inset: -6px -4px; }
+@media (prefers-reduced-motion: reduce) { .ib-plan-bartitle > *, .ib-plan-bartitle[data-settled] > * { transition: none; transform: none !important; } }
+/* A phone's one bar is as slim as the Inbox list's own phone header (`.ib-lhead`, 52 px): its 44 px targets fit it. */
+.ib-plan-page[data-phone] nav[data-page-header] { min-height: 0; height: 52px; padding-top: 1px; padding-bottom: 0; flex-wrap: nowrap; }
+/* The frame's empty actions group takes a row's full basis on a phone (meant for wrapping): with one row it would
+   squeeze the bar, so it is not drawn while it holds nothing. */
+.ib-plan-page[data-phone] nav[data-page-header] > [data-document-actions]:empty { display: none; }
+/* While editing, Done and Cancel take the room of Share too (it shares the newest version, not a draft), and the
+   crumbs' place (empty: PlanPage.tsx draws no crumbs then) gives way below the frame's 96 px floor, so a 320 px bar
+   keeps Done, Cancel and "…" on screen. */
+.ib-plan-page[data-phone] nav[data-page-header]:has([data-plan-edit-done]) [data-plan-share] { display: none; }
+.ib-plan-page[data-phone] nav[data-page-header]:has([data-plan-edit-done]) > div:not([data-document-actions]) { min-width: 0; }
+/* Under 400 px a phone's one bar has no room for Share's words beside the marks and "…" (the bar does not wrap, so
+   "…" would be pushed off the screen): Share is its mark alone, its words kept as its name (as Send's are), and the
+   project gives way below the frame's 96 px. */
+@media (max-width: 399px) {
+  .ib-plan-page[data-phone] nav[data-page-header] > div:not([data-document-actions]) { min-width: 0; }
+  .ib-plan-page[data-phone] nav[data-page-header] [data-plan-share] { position: relative; width: 44px; height: 44px; padding: 0; gap: 0; justify-content: center; }
+  .ib-plan-page[data-phone] nav[data-page-header] [data-plan-share] > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+}

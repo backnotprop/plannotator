@@ -1,4 +1,5 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
+import { useOtherFieldVoice, type OtherFieldVoice } from '../components/FieldVoice';
 import { useVoiceSession, type VoiceHandle } from '../voice';
 import type { VoiceLate, VoiceSession } from '../voiceSession';
 
@@ -10,15 +11,18 @@ import type { VoiceLate, VoiceSession } from '../voiceSession';
  *
  * `parked`: the pane is kept off the page (a free layout too narrow for it). No mic runs unseen, so the take stops and
  * what was said lands in the box, as leaving the thread, or a hidden full screen composer, does.
+ *
+ * `others`: the thread's question cards' Other fields, each with its own mic (none while parked). Send waits for them.
  */
-export function useThreadVoice(threadId: string, late: (outcome: VoiceLate, takenIn: string) => void, parked = false): VoiceHandle {
+export function useThreadVoice(threadId: string, late: (outcome: VoiceLate, takenIn: string) => void, parked = false): VoiceHandle & { others: OtherFieldVoice } {
   const voice = useVoiceSession(true, (outcome, takenIn) => late(outcome, takenIn ?? threadId), threadId);
   useEffect(() => {
     if (!parked) return;
     voice.session.stop();
     coverVoice(voice.session);
   }, [parked, voice.session]);
-  return voice;
+  const others = useOtherFieldVoice(parked);
+  return useMemo(() => ({ ...voice, others }), [voice, others]);
 }
 
 /**

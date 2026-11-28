@@ -22,7 +22,7 @@ import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { buildGuideSnapshot } from "@plannotator/core/guide-format";
 import { startInboxServer, type InboxServer } from "./inbox";
-import { createInboxPulls, gitBlobId, INBOX_PULL_FILE_MAX_BYTES, type PullFileGitReader } from "./inbox-pulls";
+import { createInboxPulls, gitBlobId, INBOX_PULL_FILE_MAX_BYTES, INBOX_PULL_NOW_JQ, type PullFileGitReader } from "./inbox-pulls";
 import { changedFileOf } from "./inbox-pull-diff-files";
 import { patchBlobIds } from "@plannotator/core/diff-files";
 import type { RefRunner } from "./ref-cards";
@@ -49,7 +49,7 @@ const HEAD = "a".repeat(40);
 const BASE = "b".repeat(40);
 const REPO = { host: "github.com", repo: "northwind/billing-svc", project_id: "prj_1" };
 /** The diff's read of the PR as it is now: its head and its description, one JSON line (inbox-pulls.ts `pullNow`). */
-const PULL_NOW_JQ = "{sha: .head.sha, body: .body} | tojson";
+const PULL_NOW_JQ = INBOX_PULL_NOW_JQ;
 
 const ghPull = (fields: Record<string, unknown> = {}) => ({
   number: 412,

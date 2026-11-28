@@ -6,7 +6,7 @@
  * closes (`settleOwn`; when that happens and how it moves: settle.ts). Pure.
  */
 
-import { INBOX_PRIORITY_GROUP, inboxRowInPriority, type InboxListGroupId, type InboxListRow, type InboxListSection } from '@plannotator/core/inbox-types';
+import { INBOX_PRIORITY_GROUP, inboxGroupWaitsOnPerson, inboxRowInPriority, type InboxListGroupId, type InboxListRow, type InboxListSection } from '@plannotator/core/inbox-types';
 import { INBOX_SNOOZED_BAND } from '@plannotator/core/inbox-snooze';
 
 /**
@@ -407,7 +407,7 @@ export function settlesOnBack(shown: readonly InboxListSection[], row: InboxList
   if (row.scheduled_running === true && (drawn?.id === 'quiet' || drawn?.id === 'sent')) return true;
   if (row.unseen > 0) return true;
   if (drawn?.id === INBOX_PRIORITY_GROUP.id) return false;
-  const onYou = (section: string | undefined) => section === 'stopped' || section === 'holding' || section === 'waiting';
+  const onYou = inboxGroupWaitsOnPerson;
   if (!onYou(row.section)) return onYou(drawn?.id);
   return drawn?.id !== row.section;
 }
@@ -429,7 +429,7 @@ export function addOwnThreads(shown: readonly InboxListSection[], latest: readon
   const fresh = rowsById(latest);
   const onScreen = rowsById(shown);
   const adding = threadIds.map((id) => fresh.get(id)).filter((row): row is InboxListRow => row !== undefined && !onScreen.has(row.thread_id));
-  // The list always carries all six sections (empty ones included), so the row's section is on screen.
+  // The list always carries every section its server places rows in (empty ones included), so the row's section is on screen.
   return shown.map((section) => {
     const threads = [...section.threads];
     for (const row of adding) {
@@ -515,11 +515,12 @@ export function putReadRowBack(shown: readonly InboxListSection[], before: reado
  * reads as looked at until the server has taken the look and the list has
  * been read again (App.tsx `looking`), which then gives the server's row. Its
  * news is seen (`unseen` 0), so the row is no longer bold (shared/inbox/list.ts
- * `inboxRowUnread`), in the group it is drawn in. A row in New for that news
- * alone offers Mark unread at once, on its hover action and the header's
- * button (markRead.ts `canMarkUnread`). A row in Stopped, Holding up work or
- * Waiting on you keeps Mark read (its questions still wait). Only picks not
- * sent ("Answered, not sent") keep a row bold: it waits on the person's Send.
+ * `inboxRowUnread`), in the group it is drawn in, and it offers Mark unread at
+ * once, on its hover action, the header's ⋯ and a phone's swipe (markRead.ts
+ * `canMarkUnread`): a row in Stopped, Holding up work or Waiting on you too
+ * (the owner, 2026-11-25), whose Mark read stays in the row menu, the ⋯ and
+ * on `E` while its questions wait. Only picks not sent ("Answered, not sent")
+ * keep a row in New bold: it waits on the person's Send, and keeps Mark read.
  */
 export function lookedRow(row: InboxListRow): InboxListRow {
   if (row.unseen === 0) return row;
@@ -570,11 +571,11 @@ export function filterSections(sections: readonly InboxListSection[], projectId:
   return sections.map((s) => ({ ...s, threads: s.threads.filter((row) => row.project.id === projectId) }));
 }
 
-/** The rows that wait on the person (Stopped, Holding, Waiting): the sidebar counts. */
+/** The rows that wait on the person (core's `inboxSectionWaitsOnPerson`: Stopped, Holding, Waiting, Tagged you): the sidebar counts. */
 export function waitingCount(sections: readonly InboxListSection[], projectId?: string): number {
   let n = 0;
   for (const section of sections) {
-    if (section.id !== 'stopped' && section.id !== 'holding' && section.id !== 'waiting') continue;
+    if (!inboxGroupWaitsOnPerson(section.id)) continue;
     for (const row of section.threads) if (!projectId || row.project.id === projectId) n += 1;
   }
   return n;

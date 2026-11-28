@@ -9,7 +9,7 @@
  * rows name those. A thread's tag lives on the thread's own machine, like its Priority.
  */
 import { createContext, useContext } from 'react';
-import { inboxInitiativeNameKey, type InboxInitiative, type InboxListRow, type InboxListSection, type InboxTagLook } from '@plannotator/core/inbox-types';
+import { inboxGroupWaitsOnPerson, inboxInitiativeNameKey, type InboxInitiative, type InboxListRow, type InboxListSection, type InboxTagLook } from '@plannotator/core/inbox-types';
 import { plural } from '@plannotator/core/inbox-format';
 import type { MachinesModel } from './machines';
 
@@ -35,7 +35,7 @@ export interface ThreadTagsHost {
   rows?: readonly InboxListRow[];
   /** A row's tags by the window's rule (`rowTagsHere`). */
   rowTags?: RowTags;
-  /** The tags this Inbox's own listed threads carry: Search's Tag chip offers these (search reads this Inbox's threads). */
+  /** The tags the listed threads search can filter carry (`tagsOnOwnRows`): Search's Tag chip offers these. */
   here?: readonly InboxInitiative[];
   /** A row's tags for the filters: its own and its project's (projectTags.ts). */
   filterTags?: (row: InboxListRow) => readonly string[];
@@ -123,9 +123,12 @@ export function tagWrite(tag: ListTag, machine: string | null, self: string | nu
   return id ? { tag: id } : { name: tag.name };
 }
 
-/** The tags this Inbox's own rows carry (`here` on the host): a linked machine's rows and tags left out. */
-export function tagsOnOwnRows<T extends ListTag>(tags: readonly T[], rows: readonly InboxListRow[], self: string | null, tagsOf: RowTags = ownTags): T[] {
-  const carried = new Set(rows.filter((row) => !row.machine || row.machine === self).flatMap((row) => tagsOf(row)));
+/**
+ * The tags this Inbox's own rows carry (`here` on the host), and a linked machine's rows where `searched` says its
+ * search takes a Tag filter (`linked-reads`); any other machine's rows and tags left out.
+ */
+export function tagsOnOwnRows<T extends ListTag>(tags: readonly T[], rows: readonly InboxListRow[], self: string | null, tagsOf: RowTags = ownTags, searched: (machine: string) => boolean = () => false): T[] {
+  const carried = new Set(rows.filter((row) => !row.machine || row.machine === self || searched(row.machine)).flatMap((row) => tagsOf(row)));
   return tags.filter((tag) => carried.has(tag.id));
 }
 
@@ -144,7 +147,7 @@ export function filterTagRows(sections: readonly InboxListSection[], tag: string
 export function tagWaitingCounts(sections: readonly InboxListSection[], tagsOf: RowTags = ownTags): Map<string, number> {
   const counts = new Map<string, number>();
   for (const section of sections) {
-    if (section.id !== 'stopped' && section.id !== 'holding' && section.id !== 'waiting') continue;
+    if (!inboxGroupWaitsOnPerson(section.id)) continue;
     for (const row of section.threads) for (const tag of tagsOf(row)) counts.set(tag, (counts.get(tag) ?? 0) + 1);
   }
   return counts;

@@ -10,8 +10,9 @@ import InboxWire
 /// sections; the window asks with `?archived=exclude&snoozed=exclude`. `ListView.of` makes the one from the other,
 /// and takes either.
 public enum ListRules {
-  /// `INBOX_SECTIONS`: the approved order.
-  public static let sectionOrder: [InboxSectionId] = [.stopped, .holding, .waiting, .new, .sent, .quiet]
+  /// `INBOX_SECTIONS`: the approved order. Tagged you (fourth) comes only from a server that places rows there (Spaces);
+  /// this computer's Inbox never does (`INBOX_LOCAL_SECTIONS`), so `sections` leaves it out while no row is in it.
+  public static let sectionOrder: [InboxSectionId] = [.stopped, .holding, .waiting, .tagged, .new, .sent, .quiet]
 
   /// `inboxRowArchived`: resolved, and not come back.
   public static func archived(_ row: InboxListRow) -> Bool { row.resolvedAt != nil && row.backFromArchive != true }
@@ -85,9 +86,11 @@ public enum ListRules {
     }, split.snoozed)
   }
 
-  /// `inboxListSections`: every section in the approved order, each newest first (empty ones included).
+  /// `inboxListSections`: every section in the approved order, each newest first (empty ones included; Tagged you only
+  /// with a row in it, as only a server that places rows there sends it).
   public static func sections(_ rows: [InboxListRow]) -> [InboxListSection] {
-    sectionOrder.map { id in
+    let tagged = rows.contains { $0.section == .tagged }
+    return sectionOrder.filter { $0 != .tagged || tagged }.map { id in
       InboxListSection(id: InboxListGroupId(rawValue: id.rawValue), label: Words.sections[id.rawValue] ?? id.rawValue, threads: rows.filter { $0.section == id }.sorted(by: newestFirst))
     }
   }
@@ -118,9 +121,9 @@ public enum ListRules {
   /// `tabBadgeLabel`: "" for none, "9+" past nine.
   public static func badgeLabel(_ count: Int) -> String { count <= 0 ? "" : count > 9 ? "9+" : String(count) }
 
-  /// `waitingCount`: the rows that wait on the person (Stopped, Holding, Waiting).
+  /// `waitingCount`: the rows that wait on the person (`inboxGroupWaitsOnPerson`: Stopped, Holding, Waiting, Tagged you).
   public static func waitingCount(_ sections: [InboxListSection]) -> Int {
-    sections.filter { [.stopped, .holding, .waiting].contains($0.id) }.reduce(0) { $0 + $1.threads.count }
+    sections.filter { [.stopped, .holding, .waiting, .tagged].contains($0.id) }.reduce(0) { $0 + $1.threads.count }
   }
 
   /// `inboxArchivedRows`: newest archived first; ties on the thread id.
@@ -144,6 +147,7 @@ public enum ListRules {
     case .holding: return .hold
     case .waiting: return .wait
     case .new: return row.unseen > 0 ? .new : .quiet
+    case .tagged: return row.unseen > 0 ? .new : .quiet
     case .sent: return .sent
     default: return .quiet
     }
@@ -162,7 +166,7 @@ public enum ListRules {
 
 /// The list as drawn at one moment: what a list screen shows, and when it next changes by itself.
 public struct ListView: Hashable, Sendable {
-  /// The Priority group, the six sections, then the Snoozed band. Empty groups are kept: the screen leaves them out.
+  /// The Priority group, the sections (Tagged you only when a row is in it), then the Snoozed band. Empty groups are kept: the screen leaves them out.
   public var groups: [InboxListSection]
   /// The sections as counted (no group taken out): what the badge and the waiting count read.
   public var sections: [InboxListSection]

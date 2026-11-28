@@ -223,8 +223,8 @@ describe('review entry assets', () => {
     // The Post to GitHub/GitLab dialog of a pull request's review (the review app's own) is a lazy module too: `#platform-post`. The PR page's
     // All files (the review app's tree and file view) rides the reader's chunk, re-exported by GuideReader.tsx. So do
     // the rendered Markdown files (renderedFiles.tsx), which only GuideReader.tsx imports, and the review app's keys on
-    // a review (ReviewKeys.tsx, with reviewWalk.ts).
-    const readers = ['packages/inbox/guide/GuideReader.tsx', 'packages/inbox/guide/SurfaceGuideReader.tsx','packages/inbox/guide/PlatformPost.tsx', 'packages/inbox/guide/PullRepoParts.tsx', 'packages/inbox/guide/PullChangesTree.tsx', 'packages/inbox/guide/useSemDiffClient.ts', 'packages/inbox/guide/renderedFiles.tsx', 'packages/inbox/guide/ReviewKeys.tsx', 'packages/inbox/guide/reviewWalk.ts'];
+    // a review (ReviewKeys.tsx, with reviewWalk.ts), and Power Up's hook and mark (usePowerUp.ts, PowerUpMark.tsx).
+    const readers = ['packages/inbox/guide/GuideReader.tsx', 'packages/inbox/guide/SurfaceGuideReader.tsx','packages/inbox/guide/PlatformPost.tsx', 'packages/inbox/guide/PullRepoParts.tsx', 'packages/inbox/guide/PullChangesTree.tsx', 'packages/inbox/guide/useSemDiffClient.ts', 'packages/inbox/guide/renderedFiles.tsx', 'packages/inbox/guide/ReviewKeys.tsx', 'packages/inbox/guide/reviewWalk.ts', 'packages/inbox/guide/usePowerUp.ts', 'packages/inbox/guide/PowerUpMark.tsx'];
     const eager = walk('packages/inbox').filter((path) => !readers.includes(path) && heavy.test(read(path)));
     expect(eager).toEqual([]);
     // The window's parts (lazyParts.tsx): fetched in idle time, each through its dynamic import only.
@@ -257,6 +257,23 @@ describe('review entry assets', () => {
     expect(read('packages/inbox/package.json')).toContain('"#search-palette": "./search/SearchPalette.tsx"');
   });
 
+  // Settings → Reviews (packages/inbox/reviewSettings/) is code review's own page, hosted through its seams. It
+  // reaches the window only through lazyParts.tsx's dynamic import of `#reviews-settings`, so neither it nor the shared
+  // page it draws rides the window's first chunk. A type-only import is erased.
+  test('the Inbox window mounts Settings → Reviews only through its dynamic import', () => {
+    const page = /^import\s+(?!type\b)[^;]*from\s+['"](?:#reviews-settings|[^'"]*reviewSettings\/ReviewsSettings(?:\.tsx)?|@plannotator\/ui\/components\/settings\/ReviewSettingsPage(?:\.tsx)?)['"]/m;
+    const walk = (dir: string): string[] =>
+      readdirSync(resolve(root, dir), { withFileTypes: true }).flatMap((entry) =>
+        entry.isDirectory()
+          ? entry.name === 'node_modules' ? [] : walk(`${dir}/${entry.name}`)
+          : /\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name) ? [`${dir}/${entry.name}`] : [],
+      );
+    const eager = [...walk('packages/inbox'), ...walk('apps/inbox')].filter((path) => path !== 'packages/inbox/reviewSettings/ReviewsSettings.tsx' && page.test(read(path)));
+    expect(eager).toEqual([]);
+    expect(read('packages/inbox/lazyParts.tsx')).toContain("lazyPart(() => import('#reviews-settings'))");
+    expect(read('packages/inbox/package.json')).toContain('"#reviews-settings": "./reviewSettings/ReviewsSettings.tsx"');
+  });
+
   // Built-artifact check: a lost eager import would still type-check and pass
   // every unit test, so the built single-file bundles are read directly.
   // Two different kinds of marker, deliberately:
@@ -286,9 +303,16 @@ describe('review entry assets', () => {
   //
   // dist/ is gitignored, so this is skipped on an unbuilt checkout; the CI job
   // that builds the bundles runs it right after.
+  //
+  // Mermaid's presence marker is a name on Mermaid's public API object, so it
+  // survives minification. It is not `flowchart-v2`: Pele 1.13 names that
+  // diagram id in its own detect table, so a bundle carrying Pele has it
+  // without any Mermaid. (`flowchart-v2` still serves as an ABSENT marker for
+  // the review page, which carries neither Pele nor Mermaid.)
+  const MERMAID_RUNTIME_MARKER = 'registerExternalDiagrams';
   const REGISTRATION_MARKERS = ['plannotator-math-eager', 'uniqueUsernameGenerator'];
   const markerExpectations: Array<[bundle: string, present: string[], absent: string[]]> = [
-    ['apps/hook/dist/index.html', [...REGISTRATION_MARKERS, 'katex-display', 'flowchart-v2', 'viz_set_y_invert', '__plannotatorLiveConfig'], ['plannotator-mermaid-eager']],
+    ['apps/hook/dist/index.html', [...REGISTRATION_MARKERS, 'katex-display', MERMAID_RUNTIME_MARKER, 'viz_set_y_invert', '__plannotatorLiveConfig'], ['plannotator-mermaid-eager']],
     ['apps/review/dist/index.html', [...REGISTRATION_MARKERS, 'katex-display', '__plannotatorLiveConfig'], ['plannotator-mermaid-eager', 'flowchart-v2', 'viz_set_y_invert']],
   ];
   for (const [path, present, absent] of markerExpectations) {
@@ -306,6 +330,8 @@ describe('review entry assets', () => {
   // Each runtime lives in its own file, the engine carries neither, and the
   // engine brings no React of its own: every module it shares with the page
   // is read from the host the page installs (no bare import survives).
+  // `mermaidRuntime` below asserts MERMAID_RUNTIME_MARKER in mermaid.js, so it
+  // would find Mermaid if Mermaid were bundled into the engine.
   const ENGINE_DIRS = ['apps/review/dist/diagram-engine', 'apps/hook/dist/diagram-engine'];
   for (const dir of ENGINE_DIRS) {
     test.skipIf(!existsSync(resolve(root, dir)))(`${dir} holds the engine and both runtimes, apart`, () => {
@@ -315,13 +341,13 @@ describe('review entry assets', () => {
       const graphviz = file('graphviz');
       const facts = {
         dir,
-        engineHasMermaid: engine.includes('flowchart-v2'),
+        engineHasMermaid: engine.includes(MERMAID_RUNTIME_MARKER),
         engineHasGraphviz: engine.includes('viz_set_y_invert'),
         engineReadsHost: engine.includes('__plannotatorDiagramEngineHost'),
         // Every import the engine names (statements and literal dynamic
         // imports); the runtimes are imported by URL from the host, never by name.
         engineImports: new Bun.Transpiler({ loader: 'js' }).scanImports(engine).map((entry) => entry.path),
-        mermaidRuntime: mermaid.includes('flowchart-v2'),
+        mermaidRuntime: mermaid.includes(MERMAID_RUNTIME_MARKER),
         graphvizRuntime: graphviz.includes('viz_set_y_invert'),
         mermaidCarriesKatex: mermaid.includes('katex-display'),
       };
@@ -456,7 +482,7 @@ describe('review entry assets', () => {
   // neither: its diagrams come from the engine file, which holds Pele (and
   // fetches the Mermaid runtime file only for a fence that falls back).
   const PELE_CORE_MARKER = 'PeleError';
-  const MERMAID_MARKER = 'flowchart-v2';
+  const MERMAID_MARKER = MERMAID_RUNTIME_MARKER;
   const packedScripts = async (path: string): Promise<{ upFront: Map<string, string>; all: Map<string, string> }> => {
     const bundle = readFileSync(resolve(root, path), 'utf8');
     const app = openPackedApp(bundle);
@@ -561,11 +587,13 @@ describe('review entry assets', () => {
   const INBOX_LAZY_MARKERS: Record<string, string> = {
     'guide viewer (#guide-reader)': 'data-guide-code-view-mounted',
     'Shiki TypeScript grammar': '"scopeName":"source.ts"',
-    Mermaid: 'flowchart-v2',
+    Mermaid: MERMAID_RUNTIME_MARKER,
     Graphviz: 'viz_set_y_invert',
     // KaTeX's own error text: its class names are also in Plannotator's
     // label code (`utils/pele-labels.ts` reads `katex-display`).
     KaTeX: 'KaTeX parse error',
+    // Settings → Reviews (#reviews-settings): the shared page's section mark.
+    'Settings → Reviews (#reviews-settings)': 'data-review-settings-section',
     // Pele is in no build while the engine switch is 'mermaid' (checked
     // above); on, it is a lazy part like Mermaid.
     ...(DIAGRAM_ENGINE_MODE === 'mermaid' ? {} : { Pele: 'pele-shape-' }),

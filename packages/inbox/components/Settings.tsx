@@ -45,6 +45,7 @@ import { openSystemSetup } from '../system/opener';
 import { systemStateWords } from '../system/projects';
 import { ScheduledSettingsRow } from '../scheduled/SettingsRow';
 import { usePhone } from '../phone';
+import { ReviewsSection, useReviewsShown } from '../reviewSettings/ReviewsSection';
 
 const TOOL_HOSTS: { host: AgentToolHost; name: string }[] = [
   { host: 'claude-code', name: 'Claude Code' },
@@ -59,6 +60,7 @@ const TOOL_HOSTS: { host: AgentToolHost; name: string }[] = [
 const SECTION_ICON: Record<SettingsSection, IconName> = {
   general: 'settings',
   rows: 'contents',
+  reviews: 'reviews',
   agents: 'chip',
   'cloud-agents': 'cloud',
   accounts: 'user',
@@ -965,6 +967,7 @@ const LEDE: Record<SettingsSection, string> = {
   general: 'How the Inbox looks, and how it gets your attention.',
   // Rows draws its own lede, with Undo and Reset beside it (RowsSettings.tsx).
   rows: '',
+  reviews: 'How a review reads, here and in code review. A change made in either holds in both.',
   agents: "How each agent on this computer reaches the Inbox and learns when to use it. A change applies to that agent's next session; sessions already running keep what they started with.",
   'cloud-agents': 'An agent in the cloud or on a server, such as a Claude Code routine, Grok Bot, Muse, Hermes Agent or OpenClaw, that reads and writes across this Inbox.',
   accounts: '',
@@ -1105,8 +1108,9 @@ export function SettingsPage(props: SettingsPageProps) {
   const linkedMachines = machines.filter((machine) => !machine.self);
   const voice = useVoiceSettings();
   const [look] = useListLook();
+  const reviewsShown = useReviewsShown(settings);
   const sections = SETTINGS_SECTIONS.filter(
-    (id) => (id !== 'capabilities' || board !== null || steps !== null || decisionMode !== null || scheduled !== null || codeReview !== null || bro !== null || floatDrafts !== null || experimental !== null) && (id !== 'cloud-agents' || cloud.shown === true) && (id !== 'machines' || machines.length > 0) && (id !== 'voice' || voice !== null),
+    (id) => (id !== 'reviews' || reviewsShown) && (id !== 'capabilities' || board !== null || steps !== null || decisionMode !== null || scheduled !== null || codeReview !== null || bro !== null || floatDrafts !== null || experimental !== null) && (id !== 'cloud-agents' || cloud.shown === true) && (id !== 'machines' || machines.length > 0) && (id !== 'voice' || voice !== null),
   );
   /** The phone's list of sections, in its groups: settings (Capabilities last of them), then your data and Plannotator. */
   const phoneGroups: { label: string; ids: SettingsSection[] }[] = [
@@ -1158,6 +1162,7 @@ export function SettingsPage(props: SettingsPageProps) {
       case 'rows':
         return rowsSummary(look);
       case 'accounts':
+      case 'reviews':
         return '';
       case 'prompts':
         return settings.prompts ? promptsSummary(settings.prompts) : '';
@@ -1206,6 +1211,9 @@ export function SettingsPage(props: SettingsPageProps) {
         break;
       case 'rows':
         body = <RowsSection phone={phone} onGeneral={() => onSection?.('general')} {...props.rowsPreview} />;
+        break;
+      case 'reviews':
+        body = <ReviewsSection phone={phone} />;
         break;
       case 'agents':
         body = <AgentsSection settings={settings} context={context} onToggleTool={onToggleTool} agents={props.agents} onAgents={props.onAgents} />;

@@ -190,7 +190,7 @@ export function PhoneToSheet({
               );
             }
             const { target } = item.row;
-            const agent = hostLabel(target.host);
+            const agent = hostLabel(target.host, target.runtime);
             const time = target.started_at ? whenTime(target.started_at) : null;
             const asleep = item.machine.asleep;
             return (

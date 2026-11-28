@@ -1066,6 +1066,10 @@
       "at",
       "kind"
     ],
+    "OutboxViewViewed": [
+      "path",
+      "viewed"
+    ],
     "ProjectFolder": [
       "created_at",
       "id",

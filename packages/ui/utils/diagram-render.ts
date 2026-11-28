@@ -59,6 +59,7 @@ import { finishPeleLabels, needsPeleLabels, pageMathTypesetter, peleLabelMeasure
 import { peleAuthorColors } from './peleAuthorTheme';
 import { clampPeleStyles } from './peleStyleClamp';
 import { spaceWrappedRows } from './peleRowSpaces';
+import { withoutSankeyHeader } from './peleSankeyHeader';
 import { applyPeleThemeVariables, peleShadowCss, readPeleThemeVariables } from './peleTheme';
 
 export type { DiagramKind } from '@plannotator/core/diagram-anchor';
@@ -215,7 +216,10 @@ function sanitizeAcceptedDiagramSvg(svg: string, accept: (svg: SVGSVGElement) =>
   return root;
 }
 
-const REFUSED_RESULT: DiagramRenderError = { ok: false, message: 'The diagram is shown as its source.', line: null, runtimeUnavailable: false, refused: true };
+/** A host's refusal (`accept` here, or `DiagramSourceAcceptContext` before any render): the block shows the source.
+ * Frozen: it is exported and shared by every refusal, so no caller can change what a refusal is for the others. */
+export const DIAGRAM_REFUSED_RESULT: DiagramRenderError = Object.freeze({ ok: false, message: 'The diagram is shown as its source.', line: null, runtimeUnavailable: false, refused: true });
+const REFUSED_RESULT = DIAGRAM_REFUSED_RESULT;
 
 /** The sanitized root, through `accept` when the host gave one. */
 function sanitizeFor(svg: string, options: DiagramRenderOptions | undefined): SVGSVGElement | null | typeof REFUSED {
@@ -1134,15 +1138,17 @@ async function renderPele(renderId: string, source: string, theme: DiagramTheme,
   // Math and styled text in labels (`pele-labels.ts`): the source Pele draws, then its svg finished. Inside the
   // try: a step that throws is this fence's error (so 'pele-where-safe' falls back), never a rejected render.
   let labels: PreparedPeleLabels | null = null;
+  // A sankey's CSV header row is read as a header, not a flow (`peleSankeyHeader.ts`).
+  const drawn = withoutSankeyHeader(source);
   try {
     const fonts = peleFonts();
-    if (needsPeleLabels(source)) {
-      const typesetter = hasMermaidMath(source) ? await pageMathTypesetter(fonts.sans) : null;
-      labels = preparePeleLabels(source, typesetter);
+    if (needsPeleLabels(drawn)) {
+      const typesetter = hasMermaidMath(drawn) ? await pageMathTypesetter(fonts.sans) : null;
+      labels = preparePeleLabels(drawn, typesetter);
     }
     const prepared = labels;
     let measurer: TextMeasurer | undefined;
-    const result = await renderPeleSource(runtime, prepared?.text ?? source, renderId, fonts, prepared === null ? undefined : (base) => (measurer = peleLabelMeasurer(base, prepared)));
+    const result = await renderPeleSource(runtime, prepared?.text ?? drawn, renderId, fonts, prepared === null ? undefined : (base) => (measurer = peleLabelMeasurer(base, prepared)));
     const markup = result.svg.length > PELE_OUTPUT_LIMIT || prepared === null ? result.svg : finishPeleLabels(result.svg, prepared, measurer ?? peleLabelMeasurer(undefined, prepared));
     // Again after the formulas are in: their MathML is not part of what Pele measured.
     if (markup.length > PELE_OUTPUT_LIMIT) {

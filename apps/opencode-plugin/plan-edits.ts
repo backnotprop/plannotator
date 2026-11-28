@@ -1,4 +1,5 @@
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 
 export interface PlanEdit {
@@ -9,12 +10,13 @@ export interface PlanEdit {
 
 /**
  * Backing file for the current plan. Stored outside the workspace in
- * `~/.plannotator/active/{project}/_active-plan.md` so it never appears
+ * `~/.plannotator/active/{project}/` so it never appears
  * in git status or editor file trees. Managed entirely by the plugin;
  * the agent never sees or touches this file directly.
  */
-export function getPlanBackingPath(project: string): string {
-  return path.join(getPlannotatorDataDir(), "active", project, "_active-plan.md");
+export function getPlanBackingPath(project: string, directory: string, sessionId: string): string {
+  const key = createHash("sha256").update(JSON.stringify([path.resolve(directory), sessionId])).digest("hex");
+  return path.join(getPlannotatorDataDir(), "active", project, `${key}.md`);
 }
 
 /**

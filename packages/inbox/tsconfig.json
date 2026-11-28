@@ -25,6 +25,7 @@
       "#guide-reader": ["./guide/reader-module.d.ts"],
       "#surface-guide-reader": ["./guide/surface-reader-module.d.ts"],
       "#search-palette": ["./search/SearchPalette.tsx"],
+      "#reviews-settings": ["./reviewSettings/ReviewsSettings.tsx"],
       // Post to GitHub/GitLab (the review app's dialog); PlatformPost.tsx is checked by tsconfig.guide.json.
       "#platform-post": ["./guide/platform-post-module.d.ts"]
     }
@@ -43,6 +44,8 @@
     // guide/pullChangesTreeRisk.test.tsx renders guide/PullChangesTree.tsx, excluded for the same reason (it reaches
     // review-editor's ReviewStateContext and AllFilesCodeView); tsconfig.guide.json checks both.
     "guide/pullChangesTreeRisk.test.tsx",
+    // Renders guide/GuideReader.tsx's GuideDiff (excluded above) to prove a diff loads the picked code font.
+    "guide/diffFontLoad.test.tsx",
     "guide/useSemDiffClient.ts",
     "guide/renderedFiles.tsx",
     "guide/useSemDiffClient.test.tsx",

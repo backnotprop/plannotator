@@ -15,6 +15,7 @@ import { SoftLineBreaksContext } from '@plannotator/ui/components/InlineMarkdown
 import { ImageRowsContext } from '@plannotator/ui/components/imageRow';
 import { useRefRepo } from '../../links';
 import { OpenInCodeSpans } from '../../components/OpenIn';
+import { readsServedFor, useLinkedReadsRev } from '../../linkedReads';
 import { FileRefCodeSpans } from '../../components/FileRefSpan';
 import { InlineReuseLayer } from '../../reuse';
 import { SentAnswers, ReplyActions } from '../../components/ReplyAnswers';
@@ -95,6 +96,10 @@ export function MessageBody({
   const refCard = useRefHoverCards(bodyRef);
   const { refsOn, openFileRefRef } = useFileRefs({ message, projectRoot, onOpenFileRef, onOpenAttachment });
   const { imageBaseDir, htmlEmbeds, resolveImage, fallback, setFallback, onImageClick, onZoomChoice, pictureSizeOf, refOf } = useBodyImages({ message, imageBase, bodyRef, onOpenInlineImage, inlineRefOf, onImage, onOpenOptionSet, onOpenUncapturedImage, openFileRefRef });
+  // A code span's hover reads on the message's own machine, under its Code review switch (one set with this
+  // computer's, `capability-set`; off there, it answers nothing): none for a machine too old to serve it.
+  useLinkedReadsRev();
+  const codeHovers = openInFiles && readsServedFor(message.id);
   const { tagLabels, tagHosts, tagLayerRef, tagMarks, resolveLocalLink } = useBodyLinks({ message, bodyRef, skills, replyFiles, replyFileList, projectRoot, openInFiles, onOpenAttachment, setFallback, refsOn, openFileRefRef });
   const { renderFooter, acceptBehavior, questionCard, belowPrompt, directiveBlock, afterChoices, answerLocked, statusLabel } = useQuestionCards({ message, projectRoot, readOnly, movedThread, footerFor, answers, renderReplacedCard, renderReplacesLine, renderActions, renderRunBlock, onTryPrototype, blocks, noteAtLine, notesRef, refRepo });
   const pictures = useCommentPictures();
@@ -160,8 +165,8 @@ export function MessageBody({
     {/* The body fits its pictures itself (images.ts, `.ib-body img[data-ib-fit]`): no image rows from ui. */}
     <ImageRowsContext.Provider value={false}>
     <SoftLineBreaksContext.Provider value={ownReply}>
-    <OpenInCodeSpans scope={{ thread: message.thread_id, message: message.id }} on={openInFiles}>
-    <FileRefCodeSpans on={refsOn} hover={openInFiles} scope={{ thread: message.thread_id, message: message.id }} openRef={openFileRefRef}>
+    <OpenInCodeSpans scope={{ thread: message.thread_id, message: message.id }} on={codeHovers}>
+    <FileRefCodeSpans on={refsOn} hover={codeHovers} scope={{ thread: message.thread_id, message: message.id }} openRef={openFileRefRef}>
     <div className="ib-body" data-message-id={message.id} data-text-comments={comments ? '' : undefined} data-sent-reply={replyParts ? '' : undefined} ref={bodyRef} onMouseUpCapture={comments?.onOpen ? readPress : undefined} onClickCapture={openHashtag} onClick={comments?.onOpen ? openHighlight : undefined}>
       {refCard}
       {tagPeek.node}

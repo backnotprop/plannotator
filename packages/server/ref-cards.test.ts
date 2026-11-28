@@ -409,8 +409,9 @@ describe("fetching", () => {
     // A host gh is signed in to (GitHub Enterprise) is fetched, with --hostname.
     expect(await cards.get("https://github.acme.dev/acme/widgets/pull/12")).toMatchObject({ ok: true });
     expect(r.queries()[0].args.slice(0, 4)).toEqual(["api", "graphql", "--hostname", "github.acme.dev"]);
-    // The signed-in hosts are read once per CLI, not per hover.
-    expect(r.calls.filter((c) => c.args[0] === "auth").map((c) => c.cli).sort()).toEqual(["gh", "glab"]);
+    // The signed-in hosts are read once per CLI, not per hover (glab's `--all` named no host, so it was asked once more
+    // without it, as a glab without the flag is).
+    expect(r.calls.filter((c) => c.args[0] === "auth").map((c) => [c.cli, ...c.args].join(" ")).sort()).toEqual(["gh auth status --json hosts", "glab auth status", "glab auth status --all"]);
   });
 
   test("gh's JSON: an account with no state, or a state other than success, does not make its host signed in", async () => {
