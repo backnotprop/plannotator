@@ -28,6 +28,8 @@ import { ReplyRow } from '../ReplyRow';
 import { ReplySummary, type FootComments } from '../ReplySummary';
 import { Tip } from '../Tip';
 import { VoiceMicButton, VoiceStatusLine } from '../VoiceMic';
+import { ReplyBoxRecipientControl } from './ReplyBoxRecipients';
+import type { ReplyBoxRecipients } from './replyBoxSeams';
 
 type FieldProps = ComponentProps<typeof ReplyTextField>;
 type ReplyQuote = ReturnType<typeof useReplyQuote>;
@@ -68,8 +70,8 @@ export interface ReplyBoxProps {
   replyToNames: string;
   /** The asker note's id while it shows: the field is described by it. */
   askerNoteId: string | null;
-  /** Who gets the reply, when several agents could: a computer's chip leads the words, a phone's sits in the row. */
-  recipientPill: ReactNode;
+  /** Who gets the reply, when several agents could: a computer's chip leads the words, a phone's sits in the row. Absent: no control. */
+  recipients?: ReplyBoxRecipients;
   skillFilter: FieldProps['skillFilter'];
   commands: FieldProps['commands'];
   tags: FieldProps['tags'];
@@ -134,7 +136,7 @@ export function ReplyBox({
   voice,
   replyToNames,
   askerNoteId,
-  recipientPill,
+  recipients,
   skillFilter,
   commands,
   tags,
@@ -166,6 +168,7 @@ export function ReplyBox({
   onDiscardDraft,
   errorLine,
 }: ReplyBoxProps) {
+  const recipientPill = recipients ? <ReplyBoxRecipientControl phone={phone} recipients={recipients} /> : null;
   return (
     <>
       {/* Above the box (approval "inbox-reply-recipient"): after a conflict its line and choice, and on a phone the
