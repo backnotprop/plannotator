@@ -40,7 +40,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { randomUUID } from "node:crypto";
 import { closeSync, existsSync, openSync, readSync } from "node:fs";
-import { loadConfig, resolveInboxReminder, resolveInboxReminderText, resolveInboxTool } from "./generated/config.ts";
+import { inboxReminderRulesFor, loadConfig, resolveInboxReminder, resolveInboxReminderText, resolveInboxTool, type PlannotatorConfig } from "./generated/config.ts";
 import { getPlannotatorDataDir } from "./generated/data-dir.ts";
 import {
 	discoverInboxTools,
@@ -53,7 +53,7 @@ import { isInboxTurnedOn } from "./generated/inbox/turned-on.ts";
 import { releasePiSessionClaim, writePiSessionClaim } from "./generated/inbox/pi-session-claim.ts";
 import { isCtxAlive, resolveIdleDeliveryOptions } from "./current-pi-session.ts";
 import { loadedPackageVersion, packageUpdatedMessage, readPackageVersion } from "./package-version.ts";
-import { detectPiHost } from "./pi-host.ts";
+import { detectPiHost, type PiAgentToolHost } from "./pi-host.ts";
 
 /** How long a read of package.json on disk is reused: every poll asks. */
 const ON_DISK_FRESH_MS = 2_000;
@@ -181,18 +181,63 @@ export function setupPiInbox(pi: InboxPi, options: PiInboxOptions): Promise<void
 	const config = loadConfig();
 	// Only once the person turned the Inbox on here (turned-on.ts).
 	if (!resolveInboxTool(config, process.env, "pi") || !isInboxTurnedOn(dataDir)) return undefined;
-	// Decided with the tool, once per extension instance (each session, /reload):
-	// the line (the person's own from config.json prompts.inbox, else
-	// INBOX_REMINDER_TEXT), or null when the reminder is off.
-	const reminder = resolveInboxReminder(config, process.env, "pi") ? resolveInboxReminderText(config, "pi") : null;
+	// Decided with the tool, once per extension instance (each session, /reload), and again at each
+	// session OMP switches to (piReminderFollower): the line (the person's own from config.json
+	// prompts.inbox, else INBOX_REMINDER_TEXT), or null when the reminder is off.
+	const host = detectPiHost(pi);
+	const reminder = piInboxReminder(config, { host });
 	return discoverInboxTools(dataDir).then((tools) => {
 		if (!tools) return;
 		registerPiInbox(
 			pi,
 			new InboxAgentConnection({ dataDir, host: PI_INBOX_HOST, agentName: PI_INBOX_AGENT_NAME, tools }),
-			{ ...options, reminder },
+			{ ...options, reminder, reminderNow: () => piInboxReminder(loadConfig(), { host }) },
 		);
 	});
+}
+
+/**
+ * The reminder this session starts with, or null when it is off: the
+ * person's own line or INBOX_REMINDER_TEXT, with the person's rules unless
+ * the instructions file this host reads already holds them (the Inbox's note),
+ * so they reach the session once. Per host: Pi's note is in Pi's agent folder
+ * (`inboxNoteFileOf("pi")`); Oh My Pi reads its own folder (~/.omp/agent), where
+ * the Inbox writes no note, so its reminder always carries the rules. Decided
+ * once per session, as Pi reads its instructions file once per session.
+ */
+export function piInboxReminder(
+	config: PlannotatorConfig,
+	options: { host?: PiAgentToolHost; env?: NodeJS.ProcessEnv; place?: Parameters<typeof inboxReminderRulesFor>[2] } = {},
+): string | null {
+	const { host = "pi", env = process.env, place } = options;
+	if (!resolveInboxReminder(config, env, "pi")) return null;
+	// No note for Oh My Pi: the person's rules (shared, or Pi's own) go in the reminder.
+	if (host === "oh-my-pi") return resolveInboxReminderText(config, "pi");
+	return resolveInboxReminderText(config, "pi", { rules: inboxReminderRulesFor(config, "pi", place) });
+}
+
+/**
+ * The reminder text for the session this instance runs now: `first` (decided at setup), then, in Oh My Pi,
+ * decided again at each `session_switch` (OMP keeps the instance and replaces the session), so a switched-to
+ * session never carries a decision made for the one before it. Pi makes a new instance per session.
+ */
+export function piReminderFollower(
+	pi: Pick<InboxPi, "on">,
+	host: PiAgentToolHost,
+	first: string | null,
+	decide: (() => string | null) | undefined,
+): () => string | null {
+	let current = first;
+	if (host === "oh-my-pi" && decide) {
+		pi.on("session_switch", () => {
+			try {
+				current = decide();
+			} catch {
+				// A config that can't be read now: the last decision stands.
+			}
+		});
+	}
+	return () => current;
 }
 
 /**
@@ -370,7 +415,11 @@ function piHandoffLineOf(ctx: ExtensionContext, sessionId: string): string[] {
 }
 
 /** Exported for the tests. */
-export function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options: PiInboxOptions & { reminder: string | null }): void {
+export function registerPiInbox(
+	pi: InboxPi,
+	connection: InboxAgentConnection,
+	options: PiInboxOptions & { reminder: string | null; reminderNow?: () => string | null },
+): void {
 	const spec = inboxAgentTool(connection.tools);
 	const ohMyPi = detectPiHost(pi) === "oh-my-pi";
 	if (!spec) return;
@@ -556,12 +605,13 @@ export function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, o
 	// threads (`sessionThreads`, bounded, never starting the Inbox), so the
 	// thread ids come from the Inbox, not from the summary: the Claude Code
 	// mod's compact hook, here.
-	const reminderText = options.reminder;
-	if (reminderText) {
+	const reminderOf = piReminderFollower(pi, ohMyPi ? "oh-my-pi" : "pi", options.reminder, options.reminderNow);
+	if (options.reminder || ohMyPi) {
 		/** A compaction summarized the reminder away: the next one carries the thread list too. */
 		let afterCompaction = false;
 		pi.on("before_agent_start", async (_event, agentCtx: ExtensionContext) => {
-			if (!toolActive || reminderDelivered) return undefined;
+			const reminderText = reminderOf();
+			if (!reminderText || !toolActive || reminderDelivered) return undefined;
 			reminderDelivered = true;
 			let content = reminderText;
 			if (afterCompaction) {

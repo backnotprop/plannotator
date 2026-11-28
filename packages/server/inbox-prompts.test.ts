@@ -6,7 +6,7 @@
  * window's usual guards.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InboxPromptsSettings } from "@plannotator/core/inbox-types";
@@ -14,6 +14,7 @@ import { INBOX_REMINDER_MAX_CHARS, INBOX_REMINDER_TEXT, INBOX_REMINDER_TEXT_NO_W
 import { DEFAULT_PLAN_APPROVED_PROMPT, DEFAULT_REVIEW_DENIED_SUFFIX } from "@plannotator/shared/prompts";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { createAgentEnvironmentFor } from "./inbox-agents";
+import { addInboxNote, INBOX_NOTE_BLOCK, inboxNoteBlockWith } from "./inbox-agent-notes";
 
 const roots: string[] = [];
 const servers: InboxServer[] = [];
@@ -260,5 +261,79 @@ describe("Settings → Prompts", () => {
     expect(onDisk()).toEqual({ displayName: "Ann" });
     const fits = await post(server, { serverSession: server.serverSession, prompts: { inbox: { rules: "r".repeat(room) } } });
     expect(fits.status).toBe(200);
+  });
+
+  test("saving rules rewrites the note Plannotator wrote in each agent's instructions; Back to default puts today's block back", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-prompts-note-")));
+    roots.push(root);
+    const home = join(root, "home");
+    mkdirSync(join(home, ".claude"), { recursive: true });
+    const dataDir = join(root, "data");
+    mkdirSync(dataDir, { recursive: true });
+    previousDataDir = process.env.PLANNOTATOR_DATA_DIR;
+    process.env.PLANNOTATOR_DATA_DIR = dataDir;
+    const agentEnvironment = createAgentEnvironmentFor({ platform: "linux", homeDir: home, env: { HOME: home, PATH: "", CLAUDE_CONFIG_DIR: join(home, ".claude") } });
+    expect(addInboxNote("claude-code", dataDir, agentEnvironment, undefined, { config: {} }).ok).toBe(true);
+    const note = join(home, ".claude", "rules", "plannotator-inbox.md");
+    const server = await startInboxServer({ dataDir, agentEnvironment });
+    servers.push(server);
+    const save = async (inbox: unknown) => expect((await post(server, { serverSession: server.serverSession, prompts: { inbox } })).status).toBe(200);
+    await save({ rules: "Ask me before you delete any file." });
+    expect(readFileSync(note, "utf8")).toBe(`${inboxNoteBlockWith("Ask me before you delete any file.")}\n`);
+    await save({ runtimes: { "claude-code": { rules: "Never send from reviewer sessions." } } });
+    expect(readFileSync(note, "utf8")).toBe(`${inboxNoteBlockWith("Never send from reviewer sessions.")}\n`);
+    await save({ rules: null, runtimes: { "claude-code": { rules: null } } });
+    expect(readFileSync(note, "utf8")).toBe(`${INBOX_NOTE_BLOCK}\n`);
+    // The reminder's own text is no rules change: the note is not touched.
+    await save({ reminder: "Shared line." });
+    expect(readFileSync(note, "utf8")).toBe(`${INBOX_NOTE_BLOCK}\n`);
+    // A note that cannot be written (its folder locked): the save still succeeds and the rules are kept.
+    chmodSync(join(home, ".claude", "rules"), 0o500);
+    try {
+      await save({ rules: "Keep messages short." });
+      expect(readFileSync(note, "utf8")).toBe(`${INBOX_NOTE_BLOCK}\n`);
+      expect(JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")).prompts.inbox.rules).toBe("Keep messages short.");
+      expect((await read(server)).rules?.shared).toBe("Keep messages short.");
+    } finally {
+      chmodSync(join(home, ".claude", "rules"), 0o755);
+    }
+  });
+
+  test("over /mcp: Codex gets the rules in the instructions even while its note holds them (the Inbox cannot tell which file it reads)", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-prompts-mcp-")));
+    roots.push(root);
+    const home = join(root, "home");
+    mkdirSync(join(home, ".codex"), { recursive: true });
+    const dataDir = join(root, "data");
+    mkdirSync(dataDir, { recursive: true });
+    const first = { prompts: { inbox: { rules: "Ask me before you delete any file." } } };
+    writeFileSync(join(dataDir, "config.json"), JSON.stringify(first));
+    previousDataDir = process.env.PLANNOTATOR_DATA_DIR;
+    process.env.PLANNOTATOR_DATA_DIR = dataDir;
+    const agentEnvironment = createAgentEnvironmentFor({ platform: "linux", homeDir: home, env: { HOME: home, PATH: "", CODEX_HOME: join(home, ".codex") } });
+    expect(addInboxNote("codex", dataDir, agentEnvironment, undefined, { config: first }).ok).toBe(true);
+    const note = join(home, ".codex", "AGENTS.md");
+    const server = await startInboxServer({ dataDir, agentEnvironment });
+    servers.push(server);
+    const instructions = async (name: string): Promise<string> => {
+      const response = await fetch(`http://127.0.0.1:${server.port}/mcp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name, version: "1.0.0" } } }),
+      });
+      const text = await response.text();
+      const body = text.trimStart().startsWith("{") ? text : text.split("\n").find((line) => line.startsWith("data: "))!.slice(6);
+      return (JSON.parse(body) as { result: { instructions: string } }).result.instructions;
+    };
+    expect(readFileSync(note, "utf8")).toContain("Ask me before you delete any file.");
+    expect(await instructions("codex-mcp-client")).toContain("Ask me before you delete any file.");
+    expect(await instructions("gemini-cli-mcp-client")).toContain("Ask me before you delete any file.");
+    expect(await instructions("some-mcp-client")).toContain("Ask me before you delete any file.");
+    // New rules: the save rewrites the note, and the next Codex connection gets the new ones in the instructions too.
+    expect((await post(server, { serverSession: server.serverSession, prompts: { inbox: { rules: "Keep messages short." } } })).status).toBe(200);
+    expect(readFileSync(note, "utf8")).toContain("Keep messages short.");
+    const next = await instructions("codex-mcp-client");
+    expect(next).toContain("Keep messages short.");
+    expect(next).not.toContain("Ask me before you delete any file.");
   });
 });

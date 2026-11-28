@@ -1,4 +1,5 @@
-import { INBOX_PROMPT_HOSTS, type InboxPromptHost, type InboxPromptsChange, type InboxPromptsSettings } from "@plannotator/core/inbox-types";
+import { INBOX_NOTE_AGENT_IDS, INBOX_PROMPT_HOSTS, type InboxNoteAgentId, type InboxPromptHost, type InboxPromptsChange, type InboxPromptsSettings, type InboxRulesUnsent } from "@plannotator/core/inbox-types";
+import type { InboxNoteRulesState } from "./inbox-agent-notes";
 import type { PlannotatorConfig } from "@plannotator/shared/config";
 import {
   inboxReminderCustomText,
@@ -33,14 +34,26 @@ function slots(config: PlannotatorConfig): { shared: string | null; runtimes: Re
   };
 }
 
-export function inboxRulesModel(config: PlannotatorConfig, wakes: Wakes): NonNullable<InboxPromptsSettings["rules"]> {
+/**
+ * How the rules reach each agent (inbox.ts): whose note holds them now (noteRulesStates), whose
+ * reminder is on, and who is connected through MCP. Without it (a caller that has neither) the model is the reminder's alone.
+ */
+export interface InboxRulesDelivery {
+  notes: Partial<Record<InboxNoteAgentId, InboxNoteRulesState>>;
+  on: Record<InboxPromptHost, boolean>;
+  /** The note agents connected to the Inbox through MCP (inbox/agents.json): the MCP instructions carry them the shared rules. */
+  mcp?: Partial<Record<InboxNoteAgentId, boolean>>;
+}
+
+export function inboxRulesModel(config: PlannotatorConfig, wakes: Wakes, delivery?: InboxRulesDelivery): NonNullable<InboxPromptsSettings["rules"]> {
   const { shared, runtimes } = slots(config);
   const room = Object.fromEntries(INBOX_PROMPT_HOSTS.map((host) => [host, inboxRulesRoom(reminderOf(config, host, wakes))])) as Record<InboxPromptHost, number>;
   const reached = INBOX_PROMPT_HOSTS.filter((host) => runtimes[host] === null);
   const sharedRoom = Math.min(...(reached.length > 0 ? reached : INBOX_PROMPT_HOSTS).map((host) => room[host]));
+  // An agent whose note holds its rules gets them there: its reminder leaves them out, so their length is no matter.
   const dropped = INBOX_PROMPT_HOSTS.filter((host) => {
     const rules = inboxReminderRulesText(config, host);
-    if (rules === null) return false;
+    if (rules === null || delivery?.notes[host] === "held") return false;
     const reminder = reminderOf(config, host, wakes);
     return inboxReminderWithRules(reminder, rules, LONGEST_TOOL_NAME) === reminder;
   });
@@ -53,7 +66,21 @@ export function inboxRulesModel(config: PlannotatorConfig, wakes: Wakes): NonNul
     dropped: mcpText?.rules != null ? sent.filter(([, fit]) => !fit.rules).map(([tier]) => tier) : [],
     reminder_dropped: mcpText?.custom != null ? sent.filter(([, fit]) => !fit.reminder).map(([tier]) => tier) : [],
   };
-  return { shared, runtimes, room: { shared: sharedRoom, runtimes: room }, dropped, mcp };
+  if (!delivery) return { shared, runtimes, room: { shared: sharedRoom, runtimes: room }, dropped, mcp };
+  // The note agents other than Claude Code, Pi and OpenCode are MCP clients of the `other` room (Codex, Gemini CLI,
+  // Qwen Code): connected through MCP, they read the shared rules in the server instructions whenever they fit there.
+  const mcpCarries = mcpText?.rules != null && inboxMcpSent(mcpText, "other").rules;
+  const unsent: InboxRulesUnsent[] = [];
+  for (const agent of INBOX_NOTE_AGENT_IDS) {
+    const state = delivery.notes[agent];
+    if (state === undefined || state === "held") continue;
+    const host = (INBOX_PROMPT_HOSTS as readonly string[]).includes(agent) ? (agent as InboxPromptHost) : null;
+    // Claude Code, Pi and OpenCode get them by the reminder while it is on.
+    if (host && delivery.on[host]) continue;
+    if (!host && mcpCarries && delivery.mcp?.[agent]) continue;
+    unsent.push({ agent, slot: host && runtimes[host] !== null ? host : "shared", why: state.why, fix: state.fix });
+  }
+  return { shared, runtimes, room: { shared: sharedRoom, runtimes: room }, dropped, mcp, unsent };
 }
 
 export function inboxRulesFitError(change: InboxPromptsChange, config: PlannotatorConfig, wakes: Wakes): { field: string; message: string } | null {

@@ -10,8 +10,10 @@ import { isTextCut, Tip } from './Tip';
 export interface AgentNoteDialogProps {
   /** The agents asked about (fixed when the dialog opens): the candidates not asked yet. */
   rows: InboxAgentRow[];
-  /** The exact block a note writes (Show the note). */
+  /** The exact block a note writes (Show the note), with the person's rules for all agents. */
   noteText: string;
+  /** The block for each agent whose own differs (its own rules; a file several agents read): what it really gets. */
+  noteTexts?: Partial<Record<InboxNoteAgentId, string>>;
   onModel: (next: InboxAgentsModel) => void;
   onClosed: () => void;
 }
@@ -31,7 +33,7 @@ type RowStatus = { kind: 'busy' } | { kind: 'done'; result: InboxNoteResult };
  * nothing is written without the person's yes. On the sound dialog's shell,
  * no entrance motion.
  */
-export function AgentNoteDialog({ rows, noteText, onModel, onClosed }: AgentNoteDialogProps) {
+export function AgentNoteDialog({ rows, noteText, noteTexts, onModel, onClosed }: AgentNoteDialogProps) {
   const id = useId();
   const doneRef = useRef<HTMLButtonElement>(null);
   const [picks, setPicks] = useState<Record<string, boolean>>(() => defaultPicks(rows));
@@ -54,6 +56,8 @@ export function AgentNoteDialog({ rows, noteText, onModel, onClosed }: AgentNote
   const handOnly = handRows.length === rows.length;
   const handNames = joinNames(handRows.map((row) => row.label));
   const copyText = noteWithoutMarkers(noteText);
+  // Show the note: the block each agent written to really gets, one per distinct block, named when they differ.
+  const previews = notePreviews(rows.filter((row) => !noteCopiedByHand(row)), noteText, noteTexts);
   const isManual = (agent: string) => {
     const result = status[agent];
     return result?.kind === 'done' && result.result.ok && result.result.action === 'manual';
@@ -260,9 +264,24 @@ export function AgentNoteDialog({ rows, noteText, onModel, onClosed }: AgentNote
             </button>
             {preview && (
               <div className="ib-anote-note" id={`${id}-note`}>
-                <pre tabIndex={0} aria-label={handOnly ? 'The note to copy' : 'The note Plannotator adds'}>
-                  <NoteText text={handOnly ? copyText : noteText} />
-                </pre>
+                {handOnly ? (
+                  <pre tabIndex={0} aria-label="The note to copy">
+                    <NoteText text={copyText} />
+                  </pre>
+                ) : (
+                  previews.map(({ text, names }) => (
+                    <Fragment key={names.join(',')}>
+                      {previews.length > 1 && (
+                        <span className="ib-anote-sub" data-anote-for={names.join(' ')}>
+                          {joinNames(names.map((agent) => INBOX_AGENT_LABELS[agent]))}
+                        </span>
+                      )}
+                      <pre tabIndex={0} aria-label="The note Plannotator adds" data-anote-preview={names.join(' ')}>
+                        <NoteText text={text} />
+                      </pre>
+                    </Fragment>
+                  ))
+                )}
               </div>
             )}
           </>
@@ -301,6 +320,26 @@ export function AgentNoteDialog({ rows, noteText, onModel, onClosed }: AgentNote
       </div>
     </Modal>
   );
+}
+
+/**
+ * The blocks Show the note previews: one per distinct block among the agents a note is written for (each agent's
+ * own from `noteTexts`, else the shared one), with the agents that get it, in row order.
+ */
+export function notePreviews(
+  rows: InboxAgentRow[],
+  noteText: string,
+  noteTexts: Partial<Record<InboxNoteAgentId, string>> | undefined,
+): { text: string; names: InboxNoteAgentId[] }[] {
+  const out: { text: string; names: InboxNoteAgentId[] }[] = [];
+  for (const row of rows) {
+    const agent = row.id as InboxNoteAgentId;
+    const text = noteTexts?.[agent] ?? noteText;
+    const group = out.find((entry) => entry.text === text);
+    if (group) group.names.push(agent);
+    else out.push({ text, names: [agent] });
+  }
+  return out.length > 0 ? out : [{ text: noteText, names: [] }];
 }
 
 function Pill({ row }: { row: InboxAgentRow }) {

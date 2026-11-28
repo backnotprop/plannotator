@@ -24,13 +24,14 @@ import {
   realpathSync,
 } from "fs";
 import { execSync } from "child_process";
+import { homedir } from "os";
 
 import type { DefaultDiffType, DiffLineBgIntensity, DiffOptions, DisplayOptions, JjDefaultDiffType, ReviewDefaults, ThemeConfig } from '@plannotator/core/config-types';
 import { isFaviconStyle, type FaviconStyle } from './favicon';
 import { isAnnotateAgentTerminalSide, type AnnotateAgentTerminalSide } from './agent-terminal';
 import { parseAgentSwitchConfig, agentSwitchConfigValue, type AgentSwitchConfigValue } from './agent-switch';
 import { isLocalhostSubdomain } from './loopback-host';
-import { INBOX_TOOL_NAME, inboxReminderCustomText, inboxReminderFor, inboxReminderRulesText } from './inbox/connection';
+import { INBOX_TOOL_NAME, inboxNoteHoldsRules, inboxReminderCustomText, inboxReminderFor, inboxReminderRulesText } from './inbox/connection';
 import { parseAnnotateView, type AnnotateView } from '@plannotator/core/config-types';
 export type { DefaultDiffType, DiffLineBgIntensity, DiffOptions, DisplayOptions, JjDefaultDiffType, ReviewDefaults, ThemeConfig, FaviconStyle };
 
@@ -1409,6 +1410,17 @@ function copyJson<T>(value: T): T {
   return value;
 }
 
+/**
+ * config.json for a caller that must not act on a failed read: null when the
+ * file is there but cannot be read or is not a JSON object (loadConfig answers
+ * `{}` then, which reads as "nothing set"). Missing or blank: `{}`. The note
+ * refresh uses it, so an unreadable file never rewrites notes without rules.
+ */
+export function loadConfigOrNull(): PlannotatorConfig | null {
+  const read = readConfigForSave(getConfigPath());
+  return read.ok ? withMachineState(read.config as Record<string, unknown>, readState().state) : null;
+}
+
 function loadSettings(options: { quiet?: boolean }): Record<string, unknown> {
   try {
     const configPath = getConfigPath();
@@ -2524,9 +2536,126 @@ export function resolveInboxReminder(
 export function resolveInboxReminderText(
   config: PlannotatorConfig,
   host: InboxToolHost,
-  options: { wakes?: boolean; toolName?: string } = {},
+  options: { wakes?: boolean; toolName?: string; rules?: string | null } = {},
 ): string {
-  return inboxReminderFor(inboxReminderCustomText(config, host), options.toolName ?? INBOX_TOOL_NAME, { wakes: options.wakes, rules: inboxReminderRulesText(config, host) });
+  const rules = options.rules === undefined ? inboxReminderRulesText(config, host) : options.rules;
+  return inboxReminderFor(inboxReminderCustomText(config, host), options.toolName ?? INBOX_TOOL_NAME, { wakes: options.wakes, rules });
+}
+
+/**
+ * The file a host's agent reads the Inbox note from, as the Inbox writes it
+ * (`noteTarget` in packages/server/inbox-agent-notes.ts; inbox-note-rules.test.ts
+ * keeps the two equal): Claude Code's `rules/plannotator-inbox.md` in its
+ * config folder, Pi's first instructions file that exists (it reads one),
+ * OpenCode's `AGENTS.md`. Null for any other host.
+ */
+export function inboxNoteFileOf(host: string, env: Readonly<Record<string, string | undefined>>, homeDir: string): string | null {
+  const dir = (name: string): string | null => {
+    const value = env[name]?.trim();
+    if (!value) return null;
+    const path = value === "~" ? homeDir : value.startsWith("~/") ? join(homeDir, value.slice(2)) : value;
+    return isAbsolute(path) ? path : null;
+  };
+  if (host === "claude-code") return join(dir("CLAUDE_CONFIG_DIR") ?? join(homeDir, ".claude"), "rules", "plannotator-inbox.md");
+  if (host === "opencode") return join(dir("OPENCODE_CONFIG_DIR") ?? join(dir("XDG_CONFIG_HOME") ?? join(homeDir, ".config"), "opencode"), "AGENTS.md");
+  if (host === "pi") {
+    const pi = dir("PI_CODING_AGENT_DIR") ?? join(homeDir, ".pi", "agent");
+    const names = ["AGENTS.override.md", "AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD"];
+    return names.map((name) => join(pi, name)).find((path) => existsSync(path)) ?? null;
+  }
+  return null;
+}
+
+/**
+ * The rules a host's reminder carries this session: the person's rules
+ * (inboxReminderRulesText), or null when the agent's own instructions file
+ * already holds the Inbox note with exactly these rules (inboxNoteHoldsRules):
+ * the agent reads them there, so they reach it once. Note off, no file, a file
+ * Plannotator could not update, an older Inbox that has not written them yet,
+ * or a note edited so the rules are gone: the reminder carries them, as before.
+ * Read once per session start, with the switch; the file only when there are rules.
+ */
+export function inboxReminderRulesFor(
+  config: PlannotatorConfig,
+  host: InboxToolHost,
+  place: { env: Readonly<Record<string, string | undefined>>; homeDir: string } = { env: process.env, homeDir: homedir() },
+): string | null {
+  const rules = inboxReminderRulesText(config, host);
+  if (rules === null) return null;
+  const file = inboxNoteFileOf(host, place.env, place.homeDir);
+  try {
+    if (file && inboxNoteHoldsRules(readFileSync(file, "utf8"), rules)) return null;
+  } catch {
+    // No file, or not readable: the reminder carries them.
+  }
+  return rules;
+}
+
+/** A file's size, time and inode (a key that changes when the file does), or `none`. */
+function statKey(path: string | null): string {
+  try {
+    if (path) {
+      const stat = statSync(path);
+      return `${path}:${stat.size}:${stat.mtimeMs}:${stat.ino}`;
+    }
+  } catch {
+    // No file.
+  }
+  return `${path}:none`;
+}
+
+/**
+ * config.json as it is now, for a process that runs for long: read again only
+ * when the file's size, time or inode changed (one stat per call), so a save in
+ * Settings reaches it. `initial` is the config the process just loaded. A read
+ * that fails (loadConfigOrNull: the file there but unreadable, a save half
+ * done) keeps the last good one, and is tried again at the next change.
+ */
+export function inboxConfigWatch(initial: PlannotatorConfig, path: string = getConfigPath(), read: () => PlannotatorConfig | null = loadConfigOrNull): () => PlannotatorConfig {
+  let seen = statKey(path);
+  let current = initial;
+  return () => {
+    const key = statKey(path);
+    if (key !== seen) {
+      const next = read();
+      if (next !== null) {
+        seen = key;
+        current = next;
+      }
+    }
+    return current;
+  };
+}
+
+/**
+ * inboxReminderRulesFor asked again on every request, for a host that builds
+ * its system prompt per request (OpenCode reads its AGENTS.md then): the note
+ * file is stat'ed each time and read again only when its path, size or
+ * modification time changed, or the rules did, so the answer follows the note
+ * and the rules as they change (the person saves new rules, the Inbox writes
+ * them into the note, the note is turned off) and costs one stat. `config`: a
+ * getter (inboxConfigWatch) for the rules as config.json holds them now, so
+ * the note is compared with the current rules, never the ones of the start.
+ */
+export function inboxReminderRulesWatch(
+  config: PlannotatorConfig | (() => PlannotatorConfig),
+  host: InboxToolHost,
+  place: { env: Readonly<Record<string, string | undefined>>; homeDir: string } = { env: process.env, homeDir: homedir() },
+): () => string | null {
+  const configNow = typeof config === "function" ? config : () => config;
+  let seen: string | null = null;
+  let answer: string | null = null;
+  return () => {
+    const now = configNow();
+    const rules = inboxReminderRulesText(now, host);
+    if (rules === null) return null;
+    const key = `${statKey(inboxNoteFileOf(host, place.env, place.homeDir))}\0${rules}`;
+    if (key !== seen) {
+      seen = key;
+      answer = inboxReminderRulesFor(now, host, place);
+    }
+    return answer;
+  };
 }
 
 /**

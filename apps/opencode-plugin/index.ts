@@ -20,7 +20,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { loadConfig, resolveInboxReminder, resolveInboxReminderText, resolveSharingEnabled } from "@plannotator/shared/config";
+import { inboxConfigWatch, inboxReminderRulesWatch, loadConfig, resolveInboxReminder, resolveInboxReminderText, resolveSharingEnabled } from "@plannotator/shared/config";
 import { readImprovementHook } from "@plannotator/shared/improvement-hooks";
 import { composeImproveContext } from "@plannotator/shared/pfm-reminder";
 import { isAskAiChild } from "@plannotator/shared/child-env";
@@ -767,7 +767,11 @@ Do NOT proceed with implementation until your plan is approved.`;
       const inboxConfig = loadConfig();
       if (resolveInboxReminder(inboxConfig, process.env, "opencode")) {
         // The person's own line (config.json prompts.inbox) or the no-wake default, decided once here.
-        const reminderText = resolveInboxReminderText(inboxConfig, "opencode", { wakes: false });
+        // The person's rules ride along unless OpenCode's AGENTS.md already holds them (the Inbox's note):
+        // asked on each request, as OpenCode 1 reads that file again for each (a stat; read when it changed),
+        // against the rules config.json holds now (a stat too): a save in Settings rewrites the note.
+        const rulesNow = inboxReminderRulesWatch(inboxConfigWatch(inboxConfig), "opencode");
+        const reminderText = () => resolveInboxReminderText(inboxConfig, "opencode", { wakes: false, rules: rulesNow() });
         const planTransform = plugin["experimental.chat.system.transform"];
         const lastAnswer = new Map<string, boolean>();
         plugin["experimental.chat.system.transform"] = async (input, output) => {
@@ -789,7 +793,7 @@ Do NOT proceed with implementation until your plan is approved.`;
           }
           if (lastAnswer.size > 500 && !lastAnswer.has(input.sessionID)) lastAnswer.clear();
           lastAnswer.set(input.sessionID, hasInbox);
-          if (hasInbox) addInboxReminderOpenCode1(output.system, reminderText);
+          if (hasInbox) addInboxReminderOpenCode1(output.system, reminderText());
         };
       }
     }

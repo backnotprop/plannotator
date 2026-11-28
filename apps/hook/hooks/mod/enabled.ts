@@ -16,7 +16,7 @@
  * may import only its own files); `enabled.test.ts` keeps the two in step.
  */
 
-import { inboxReminderCustomText, inboxReminderRulesText } from './inbox-contract'
+import { inboxNoteHoldsRules, inboxReminderCustomText, inboxReminderRulesText } from './inbox-contract'
 
 /** The env override: true/false, or undefined when it does not decide (unset, empty, unrecognized). */
 export function parseClaudeModEnv(value: string | undefined): boolean | undefined {
@@ -211,6 +211,18 @@ export function resolveInboxReminderCustom(configText: string | null | undefined
   } catch {
     return null
   }
+}
+
+/**
+ * The rules the reminder carries, given Claude Code's own rules file
+ * (`rules/plannotator-inbox.md`, the Inbox's note; null: none): none when the
+ * note there holds exactly these rules (Claude Code loads that file itself, so
+ * they reach the session once). Mirrors `inboxReminderRulesFor` in
+ * packages/shared/config.ts for Pi and OpenCode. Read once, at session start.
+ */
+export function inboxReminderRulesAfterNote(rules: string | null, noteText: string | null | undefined): string | null {
+  if (rules === null) return null
+  return typeof noteText === 'string' && inboxNoteHoldsRules(noteText, rules) ? null : rules
 }
 
 export function resolveInboxReminderRules(configText: string | null | undefined): string | null {

@@ -13,7 +13,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import type { InboxPromptHost, InboxPromptsSettings } from '@plannotator/core/inbox-types';
+import { INBOX_AGENT_LABELS, type InboxPromptHost, type InboxPromptsSettings } from '@plannotator/core/inbox-types';
 import { tooltipOf } from './testing/tooltip';
 
 const hasDom = typeof document !== 'undefined';
@@ -376,6 +376,46 @@ test.skipIf(!hasDom)("Rules for one agent: For picks the agent's own box; Save w
   expect(sent.at(-1)).toEqual({ inbox: { runtimes: { pi: { rules: 'Never send from reviewer sessions.' } } } });
   expect(q(el, '[data-rules-text="pi"]')?.textContent).toBe('Never send from reviewer sessions.');
   expect(q(el, '[data-rules-text="shared"]')?.textContent).toBe('Keep messages short.');
+});
+
+test.skipIf(!hasDom)('an agent the rules do not reach is named under the box they come from, one line per reason and fix', () => {
+  const el = mount(
+    withRules({
+      shared: 'Keep messages short.',
+      runtimes: { 'claude-code': 'Never send from reviewer sessions.', pi: null, opencode: null },
+      unsent: [
+        { agent: 'gemini', slot: 'shared', why: 'none', fix: true },
+        { agent: 'qwen', slot: 'shared', why: 'none', fix: true },
+        { agent: 'opencode', slot: 'shared', why: 'none', fix: false },
+        { agent: 'codex', slot: 'shared', why: 'edited', fix: true },
+        { agent: 'claude-code', slot: 'claude-code', why: 'stale', fix: true },
+      ],
+    }),
+    false,
+  );
+  const lines = (slot: string) =>
+    [...el.querySelectorAll<HTMLElement>(`[data-rules-slot="${slot}"] [data-rules-unsent]`)].map((line) => ({
+      why: line.dataset.rulesUnsent,
+      agents: line.dataset.rulesAgents,
+      fix: line.dataset.rulesFix === 'true',
+      named: [INBOX_AGENT_LABELS.gemini, INBOX_AGENT_LABELS.qwen, INBOX_AGENT_LABELS.opencode, INBOX_AGENT_LABELS.codex, INBOX_AGENT_LABELS['claude-code']].filter((label) => line.textContent?.includes(label)),
+      saysWhere: line.textContent?.includes('Settings → Agents') ?? false,
+    }));
+  // Grouped by reason, and by whether Settings → Agents can put it right; every agent named in its own line only.
+  expect(lines('shared')).toEqual([
+    { why: 'none', agents: 'gemini qwen', fix: true, named: [INBOX_AGENT_LABELS.gemini, INBOX_AGENT_LABELS.qwen], saysWhere: true },
+    { why: 'none', agents: 'opencode', fix: false, named: [INBOX_AGENT_LABELS.opencode], saysWhere: false },
+    { why: 'edited', agents: 'codex', fix: true, named: [INBOX_AGENT_LABELS.codex], saysWhere: true },
+  ]);
+  // A line naming several agents says how to fix them all, not one of them.
+  const several = el.querySelector<HTMLElement>('[data-rules-slot="shared"] [data-rules-agents="gemini qwen"]')!.textContent ?? '';
+  expect(several.includes('Turn them on')).toBe(true);
+  expect(several.includes('Turn it on')).toBe(false);
+  // A note Plannotator could not update: never a way to fix it that Settings → Agents does not have.
+  expect(lines('claude-code')).toEqual([{ why: 'stale', agents: 'claude-code', fix: false, named: [INBOX_AGENT_LABELS['claude-code']], saysWhere: false }]);
+  // Everyone reached, or an older Inbox that does not say: no line.
+  expect(mount(withRules({ shared: 'Keep messages short.', unsent: [] }), false).querySelector('[data-rules-unsent]')).toBeNull();
+  expect(mount(withRules({ shared: 'Keep messages short.' }), false).querySelector('[data-rules-unsent]')).toBeNull();
 });
 
 /** The rooms as the server computes them (packages/server/inbox-mcp-instructions.ts): a fixture, the page shows whatever it is given. */

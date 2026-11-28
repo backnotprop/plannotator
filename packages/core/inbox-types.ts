@@ -3262,8 +3262,10 @@ export interface InboxAgentsModel {
   notes_offered: boolean;
   /** The agents the note question was asked about: each is asked once (absent from an Inbox of 0.28.18 or older, which asked once in all). */
   notes_asked?: InboxNoteAgentId[];
-  /** The exact block a note writes, markers included. */
+  /** The exact block a note writes, markers included (with the person's rules for all agents: Cursor's copy too). */
   note_text: string;
+  /** An agent whose block differs (its own rules): that block. Absent from an older Inbox. */
+  note_texts?: Partial<Record<InboxNoteAgentId, string>>;
   /** Notes Plannotator wrote by itself that the window has not said yet (one quiet line; POST /api/inbox/agents/seen clears it). Absent from older Inboxes. */
   notes_auto?: InboxNoteAutoAdd[];
   /** A switch's refusal, after POST /api/inbox/agents. */
@@ -4342,6 +4344,16 @@ export interface InboxPromptsSettings {
     room: { shared: number; runtimes: Record<InboxPromptHost, number> };
     dropped: InboxPromptHost[];
     /**
+     * The agents found here that do not get their rules (Settings says "Not sent to …"), under the box
+     * they come from (`slot`): `none`, no note in its instructions (for Claude Code, Pi and OpenCode:
+     * and its reminder off); `edited`, a note the person edited (left as it is); `stale`, a note
+     * Plannotator could not bring up to date. `fix`: Settings → Agents can put it right. Agents
+     * nothing true can be said about are left out (Cursor's copy by hand, an agent the person said no
+     * to), and an agent connected through MCP while the MCP instructions carry the shared rules (they fit
+     * its room). Absent from an older Inbox, or when the Inbox could not tell.
+     */
+    unsent?: InboxRulesUnsent[];
+    /**
      * Agents that reach the Inbox over MCP (T3 Code, Codex, any MCP client): they get the shared
      * ("All agents") rules and reminder in the MCP server's instructions, sized to what each kind of
      * client keeps (`InboxMcpTier`). `room`: the count the editor shows, current Claude Code's (the
@@ -4351,6 +4363,13 @@ export interface InboxPromptsSettings {
      */
     mcp?: { room: number; rooms: Record<InboxMcpTier, number>; dropped: InboxMcpTier[]; reminder_dropped: InboxMcpTier[] };
   };
+}
+
+export interface InboxRulesUnsent {
+  agent: InboxNoteAgentId;
+  slot: "shared" | InboxPromptHost;
+  why: "none" | "edited" | "stale";
+  fix: boolean;
 }
 
 /**

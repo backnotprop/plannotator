@@ -80,7 +80,8 @@ import { assertTestHome } from "@plannotator/server/test-home-guard";
 import { agentSpec, createAgentEnvironment, formatConnectReport, inboxConnectDisabled } from "@plannotator/server/inbox-agents";
 import { withoutRexPane } from "@plannotator/server/inbox-launch-env";
 import { INBOX_REX_SERVER_ENV, inboxRexServerSocket } from "@plannotator/server/inbox-rex-where";
-import { addInboxNote, INBOX_NOTE_BODY, inboxNotesDisabled, markNotesAsked } from "@plannotator/server/inbox-agent-notes";
+import { addInboxNote, inboxNoteBodyWith, inboxNotesDisabled, markNotesAsked, noteRulesConfig, sharedNoteRules } from "@plannotator/server/inbox-agent-notes";
+import { loadConfig } from "@plannotator/shared/config";
 import { INBOX_AGENT_LABELS, INBOX_AUTO_SEND_AFTER_MS, INBOX_NOTE_AGENT_IDS, type InboxConnectReport, type InboxNoteAgentId } from "@plannotator/core/inbox-types";
 import { writeUrlQr } from "@plannotator/server/qr";
 import { shellLine } from "@plannotator/inbox/harnesses";
@@ -525,7 +526,8 @@ async function writeNotes(dataDir: string, list: string): Promise<number> {
     }
     if (id === "cursor") {
       // Cursor keeps its rules in the app: nothing is written; the note (without the markers) goes to stdout to copy.
-      process.stdout.write(`${INBOX_NOTE_BODY}\n\n`);
+      // With the person's rules for all agents after it, as the other notes carry them (a copy: changed rules need a new copy).
+      process.stdout.write(`${inboxNoteBodyWith(sharedNoteRules(noteRulesConfig(dataDir, loadConfig())))}\n\n`);
       process.stderr.write("Cursor: nothing written. Cursor keeps its rules in the app: copy the note above into Customize → Rules in Cursor. Plannotator can't see, update or remove that copy.\n");
       added.push(id);
       continue;

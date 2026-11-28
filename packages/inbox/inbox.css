@@ -4342,6 +4342,9 @@ label.ib-anote-r:hover { background: color-mix(in oklch, var(--muted) 40%, trans
 .ib-anote-fold[aria-expanded="true"] svg.ib-ic { transform: rotate(90deg); }
 .ib-anote-note { margin-top: 8px; border: 1px solid var(--ib-line); background: color-mix(in oklab, var(--muted) 45%, transparent); border-radius: 8px; }
 .ib-anote-note pre { margin: 0; padding: 10px 12px; max-height: 150px; overflow: auto; font-family: var(--font-mono); font-size: var(--ib-fs-11-5, 11.5px); line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--foreground); }
+/* Several blocks in Show the note (an agent with its own rules): each named above its own. */
+.ib-anote-note > .ib-anote-sub { display: block; padding: 8px 12px 0; }
+.ib-anote-note > .ib-anote-sub ~ .ib-anote-sub { border-top: 1px solid var(--ib-line); }
 .ib-anote-marker { color: var(--muted-foreground); }
 .ib-anote-doneline { margin: 12px 0 0; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
 .ib-anote-doneline:empty { display: none; }

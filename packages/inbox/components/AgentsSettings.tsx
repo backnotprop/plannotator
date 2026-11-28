@@ -7,6 +7,7 @@ import {
   type InboxAgentsModel,
   type InboxCodexAccount,
   type InboxHostSessions,
+  type InboxNoteAgentId,
   type InboxOpenSession,
   type InboxToolHostId,
 } from '@plannotator/core/inbox-types';
@@ -923,7 +924,7 @@ export function AgentsSettings({
           <Fragment key={row.id}>
           <AgentGroup
             row={row}
-            noteText={model.note_text}
+            noteText={model.note_texts?.[row.id as InboxNoteAgentId] ?? model.note_text}
             pending={pending}
             busy={busy.has(row.id)}
             settling={model.connecting}
