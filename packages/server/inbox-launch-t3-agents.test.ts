@@ -85,11 +85,11 @@ describe("Codex, OpenCode and Pi in T3 Code reach the Inbox under their own sess
       const who = agentIn(agent);
       expect(who.host).toBe(agent);
       expect(who.session).not.toBe(thread);
-      const answer = writes(t, root, who, "Tightened: three labels shorter.");
-      // Past the ten-minute wait, with T3 saying the turn is over: connected, no "hasn't connected" line.
+      // Past the ten-minute wait, with T3 saying the turn is over, and nothing from it yet: "hasn't connected".
       t.clock.now += 11 * 60_000;
-      expect(t.launch.runOfMessage(root.id)).toBeNull();
-      await Bun.sleep(150);
+      expect(await until("the line", () => t.launch.runOfMessage(root.id))).toMatchObject({ state: "failed", t3: { started: true } });
+      // It writes in the thread: connected, and the line goes.
+      const answer = writes(t, root, who, "Tightened: three labels shorter.");
       expect(t.launch.runOfMessage(root.id)).toBeNull();
       expect(t.launch.agents().find((a) => a.session === thread)).toMatchObject({ t3: true, run: null });
       // The person's reply to it goes to the agent's own session, and the T3 wake leaves it alone.
