@@ -124,11 +124,12 @@ import {
 import { ReaskNote } from './ReaskNote';
 import { CombineLeftNote, ShipNote, TidyNote } from './Tidy';
 import { reaskedIn, reaskNoteAgent, reaskOffered, reaskTargets, reaskTooltip } from '../reask';
-import { StaleGuard, replacedBy, replacementOf, type JumpTarget } from './ReplacedQuestion';
+import { ChangedNotice, StaleGuard, replacedBy, replacementOf, type JumpTarget } from './ReplacedQuestion';
 import type { ComposerCommand } from './ComposerField';
 import { ReplyBox } from './reply/ReplyBox';
+import { replyVoiceParts } from './reply/replyVoice';
 import { SEND_MAY_NOT_HAVE_GONE, sendFailure } from '../sendFailure';
-import { ReplyRecipientControl } from '../parts/ReplyRecipientControl';
+import type { ReplyBoxRecipients } from './reply/replyBoxSeams';
 import { aimable, headFolder, knownRecipients, latestBy, RECIPIENTS_MAX, sessionFolder, toggleRecipient, type RecipientRow } from '../replyRecipients';
 import { replyRecipientList } from '../thread/recipientList';
 import { removeAgentAction } from '../thread/removeAgent';
@@ -4076,36 +4077,26 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     // A foot that does not scroll stays at 0 (the browser holds it there), and grows upward instead.
     if (foot && now !== was) foot.scrollTop += now - was;
   }, [draftAboveShows]);
-  const onlyRecipient = (row: RecipientRow) => {
-    aimReply([row.session]);
-    setRcptOpen(false);
-    announce(`This reply goes to ${row.label}.`);
-  };
-  const toggleReplyRecipient = (row: RecipientRow) => {
-    // The agents typed with `@` count toward the most one reply goes to.
-    const base = rcptPicked ?? rcptLead;
-    const next = toggleRecipient(base, row.session, RECIPIENTS_MAX - taggedIds.filter((id) => !base.includes(id)).length, rcptAlone);
-    aimReply(next);
-    announce(`This reply goes to ${namesList(next.map((id) => rcptAgents.find((r) => r.session === id)?.label ?? id))}.`);
-  };
-  // The reply's recipient control: a phone's in the box's row, a computer's the field's lead (parts/ReplyRecipientControl).
+  // The reply's recipients, as the box's control takes them (reply/ReplyBoxRecipients.tsx): a phone's in the box's
+  // row, a computer's the field's lead. A row picked alone, or ticked in or out, aims the reply and says to whom.
   const rcptFolderOf = (session: string) => sessionFolder(session, thread, taggable) ?? thread.project.name;
-  const rcptPill = !pillActive ? null : (
-    <ReplyRecipientControl
-      phone={phone}
-      rows={rcptAgents}
-      chosen={rcptChosen}
-      open={rcptOpen}
-      onOpen={setRcptOpen}
-      onOnly={onlyRecipient}
-      onToggle={toggleReplyRecipient}
-      onTagAnother={tagAnother}
-      onRemove={removeAgentAction({ threadId: thread.thread_id, onToast, changed: onChanged, labels: sessionLabels, folderOf: rcptFolderOf, rows: rcptAgents, picked: rcptPicked, aim: aimReply, field: () => textRef.current })}
-      section={sectionRef.current}
-      labels={sessionLabels}
-      folderOf={rcptFolderOf}
-    />
-  );
+  const rcptBox: ReplyBoxRecipients | undefined = !pillActive ? undefined : {
+    rows: rcptAgents,
+    chosen: rcptChosen,
+    open: rcptOpen,
+    onOpen: setRcptOpen,
+    onChange: (to) => {
+      aimReply(to);
+      announce(`This reply goes to ${namesList(to.map((id) => rcptAgents.find((r) => r.session === id)?.label ?? id))}.`);
+    },
+    // The agents typed with `@` count toward the most one reply goes to.
+    toggle: (row) => toggleRecipient(rcptPicked ?? rcptLead, row.session, RECIPIENTS_MAX - taggedIds.filter((id) => !(rcptPicked ?? rcptLead).includes(id)).length, rcptAlone),
+    onTagAnother: tagAnother,
+    onRemove: removeAgentAction({ threadId: thread.thread_id, onToast, changed: onChanged, labels: sessionLabels, folderOf: rcptFolderOf, rows: rcptAgents, picked: rcptPicked, aim: aimReply, field: () => textRef.current }),
+    section: sectionRef.current,
+    labels: sessionLabels,
+    folderOf: rcptFolderOf,
+  };
   const routeChoice = asking ? (
     <RouteChoice
       kind={routeFor}
@@ -5338,7 +5329,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           // The open box (components/reply/ReplyBox.tsx): drawn from what the thread holds; what it does comes back here.
           <ReplyBox
             phone={phone}
-            thread={thread}
+            threadId={thread.thread_id}
             offerShown={offerShown}
             onRestoreDraft={restoreDraft}
             conflict={
@@ -5357,7 +5348,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   }
             }
             takeBack={takeBack.state}
-            staleQuestions={staleQuestions}
+            changedNotice={staleQuestions.length > 0 && <ChangedNotice questions={staleQuestions} thread={thread} onJump={jumpTo} />}
             onJump={jumpTo}
             draftStamp={draftStamp}
             draftAboveRef={draftAboveRef}
@@ -5375,12 +5366,12 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             replyText={replyText}
             sendingWords={wordsAway === thread.thread_id}
             textRef={textRef}
-            voice={voice}
+            voice={{ handle: voice, parts: replyVoiceParts }}
             replyToNames={replyToNames}
+            placeholder="Write a reply. Type / for a skill"
             askerNoteId={showAskerNote ? noteId : null}
-            recipientPill={rcptPill}
-            skillFilter={skillFilter}
-            commands={replyCommands}
+            recipients={rcptBox}
+            skills={{ onOpen: openSkillsFromBox, noneHint: noSkillsHint, filter: skillFilter, commands: replyCommands }}
             tags={composerTags}
             onChange={changeReply}
             onFieldKeyDown={(event) => {
@@ -5421,14 +5412,13 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             fold={replyFold}
             onFold={setReplyFold}
             fitKey={replyFitKey}
-            noSkillsHint={noSkillsHint}
             routeChoiceOpen={!!routeChoiceOpen}
             routeChoice={routeChoice}
             sending={sending}
             sendRef={sendRef}
             sendAria={sendAria}
             onSend={() => void send()}
-            onOpenSkills={openSkillsFromBox}
+            onSendWhileUploading={() => void send()} // which says why itself ("Wait for the files to finish uploading.")
             onDiscardDraft={discardReply}
             errorLine={lineError && errorLine}
           />
