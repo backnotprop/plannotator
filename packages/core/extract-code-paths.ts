@@ -3,8 +3,8 @@ import {
 	isCodeFilePath,
 	isCodeFilePathStrict,
 } from "./code-file";
+import { codeFenceCloseIndex } from "./markdown-structure";
 
-const FENCED_CODE_BLOCK = /(^|\n)([ \t]*)(```|~~~)[\s\S]*?\n\2\3/g;
 const HTML_COMMENT = /<!--[\s\S]*?-->/g;
 // Match InlineMarkdown.tsx's bare-URL regex exactly so URL ranges excised
 // here mirror the ranges the renderer would consume.
@@ -25,9 +25,7 @@ const BACKTICK_SPAN = /`([^`\n]+)`/g;
  * `cleanPath` transform. Returns deduped candidate strings.
  */
 export function extractCandidateCodePaths(markdown: string): string[] {
-	const stripped = markdown
-		.replace(FENCED_CODE_BLOCK, "")
-		.replace(HTML_COMMENT, "");
+	const stripped = stripCodeFences(markdown).replace(HTML_COMMENT, "");
 
 	const candidates = new Set<string>();
 
@@ -63,4 +61,15 @@ export function extractCandidateCodePaths(markdown: string): string[] {
 	}
 
 	return Array.from(candidates);
+}
+
+// Drop fenced code blocks with the renderer's extent: an unclosed fence runs to the end.
+function stripCodeFences(markdown: string): string {
+	const lines = markdown.split("\n");
+	const kept: string[] = [];
+	for (let i = 0; i < lines.length; i++) {
+		if (lines[i].trim().startsWith("```")) i = codeFenceCloseIndex(lines, i);
+		else kept.push(lines[i]);
+	}
+	return kept.join("\n");
 }

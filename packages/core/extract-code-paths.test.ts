@@ -56,4 +56,21 @@ describe("extractCandidateCodePaths", () => {
 		const md = "see https://en.wikipedia.org/wiki/Foo_(bar).ts in the docs";
 		expect(extractCandidateCodePaths(md)).toEqual([]);
 	});
+
+	test("a four-backtick fence ends at its own closing fence, not at an inner ``` line", () => {
+		// The renderer (codeFenceCloseIndex) closes this fence at "````", so the
+		// prose after it renders and its path must be validated, not demoted.
+		const md = "````md\n```ts\n````\n\nSee `src/real.ts`.\n\n```sh\nls\n```\n";
+		expect(extractCandidateCodePaths(md)).toEqual(["src/real.ts"]);
+	});
+
+	test("an unclosed fence runs to the end of the document, as the renderer shows it", () => {
+		const md = "See `src/real.ts`.\n\n```ts\nimport x from \"src/inside.ts\";\n";
+		expect(extractCandidateCodePaths(md)).toEqual(["src/real.ts"]);
+	});
+
+	test("a ~~~ line is ordinary text, as it is for the renderer", () => {
+		const md = "~~~\nSee `src/real.ts`.\n~~~\n";
+		expect(extractCandidateCodePaths(md)).toEqual(["src/real.ts"]);
+	});
 });
