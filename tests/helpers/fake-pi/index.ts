@@ -136,12 +136,15 @@ export function installFakePi(input: { bin: string; state: string; home: string;
   };
   install();
   const settings = join(home, ".pi", "agent", "settings.json");
-  // Oh My Pi's plugin record (`omp plugin install`): the plugins folder's package.json and its lock.
+  // Oh My Pi's plugin record (`omp plugin install`): the plugins folder's package.json, its lock, and the package
+  // itself under node_modules (its loader skips a dependency whose package is not there).
   const plugins = join(agentRoot, "plugins");
   const setExtension = (on: boolean) => {
     if (flavor === "pi") return writeFileSync(settings, JSON.stringify({ packages: on ? ["npm:@plannotator/pi-extension"] : ["npm:pi-subagents"] }));
     mkdirSync(plugins, { recursive: true });
     const name = on ? "@plannotator/pi-extension" : "pi-subagents";
+    mkdirSync(join(plugins, "node_modules", ...name.split("/")), { recursive: true });
+    writeFileSync(join(plugins, "node_modules", ...name.split("/"), "package.json"), JSON.stringify({ name, version: "0.28.70", pi: {} }));
     writeFileSync(join(plugins, "package.json"), JSON.stringify({ name: "omp-plugins", private: true, dependencies: { [name]: "^0.28.0" } }));
     writeFileSync(join(plugins, "omp-plugins.lock.json"), JSON.stringify({ plugins: { [name]: { version: "0.28.70", enabledFeatures: null, enabled: true } }, settings: {} }));
   };

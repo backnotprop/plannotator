@@ -946,7 +946,8 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
       const extension = flavor.extension(envOf, ctx.homeDir, agentDir());
       if (!extension.ok) return { ok: false, missing: false, reason: extension.reason, ...(extension.code ? { code: extension.code } : {}) };
       const version = parsePiVersion((await agentVersionRun(e, path, { timeoutMs: 10_000 })).stdout);
-      // Oh My Pi says it is too old, as Claude Code, Codex and OpenCode do (compose's row then says so, not "can't start").
+      // Oh My Pi says it is too old, as Claude Code, Codex and OpenCode do: a linked computer's window names it too old;
+      // on this computer the row is simply absent, as for the others.
       if (!version || !versionAtLeast(version, flavor.minVersion)) return { ok: false, missing: false, reason: `${NAME} ${version ?? "?"} is older than ${flavor.minVersion}`, ...(flavor === PI_FLAVOR ? {} : { code: "too_old" as const }) };
       choiceKey = `${path}@${version}`;
       return { ok: true, version };

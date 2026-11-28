@@ -25,7 +25,7 @@
  *   the person picked.
  * - No model or effort menus and no Rex tab yet; it starts in the background only.
  */
-import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { INBOX_OMP_EXTENSION_INSTALL } from "@plannotator/core/inbox-launch-ready";
@@ -119,26 +119,30 @@ const readJson = (file: string): Record<string, unknown> | null => {
 
 /**
  * Whether Oh My Pi's plugin record in `dir` has Plannotator's Pi extension, as its loader decides (coding-agent
- * extensibility/plugins/loader.ts): `package.json` lists it in `dependencies` (`bun install <spec>` there, as `omp
- * plugin install` runs it), or `omp-plugins.lock.json` names it and `node_modules` links it (`omp plugin link` links a
- * checkout there and adds no dependency; with a `package.json` there the entry must be that link, and a link to nothing
- * does not count); and the lock does not turn it off (`plugins[name].enabled: false`, `omp plugin disable`).
+ * extensibility/plugins/loader.ts `collectPluginsAtRoot`): `package.json` lists it in `dependencies` (`bun install
+ * <spec>` there, as `omp plugin install` runs it), or `omp-plugins.lock.json` names it (`omp plugin link` links a
+ * checkout into `node_modules` and adds no dependency; with a `package.json` there the entry must be that link); either
+ * way its own `node_modules/<name>/package.json` must be readable (an install cut short leaves the dependency with no
+ * package, and a link to nothing does not count); and the lock does not turn it off: a lock entry whose `enabled` is not
+ * truthy is off (`!runtimeState.enabled`; `omp plugin disable` writes `false`).
  */
 export function ompPluginInstalled(dir: string): boolean {
   const manifest = join(dir, "package.json");
   const deps = readJson(manifest)?.dependencies;
-  const lock = readJson(join(dir, "omp-plugins.lock.json"))?.plugins as Record<string, { enabled?: unknown }> | undefined;
+  const lock = readJson(join(dir, "omp-plugins.lock.json"))?.plugins;
   const listed = !!deps && typeof deps === "object" && Object.hasOwn(deps, EXTENSION);
-  if (!listed && !(lock && typeof lock === "object" && Object.hasOwn(lock, EXTENSION) && ompPluginLinked(dir, existsSync(manifest)))) return false;
-  return lock?.[EXTENSION]?.enabled !== false;
+  const locked = !!lock && typeof lock === "object" && Object.hasOwn(lock, EXTENSION);
+  if (!listed && !locked) return false;
+  const entry = join(dir, "node_modules", ...EXTENSION.split("/"));
+  if (!listed && existsSync(manifest) && !isSymlink(entry)) return false;
+  if (readJson(join(entry, "package.json")) === null) return false;
+  const state = locked ? (lock as Record<string, unknown>)[EXTENSION] : undefined;
+  return !(state && !(state as { enabled?: unknown }).enabled);
 }
 
-/** The extension in `dir/node_modules` as Oh My Pi loads one its lock names: a link (any folder where the plugins folder has no package.json) to a package it can read. */
-function ompPluginLinked(dir: string, hasManifest: boolean): boolean {
-  const entry = join(dir, "node_modules", ...EXTENSION.split("/"));
+function isSymlink(path: string): boolean {
   try {
-    if (hasManifest && !lstatSync(entry).isSymbolicLink()) return false;
-    return statSync(join(entry, "package.json")).isFile();
+    return lstatSync(path).isSymbolicLink();
   } catch {
     return false;
   }

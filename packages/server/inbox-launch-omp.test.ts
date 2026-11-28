@@ -437,6 +437,29 @@ describe("Oh My Pi's plugin record, as its loader reads it", () => {
     expect(ompPluginInstalled(plugins({ entry: "link", lock: false }))).toBe(false);
     expect(ompPluginInstalled(plugins({ entry: "none" }))).toBe(false);
   });
+
+  /** A plugins folder where `omp plugin install` listed the extension as a dependency, with its lock entry as given. */
+  function installed(input: { pkg: boolean; lockEntry?: Record<string, unknown> | "none" }) {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-omp-dep-")));
+    cleanup.push(() => rmSync(root, { recursive: true, force: true }));
+    const dir = join(root, "plugins");
+    const at = join(dir, "node_modules", "@plannotator", "pi-extension");
+    mkdirSync(at, { recursive: true });
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "omp-plugins", private: true, dependencies: { "@plannotator/pi-extension": "^0.29.6" } }));
+    if (input.pkg) writeFileSync(join(at, "package.json"), JSON.stringify({ name: "@plannotator/pi-extension", version: "0.29.6", pi: {} }));
+    const entries: Record<string, unknown> = input.lockEntry === "none" ? {} : { "@plannotator/pi-extension": input.lockEntry ?? { version: "0.29.6", enabledFeatures: null, enabled: true } };
+    writeFileSync(join(dir, "omp-plugins.lock.json"), JSON.stringify({ plugins: entries, settings: {} }));
+    return dir;
+  }
+
+  test("a dependency counts only with its package there (an install cut short leaves none), and a lock entry without `enabled` is off, as the loader reads them", () => {
+    expect(ompPluginInstalled(installed({ pkg: true }))).toBe(true);
+    expect(ompPluginInstalled(installed({ pkg: true, lockEntry: "none" }))).toBe(true);
+    expect(ompPluginInstalled(installed({ pkg: false }))).toBe(false);
+    // The loader skips an entry whose `enabled` is not truthy (`!runtimeState.enabled`).
+    expect(ompPluginInstalled(installed({ pkg: true, lockEntry: { version: "0.29.6", enabledFeatures: null } }))).toBe(false);
+    expect(ompPluginInstalled(installed({ pkg: true, lockEntry: { version: "0.29.6", enabled: false } }))).toBe(false);
+  });
 });
 
 describe("Oh My Pi's folders", () => {
