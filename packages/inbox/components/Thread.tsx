@@ -37,7 +37,7 @@ import { stepsOf } from '../stepping';
 import { choiceLetters, optionOf, optionSetAddress, optionSetId, optionSetOf, parseOptionSetId, openChoiceSetOf } from '../optionSets';
 import { PrototypeWindow, openingOption, type PrototypeOption } from './PrototypeWindow';
 import { prototypeNames, questionPrototypePages } from '../prototypes';
-import { artifactKey, artifactOfFile, newestViewableFile, openArtifactKey, threadArtifacts } from '../artifacts';
+import { artifactKey, artifactOfFile, newestViewableFile, openArtifactKey, threadArtifacts, threadLinkAttachments } from '../artifacts';
 import { ArtifactsView, HtmlArtifactOpen } from './ArtifactsView';
 import { ArtifactsBar, ThreadLinksView, ThreadViewSwitch } from './ThreadLinksView';
 import { threadLinks } from '../threadLinks';
@@ -5117,7 +5117,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                     sentActions: message.author.kind === 'person' ? sentActionsByReply.get(message.id) : undefined,
                     files: message.author.kind === 'person' ? allFiles : null,
                     personMessageIds: message.author.kind === 'person' ? personMessageIds : null,
-                    root: thread.project.root,
+                    root: thread.project.root, threadAttachments: threadLinkAttachments(thread.messages),
                     repo: refRepos.repoOf(message.id),
                     codeReview,
                     notes: codeReview && isAgent && hasReview ? reviewOfNote.has(message.id) : null,

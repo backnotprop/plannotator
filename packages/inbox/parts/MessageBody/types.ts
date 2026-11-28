@@ -29,6 +29,8 @@ export interface MessageBodyProps {
   message: InboxMessageWire;
   /** The thread's project root: relative links start there or at the message's own folder. */
   projectRoot: string;
+  /** Every attachment of the thread's messages: a link opens the newest version of a file any of them attached. Absent: only this message's. */
+  threadAttachments?: readonly InboxAttachment[];
   /** Code review is on: a link to a file of the project that is not attached offers Open in. */
   openInFiles?: boolean;
   /** The project's git `origin` (the thread payload's `project.repo`): bare `#123` refs link into it. */

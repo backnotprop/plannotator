@@ -1,5 +1,5 @@
 import type { Annotation } from '@plannotator/ui/types';
-import type { InboxAttachmentState, InboxMessageWire, InboxProjectRepo, InboxQuestion } from '@plannotator/core/inbox-types';
+import type { InboxAttachment, InboxAttachmentState, InboxMessageWire, InboxProjectRepo, InboxQuestion } from '@plannotator/core/inbox-types';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
 import { actionForBlock } from '../actions';
 import { ActionChecklist } from '../components/ActionChecklist';
@@ -27,6 +27,8 @@ export type MessageBodyData = {
   files: readonly InboxAttachmentState[] | null;
   personMessageIds: ReadonlySet<string> | null;
   root: string;
+  /** Every attachment of the thread's messages, what the message's links may open (artifacts.ts `threadLinkAttachments`). */
+  threadAttachments: readonly InboxAttachment[];
   repo: InboxProjectRepo | null;
   codeReview: boolean;
   notes: boolean | null;
@@ -62,6 +64,7 @@ export function drawMessageBody(d: MessageBodyData) {
         replyFiles={d.files && d.personMessageIds ? { files: d.files, personMessageIds: d.personMessageIds, onOpen: (file, version) => acts.current.openFromReply(file, version) } : undefined}
         onJumpQuestion={(target) => acts.current.jumpTo(target)}
         projectRoot={d.root}
+        threadAttachments={d.threadAttachments}
         openInFiles={d.codeReview}
         {...(d.notes === null ? {} : { contextNotes: d.notes ? { onOpen: (note) => acts.current.noteChips(id).onOpen?.(note) } : {} })}
         repo={d.repo}

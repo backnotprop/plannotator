@@ -14,6 +14,10 @@
  * no folder (`mock.html`) also matches the one attachment of the message
  * with that name, when only one has it.
  *
+ * In the thread, a link may also open a file another message of the thread
+ * attached, the newest version first (`newestAttachmentForLink`): an agent
+ * links a file it attached earlier instead of attaching it again.
+ *
  * A local link that names no attachment of the message is drawn as inert
  * text titled "Not attached". With Code review on, "Open in" asks the server
  * whether it is a file on this computer (`projectFileOfLink`); nothing else does.
@@ -99,6 +103,24 @@ export function attachmentForLink<T extends LinkableAttachment>(
     if (named.length === 1) return named[0]!;
   }
   return null;
+}
+
+/**
+ * The attachment a link points to among files sent at different times (every
+ * message of a thread), by `attachmentForLink`'s rules. When several match (one
+ * file attached again, or a bare file name several attached), the newest sent wins.
+ */
+export function newestAttachmentForLink<T extends LinkableAttachment & Pick<InboxAttachment, 'sent_at'>>(
+  href: string,
+  options: { attachments: readonly T[]; root: string; base?: string | null },
+): T | null {
+  const { root, base } = options;
+  // Oldest first: a later record of the same path replaces an earlier one in attachmentForLink's map.
+  const oldestFirst = [...options.attachments].sort((a, b) => a.sent_at.localeCompare(b.sent_at));
+  const hit = attachmentForLink(href, { attachments: oldestFirst, root, base });
+  if (hit) return hit;
+  // A bare name several attached: the newest of them.
+  return oldestFirst.reverse().find((attachment) => attachmentForLink(href, { attachments: [attachment], root, base })) ?? null;
 }
 
 /**
