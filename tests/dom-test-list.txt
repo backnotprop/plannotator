@@ -991,3 +991,4 @@ packages/inbox/guide/diffFontLoad.test.tsx
 packages/ui/components/diagram/DiagramCanvas.controlsReserve.test.tsx
 packages/ui/components/diagram/diagramSourceAccept.test.tsx
 packages/inbox/decisionHeldRetry.test.tsx
+packages/inbox/decisionUndoStays.test.tsx

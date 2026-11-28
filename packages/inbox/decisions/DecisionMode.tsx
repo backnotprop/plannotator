@@ -665,8 +665,16 @@ export function DecisionMode(props: DecisionModeProps) {
   const advance = (from: string) => {
     setQueue((current) => (current.current === from ? { ...current, current: nextId(current, from) } : current));
   };
+  /** An answer's move to the next card, while its stamp shows. */
+  const landing = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** The person moved since (Undo, another card, the card open again): that answer's move never comes. */
+  const stopLanding = () => {
+    if (landing.current !== null) clearTimeout(landing.current);
+    landing.current = null;
+  };
   /** Move to another card: the words waiting are saved first. */
   const goTo = (id: string) => {
+    stopLanding();
     flushTyped();
     setBanner(null);
     setStamp(null);
@@ -678,8 +686,10 @@ export function DecisionMode(props: DecisionModeProps) {
     setBanner(null);
     const left = leftCount(queueRef.current) - (isHandled(queueRef.current, id) ? 0 : 1);
     setSaid(`Answered: ${words}. ${left === 0 ? 'Nothing left.' : `${formatCount(Math.max(0, left))} left.`} It waits as a draft until you send.`);
-    setTimeout(
+    stopLanding();
+    landing.current = setTimeout(
       () => {
+        landing.current = null;
         setStamp((current) => (current?.id === id ? null : current));
         advance(id);
       },
@@ -713,6 +723,7 @@ export function DecisionMode(props: DecisionModeProps) {
 
   /** An action item's card open again (Undo, or its mark refused on the computer the thread lives on). */
   const reopenAction = (id: string) => {
+    stopLanding();
     setQueue((current) => {
       const known = current.cache.get(id);
       if (!known) return current;
@@ -776,6 +787,7 @@ export function DecisionMode(props: DecisionModeProps) {
   const undoLast = () => {
     const entry = undo.at(-1);
     if (!canUndo(entry)) return;
+    stopLanding();
     flushTyped();
     setUndo((stack) => stack.slice(0, -1));
     const decision = queueRef.current.cache.get(entry!.id)!;
