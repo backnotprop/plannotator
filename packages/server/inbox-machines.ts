@@ -59,6 +59,7 @@ import type { FarArchived } from "./inbox-archived-merged";
 import { ARTIFACT_PINS_MARK, readFarWall } from "./inbox-artifacts-merged";
 import type { InboxShowArchived } from "./inbox-show-archived";
 import { createFarRoutines } from "./inbox-scheduled-machines";
+import { createFarDecisions } from "./inbox-decisions-merged";
 import { CAPABILITY_SET_MARK, type CapabilitySet } from "./inbox-capability-set";
 import type { SharedReactions } from "./inbox-reactions-shared";
 import { FAR_AGENT_REPLY_ROUTE, FAR_DELIVERED_ROUTE, FAR_TAGGABLE_ROUTE, FAR_WAKE_ROUTE } from "./inbox-far-tags";
@@ -551,6 +552,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
   const heldOn = (machine: string) => outbox.list(machine, "pending").filter((entry) => !entry.auto);
   /** Each linked computer's routines (mark `routines`), for the Routines page's merged read (inbox-scheduled-machines.ts). */
   const farRoutines = createFarRoutines(() => peers.values(), heldOn);
+  /** Each linked computer's decisions (mark `decisions`), for decision mode's merged read (inbox-decisions-merged.ts). */
+  const farDecisions = createFarDecisions(() => peers.values());
   // An agent here reads a linked machine's thread, and saves its files here (inbox-machine-agent-read.ts).
   const agentRead = createMachineAgentRead({ peers: () => peers.values(), nameOf: (id) => links.get(id)?.name ?? "A linked machine" });
   // ...and finds them: its search and read_thread's list ask every linked machine too (inbox-machine-agent-find.ts).
@@ -1634,6 +1637,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
     cardLists,
     archivedPages,
     farRoutines,
+    farDecisions,
     /** Pinned artifacts and the Wall on linked machines (mark `artifact-pins`, inbox-artifacts-merged.ts). */
     artifactPins,
     showArchivedCopies,

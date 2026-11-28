@@ -3,7 +3,8 @@
  * it used to live only in the card's own state, so Previous, Next, Escape or Close lost it without a word.
  */
 import { expect, test } from 'bun:test';
-import { createReasonDrafts, reasonDraftKey, type ReasonStore } from './decisions/reasonDrafts';
+import { commentDrafts, createReasonDrafts, reasonDraftKey, type ReasonStore } from './decisions/reasonDrafts';
+import { rememberMachine, resetMachineRoutes } from './inboxUrl';
 
 const T = 'msg_T';
 const ID = 'msg_A/a1';
@@ -153,20 +154,38 @@ test('emptying a reason after its mark saved: a failed write is not told, keeps 
   expect(s.saved.has(reasonDraftKey(ID))).toBe(false);
 });
 
-test("a thread on a linked computer keeps its reason on the card: no comment-draft read or write goes", async () => {
-  const s = heldStore();
-  const failed: string[] = [];
-  const timers: (() => void)[] = [];
-  const reasons = createReasonDrafts({ store: s.store, far: (thread) => thread === 'msg_far', onChange: () => {}, onFailed: (m) => failed.push(m), timers: { set: (run) => timers.push(run), clear: () => {} } });
-  reasons.load('msg_far', ID);
-  reasons.type('msg_far', ID, 'Blocked on review');
-  timers.splice(0).forEach((run) => run());
-  reasons.clear('msg_far', ID);
-  reasons.leave();
-  expect(await reasons.settled()).toBe(true);
-  expect(s.reads).toEqual([]);
-  expect(s.writes).toEqual([]);
-  expect(failed).toEqual([]);
+// A linked computer's thread kept its reasons there, through the append-only outbox: one held entry per typing pause
+// while it was away, and a held reason overwrote what was typed on that computer. Now they are this Inbox's own
+// drafts, named by that computer, and never go to it; its own threads keep theirs as before.
+test("a linked computer's thread keeps its reasons on this Inbox, named by that computer, never sent there", async () => {
+  const laptop = 'ibx_01JZ0000000000000000000000';
+  rememberMachine(['msg_far'], laptop);
+  const sent: { url: string; body: Record<string, unknown> | null }[] = [];
+  const real = globalThis.fetch;
+  globalThis.fetch = (async (url: string, init?: RequestInit) => {
+    sent.push({ url: String(url), body: init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : null });
+    return Response.json({ draft: { text: 'Blocked on review' } });
+  }) as typeof fetch;
+  try {
+    const key = reasonDraftKey(ID);
+    expect(await commentDrafts.read('msg_far', key)).toBe('Blocked on review');
+    await commentDrafts.write('msg_far', key, 'Blocked on review by Bob Tully', false);
+    await commentDrafts.write('msg_far', key, 'Blocked until Friday', false);
+    await commentDrafts.read(T, key);
+    expect(sent.map((s) => s.url)).toEqual([
+      `/api/inbox/threads/msg_far/comment-draft?key=${encodeURIComponent(key)}&machine=${laptop}`,
+      '/api/inbox/threads/msg_far/comment-draft',
+      '/api/inbox/threads/msg_far/comment-draft',
+      `/api/inbox/threads/${T}/comment-draft?key=${encodeURIComponent(key)}`,
+    ]);
+    expect(sent.slice(1, 3).map((s) => [s.body?.machine, s.body?.text, s.body?.force])).toEqual([
+      [laptop, 'Blocked on review by Bob Tully', true],
+      [laptop, 'Blocked until Friday', true],
+    ]);
+  } finally {
+    globalThis.fetch = real;
+    resetMachineRoutes();
+  }
 });
 
 test('a read that lands after the person typed never replaces their words', async () => {

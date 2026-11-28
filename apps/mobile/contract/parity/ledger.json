@@ -23843,6 +23843,20 @@
       }
     },
     {
+      "id": "undecided-door-get-decisions",
+      "title": "door:GET decisions",
+      "surface": [
+        "door:GET decisions"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-28",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
       "id": "undecided-door-post-messages-id-reopen",
       "title": "door:POST messages/:id/reopen",
       "surface": [

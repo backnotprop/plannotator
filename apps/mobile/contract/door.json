@@ -1330,6 +1330,22 @@
       "relay": true
     },
     {
+      "name": "GET decisions",
+      "method": "GET",
+      "path": "decisions",
+      "params": [],
+      "call": "getDecisions",
+      "window": "/api/inbox/decisions",
+      "grant": "machine",
+      "auth": "token",
+      "kind": "read",
+      "write": null,
+      "key": null,
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
       "name": "GET attachments/:id/view",
       "method": "GET",
       "path": "attachments/{attachment}/view",

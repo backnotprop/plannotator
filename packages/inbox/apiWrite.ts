@@ -20,17 +20,27 @@ import { wholeBody } from './apiBody';
 export const WRITE_IDLE_MS = 20_000;
 /** A small read inside a Send (the draft, the thread for a conflict, the skills its words name). */
 export const SEND_READ_MS = 10_000;
+/**
+ * A write that starts an agent session (`to: { launch }`: New message's start, a reply to "New … session"). The Inbox
+ * checks and prepares the launch before it answers, with nothing sent meanwhile: the agent's version and sign-in checks
+ * (10 s each at most), the login shell (5 s), a folder outside home (3 s), Trust and start's lock (12 s), the tags of
+ * far sessions (1.5 s): well under a minute. The agent itself, and a clone, start after the answer. A linked computer's
+ * Inbox answers within 4 s (it holds the write when that computer is away). Past this, the network is gone, not slow.
+ */
+export const LAUNCH_IDLE_MS = 90_000;
 
 let idleMs = WRITE_IDLE_MS;
 let readMs = SEND_READ_MS;
+let launchMs = LAUNCH_IDLE_MS;
 
 /** How long a small read inside a Send waits with nothing arriving. */
 export const sendReadMs = (): number => readMs;
 
-/** Tests only: shorter waits, so a test sees the limits; `null` puts the real ones back. */
+/** Tests only: shorter waits, so a test sees the limits (a launch's in the same proportion); `null` puts the real ones back. */
 export function setWriteIdleForTests(ms: number | null): void {
   idleMs = ms ?? WRITE_IDLE_MS;
   readMs = ms ?? SEND_READ_MS;
+  launchMs = ms === null ? LAUNCH_IDLE_MS : Math.round((ms * LAUNCH_IDLE_MS) / WRITE_IDLE_MS);
 }
 
 /** A write with nothing arriving in time. Unlike a refusal it may have landed: only its key makes trying again safe. */
@@ -44,20 +54,18 @@ export class InboxWriteTimeout extends Error {
 /** What a write passes to `post` to be given up this way. */
 export const WITHIN = { within: true } as const;
 
-/**
- * A write that starts an agent session (`to: { launch }`: New message's start, a reply to "New … session") goes with
- * no limit: the Inbox checks and prepares the launch before it answers (the agent's version and sign-in checks, the
- * login shell, the folder's git: up to about 25 s before the first byte), so a limit would give up on a healthy start.
- * The same on a linked computer: its Inbox prepares, and this one holds the write when that computer is away.
- */
-export const withinUnlessLaunch = (to: object | undefined): { within?: boolean } => (to && 'launch' in to ? {} : WITHIN);
+/** A write's limit by where it goes: one that starts an agent session waits `LAUNCH_IDLE_MS` (its key makes Send again safe: the Inbox answers it again and starts nothing). */
+export const withinFor = (to: object | undefined): { within: true | 'launch' } => (to && 'launch' in to ? { within: 'launch' } : WITHIN);
+
+/** The fetch a `post` makes: `fetchWithin` with the limit `within` names, or plain `fetch` with none. */
+export const fetchFor = (within: boolean | 'launch' | undefined): typeof fetchWithin =>
+  within ? (input, init) => fetchWithin(input, init, within === 'launch' ? launchMs : idleMs) : (input, init) => fetch(input, init);
 
 /** Statuses whose Response may carry no body. */
 const NO_BODY = new Set([101, 204, 205, 304]);
 
-/** `fetch`, with the whole answer read before it returns (a status with no body as it is), given up after `idleMs` with nothing arriving. */
-export async function fetchWithin(input: string, init: RequestInit): Promise<Response> {
-  const limit = idleMs;
+/** `fetch`, with the whole answer read before it returns (a status with no body as it is), given up after `limit` with nothing arriving. */
+export async function fetchWithin(input: string, init: RequestInit, limit = idleMs): Promise<Response> {
   const controller = new AbortController();
   let timedOut = false;
   const expire = () => {
