@@ -4,7 +4,8 @@
  * or not inside the press (what the host set for the press lost); a second press reaching the host while its Send is
  * out; Discard or typing getting through while the host's Send is out, or a file refused then (the host's Send keeps
  * a file added meanwhile); the chord or Escape not reaching the host's own keys; the controller restoring or
- * saving a draft the host restores and saves itself; the host's draft and files options not reaching the hooks.
+ * saving a draft the host restores and saves itself; the host's draft and files options not reaching the hooks; the
+ * host's line kept per thread (the pane has one line, whatever thread it shows).
  *
  * Assertions compare strings and numbers, never elements (a failed `expect(element)` can take bun down).
  *
@@ -61,6 +62,9 @@ interface Seen {
 
 let setHostSending: (sending: boolean) => void = () => {};
 let setRoute: (open: boolean) => void = () => {};
+/** The host shows another thread under the same box (the Inbox's pane is reused across threads). */
+let showThread: (id: string) => void = () => {};
+const OTHER = 'msg_01M6RF00000000000000000012';
 
 /** A wired host shaped as the Inbox's pane: its own words handler, keys, Discard and Send, drawn through `view()`. */
 function WiredBox({ store, uploader, seen, out }: { store: ReplyDraftStore; uploader: DraftFileUploader; seen: Seen; out: { current: ReplyComposerWiredHandle } }) {
@@ -69,10 +73,12 @@ function WiredBox({ store, uploader, seen, out }: { store: ReplyDraftStore; uplo
   const [hostSending, setSending] = useState(false);
   const [routeOpen, setRouteOpen] = useState(false);
   const [pressNote] = useState(() => ({ current: 'none' }));
+  const [shown, setShown] = useState(THREAD);
   setHostSending = setSending;
   setRoute = setRouteOpen;
+  showThread = setShown;
   const host: ReplyComposerWiredHost = {
-    threadId: THREAD,
+    threadId: shown,
     send: () =>
       new Promise<void>((resolve) => {
         seen.sends.push(pressNote.current);
@@ -89,7 +95,6 @@ function WiredBox({ store, uploader, seen, out }: { store: ReplyDraftStore; uplo
         sendingWords: false,
         slots: { placeholder: 'Write to harbor', replyToNames: 'harbor' },
         errorLine: null,
-        draftNotSaved: false,
         change: (text) => {
           seen.calls.push(`change ${text}`);
           composer.handle.replyText.set(text);
@@ -110,7 +115,6 @@ function WiredBox({ store, uploader, seen, out }: { store: ReplyDraftStore; uplo
           seen.calls.push(`attach ${list.length}`);
           composer.handle.wired!.files.add(list);
         },
-        added: () => seen.calls.push('added'),
       }),
     },
   };
@@ -233,6 +237,18 @@ test.skipIf(!hasDom)('the host restores and saves its draft itself: the controll
   expect(finish.length).toBe(1);
   expect(tiles(el)).toBe(1);
   expect(seen.calls.join('|')).toBe('attach 1');
+});
+
+test.skipIf(!hasDom)('the line is one for the pane: another thread shows it as it was until the host sets it, and none is kept for a thread left', async () => {
+  const { handle } = mount();
+  act(() => handle.current.wired.setError('Not sent: the Inbox did not answer.'));
+  expect(handle.current.wired.error).toBe('Not sent: the Inbox did not answer.');
+  act(() => showThread(OTHER));
+  expect(handle.current.wired.error).toBe('Not sent: the Inbox did not answer.');
+  // The host's arrival sets the other thread's line; back on the first thread nothing of its own comes back.
+  act(() => handle.current.wired.setError(null));
+  act(() => showThread(THREAD));
+  expect(handle.current.wired.error).toBe(null);
 });
 
 /**

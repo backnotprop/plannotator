@@ -8,7 +8,7 @@
  * that carried a file, a conflict reaching the host and resolved through `handle.draft`, a reload taking newer words
  * only into an untouched box, a read-only box while a Send is out, a thread change carrying nothing across, a discard
  * that never answers, a host's upload refusal, no fetch of the box's own, an empty Send the host carries content for,
- * the same result for an unchanged box from press to press, and `to` as the picker shows it.
+ * the same result for an unchanged box from press to press, when "Not saved" shows, and `to` as the picker shows it.
  *
  * Assertions compare strings and numbers, never elements (a failed `expect(element)` can take bun down).
  *
@@ -18,7 +18,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { DraftFileUploader, ReplyDraftSaveInput, ReplyDraftStore } from '@plannotator/core/inbox-reply-draft';
-import type { InboxReplyDraft, InboxUpload } from '@plannotator/core/inbox-types';
+import { INBOX_DRAFT_BODY_MAX, type InboxReplyDraft, type InboxUpload } from '@plannotator/core/inbox-types';
 import type { ReplyComposerHandle } from './useReplyComposer';
 import type { ReplyComposerHost, ReplyDraftConflict, ReplySendResult } from './replyComposerHost';
 import type { RecipientRow } from '../../replyRecipients';
@@ -463,6 +463,39 @@ test.skipIf(!hasDom)('a save that did not land draws no empty line; the host\'s 
   typeIn(slotted.el, 'Not saved yet.');
   await wait(SAVED);
   expect(slotted.el.querySelectorAll('[data-reply-note] [data-host-stamp]').length).toBe(1);
+}, LONG);
+
+test.skipIf(!hasDom)('"Not saved": a failed save says it while the box holds words or a file, not once it is emptied, never beside a conflict (words too long to save included)', async () => {
+  const stamp = { draftStamp: <span data-host-stamp="">Not saved</span> };
+  const stamps = (el: HTMLElement) => el.querySelectorAll('[data-reply-note] [data-host-stamp]').length;
+  const failing = mount(host({ send: fakeSend().send, draftStore: fakeStore({ refuse: true }).store, uploader: fakeUploader().uploader, slots: stamp }));
+  await wait(30);
+  typeIn(failing.el, 'Words that never land.');
+  await wait(SAVED);
+  expect(stamps(failing.el)).toBe(1);
+  // Every word deleted: the save still fails, the box holds nothing, and nothing is said.
+  typeIn(failing.el, '');
+  await wait(SAVED);
+  expect(failing.handle.current.draft.failed).toBe(true);
+  expect(stamps(failing.el)).toBe(0);
+  // A file, no words: the box holds something again.
+  const input = failing.el.querySelector<HTMLInputElement>('input[type="file"]')!;
+  Object.defineProperty(input, 'files', { configurable: true, value: [notes('a.txt')] });
+  act(() => void input.dispatchEvent(new Event('change', { bubbles: true })));
+  await wait(30);
+  expect(tiles(failing.el)).toBe(1);
+  expect(stamps(failing.el)).toBe(1);
+  // A conflict, then words longer than a draft holds: the conflict's own line says it, and "Not saved" does not.
+  const s = strictStore();
+  const conflicted = mount(host({ send: fakeSend().send, draftStore: s.store, uploader: fakeUploader().uploader, slots: stamp }));
+  await wait(30);
+  await raiseConflict(conflicted.el, s);
+  expect(conflicted.handle.current.draft.conflict === null).toBe(false);
+  typeIn(conflicted.el, 'x'.repeat(INBOX_DRAFT_BODY_MAX + 1));
+  await wait(SAVED);
+  expect(conflicted.handle.current.draft.conflict === null).toBe(false);
+  expect(conflicted.handle.current.draft.tooLong).toBe(true);
+  expect(stamps(conflicted.el)).toBe(0);
 }, LONG);
 
 test.skipIf(!hasDom)('after a good Send that carried a file: with sendClearsDraft no store call at all; without it one discard at the saved version', async () => {

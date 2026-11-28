@@ -16,11 +16,11 @@
  * `browserStorage: false` neither keeps anything in the browser. The Inbox's thread pane (Thread.tsx) is a wired host
  * (replyComposerWiring.ts): it hands in its own page, mentions, hook options and Send, and keeps 2, 3 and 5 itself.
  */
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject, type SetStateAction } from 'react';
 import type { InboxDraftFile } from '@plannotator/core/inbox-types';
 import { pastedSignature, useComposeFiles, useFileDrop } from '../../compose/ComposeFiles';
 import { createReplyDraftPage } from '../../replyDraft';
-import { useReplyTextStore, type ReplyText } from '../../replyText';
+import { useReplyHasWords, useReplyTextStore, type ReplyText } from '../../replyText';
 import { SEND_NOT_SENT, UPLOADING_LINE } from '../../sendFailure';
 import { isComposingKey } from '../../shortcuts/guards';
 import { createThreadMentions, type ThreadMentions } from '../../threadMentions';
@@ -70,7 +70,8 @@ export interface ReplyComposerHandle {
  */
 export type ReplyComposerWiredHandle = Omit<ReplyComposerHandle, 'cancel' | 'open' | 'close' | 'draft'> & {
   draft: Omit<ReplyComposerDraft, 'keepMine' | 'takeTheirs' | 'reload'>;
-  wired: { draft: ReplyDraftHook; files: ReplyFilesHook };
+  /** Also the line under the box: the pane's own lines are set here, so the controller's clears reach them. */
+  wired: { draft: ReplyDraftHook; files: ReplyFilesHook; error: string | null; setError: (line: SetStateAction<string | null>) => void };
 };
 
 type ReplyDraftHook = ReturnType<ReturnType<typeof createReplyDraftPage>['useReplyDraft']>;
@@ -100,21 +101,33 @@ export function useReplyComposer(host: ReplyComposerHost | ReplyComposerWiredHos
   const [mentions] = useState(() => wiring?.mentions ?? createThreadMentions({ keepInBrowser: plain().browserStorage, refs: plain().mentionRefs ?? NO_MENTION_REFS }));
   const [page] = useState(() => wiring?.page ?? createReplyDraftPage({ keepInBrowser: plain().browserStorage, mentions }));
   const replyText = useReplyTextStore();
+  const hasWords = useReplyHasWords(replyText);
   const draft = page.useReplyDraft(threadId, wiring ? wiring.draft : { store: seams!.store });
   const draftRef = useRef(draft);
   draftRef.current = draft;
   const [open, setOpen] = useState(true);
   const focusNext = useRef(false);
-  /** Per thread: the line under the box (a Send that failed while another thread showed says so when it is back). */
+  /**
+   * The line under the box. A plain host's is per thread (a Send that failed while another thread showed says so when
+   * it is back). A wired host's own lines live here too (`handle.wired.setError`), so files coming in clear it the same
+   * way for both; it has one line for the pane, whatever thread it shows (as the Inbox's own state was): its arrival on
+   * another thread sets that thread's line, and until then the line stays as it was.
+   */
   const [errors, setErrors] = useState<ReadonlyMap<string, string>>(() => new Map());
-  const setErrorFor = (target: string, line: string | null) =>
+  const lineKey = (target: string) => ('wiring' in hostRef.current ? '' : target);
+  const setErrorFor = (target: string, line: SetStateAction<string | null>) =>
     setErrors((now) => {
-      if ((now.get(target) ?? null) === line) return now;
+      const key = lineKey(target);
+      const was = now.get(key) ?? null;
+      const value = typeof line === 'function' ? line(was) : line;
+      if (was === value) return now;
       const next = new Map(now);
-      if (line === null) next.delete(target);
-      else next.set(target, line);
+      if (value === null) next.delete(key);
+      else next.set(key, value);
       return next;
     });
+  /** The shown thread's line, as a host sets it: one function for the box's life, as a state setter is. */
+  const [setError] = useState(() => (line: SetStateAction<string | null>) => setErrorFor(threadRef.current, line));
   /** Threads with a Send out, and each one's press (a ref, so a second press in the same frame sees it). */
   const out = useRef(new Map<string, number>());
   const pressSeq = useRef(0);
@@ -163,9 +176,7 @@ export function useReplyComposer(host: ReplyComposerHost | ReplyComposerWiredHos
   const addFiles = (list: Iterable<File>) => {
     if (filesBusy()) return;
     files.add(list);
-    const view = wiredView();
-    if (view) view.added();
-    else setErrorFor(threadRef.current, null);
+    setErrorFor(threadRef.current, null);
   };
   const drop = useFileDrop((list) => addFiles(list));
 
@@ -463,7 +474,7 @@ export function useReplyComposer(host: ReplyComposerHost | ReplyComposerWiredHos
     setErrorFor(threadRef.current, null);
   };
 
-  const error = errors.get(threadId) ?? null;
+  const error = errors.get(lineKey(threadId)) ?? null;
   /** The box's props, built as they are read (a wired host's view is read then, never as the hook is called). */
   const buildProps = (): ReplyBoxProps => {
     const view = wiredView();
@@ -521,15 +532,13 @@ export function useReplyComposer(host: ReplyComposerHost | ReplyComposerWiredHos
       onAttachFiles: (list) => {
         if (filesBusy()) return;
         const now = wiredView();
-        if (now) now.attach(list);
-        else addFiles(list);
+        if (!now) return addFiles(list);
+        now.attach(list);
+        setErrorFor(threadRef.current, null);
       },
       onPaste: (event) => {
         if (filesBusy()) return;
-        if (!files.paste(event)) return;
-        const now = wiredView();
-        if (now) now.added();
-        else setErrorFor(threadRef.current, null);
+        if (files.paste(event)) setErrorFor(threadRef.current, null);
       },
       dropOver: drop.over,
       dropHandlers: drop.handlers,
@@ -539,8 +548,9 @@ export function useReplyComposer(host: ReplyComposerHost | ReplyComposerWiredHos
       onSendWhileUploading: () => void send(),
       onDiscardDraft: discard,
       onClose: view ? view.close : close,
-      // "Not saved" goes in the host's own line (`slots.draftStamp`); with none, no empty line is drawn.
-      draftNotSaved: view ? view.draftNotSaved : (draft.tooLong || draft.failed) && slots.draftStamp != null,
+      // "Not saved" goes in the host's own line (`slots.draftStamp`); with none, no empty line is drawn. Never beside a
+      // conflict (its own line says it), and a save that did not land says so only while the box holds something.
+      draftNotSaved: draft.conflict === null && (draft.tooLong || (draft.failed && (hasWords || files.files.length > 0))) && slots.draftStamp != null,
       errorLine: view ? view.errorLine : error === null ? null : (
         <div className="ib-error" role="alert">
           {error}
@@ -578,7 +588,7 @@ export function useReplyComposer(host: ReplyComposerHost | ReplyComposerWiredHos
       discard,
       textRef,
       sendRef,
-      ...(wiring ? { wired: { draft, files } } : {}),
+      ...(wiring ? { wired: { draft, files, error, setError } } : {}),
     },
   };
 }
