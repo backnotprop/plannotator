@@ -291,3 +291,24 @@ test.skipIf(!hasDom)('a computer: "Not saved" over the row while a save did not 
   expect(el.querySelector('[data-reply-note]') === null).toBe(true);
   expect(field(el)?.value ?? '').toBe('Older words. Newer words.');
 });
+
+test.skipIf(!hasDom)('a computer: a save that did not land, then every word deleted: the empty box says nothing; words again, it says "Not saved"', async () => {
+  const el = await open();
+  savesFail = true;
+  typeOn(el, 'Words that never land.');
+  await until(() => el.querySelector('[data-reply-note] [data-draft-failed]') !== null, '"Not saved" over the row');
+  const text = field(el)!;
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+  act(() => {
+    setter.call(text, '');
+    text.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await settle(30);
+  expect(el.querySelector('[data-reply-note]') === null).toBe(true);
+  typeOn(el, 'Back again.');
+  await until(() => el.querySelector('[data-reply-note] [data-draft-failed]') !== null, '"Not saved" again');
+  savesFail = false;
+  typeOn(el, ' Saved now.');
+  await until(() => drafts.get(ONE)?.body === 'Back again. Saved now.', 'the save once the Inbox answers');
+  await until(() => el.querySelector('[data-reply-note]') === null, '"Not saved" gone');
+});
