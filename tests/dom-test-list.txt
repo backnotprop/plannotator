@@ -991,6 +991,7 @@ packages/inbox/guide/useViewedTicks.test.tsx
 packages/inbox/components/reply/replyBoxParity.test.tsx
 packages/inbox/components/reply/replyBoxSeams.test.tsx
 packages/inbox/components/reply/replyComposer.test.tsx
+packages/inbox/components/reply/replyComposerWiring.test.tsx
 packages/inbox/components/reply/replyDraftPages.test.tsx
 packages/inbox/guide/diffFontLoad.test.tsx
 packages/ui/components/diagram/DiagramCanvas.controlsReserve.test.tsx

@@ -13,10 +13,10 @@
  * 5. A refused draft save (a conflict) never replaces the box's words; saving waits for the host's choice.
  *
  * Each controller has its own mentions scope and draft page, so two boxes (even on one thread) share nothing, and with
- * `browserStorage: false` neither keeps anything in the browser. The Inbox's own thread pane still wires the same
- * hooks itself (Thread.tsx); this is the one contract another host takes.
+ * `browserStorage: false` neither keeps anything in the browser. The Inbox's thread pane (Thread.tsx) is a wired host
+ * (replyComposerWiring.ts): it hands in its own page, mentions, hook options and Send, and keeps 2, 3 and 5 itself.
  */
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
 import type { InboxDraftFile } from '@plannotator/core/inbox-types';
 import { pastedSignature, useComposeFiles, useFileDrop } from '../../compose/ComposeFiles';
 import { createReplyDraftPage } from '../../replyDraft';
@@ -28,6 +28,7 @@ import type { ReplyBoxProps } from './ReplyBox';
 import type { ReplyBoxRecipients } from './replyBoxSeams';
 import type { ReplyComposerDraft, ReplyComposerHost, ReplyDraftConflict, ReplySendResult } from './replyComposerHost';
 import { hostSeams, NO_MENTION_REFS } from './replyComposerSeams';
+import type { ReplyComposerWiredHost, ReplyComposerWiringView } from './replyComposerWiring';
 
 export { UPLOADING_LINE };
 
@@ -54,23 +55,52 @@ export interface ReplyComposerHandle {
   mentions: ThreadMentions;
   /** Whether words or files wait for a draft save (a host's leave guard). */
   unsaved: () => boolean;
+  /** Discard, as the bin's: nothing while a Send is out. */
+  discard: () => void;
+  /** The field and the Send button. */
+  textRef: RefObject<HTMLTextAreaElement | null>;
+  sendRef: RefObject<HTMLButtonElement | null>;
 }
 
+/**
+ * A wired host's handle (replyComposerWiring.ts): what the Inbox's pane may call. Not `cancel` (it would release the
+ * pane's draft claim mid-Send), `open` / `close` (the box's open state is the pane's), nor the draft's choices (they
+ * would pass by the pane's own words handler); `wired` is its reads of the draft and files hooks.
+ * Inbox-only plumbing, never exported from a shared package.
+ */
+export type ReplyComposerWiredHandle = Omit<ReplyComposerHandle, 'cancel' | 'open' | 'close' | 'draft'> & {
+  draft: Omit<ReplyComposerDraft, 'keepMine' | 'takeTheirs' | 'reload'>;
+  wired: { draft: ReplyDraftHook; files: ReplyFilesHook };
+};
+
+type ReplyDraftHook = ReturnType<ReturnType<typeof createReplyDraftPage>['useReplyDraft']>;
+type ReplyFilesHook = ReturnType<typeof useComposeFiles>;
+
 const NO_DROP = () => {};
+const NO_FILES: readonly InboxDraftFile[] = [];
 const errorText = (error: unknown) => (error instanceof Error && error.message.trim() !== '' ? error.message : SEND_NOT_SENT);
 
-export function useReplyComposer(host: ReplyComposerHost): { box: { props: ReplyBoxProps }; handle: ReplyComposerHandle } {
+export function useReplyComposer(host: ReplyComposerWiredHost): { box: { readonly props: ReplyBoxProps }; handle: ReplyComposerWiredHandle };
+export function useReplyComposer(host: ReplyComposerHost): { box: { readonly props: ReplyBoxProps }; handle: ReplyComposerHandle };
+export function useReplyComposer(host: ReplyComposerHost | ReplyComposerWiredHost): { box: { readonly props: ReplyBoxProps }; handle: ReplyComposerHandle | ReplyComposerWiredHandle } {
   const hostRef = useRef(host);
   hostRef.current = host;
   const { threadId } = host;
   const threadRef = useRef(threadId);
   threadRef.current = threadId;
+  /** A wired host (the Inbox's pane) keeps its page, mentions, hook options and Send flow: replyComposerWiring.ts. */
+  const wiring = 'wiring' in host ? host.wiring : null;
+  const wiredView = (): ReplyComposerWiringView | null => {
+    const now = hostRef.current;
+    return 'wiring' in now ? now.wiring.view() : null;
+  };
+  const plain = (): ReplyComposerHost => hostRef.current as ReplyComposerHost;
   // Per box: its mentions, its draft page and its wrappers of the host's store and uploader (nothing at module level).
-  const [seams] = useState(() => hostSeams(() => hostRef.current));
-  const [mentions] = useState(() => createThreadMentions({ keepInBrowser: host.browserStorage, refs: host.mentionRefs ?? NO_MENTION_REFS }));
-  const [page] = useState(() => createReplyDraftPage({ keepInBrowser: host.browserStorage, mentions }));
+  const [seams] = useState(() => (wiring ? null : hostSeams(plain)));
+  const [mentions] = useState(() => wiring?.mentions ?? createThreadMentions({ keepInBrowser: plain().browserStorage, refs: plain().mentionRefs ?? NO_MENTION_REFS }));
+  const [page] = useState(() => wiring?.page ?? createReplyDraftPage({ keepInBrowser: plain().browserStorage, mentions }));
   const replyText = useReplyTextStore();
-  const draft = page.useReplyDraft(threadId, { store: seams.store });
+  const draft = page.useReplyDraft(threadId, wiring ? wiring.draft : { store: seams!.store });
   const draftRef = useRef(draft);
   draftRef.current = draft;
   const [open, setOpen] = useState(true);
@@ -90,7 +120,13 @@ export function useReplyComposer(host: ReplyComposerHost): { box: { props: Reply
   const pressSeq = useRef(0);
   const [outFor, setOutFor] = useState<readonly string[]>([]);
   const syncOut = () => setOutFor([...out.current.keys()]);
-  const busy = () => out.current.has(threadRef.current);
+  /**
+   * A Send of the shown thread is out. A wired host says so itself (`view().sending`): its Send reads who is still
+   * running before it starts (the words typed meanwhile count), and only then holds the box.
+   */
+  const busy = () => wiredView()?.sending ?? out.current.has(threadRef.current);
+  /** Files may not change: a Send is out. A wired host's Send keeps a file added meanwhile in the box: never for it. */
+  const filesBusy = () => !('wiring' in hostRef.current) && busy();
   /** The thread whose good Send's discard was rejected. */
   const [clearFailed, setClearFailed] = useState<string | null>(null);
   const textRef = useRef<HTMLTextAreaElement | null>(null);
@@ -98,29 +134,46 @@ export function useReplyComposer(host: ReplyComposerHost): { box: { props: Reply
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const draftAboveRef = useRef<HTMLDivElement | null>(null);
 
-  const files = useComposeFiles([], {
-    uploader: seams.uploader,
-    text: {
-      get value() {
-        return replyText.get();
-      },
-      set: (text) => change(text),
-    },
-    // The box goes while files upload: each lands in its thread's draft when it finishes.
-    onUnmountUploads: (uploads) => {
-      for (const upload of uploads) void page.landInReplyDraft(threadRef.current, upload, seams.store);
-    },
-  });
+  const files = useComposeFiles(
+    NO_FILES,
+    wiring
+      ? {
+          ...wiring.files,
+          text: {
+            get value() {
+              return replyText.get();
+            },
+            set: (text) => wiring.files.setText(text),
+          },
+        }
+      : {
+          uploader: seams!.uploader,
+          text: {
+            get value() {
+              return replyText.get();
+            },
+            set: (text) => change(text),
+          },
+          // The box goes while files upload: each lands in its thread's draft when it finishes.
+          onUnmountUploads: (uploads) => {
+            for (const upload of uploads) void page.landInReplyDraft(threadRef.current, upload, seams!.store);
+          },
+        },
+  );
   const addFiles = (list: Iterable<File>) => {
-    if (busy()) return;
+    if (filesBusy()) return;
     files.add(list);
-    setErrorFor(threadRef.current, null);
+    const view = wiredView();
+    if (view) view.added();
+    else setErrorFor(threadRef.current, null);
   };
   const drop = useFileDrop((list) => addFiles(list));
 
   /** The words changed: the draft saves them after a pause, with the files beside them. Read-only while a Send is out. */
   const change = (text: string) => {
     if (busy()) return;
+    const view = wiredView();
+    if (view) return view.change(text);
     replyText.set(text);
     files.follow();
     draftRef.current.save(text, files.draftFiles(text));
@@ -130,7 +183,7 @@ export function useReplyComposer(host: ReplyComposerHost): { box: { props: Reply
   const filesNow = pastedSignature(files.draftFiles());
   const filesSaved = useRef(filesNow);
   useEffect(() => {
-    if (filesNow === filesSaved.current) return;
+    if (wiring || filesNow === filesSaved.current) return;
     filesSaved.current = filesNow;
     if (busy()) return;
     const text = replyText.get();
@@ -150,7 +203,7 @@ export function useReplyComposer(host: ReplyComposerHost): { box: { props: Reply
   // The thread's draft, once read, comes back into an untouched box: its words and its files.
   const restoredFor = useRef<string | null>(null);
   useEffect(() => {
-    if (draft.loadedFor !== threadId || restoredFor.current === threadId) return;
+    if (wiring || draft.loadedFor !== threadId || restoredFor.current === threadId) return;
     restoredFor.current = threadId;
     const saved = draft.draft;
     if (!saved || replyText.get() !== '' || files.current().length > 0) return;
@@ -158,7 +211,7 @@ export function useReplyComposer(host: ReplyComposerHost): { box: { props: Reply
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draft.loadedFor, threadId]);
 
-  const chosenOf = (now: ReplyComposerHost): readonly string[] => now.recipients?.chosen ?? [];
+  const chosenOf = (now: ReplyComposerHost | ReplyComposerWiredHost): readonly string[] => ('recipients' in now ? now.recipients?.chosen : undefined) ?? [];
   const [to, setTo] = useState<readonly string[]>(() => chosenOf(host));
   const toRef = useRef(to);
   toRef.current = to;
@@ -172,13 +225,13 @@ export function useReplyComposer(host: ReplyComposerHost): { box: { props: Reply
   }, [chosenKey]);
   /** Who the reply goes to as the picker shows it: the ids it lists, in order, at most `maxRecipients`. */
   const toNow = (): readonly string[] => {
-    const list = hostRef.current.recipients;
+    const list = 'wiring' in hostRef.current ? undefined : plain().recipients;
     if (!list) return [];
     const ids = toRef.current.filter((id) => list.rows.some((row) => row.session === id));
     return list.maxRecipients && list.maxRecipients > 0 ? ids.slice(0, list.maxRecipients) : ids;
   };
   const [listOpen, setListOpen] = useState(false);
-  const recipients: ReplyBoxRecipients | undefined = host.recipients
+  const recipients: ReplyBoxRecipients | undefined = 'wiring' in host ? undefined : host.recipients
     ? {
         rows: host.recipients.rows,
         chosen: toNow().map((id) => host.recipients!.rows.find((row) => row.session === id)!),
@@ -198,7 +251,9 @@ export function useReplyComposer(host: ReplyComposerHost): { box: { props: Reply
     const was = shownFor.current;
     if (was === threadId) return;
     shownFor.current = threadId;
-    for (const upload of files.detach()) void page.landInReplyDraft(was, upload, seams.store);
+    // A wired host's pane moves to another thread itself (its words, files and their draft).
+    if (wiring) return;
+    for (const upload of files.detach()) void page.landInReplyDraft(was, upload, seams!.store);
     files.reset();
     replyText.set('');
     filesSaved.current = '';
@@ -216,10 +271,11 @@ export function useReplyComposer(host: ReplyComposerHost): { box: { props: Reply
   };
 
   const send = async (): Promise<void> => {
-    const now = hostRef.current;
     const thread = threadRef.current;
     // (4) One Send at a time.
     if (out.current.has(thread)) return;
+    if ('wiring' in hostRef.current) return sendWired(hostRef.current, thread);
+    const now = plain();
     // (1) Never while a file uploads: the host is not called.
     if (files.uploading) {
       setErrorFor(thread, now.uploadingLine ?? UPLOADING_LINE);
@@ -291,6 +347,31 @@ export function useReplyComposer(host: ReplyComposerHost): { box: { props: Reply
     });
   };
 
+  /**
+   * A wired host's press: its own Send runs whole (its gates, the draft's claim and clear, the box, its line), called
+   * at once (in the press, so what the host set for this press is still there); the box stays read-only until it
+   * ends. Nothing here renders: the host's own `sending` draws the box busy.
+   */
+  const sendWired = async (now: ReplyComposerWiredHost, thread: string): Promise<void> => {
+    const press = ++pressSeq.current;
+    out.current.set(thread, press);
+    const body = replyText.get().trim();
+    try {
+      await now.send({
+        threadId: thread,
+        body,
+        mentions: mentions.mentionsFor(thread, body),
+        to: [],
+        reply_to: now.replyTo ?? null,
+        files: files.uploaded.map((upload) => upload.upload_id),
+        draft: null,
+        ...(now.extra ? { extra: now.extra() } : {}),
+      });
+    } finally {
+      if (out.current.get(thread) === press) out.current.delete(thread);
+    }
+  };
+
   const cancel = () => {
     const thread = threadRef.current;
     if (!out.current.has(thread)) return;
@@ -308,21 +389,25 @@ export function useReplyComposer(host: ReplyComposerHost): { box: { props: Reply
   const onFieldKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
       event.preventDefault();
+      // The chord is spent here: the host's own Send key (a window listener) never sees it.
       event.stopPropagation();
-      void send();
+      if (!wiredView()?.chord()) void send();
     } else if (event.key === 'Escape') {
       event.stopPropagation();
       // An input method's Escape ends its composition, never the box.
       if (isComposingKey(event.nativeEvent)) return;
       event.preventDefault();
-      close();
+      const view = wiredView();
+      if (view) view.escape();
+      else close();
     }
   };
 
-  const sending = outFor.includes(threadId);
+  /** The box shows a Send out (a wired host's own `sending`: read as the box is drawn, never as the hook is called). */
+  const sendingNow = () => wiredView()?.sending ?? outFor.includes(threadId);
   // While a Send is out the field takes no keys (as the Inbox's, Thread.tsx): nothing typed is accepted, then lost.
   useEffect(() => {
-    if (textRef.current) textRef.current.readOnly = sending;
+    if (textRef.current) textRef.current.readOnly = sendingNow();
   });
   // Opened through the handle: the field takes focus once it is drawn.
   useEffect(() => {
@@ -333,7 +418,7 @@ export function useReplyComposer(host: ReplyComposerHost): { box: { props: Reply
 
   // A conflict raised: the host hears it, with the store's own refusal and the draft it holds now.
   const conflict: ReplyDraftConflict | null =
-    draft.conflict === null ? null : { threadId, mine: draft.conflict, theirs: draft.draft, refusal: seams.refusals.get(threadId) ?? null };
+    draft.conflict === null ? null : { threadId, mine: draft.conflict, theirs: draft.draft, refusal: seams?.refusals.get(threadId) ?? null };
   const conflictRef = useRef(conflict);
   conflictRef.current = conflict;
   const raised = conflict !== null;
@@ -366,92 +451,114 @@ export function useReplyComposer(host: ReplyComposerHost): { box: { props: Reply
     },
   };
 
-  const slots = host.slots ?? {};
+  const discard = () => {
+    if (busy()) return;
+    const view = wiredView();
+    if (view) return view.discard();
+    draftRef.current.discard();
+    replyText.set('');
+    files.reset();
+    // The tiles went with the draft: no save of an empty box follows the discard.
+    filesSaved.current = '';
+    setErrorFor(threadRef.current, null);
+  };
+
   const error = errors.get(threadId) ?? null;
-  const props: ReplyBoxProps = {
-    phone: host.phone ?? false,
-    offerShown: false,
-    onRestoreDraft: NO_DROP,
-    conflict: null,
-    takeBack: null,
-    onJump: NO_DROP,
-    draftStamp: null,
-    draftAboveRef,
-    quote: null,
-    quotedMessage: undefined,
-    onRemoveQuote: NO_DROP,
-    scrollRef,
-    replyToNames: host.replyToNames ?? '',
-    placeholder: host.placeholder ?? '',
-    askerNoteId: null,
-    tags: undefined,
-    onShowFiles: NO_DROP,
-    draftAnswers: [],
-    draftActions: [],
-    replySkip: { count: 0, keepOpen: true, onToggle: NO_DROP },
-    dropped: 0,
-    comments: null,
-    replySummaryShown: false,
-    chips: null,
-    fold: false,
-    onFold: NO_DROP,
-    fitKey: '',
-    routeChoiceOpen: false,
-    routeChoice: null,
-    sendAria: undefined,
-    ...slots,
-    // What the controller owns comes last: a slot never stands in for it.
-    threadId,
-    mentions,
-    replyText,
-    sendingWords: false,
-    textRef,
-    voice: host.voice,
-    skills: host.skills,
-    recipients,
-    onChange: change,
-    onFieldKeyDown,
-    files: files.files,
-    onRemoveFile: (key) => {
-      if (!busy()) files.remove(key);
-    },
-    onPutBackFile: (key, field) => {
-      if (!busy()) files.putBack(key, field);
-    },
-    onAttachFiles: (list) => addFiles(list),
-    onPaste: (event) => {
-      if (busy()) return;
-      if (files.paste(event)) setErrorFor(threadRef.current, null);
-    },
-    dropOver: drop.over,
-    dropHandlers: drop.handlers,
-    sending,
-    sendRef,
-    onSend: () => void send(),
-    onSendWhileUploading: () => void send(),
-    onDiscardDraft: () => {
-      if (busy()) return;
-      draftRef.current.discard();
-      replyText.set('');
-      files.reset();
-      // The tiles went with the draft: no save of an empty box follows the discard.
-      filesSaved.current = '';
-      setErrorFor(threadRef.current, null);
-    },
-    onClose: close,
-    // "Not saved" goes in the host's own line (`slots.draftStamp`); with none, no empty line is drawn.
-    draftNotSaved: (draft.tooLong || draft.failed) && slots.draftStamp != null,
-    errorLine: error === null ? null : (
-      <div className="ib-error" role="alert">
-        {error}
-      </div>
-    ),
+  /** The box's props, built as they are read (a wired host's view is read then, never as the hook is called). */
+  const buildProps = (): ReplyBoxProps => {
+    const view = wiredView();
+    const slots = view ? view.slots : (plain().slots ?? {});
+    return {
+      phone: host.phone ?? false,
+      offerShown: false,
+      onRestoreDraft: NO_DROP,
+      conflict: null,
+      takeBack: null,
+      onJump: NO_DROP,
+      draftStamp: null,
+      draftAboveRef,
+      quote: null,
+      quotedMessage: undefined,
+      onRemoveQuote: NO_DROP,
+      scrollRef,
+      replyToNames: host.replyToNames ?? '',
+      placeholder: host.placeholder ?? '',
+      askerNoteId: null,
+      tags: undefined,
+      onShowFiles: NO_DROP,
+      draftAnswers: [],
+      draftActions: [],
+      replySkip: { count: 0, keepOpen: true, onToggle: NO_DROP },
+      dropped: 0,
+      comments: null,
+      replySummaryShown: false,
+      chips: null,
+      fold: false,
+      onFold: NO_DROP,
+      fitKey: '',
+      routeChoiceOpen: false,
+      routeChoice: null,
+      sendAria: undefined,
+      ...slots,
+      // What the controller owns comes last: a slot never stands in for it.
+      threadId,
+      mentions,
+      replyText,
+      sendingWords: view?.sendingWords ?? false,
+      textRef,
+      voice: view ? view.voice : plain().voice,
+      skills: view ? view.skills : plain().skills,
+      recipients: view ? view.recipients : recipients,
+      onChange: change,
+      onFieldKeyDown,
+      files: files.files,
+      onRemoveFile: (key) => {
+        if (!filesBusy()) files.remove(key);
+      },
+      onPutBackFile: (key, field) => {
+        if (!filesBusy()) files.putBack(key, field);
+      },
+      onAttachFiles: (list) => {
+        if (filesBusy()) return;
+        const now = wiredView();
+        if (now) now.attach(list);
+        else addFiles(list);
+      },
+      onPaste: (event) => {
+        if (filesBusy()) return;
+        if (!files.paste(event)) return;
+        const now = wiredView();
+        if (now) now.added();
+        else setErrorFor(threadRef.current, null);
+      },
+      dropOver: drop.over,
+      dropHandlers: drop.handlers,
+      sending: sendingNow(),
+      sendRef,
+      onSend: () => void send(),
+      onSendWhileUploading: () => void send(),
+      onDiscardDraft: discard,
+      onClose: view ? view.close : close,
+      // "Not saved" goes in the host's own line (`slots.draftStamp`); with none, no empty line is drawn.
+      draftNotSaved: view ? view.draftNotSaved : (draft.tooLong || draft.failed) && slots.draftStamp != null,
+      errorLine: view ? view.errorLine : error === null ? null : (
+        <div className="ib-error" role="alert">
+          {error}
+        </div>
+      ),
+    };
   };
 
   return {
-    box: { props },
+    box: {
+      get props() {
+        return buildProps();
+      },
+    },
     handle: {
-      isOpen: open,
+      get isOpen() {
+        return wiredView()?.open ?? open;
+      },
       open: () => {
         if (textRef.current) textRef.current.focus();
         else focusNext.current = true;
@@ -461,11 +568,17 @@ export function useReplyComposer(host: ReplyComposerHost): { box: { props: Reply
       replyText,
       addFiles: (list) => addFiles(list),
       send,
-      sending,
+      get sending() {
+        return sendingNow();
+      },
       cancel,
       draft: draftHandle,
       mentions,
       unsaved: () => page.replyDraftUnsaved(),
+      discard,
+      textRef,
+      sendRef,
+      ...(wiring ? { wired: { draft, files } } : {}),
     },
   };
 }

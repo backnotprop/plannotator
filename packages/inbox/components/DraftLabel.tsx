@@ -127,9 +127,12 @@ export function DraftStamp({
   onDiscard,
   tooLong = false,
   failed = false,
+  disabled = false,
 }: {
   savedAt: string | null;
   onDiscard: () => void;
+  /** A Send is out: Discard does nothing, so it cannot be pressed (as a floater's bin, FloaterBox.tsx). */
+  disabled?: boolean;
   /** The box's words are longer than a draft holds: not saved, said in place of "Saved …". */
   tooLong?: boolean;
   /** The last save of the box's words did not land: "Not saved", in place of "Saved …" (an older save's time). */
@@ -143,7 +146,7 @@ export function DraftStamp({
         {tooLong ? DRAFT_NOT_SAVED_TOO_LONG : failed ? DRAFT_NOT_SAVED_FAILED : `Saved ${shortTime(savedAt!)}`}
       </span>
       {!tooLong && savedAt !== null && (
-        <button type="button" className="ib-draft-discard" data-draft-discard="" onClick={onDiscard}>
+        <button type="button" className="ib-draft-discard" data-draft-discard="" onClick={onDiscard} disabled={disabled}>
           Discard
         </button>
       )}

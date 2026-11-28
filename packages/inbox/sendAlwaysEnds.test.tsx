@@ -24,6 +24,11 @@
  * - A conflict retry (another client saved the same answer, sendSameAnswers.ts) still goes, with the same key, and a
  *   retry that never answers ends too.
  * - A good network: one POST, no read back, nothing after.
+ * - One press is one Send (the box's controller calls the pane's Send once), and Discard pressed while a Send is on its
+ *   way does nothing: when that Send then fails, the words are still in the box and in its draft. The Draft line's
+ *   Discard is disabled while it is out, and pressable again when it ends, gone or not.
+ * - ⌘/Ctrl+Enter pressed while a Send is out is no press: a later click Send that lands draws no keyboard ring on the
+ *   message (only a Send by ⌘/Ctrl+Enter does).
  *
  * The limit itself (inactivity, a slow answer that keeps coming is not cut off) is in apiWrite.test.ts.
  *
@@ -977,4 +982,128 @@ describe('New message (a thread\'s live session)', () => {
     expect(messagePosts[1]!.key === messagePosts[0]!.key).toBe(false);
     expect([...stored.values()].map((m) => m.words)).toEqual(['Also bump the client to 2.4, and the docs.']);
   });
+});
+
+test.skipIf(!hasDom)('one press is one Send: a second press while it is out posts nothing, and Send again after it was given up carries the same key', async () => {
+  replyMode = 'hang';
+  const el = await open();
+  const send = el.querySelector<HTMLButtonElement>('.ib-rbox [data-reply-send]')!;
+  await act(async () => {
+    send.click();
+    send.click();
+  });
+  await settle(2);
+  expect(replyPosts.length).toBe(1);
+  await until(() => state(el).line !== null, LIMIT * 6);
+  expect(state(el)).toEqual({ line: MAY_HAVE_GONE, words: WORDS, sendable: true });
+  replyMode = 'ok';
+  await pressSend(el);
+  await until(() => stored.size === 1 && !busy(el), LIMIT * 6);
+  expect(replyPosts.map((p) => p.words)).toEqual([WORDS, WORDS]);
+  expect(replyPosts[1]!.key).toBe(replyPosts[0]!.key);
+  expect(stored.size).toBe(1);
+});
+
+test.skipIf(!hasDom)('Discard pressed while a Send is on its way does nothing: when that Send then fails, the words are still in the box and its draft', async () => {
+  replyMode = 'hang';
+  const el = await open();
+  await pressSend(el);
+  await settle(2);
+  expect(busy(el)).toBe(true);
+  // The bin (a computer) and the Draft line's Discard (a phone, above the box): whichever this box draws.
+  const discards = [...el.querySelectorAll<HTMLButtonElement>('[data-reply-discard], [data-draft-stamp] [data-draft-discard]')];
+  expect(discards.length > 0).toBe(true);
+  await act(async () => {
+    for (const button of discards) button.click();
+  });
+  await settle(2);
+  await until(() => state(el).line !== null, LIMIT * 6);
+  expect(state(el)).toEqual({ line: MAY_HAVE_GONE, words: WORDS, sendable: true });
+  expect(draftNow).toBe(WORDS);
+});
+
+/** ⌘/Ctrl+Enter in the box's field. */
+const chord = (el: HTMLElement) =>
+  act(() => {
+    const field = el.querySelector<HTMLTextAreaElement>('.ib-rbox textarea')!;
+    field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true, cancelable: true }));
+  });
+/** The keyboard ring a Send by ⌘/Ctrl+Enter leaves on the message it lands at (Thread.tsx `byChord`). */
+const sentRings = (el: HTMLElement) => el.querySelectorAll('[data-sent-focus]').length;
+
+test.skipIf(!hasDom)('⌘/Ctrl+Enter pressed while a Send is out is no press: when that Send fails and a click Send lands, no keyboard ring is drawn', async () => {
+  replyMode = 'hang';
+  const el = await open();
+  await pressSend(el);
+  await settle(2);
+  expect(busy(el)).toBe(true);
+  await chord(el);
+  await settle(1);
+  expect(replyPosts.length).toBe(1);
+  await until(() => state(el).line !== null, LIMIT * 6);
+  expect(state(el).line).toBe(MAY_HAVE_GONE);
+  replyMode = 'ok';
+  await pressSend(el);
+  await until(() => stored.size === 1 && !busy(el), LIMIT * 6);
+  await settle(4);
+  expect(sentRings(el)).toBe(0);
+});
+
+test.skipIf(!hasDom)('a Send by ⌘/Ctrl+Enter that lands draws the keyboard ring on the message', async () => {
+  const el = await open();
+  await chord(el);
+  await until(() => stored.size === 1 && !busy(el), LIMIT * 6);
+  await settle(4);
+  expect(sentRings(el)).toBe(1);
+});
+
+/** Reply POSTs wait until `release()`; each then goes on as `replyMode` says. */
+function holdReplies(): () => void {
+  const inner = globalThis.fetch;
+  let release = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).endsWith('/reply') && init?.method === 'POST') await held;
+    return inner(input, init);
+  }) as typeof fetch;
+  return release;
+}
+
+/** The Draft line's Discard (a phone, above the box; this file's pane is a phone's): null when none is drawn, else whether it can be pressed. */
+function discardable(el: HTMLElement): boolean | null {
+  const button = el.querySelector<HTMLButtonElement>('[data-draft-stamp] [data-draft-discard]');
+  return button ? !button.disabled : null;
+}
+
+test.skipIf(!hasDom)("the Draft line's Discard is disabled while a Send is out, and pressable again when the Send fails", async () => {
+  const release = holdReplies();
+  replyMode = 'refuse-4xx';
+  const el = await open();
+  expect(discardable(el)).toBe(true);
+  await pressSend(el);
+  await settle(2);
+  expect(busy(el)).toBe(true);
+  expect(discardable(el)).toBe(false);
+  release();
+  await until(() => state(el).line !== null && !busy(el), LIMIT * 6);
+  expect(state(el)).toEqual({ line: 'The reply was not sent.', words: WORDS, sendable: true });
+  expect(discardable(el)).toBe(true);
+});
+
+test.skipIf(!hasDom)("the Draft line's Discard is disabled while a Send is out, and pressable in the next reply once it went", async () => {
+  const release = holdReplies();
+  const el = await open();
+  await pressSend(el);
+  await settle(2);
+  expect(busy(el)).toBe(true);
+  expect(discardable(el)).toBe(false);
+  release();
+  await until(() => stored.size === 1 && !busy(el), LIMIT * 6);
+  await settle(2);
+  act(() => [...el.querySelectorAll<HTMLButtonElement>('.ib-pfoot button')].find((b) => b.textContent?.trim() === 'Reply')!.click());
+  await settle(2);
+  type(el, 'Also ap-south.');
+  // The Draft line shows its Discard once the words are saved.
+  await until(() => discardable(el) !== null, LIMIT * 6);
+  expect(discardable(el)).toBe(true);
 });
