@@ -2751,12 +2751,12 @@ const ReviewApp: React.FC = () => {
   useEffect(() => {
     if (!dockApi || !needsInitialDiffPanel.current || files.length === 0) return;
     needsInitialDiffPanel.current = false;
-    // Wide PR reviews keep the combined overview landing. Compact-touch
-    // sessions arrive directly in the review artifact; PR context remains one
-    // tap away in the transient navigator.
-    if (prMetadata && !isCompactTouchLayout) openPROverviewPanel();
+    // A PR review lands on its overview, so the description is read first, on
+    // a phone too (#3667): there the overview is one full-width tab, never
+    // beside the diff, and All changes stays one tap away in Review navigation.
+    if (prMetadata) openPROverviewPanel();
     else openAllFilesPanel();
-  }, [dockApi, files, isCompactTouchLayout, openAllFilesPanel, openPROverviewPanel, prMetadata]);
+  }, [dockApi, files, openAllFilesPanel, openPROverviewPanel, prMetadata]);
 
   // Global keyboard shortcuts
   useEffect(() => {

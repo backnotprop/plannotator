@@ -41,6 +41,13 @@ const file = (name: string) => [
 const PATCH = file("refunds.ts") + file("ledger.ts");
 
 class StubEventSource {
+  constructor(url?: string | URL) {
+    // The PR context stream refuses, as a server without it does: the hook
+    // falls back to reading /api/pr-context.
+    if (String(url ?? "").includes("/api/pr-context/stream")) {
+      setTimeout(() => this.onerror?.(new Event("error")), 0);
+    }
+  }
   static readonly CONNECTING = 0;
   static readonly OPEN = 1;
   static readonly CLOSED = 2;
@@ -55,6 +62,38 @@ class StubEventSource {
   removeEventListener(): void {}
   close(): void {}
 }
+
+/** Set: /api/diff serves a pull request, as `plannotator review <pr-url>` does. */
+let prSession = false;
+const PR_METADATA = {
+  platform: "github",
+  host: "github.com",
+  owner: "acme",
+  repo: "payments-service",
+  number: 42,
+  title: "Add the refund flow",
+  author: "ada-novak",
+  baseBranch: "main",
+  headBranch: "add-refund-flow",
+  baseSha: "aaa1111",
+  headSha: "bbb2222",
+  url: "https://github.com/acme/payments-service/pull/42",
+};
+const PR_DESCRIPTION = "Refunds post a reversing entry to the ledger.";
+const PR_CONTEXT = {
+  body: PR_DESCRIPTION,
+  state: "OPEN",
+  isDraft: false,
+  labels: [],
+  reviewDecision: "",
+  mergeable: "MERGEABLE",
+  mergeStateStatus: "CLEAN",
+  comments: [],
+  reviews: [],
+  reviewThreads: [],
+  checks: [],
+  linkedIssues: [],
+};
 
 function makeFetch(): typeof fetch {
   // SAFETY: the app only ever calls fetch(input, init); the double implements
@@ -72,8 +111,10 @@ function makeFetch(): typeof fetch {
         diffType: "uncommitted",
         hideWhitespace: false,
         repoInfo: { display: "acme/payments-service", branch: "add-refund-flow" },
+        ...(prSession ? { prMetadata: PR_METADATA, platformUser: "charlie-dunn" } : {}),
       });
     }
+    if (url.pathname === "/api/pr-context") return Response.json(PR_CONTEXT);
     if (url.pathname === "/api/diff/fresh") return Response.json({ fresh: true });
     if (url.pathname === "/api/ai/capabilities") return Response.json({ available: false, providers: [] });
     if (url.pathname === "/api/draft") return Response.json({ error: "Not found" }, { status: 404 });
@@ -120,12 +161,12 @@ function seedUnrelatedAnnouncementsSeen(): void {
   memory.set("plannotator-review-dest-spotlight-seen", "1");
 }
 
-async function mount(): Promise<void> {
+async function mount(matchMedia: typeof window.matchMedia = phoneMatchMedia): Promise<void> {
   setStorageBackend(memoryBackend);
   seedUnrelatedAnnouncementsSeen();
   configStore.loadFromBackend();
   configStore.set("diffStyle", "split");
-  window.matchMedia = phoneMatchMedia;
+  window.matchMedia = matchMedia;
   globalThis.fetch = makeFetch();
   // SAFETY: the App only uses EventSource's constructor, handlers, and close.
   globalThis.EventSource = StubEventSource as unknown as typeof EventSource;
@@ -149,6 +190,7 @@ afterEach(async () => {
   globalThis.EventSource = originalEventSource;
   if (hasDom && originalMatchMedia) window.matchMedia = originalMatchMedia;
   memory.clear();
+  prSession = false;
   resetStorageBackend();
   if (hasDom) document.body.replaceChildren();
 });
@@ -179,6 +221,32 @@ describe.if(hasDom)("phone width: one thing on screen at a time", () => {
     }
     await waitFor(() => !sheetOpen(), "the sheet to close after the pick");
     expect(configStore.get("diffStyle")).toBe("split");
+  });
+});
+
+// SAFETY: as phoneMatchMedia, with no query matching: a wide desktop window.
+const wideMatchMedia = ((query: string) => ({ ...phoneMatchMedia(query), matches: false })) as unknown as typeof window.matchMedia;
+const descriptionShown = () => document.body.textContent?.includes(PR_DESCRIPTION) ?? false;
+
+describe.if(hasDom)("a pull request review opens on its description (#3667)", () => {
+  test("on a phone the PR overview is the landing tab, with the description in the page", async () => {
+    prSession = true;
+    await mount();
+    await waitFor(descriptionShown, "the PR description on a phone");
+  });
+
+  test("on a wide screen it is the landing tab too, as before", async () => {
+    prSession = true;
+    await mount(wideMatchMedia);
+    await waitFor(descriptionShown, "the PR description on a wide screen");
+  });
+
+  test("a local review on a phone still lands on All changes", async () => {
+    await mount();
+    await waitFor(() => document.querySelector("[data-changes-tree]") !== null, "the file tree");
+    for (let i = 0; i < 5; i += 1) await settle();
+    expect(descriptionShown()).toBe(false);
+    expect(document.body.textContent).not.toContain("Loading PR");
   });
 });
 
