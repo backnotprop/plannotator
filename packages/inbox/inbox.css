@@ -6290,7 +6290,9 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 .ib-draft-saved { color: var(--muted-foreground); }
 .ib-draft-discard { position: relative; border: 0; background: transparent; padding: 0 2px; color: var(--muted-foreground); font: inherit; cursor: pointer; border-radius: 4px; }
 .ib-draft-discard::after { content: ''; position: absolute; inset: -8px -6px; }
-.ib-draft-discard:hover { color: var(--foreground); text-decoration: underline; }
+.ib-draft-discard:hover:not(:disabled) { color: var(--foreground); text-decoration: underline; }
+/* Held while a Send is out: it looks held, as the thread card's Ask does (.ib-crdp-ask:disabled). */
+.ib-draft-discard:disabled { opacity: 0.55; cursor: default; }
 .ib-draft-discard:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .ib-draft-foot { display: inline-flex; align-items: center; gap: 6px; margin-right: 4px; min-width: 0; white-space: nowrap; }
 .ib-draft-foot .ib-st { margin-right: 0; }

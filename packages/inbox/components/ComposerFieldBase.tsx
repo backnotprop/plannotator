@@ -108,7 +108,7 @@ export interface InboxComposerFieldProps {
   tags?: InboxComposerTags;
   /** Open the picker at the caret's line, inside the open dialog that holds the field (see the header). */
   caretMenu?: CaretMenuOptions;
-  /** Escape closes an open picker even before a query was typed (compose: Escape would ask about a draft). */
+  /** Escape closes an open picker first, even before a query was typed (default true: a bare `/` once closed the box too). */
   escapeClosesMenu?: boolean;
   /** Voice dictation (voice.ts): the host's session, whose button sits in the host's toolbar. */
   voice?: VoiceHandle;
@@ -168,7 +168,7 @@ export function ComposerFieldBase({
   destination,
   tags,
   caretMenu,
-  escapeClosesMenu = false,
+  escapeClosesMenu = true,
   voice: givenVoice,
   voiceParts,
   voiceNoteGlide = false,

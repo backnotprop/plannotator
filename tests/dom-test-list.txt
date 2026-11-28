@@ -377,6 +377,7 @@ packages/inbox/commentRowSkills.test.tsx
 packages/inbox/skillReferences.test.tsx
 packages/inbox/skillListRoom.test.tsx
 packages/inbox/pickerOpensOnTyping.test.tsx
+packages/inbox/pickerEscapeFirst.test.tsx
 packages/inbox/fullScreenComposerRenders.test.tsx
 packages/inbox/messageComments.test.tsx
 packages/inbox/messageDelete.test.tsx
