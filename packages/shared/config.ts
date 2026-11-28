@@ -273,6 +273,12 @@ export interface PlannotatorConfig {
    */
   annotateHistory?: boolean;
   /**
+   * Folder that holds /goal packages, one `<slug>/` folder each, made by
+   * `plannotator setup-goal dir <slug>`. Relative to the working directory;
+   * `~` is the home directory. PLANNOTATOR_GOALS_DIR overrides it. Default: `goals`.
+   */
+  goalsDir?: string;
+  /**
    * The view an annotate session opens in: "wide", "focus" or "edit" (the
    * document toolbar's Wide | Focus | Edit). Unset or invalid keeps today's
    * default (panels as they are, not editing); a view the document cannot

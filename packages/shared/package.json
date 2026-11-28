@@ -107,6 +107,7 @@
     "./code-nav": "./code-nav.ts",
     "./token-hover": "./token-hover.ts",
     "./goal-setup": "./goal-setup.ts",
+    "./goal-dir": "./goal-dir.ts",
     "./question-block": "./question-block.ts",
     "./server-session": "./server-session.ts",
     "./semantic-diff-types": "./semantic-diff-types.ts",

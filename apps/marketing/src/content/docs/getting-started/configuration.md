@@ -24,6 +24,7 @@ Plannotator is configured through environment variables, hook/plugin configurati
 | `PLANNOTATOR_CLAUDE_MOD` | on | Set to `0` to turn off the [Plannotator mod](/docs/guides/claude-code/#the-plannotator-mod) for Claude Code and use the classic hook, where Claude waits for your decision. Can also be set via `~/.plannotator/config.json` (`{ "claudeCodeMod": false }`). |
 | `PLANNOTATOR_PLAN_REVIEW` | on | Claude Code only. Set to `0` to turn off plan review and use Claude Code's own plan approval dialog. The rest of Plannotator is unchanged. Can also be set via `~/.plannotator/config.json` (`{ "planReview": false }`). |
 | `PLANNOTATOR_AGENT_TOOL` | on for Claude Code and Oh My Pi, off on Pi, OpenCode 2 and DeepSeek Harness | Set to `1` to give the agent a `plannotator` tool, `0` to keep it out of the tool list (the slash commands are unchanged). Read when a session starts. Can also be set via `~/.plannotator/config.json` (`{ "agentTool": true }`). |
+| `PLANNOTATOR_GOALS_DIR` | `goals` | Where the setup-goal skill keeps goal packages. Can also be set via `~/.plannotator/config.json` (`{ "goalsDir": "..." }`). |
 | `CLAUDE_CONFIG_DIR` | `~/.claude` | Respected by the install script when placing hooks. |
 
 See the [environment variables reference](/docs/reference/environment-variables/) for full details, port resolution order, and examples.

@@ -444,6 +444,51 @@ describe("guide subcommand through the entrypoint", () => {
   }, 30_000);
 });
 
+describe("setup-goal dir through the entrypoint", () => {
+  // Stubs the built HTML like the guide test above: the entrypoint imports it at module load.
+  test("prints the absolute goal folder and nothing else; env beats config; a bad slug exits 1", async () => {
+    const { mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, writeFileSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { removeStubbedHtml, stubHookDistHtml } = await import("../../../tests/helpers/hook-dist-stub");
+    const workDir = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-goal-dir-entry-")));
+    const stubbed = stubHookDistHtml();
+    try {
+      const dataDir = join(workDir, "data");
+      mkdirSync(dataDir);
+      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ goalsDir: "from-config" }));
+      const entry = resolve(import.meta.dir, "index.ts");
+      const run = async (argv: string[], extra: Record<string, string> = {}) => {
+        const env = { ...process.env, HOME: workDir, PLANNOTATOR_DATA_DIR: dataDir, ...extra };
+        delete env.PLANNOTATOR_GOALS_DIR;
+        Object.assign(env, extra);
+        const proc = Bun.spawn(["bun", "run", entry, ...argv], { cwd: workDir, env, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+        const [stdout, stderr, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
+        return { stdout, stderr, code };
+      };
+
+      const viaConfig = await run(["setup-goal", "dir", "my-goal"]);
+      expect(viaConfig.code, viaConfig.stderr).toBe(0);
+      expect(viaConfig.stdout).toBe(`${join(workDir, "from-config", "my-goal")}\n`);
+      expect(statSync(join(workDir, "from-config", "my-goal")).isDirectory()).toBe(true);
+
+      const viaEnv = await run(["setup-goal", "dir", "my-goal"], { PLANNOTATOR_GOALS_DIR: "~/from-env" });
+      expect(viaEnv.code, viaEnv.stderr).toBe(0);
+      expect(viaEnv.stdout).toBe(`${join(workDir, "from-env", "my-goal")}\n`);
+
+      for (const argv of [["setup-goal", "dir"], ["setup-goal", "dir", "../x"], ["setup-goal", "dir", "a/b"]]) {
+        const bad = await run(argv);
+        expect(bad.code).toBe(1);
+        expect(bad.stdout).toBe("");
+        expect(bad.stderr).toContain("setup-goal dir");
+      }
+    } finally {
+      rmSync(workDir, { recursive: true, force: true });
+      removeStubbedHtml(stubbed);
+    }
+  }, 30_000);
+});
+
 describe("--title through the entrypoint (#2289)", () => {
   // Guards the hand-off in apps/hook/server/index.ts: a misused --title stops
   // the CLI before any session starts, with the strict gate's usage exit (2)

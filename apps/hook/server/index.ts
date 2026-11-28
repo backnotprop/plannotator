@@ -38,7 +38,7 @@
  *    - Annotate the last assistant message from a Copilot CLI session
  *    - Parses events.jsonl from session state
  *
- * 8. Goal Setup (`plannotator setup-goal interview|facts <bundle.json>`):
+ * 8. Goal Setup (`plannotator setup-goal interview|facts <bundle.json>`, `plannotator setup-goal dir <slug>`):
  *    - Opens the bundled question or facts acceptance UI
  *    - Outputs structured JSON for setup-goal workflows
  *
@@ -120,6 +120,7 @@ import {
   normalizeGoalSetupBundle,
   type GoalSetupStage,
 } from "@plannotator/shared/goal-setup";
+import { ensureGoalDir } from "@plannotator/shared/goal-dir";
 import {
   ANNOTATE_BUNDLE_HINT,
   buildAmbiguousAnnotateArgsMessage,
@@ -1351,12 +1352,27 @@ if (args[0] === "sessions") {
   // GOAL SETUP MODE
   // ============================================
 
+  if (args[1] === "dir") {
+    // Print the goal folder, made if missing. stdout carries the path alone, for $(...).
+    try {
+      console.log(ensureGoalDir(args[2] ?? ""));
+    } catch (err) {
+      console.error(
+        `plannotator setup-goal dir: ${err instanceof Error ? err.message : String(err)}\n` +
+          "Usage: plannotator setup-goal dir <slug>"
+      );
+      process.exit(1);
+    }
+    process.exit(0);
+  }
+
   const stage = args[1] as GoalSetupStage | undefined;
   const bundlePath = args[2];
 
   if ((stage !== "interview" && stage !== "facts") || !bundlePath) {
     console.error(
-      "Usage: plannotator setup-goal <interview|facts> <bundle.json | -> [--json]"
+      "Usage: plannotator setup-goal <interview|facts> <bundle.json | -> [--json]\n" +
+        "       plannotator setup-goal dir <slug>"
     );
     process.exit(1);
   }
