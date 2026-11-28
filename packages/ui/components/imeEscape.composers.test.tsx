@@ -8,6 +8,9 @@ import { pressKey, typeInto } from '../test-setup/commentSubmitKeys';
 const hasDom = typeof document !== 'undefined';
 const { AnnotationPanel } = hasDom ? await import('./AnnotationPanel') : ({} as typeof import('./AnnotationPanel'));
 const { DiagramComposer } = hasDom ? await import('./diagram/DiagramComposer') : ({} as typeof import('./diagram/DiagramComposer'));
+const { Settings } = hasDom ? await import('./Settings') : ({} as typeof import('./Settings'));
+const { QuickLabelsTab } = hasDom ? await import('./settings/QuickLabelsTab') : ({} as typeof import('./settings/QuickLabelsTab'));
+const { AttachmentsButton } = hasDom ? await import('./AttachmentsButton') : ({} as typeof import('./AttachmentsButton'));
 
 let root: Root | null = null;
 let host: HTMLElement | null = null;
@@ -113,5 +116,56 @@ for (const [name, mount] of BOXES) {
     } finally {
       document.removeEventListener('keydown', spy);
     }
+  });
+}
+
+interface EnterBox {
+  field: () => HTMLInputElement;
+  done: () => boolean;
+}
+
+const ENTER_BOXES: Array<[string, () => Promise<EnterBox>]> = [
+  ['a quick label tip', async () => {
+    await render(<QuickLabelsTab />);
+    await act(async () => must<HTMLButtonElement>('[data-quick-label-tip-toggle]').click());
+    await typeInto(must('[data-quick-label-tip]') as unknown as HTMLTextAreaElement, 'なぜ');
+    return { field: () => must('[data-quick-label-tip]'), done: () => !document.querySelector('[data-quick-label-tip]') };
+  }],
+  ['the identity in Settings', async () => {
+    const renamed: string[] = [];
+    await render(<Settings taterMode={false} onTaterModeChange={() => {}} mode="plan" externalOpen onIdentityChange={(_old, next) => renamed.push(next)} />);
+    const field = must<HTMLInputElement>('input[placeholder="Enter your name..."]');
+    await act(async () => field.focus());
+    await typeInto(field as unknown as HTMLTextAreaElement, '山田');
+    return { field: () => field, done: () => renamed.includes('山田') };
+  }],
+  ['a directory added in Settings', async () => {
+    await render(<Settings taterMode={false} onTaterModeChange={() => {}} mode="plan" externalOpen />);
+    await act(async () => [...document.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.trim() === 'Files')!.click());
+    const browser = must<HTMLButtonElement>('button[role="switch"]');
+    if (browser.getAttribute('aria-checked') !== 'true') await act(async () => browser.click());
+    const field = must<HTMLInputElement>('input[placeholder="/path/to/directory"]');
+    await typeInto(field as unknown as HTMLTextAreaElement, '/work/資料');
+    return { field: () => field, done: () => field.value === '' };
+  }],
+  ['an attachment path', async () => {
+    let added = 0;
+    await render(<AttachmentsButton images={[]} onAdd={() => { added++; }} onRemove={() => {}} />);
+    await act(async () => must<HTMLButtonElement>('button').click());
+    const field = must<HTMLInputElement>('input[placeholder="Paste path or URL..."]');
+    await typeInto(field as unknown as HTMLTextAreaElement, '/work/画像.png');
+    return { field: () => field, done: () => added > 0 };
+  }],
+];
+
+for (const [name, mount] of ENTER_BOXES) {
+  test.skipIf(!hasDom)(`${name}: the Enter that accepts an input method's word does not save, a plain Enter does`, async () => {
+    const box = await mount();
+    const field = box.field();
+    await pressKey(field, 'Enter', { isComposing: true });
+    await pressKey(field, 'Enter', { keyCode: 229 });
+    expect(box.done()).toBe(false);
+    await pressKey(field, 'Enter', { keyCode: 13 });
+    expect(box.done()).toBe(true);
   });
 }

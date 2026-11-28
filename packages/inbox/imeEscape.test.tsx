@@ -5,6 +5,7 @@ import type { SkillCatalogEntry } from '@plannotator/ui/utils/skillReferences';
 
 const hasDom = typeof document !== 'undefined';
 const { InboxComposerField } = (hasDom ? await import('./components/ComposerField') : {}) as typeof import('./components/ComposerField');
+const { FilesRow } = (hasDom ? await import('./scheduled/EditorParts') : {}) as typeof import('./scheduled/EditorParts');
 const catalog = (hasDom ? await import('@plannotator/ui/utils/skillCatalog') : {}) as typeof import('@plannotator/ui/utils/skillCatalog');
 
 const SKILLS: SkillCatalogEntry[] = [{ name: 'readback', root: 'claude', description: 'Read it back', humanOnly: false }];
@@ -106,3 +107,29 @@ for (const [name, words, escaped] of BOXES) {
     }
   });
 }
+
+test.skipIf(!hasDom)("a scheduled thread's file path: the Enter that accepts an input method's word does not add it, a plain Enter does", async () => {
+  const added: string[][] = [];
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  await act(async () => {
+    root = createRoot(host!);
+    root.render(<FilesRow files={[]} onChange={(next) => added.push(next)} />);
+  });
+  await act(async () => host!.querySelector<HTMLButtonElement>('.st-add')!.click());
+  const field = host.querySelector<HTMLInputElement>('input[aria-label="File path"]')!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field, '/work/資料.md');
+    field.dispatchEvent(new InputEvent('input', { bubbles: true }));
+  });
+  const enter = async (init: KeyboardEventInit & { keyCode?: number }) => {
+    await act(async () => {
+      field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...init }));
+    });
+  };
+  await enter({ isComposing: true });
+  await enter({ keyCode: 229 });
+  expect(added).toEqual([]);
+  await enter({ keyCode: 13 });
+  expect(added).toEqual([['/work/資料.md']]);
+});

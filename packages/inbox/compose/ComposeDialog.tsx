@@ -1072,7 +1072,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDialogElement>) => {
     // A key the skill picker took (Escape closing it, Enter on a row) is not the dialog's.
     // An Escape that ends an IME composition is the IME's (Safari sends it with isComposing false and keyCode 229).
-    if (isImeCompositionKey(event)) return;
+    if (event.nativeEvent.isComposing || (event.key === 'Escape' && isImeCompositionKey(event))) return;
     if (event.defaultPrevented) return;
     if (event.key === 'Escape') {
       // Never the window's Escape (it would close the thread under the dialog).

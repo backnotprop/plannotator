@@ -246,6 +246,24 @@ describe('shortcuts', () => {
     expect(matchesShortcutBinding(wrongEvent, 'Mod+Enter')).toBe(false);
   });
 
+  it('fires no shortcut on a key an input method holds, in either shape, and fires on the plain key', () => {
+    const scope = defineShortcutScope({ id: 'ime', title: 'IME', shortcuts: { close: { description: 'Close', bindings: ['Escape'], section: 'S' }, send: { description: 'Send', bindings: ['Mod+Enter'], section: 'S' } } });
+    const cases: Array<[string, Partial<KeyboardEvent>, boolean]> = [
+      ['Escape', { isComposing: true }, false],
+      ['Escape', { keyCode: 229 }, false],
+      ['Escape', { keyCode: 27 }, true],
+      ['Enter', { isComposing: true }, false],
+      ['Enter', { keyCode: 229 }, false],
+      ['Enter', { keyCode: 13 }, true],
+    ];
+    for (const [key, shape, fires] of cases) {
+      const calls: string[] = [];
+      const event = { key, code: key, ctrlKey: key === 'Enter', metaKey: false, shiftKey: false, altKey: false, isComposing: false, keyCode: 0, ...shape, preventDefault: () => {} } as unknown as KeyboardEvent;
+      expect({ key, shape, fired: dispatchShortcutEvent(scope, { close: () => calls.push('close'), send: () => calls.push('send') }, event) }).toEqual({ key, shape, fired: fires });
+      expect(calls.length).toBe(fires ? 1 : 0);
+    }
+  });
+
   it('matches a letter by its physical key only in a scope that opts in (lettersByCode)', () => {
     // Russian layout: the E key types у. Off by default, so plan review and code review match as before.
     const cyrillicE = { key: 'у', code: 'KeyE', ctrlKey: false, metaKey: false, shiftKey: false, altKey: false } as KeyboardEvent;
