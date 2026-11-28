@@ -92,8 +92,9 @@ import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import type { InboxPlace } from "@plannotator/shared/inbox/connection";
 import type { InboxRex, InboxRexStatus } from "./inbox-rex";
 import { inboxListingSessionAgents, inboxProcessListing, inboxRexResumeHeld, type InboxRexHeld } from "./inbox-rex-resume";
-import { inboxId, inboxLaunchInRex, inboxLaunchRexUnstoppable, type InboxComposeLaunch, type InboxLaunchAgent, type InboxLaunchFrom, type InboxLaunchRecord, type InboxLaunchTrust, type InboxLaunchUntrusted, type InboxListRow, type InboxMessage, type InboxProject, type InboxRun } from "@plannotator/core/inbox-types";
-import { inboxLaunchedSession, inboxRunOf, INBOX_REX_MAY_RUN, INBOX_REX_NOT_HERE_AGAIN, INBOX_REX_REFUSED_AGAIN, INBOX_REX_SERVER_AWAY_AGAIN, INBOX_REX_SHARED_AGAIN, INBOX_REX_STILL_RUNS, INBOX_RUN_IN_REX_COULDNT, INBOX_RUN_IN_REX_ELSEWHERE, INBOX_RUN_IN_REX_NO_ANSWER, INBOX_RUN_IN_REX_NO_TAB, INBOX_RUN_IN_REX_OPEN, INBOX_RUN_IN_REX_STOP, INBOX_RUN_START_GRACE_MS, type InboxRunHostState } from "@plannotator/core/inbox-run-line";
+import { inboxId, inboxLaunchInRex, inboxLaunchInT3, inboxLaunchRexUnstoppable, type InboxComposeLaunch, type InboxLaunchInner, type InboxLaunchAgent, type InboxLaunchFrom, type InboxLaunchRecord, type InboxLaunchTrust, type InboxLaunchUntrusted, type InboxListRow, type InboxMessage, type InboxProject, type InboxRun } from "@plannotator/core/inbox-types";
+import { inboxLaunchedSession, inboxRunOf, INBOX_REX_MAY_RUN, INBOX_REX_NOT_HERE_AGAIN, INBOX_REX_REFUSED_AGAIN, INBOX_REX_SERVER_AWAY_AGAIN, INBOX_REX_SHARED_AGAIN, INBOX_REX_STILL_RUNS, INBOX_RUN_IN_REX_COULDNT, INBOX_RUN_IN_REX_ELSEWHERE, INBOX_RUN_IN_REX_NO_ANSWER, INBOX_RUN_IN_REX_NO_TAB, INBOX_RUN_IN_REX_OPEN, INBOX_RUN_IN_REX_STOP, INBOX_RUN_IN_T3_AGAIN, INBOX_RUN_IN_T3_OPEN, INBOX_RUN_IN_T3_STOP, INBOX_RUN_START_GRACE_MS, type InboxRunHostState } from "@plannotator/core/inbox-run-line";
+import { INBOX_T3_DRIVERS } from "@plannotator/core/inbox-launch-choice";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { derivePersonThreadSubject } from "@plannotator/core/inbox-questions";
 import { INBOX_SCRATCH_PICK, inboxScratchCandidate, inboxScratchSlug } from "@plannotator/core/inbox-scratch";
@@ -107,9 +108,10 @@ import { createClaudeLaunchHost } from "./inbox-launch-claude";
 import { createPiLaunchHost } from "./inbox-launch-pi";
 import { createCodexLaunchHost } from "./inbox-launch-codex";
 import { createOpenCodeLaunchHost } from "./inbox-launch-opencode";
+import { createT3LaunchHost, t3LaunchWriterOf, t3TitleOf } from "./inbox-launch-t3";
 import { launchPlainEnv, launchSpawnEnv, type LaunchEnv } from "./inbox-launch-env";
 import { pathFoldersOf } from "./env-path";
-import type { LaunchAvailability, LaunchDelivery, LaunchHost, LaunchHostContext, LaunchHostPermissions, LaunchHostResult, LaunchLive, LaunchSessions, LaunchStartFailure, LaunchTrustOffer, LaunchTurnError } from "./inbox-launch-host";
+import type { LaunchAvailability, LaunchDelivery, LaunchHost, LaunchHostContext, LaunchHostPermissions, LaunchHostResult, LaunchLive, LaunchSessions, LaunchStartFailure, LaunchStartWhy, LaunchTrustOffer, LaunchTurnError } from "./inbox-launch-host";
 import { openPermissionSince } from "./inbox-launch-permission";
 import { INBOX_CROSS_SITE_BODY, INBOX_MACHINE_WINDOW_ONLY_BODY, INBOX_WINDOW_ONLY_BODY, isCrossSiteRequest, isWindowRequest } from "./inbox-cross-site";
 import { samePlace } from "./agent-files";
@@ -220,7 +222,18 @@ interface Memo {
   cloneFor?: string | null;
   /** When the running clone began: its percent shows only after a few seconds (E2). */
   cloneStartedAt?: number;
+  /**
+   * A `turnEnded` host (T3 Code): its app's last word on whether the session's turn ended (`value`, null when it
+   * couldn't be asked), and when it was asked; `asking` while a question runs.
+   */
+  ended?: { at: number; value: boolean | "failed" | null } | null;
+  endedAsking?: boolean;
+  /** A T3 start the Inbox closed during, whose agent wrote since: its thread was looked for (`settleWritten`). */
+  t3Settling?: boolean;
 }
+
+/** A host To offers: an agent of its own (every host but T3 Code's, which runs a launch's agent there). */
+type AgentHost = LaunchHost & { readonly agent: InboxLaunchAgent };
 
 /**
  * An idle launched session's turn error (`LaunchHost.turnError`, Claude Code's transcript, a few file calls in the
@@ -251,7 +264,7 @@ interface HostState {
 export function createInboxLaunch(options: {
   store: InboxStore;
   /** The mod's bridge poll: Claude Code's sessions say through it whether they are live and busy. */
-  live: { runStateOf(session: string): LaunchLive | null };
+  live: { runStateOf(session: string): LaunchLive | null; lastHeardOf?(session: string): number | null };
   dataDir: string;
   serverSession: string;
   homeDir: string;
@@ -271,8 +284,16 @@ export function createInboxLaunch(options: {
   selfCommand: readonly string[];
   /** More agents beside Claude Code, made with the engine's context (a test's fake host). Each is held by its own `agent`. */
   hosts?: (context: LaunchHostContext) => LaunchHost[];
+  /**
+   * The wake text a launched message's session would get from its agent's own wake (inbox.ts: the bridge command,
+   * as `codexQueueMessage` words it), for a host that must send it as the session's first turn (`startsWithTurn`,
+   * T3 Code). Without it such a host gets the message's own words.
+   */
+  firstTurn?: (root: InboxMessage) => string;
   /** This Inbox was started over SSH (`SSH_CONNECTION` at start): macOS keeps Claude Code's login locked there, so the launch block names that cause. */
   startedOverSsh?: boolean;
+  /** How long a start in T3 Code (`t3 thread start`) may take before its line says it didn't answer (a test makes it short). */
+  t3StartTimeoutMs?: number;
   /** This computer's name as linked machines know it: a launch another machine sends is refused in words that name it. */
   machineName?: () => string | null;
   /** The machine's system and drive folders (`folderPlacesFor`; tests name their own). */
@@ -300,7 +321,10 @@ export function createInboxLaunch(options: {
 }) {
   const { store, json } = options;
   const now = options.now ?? Date.now;
-  /** When this Inbox started: a launch from before it may have been waiting already (`waitedFromBefore`). */
+  /**
+   * When this Inbox started: a launch from before it may have been waiting already (`waitedFromBefore`), and a wait
+   * counted from a launch's start counts from here after a restart (what it heard before is gone).
+   */
   const bootAt = now();
   const log = options.log ?? (() => {});
   // config.json, parsed again only when the file changed: the list, the sweep and every route ask, flag off included.
@@ -541,25 +565,64 @@ export function createInboxLaunch(options: {
     startLog,
     displayFolder: options.displayFolder,
     bridge: options.live,
+    sessionElsewhere: (session, launchId) => sessionElsewhere(session, launchId),
+    sessionHeld: (session, launchId) => sessionHeld(session, launchId),
+    t3StartingBeside: (launchId, folder, title) =>
+      roots().some((m) => {
+        const other = m.launch!;
+        return other.id !== launchId && starting.has(other.id) && !other.session_ref && !other.deleted_at && other.folder === folder && inboxLaunchInT3(other) && t3TitleOf(launchNameOf(m)) === title;
+      }),
     log,
   };
   const claude = createClaudeLaunchHost(context);
   /** The agents the Inbox can start, one per line. */
-  const ownHosts: LaunchHost[] = [
+  const ownHosts: AgentHost[] = [
     claude,
     createPiLaunchHost(context),
     createCodexLaunchHost(context),
     createOpenCodeLaunchHost(context),
   ];
+  /**
+   * Start in T3 Code (Settings → Agents' "Start new agents in" T3 Code): it runs a launch that asked for T3 Code, as a
+   * T3 thread on the launch's own agent. No agent of its own: To never offers it, and a Send never names it.
+   */
+  const t3 = createT3LaunchHost(context, options.t3StartTimeoutMs ? { startTimeoutMs: options.t3StartTimeoutMs } : {});
   /** By each host's own `agent`, so the key a record is looked up by is the agent the host writes. */
-  const hosts: Record<string, LaunchHost> = Object.fromEntries([...ownHosts, ...(options.hosts?.(context) ?? [])].map((host) => [host.agent, host]));
-  const hostList = Object.values(hosts);
-  /** The host of a launch's agent; null for an agent with no host here. */
-  const hostOf = (launch: InboxLaunchRecord): LaunchHost | null => (Object.hasOwn(hosts, launch.agent) ? hosts[launch.agent]! : null);
+  const hosts = Object.fromEntries([...ownHosts, ...(options.hosts?.(context) ?? [])].map((host) => [host.agent, host])) as Record<string, AgentHost>;
+  const hostList: AgentHost[] = Object.values(hosts);
+  /** Whose trust a folder needs: the launch's own agent's, also when T3 Code runs it (the same agent runs in that folder). */
+  const trustHostOf = (launch: InboxLaunchRecord, host: LaunchHost): LaunchHost => (host === t3 && Object.hasOwn(hosts, launch.agent) ? hosts[launch.agent]! : host);
+  /** The host of a launch's agent; null for an agent with no host here. One that asked for T3 Code and didn't fall back: T3 Code's. */
+  const hostOf = (launch: InboxLaunchRecord): LaunchHost | null => {
+    if (inboxLaunchInT3(launch) && Object.hasOwn(INBOX_T3_DRIVERS, launch.agent)) return t3;
+    return Object.hasOwn(hosts, launch.agent) ? hosts[launch.agent]! : null;
+  };
   /** Every launch: each launched root and reply that started a new session, and each scheduled run's divider (one launch per run, many in that one thread). */
   const roots = () => [...store.launchedRoots(), ...store.scheduledRunLaunches()];
   /** A thread's launched messages, oldest first: its root, when New message launched it, then each reply sent to a new session. */
   const launchesOf = (threadId: string): InboxMessage[] => store.launchedRoots().filter((m) => m.thread_id === threadId);
+  /**
+   * A session that is not launch `launchId`'s to take: another launch (deleted or not) started it, or its first message
+   * here (one it wrote, or a person's that went to it) is in another thread than that launch's.
+   */
+  function sessionElsewhere(session: string, launchId: string): boolean {
+    if (sessionHeld(session, launchId)) return true;
+    const first = store.firstThreadsBySession().get(session);
+    return !!first && first.id !== roots().find((m) => m.launch!.id === launchId)?.thread_id;
+  }
+  /** Whether another launch than `launchId` (deleted or not) started `session` or took it as its own. */
+  function sessionHeld(session: string, launchId: string): boolean {
+    return roots().some((m) => m.launch!.id !== launchId && (m.launch!.session_ref === session || m.launch!.session === session));
+  }
+  /** The agent a T3 start of this root's launch put in its thread, once it wrote there (`t3LaunchWriterOf`); null otherwise. */
+  const t3WriterOf = (root: InboxMessage): { host: string; session: string } | null => {
+    const launch = root.launch!;
+    if (!inboxLaunchInT3(launch)) return null;
+    const firsts = store.firstThreadsBySession();
+    const messages = store.threadMessageIds(root.thread_id).flatMap((id) => store.message(id) ?? []);
+    const own = launch.session_ref && root.to && !root.to.session.startsWith("launch:") ? root.to.session : null;
+    return t3LaunchWriterOf(messages, { threadId: root.thread_id, agent: launch.agent, since: Date.parse(launch.started_at), own }, (session) => firsts.get(session)?.id ?? null, (session) => sessionElsewhere(session, launch.id));
+  };
   /** The launch a thread's run line, row and reply follow: a routine's newest run, else its latest launched message, else the thread's root. */
   const threadLaunch = (threadId: string): InboxMessage | undefined => store.scheduledRunOf(threadId) ?? launchesOf(threadId).at(-1) ?? store.message(threadId) ?? undefined;
   const states = new Map<LaunchHost, HostState>();
@@ -569,7 +632,7 @@ export function createInboxLaunch(options: {
     const sessions = stateOf(host).view?.sessions;
     return ref && sessions ? sessions(ref) : null;
   };
-  for (const host of hostList) {
+  for (const host of [...hostList, t3]) {
     const mine = (root: InboxMessage) => !root.launch!.deleted_at && hostOf(root.launch!) === host;
     states.set(host, {
       availability: null,
@@ -719,6 +782,49 @@ export function createInboxLaunch(options: {
     return [...launchesOf(threadId), ...(run ? [run] : [])].filter((m) => !m.launch!.deleted_at && inboxLaunchedSession(m) === session).at(-1) ?? null;
   };
 
+  /** Whether a launched root's session has reached the Inbox: polled, called a tool, or wrote in the thread. */
+  const heardFrom = (root: InboxMessage): boolean => {
+    const session = root.to?.session;
+    if (!session || session.startsWith("launch:")) return false;
+    if (options.live.runStateOf(session) || (options.live.lastHeardOf?.(session) ?? null) !== null) return true;
+    const wrote = store.threadMessageIds(root.thread_id).some((id) => {
+      const message = store.message(id);
+      return message?.author.kind === "agent" && message.author.session === session;
+    });
+    // In T3 Code only Claude reaches the Inbox as the thread: Codex, OpenCode and Pi write under their own sessions.
+    return wrote || t3WriterOf(root) !== null;
+  };
+
+  /** It runs (or starts) in T3 Code: the Inbox can neither stop it nor start it again. */
+  const isAppOwned = (launch: InboxLaunchRecord): boolean => inboxLaunchInT3(launch);
+
+  /** How often a `turnEnded` host's app is asked again while its session has not reached the Inbox. */
+  const TURN_ENDED_TTL_MS = 60_000;
+  /**
+   * Whether the session's turn has ended by its app's last word (true; "failed": its run failed), or the app can't be
+   * asked (null, which counts as ended). Not asked yet, or a turn that runs: false. Asks again in the background once
+   * the word is a minute old, but never after the app said the turn ended: that word can't change the line any more.
+   * No `turnEnded` member: true.
+   */
+  const quietTurnEnded = (host: LaunchHost, launch: InboxLaunchRecord, memo: Memo): boolean | "failed" => {
+    if (!host.turnEnded) return true;
+    const ref = launch.session_ref;
+    if (!ref) return false;
+    if (memo.ended?.value === true || memo.ended?.value === "failed") return memo.ended.value;
+    if (!memo.endedAsking && (!memo.ended || now() - memo.ended.at >= TURN_ENDED_TTL_MS)) {
+      memo.endedAsking = true;
+      void host
+        .turnEnded(ref)
+        .catch(() => null)
+        .then((value) => {
+          memo.ended = { at: now(), value };
+          memo.endedAsking = false;
+          options.onChange();
+        });
+    }
+    return memo.ended ? memo.ended.value !== false : false;
+  };
+
   /** The run line of a launched root; null for an agent with no host here. */
   const runOfRoot = (root: InboxMessage): InboxRun | null => {
     const launch = root.launch!;
@@ -726,7 +832,18 @@ export function createInboxLaunch(options: {
     if (launch.deleted_at || !host) return null;
     const state = stateOf(host);
     const memo = memoOf(launch);
-    const live = liveOf(host, root, memo);
+    let live = liveOf(host, root, memo);
+    // A host whose start delivers the first turn itself (T3 Code): connected once its session reached the Inbox (a
+    // poll, a tool call, a message in the thread). Not by then, `connectWaitMs` after the start: the "not connected" line.
+    // The wait counts from the start, or from this Inbox's own start after a restart (what it heard before is gone);
+    // and the line shows only once the agent's app says the turn ended (or can't be asked): a session at work in a
+    // long first turn is never called not connected.
+    // A run its app says failed (an agent not signed in there) never reached the Inbox and won't: the line at once.
+    const heard = host.connectWaitMs ? heardFrom(root) : null;
+    if (heard === false && live && !live.busy) {
+      const ended = quietTurnEnded(host, launch, memo);
+      if (ended === "failed" || (ended && now() - Math.max(memo.startedAt, bootAt) >= host.connectWaitMs!)) live = null;
+    }
     // In Rex: the host has no word on it (Rex runs it); its Rex pane's status says when it waits on the person.
     const inRex = inboxLaunchInRex(launch);
     const rexStatus = inRex && root.to ? (options.rexStatus?.(root.to.session) ?? null) : null;
@@ -751,8 +868,12 @@ export function createInboxLaunch(options: {
     }
     const project = store.project(root.project_id)?.name ?? launch.folder;
     const last = state.lastAvailable;
+    // A start the Inbox closed during (no session, no error, and none runs now): the host's own words, with Try again.
+    const cut = host.interruptedStart && !launch.session_ref && !launch.error && !starting.has(launch.id) ? { code: "failed" as const, text: host.interruptedStart, at: launch.started_at } : null;
+    // Its agent wrote in the thread since: that start made the thread, so it settles as started by itself.
+    if (cut && host === t3) settleWritten(root, memo);
     return inboxRunOf({
-      launch,
+      launch: cut ? { ...launch, error: cut } : launch,
       project,
       now: now(),
       startedAt: memo.startedAt,
@@ -760,7 +881,7 @@ export function createInboxLaunch(options: {
       cliAvailable: last === null ? null : !(last.ok === false && last.missing),
       live,
       turnWaiting: turnWaitingOf(root, memo),
-      seenLive: !!root.delivery,
+      seenLive: heard ?? !!root.delivery,
       host: hostState,
       waitingSince: memo.waitingSince,
       respawnFailed: respawnFailedOf(memo),
@@ -769,8 +890,10 @@ export function createInboxLaunch(options: {
       stoppedByPersonAt: memo.stoppedAt,
       stoppedNote: inRex ? null : (host.stoppedNote?.(launch) ?? null),
       connector: host.connector,
+      restartable: !isAppOwned(launch),
       // In Rex its tab is the way in: no command opens it elsewhere.
       attachCommand: inRex ? null : host.attach(launch),
+      ...(launch.t3 ? { t3: { ...(inboxLaunchInT3(launch) && launch.session_ref ? { started: true as const } : {}), ...(launch.t3.unavailable ? { unavailable: true as const } : {}), ...(launch.t3.refused ? { refused: true as const } : {}), ...(launch.t3.why ? { why: launch.t3.why } : {}), ...(launch.t3.declined ? { declined: launch.t3.declined } : {}), ...(launch.t3.declined_effort ? { declined_effort: launch.t3.declined_effort } : {}) } } : {}),
       ...(launch.rex ? { rex: { line: launch.rex.line ?? null, ...(launch.rex.unavailable ? { unavailable: true as const, ...(launch.rex.why === "server" || launch.rex.why === "shared" ? { why: launch.rex.why } : {}) } : {}), ...(launch.rex.refused ? { refused: true as const } : {}), ...(rexWaiting ? { waiting: rexWaiting } : {}), ...(inRex && memo.rexCheck?.held ? { held: memo.rexCheck.held } : {}), ...(inRex && ownPaneOf(launch) ? { stops: true as const } : {}) } } : {}),
       permissionSince: openPermissionSince(store, root.thread_id),
       ...(launch.made_folder || launch.clone ? { shownFolder: options.displayFolder(launch.folder) } : {}),
@@ -973,6 +1096,42 @@ export function createInboxLaunch(options: {
   /** A launch's Rex record once Rex made its tab: where, and the pane (for Stop). */
   const rexRecord = (line: string, pane: InboxPlace | null): InboxLaunchRecord["rex"] => ({ line, ...(pane ? { session: pane.session, block: pane.block } : {}) });
 
+  /** The name a launch's agent starts under: its thread's (a reply's launch takes its thread's name). */
+  const launchNameOf = (root: InboxMessage): string => {
+    const head = root.id === root.thread_id ? root : (store.message(root.thread_id) ?? root);
+    return head.thread_name ?? head.subject ?? "Inbox";
+  };
+
+  /**
+   * A T3 start the Inbox closed during, whose agent has since written in the thread: that start made the thread, so
+   * the launch settles on it as a start that took (no Try again). Claude Code writes as the thread itself; another
+   * agent's thread is found among T3's threads (`adopt`). Asked once per launch while this Inbox runs; until then, or
+   * when T3 can't say, the line stays as it is and its Try again takes the thread (it never starts a second).
+   */
+  const settleWritten = (root: InboxMessage, memo: Memo): void => {
+    const launch = root.launch!;
+    if (memo.t3Settling || starting.has(launch.id)) return;
+    const writer = t3WriterOf(root);
+    if (!writer) return;
+    memo.t3Settling = true;
+    starting.add(launch.id);
+    void (async () => {
+      // Only a Claude Code launch's agent writes as its T3 thread (taken once T3 lists it under the launch's title); any
+      // other's thread is found among T3's.
+      const thread = launch.agent === "claude-code" && writer.host === t3.agent ? await t3.adopt(launch, launchNameOf(root), writer.session) : await t3.adopt(launch, launchNameOf(root));
+      const at = store.message(root.id)?.launch;
+      if (!thread || !at || at.session_ref || at.error || at.deleted_at) return;
+      startLog(launch.id, `T3 thread ${thread}: its agent (${writer.host} ${writer.session}) wrote in the thread after the Inbox closed during its start: taken as started`);
+      store.settleLaunch(root.id, { to: { host: t3.agent, session: thread }, session_ref: thread, delivered: true });
+      log(`Inbox launch ${launch.id}: started ${thread} (its agent wrote first)`);
+    })()
+      .catch(() => {})
+      .finally(() => {
+        starting.delete(launch.id);
+        options.onChange();
+      });
+  };
+
   /** Start (or start again after a failed start) the agent for a launched root: in Rex when it asked for Rex and Rex is here, else in the background. */
   const run = async (root: InboxMessage, host: LaunchHost, again: boolean): Promise<void> => {
     const launch = root.launch!;
@@ -991,30 +1150,59 @@ export function createInboxLaunch(options: {
       // The person's login env, read for this start (after the Send answered). This start never uses an older one; the
       // read also reaches the hosts' `loginRead` (OpenCode keeps it in memory for its model lists only).
       const login = await readLogin();
-      await trustMadeFolder(launch, host);
-      // A reply's launch takes its thread's name.
-      const head = root.id === root.thread_id ? root : (store.message(root.thread_id) ?? root);
-      const name = head.thread_name ?? head.subject ?? "Inbox";
+      await trustMadeFolder(launch, trustHostOf(launch, host));
+      const name = launchNameOf(root);
       const wantsRex = !!launch.rex && !!host.rexCommand;
       const asked = wantsRex ? await startInRex(root, host, launch, { name, login, resume: false }) : null;
       const away = asked && "away" in asked ? asked.away : null;
       const viaRex = asked && !("away" in asked) ? asked : null;
-      const result = viaRex ?? (await host.start(launch, { name, login }));
+      // Start in T3 Code (`host` is T3 Code's): the T3 wake's own text for the message is the thread's first turn.
+      const firstTurn = !viaRex && host.startsWithTurn ? (options.firstTurn?.(store.message(root.id) ?? root) ?? root.body) : undefined;
+      // In T3 Code the agent is still the person's own: a folder it doesn't trust yet (a clone that brings hooks) waits
+      // for its Trust folder, as its own start, or Rex's, would (decision 4a). Trust folder starts it again.
+      const unTrusted = host === t3 && !viaRex && !trustHostOf(launch, host).trusts(launch.folder);
+      let result = viaRex ?? (unTrusted ? { ok: false as const, code: "untrusted" as const, text: `${launch.folder} isn't a trusted folder yet.` } : await host.start(launch, { name, login, ...(firstTurn !== undefined ? { firstTurn } : {}), ...(host === t3 && t3WriterOf(store.message(root.id) ?? root) ? { wrote: true } : {}) }));
+      // T3 Code not open here, or it said no (it made nothing): the agent's own host starts it in the background, and
+      // the line says why, as for Rex.
+      let used = host;
+      const t3Away = host === t3 && !result.ok && "away" in result && result.away ? result.away : null;
+      // What T3 refused rides along (the line says it): why, and the person's model or effort it didn't take.
+      const said = result as { why?: LaunchStartWhy; declined?: string; declined_effort?: string };
+      const declinedOf = { ...(said.declined ? { declined: said.declined } : {}), ...(said.declined_effort ? { declined_effort: said.declined_effort } : {}) };
+      const own = t3Away && Object.hasOwn(hosts, launch.agent) ? hosts[launch.agent]! : null;
+      if (t3Away) {
+        startLog(launch.id, `T3 Code ${t3Away === "absent" ? "isn't open" : "said no"} (${result.ok ? "" : result.text}): starting in the background`);
+        if (own) {
+          used = own;
+          result = await own.start(launch, { name, login });
+        }
+      }
+      const t3Record: InboxLaunchRecord["t3"] = t3Away
+        ? t3Away === "absent"
+          ? { unavailable: true }
+          : { refused: true, ...(said.why ? { why: said.why } : {}), ...declinedOf }
+        : host === t3 && result.ok && Object.keys(declinedOf).length > 0
+          ? declinedOf
+          : undefined;
       // Rex not here, or it said no: it started in the background, and the line says why.
       const rex = !wantsRex ? undefined : away === "refused" ? { refused: true as const } : away ? { unavailable: true as const, ...(away === "server" || away === "shared" ? { why: away } : {}) } : viaRex?.ok && viaRex.line ? rexRecord(viaRex.line, viaRex.pane) : undefined;
       // Deleted while it started: the session it made goes too (one in Rex is Rex's: left), and the thread stays as the person left it.
       if (store.message(root.id)?.launch?.deleted_at) {
         if (result.ok && viaRex === null) {
-          const stop = await host.stop(result.ref);
-          const rm = await host.remove(result.ref);
+          const stop = await used.stop(result.ref);
+          const rm = await used.remove(result.ref);
           log(`Inbox launch ${launch.id}: deleted while starting; removed ${result.ref} (stop ${stop.exitCode}, rm ${rm.exitCode})`);
         }
-        await removeScratch(host, launch);
+        await removeScratch(used, launch);
         rmSync(launchDir(launch.id), { recursive: true, force: true });
         return;
       }
-      if (result.ok) store.settleLaunch(root.id, { to: { host: launch.agent, session: result.session }, session_ref: result.ref, ...(rex ? { rex } : {}) });
-      else store.settleLaunch(root.id, { error: { code: result.code, text: result.text, at: new Date(now()).toISOString() }, ...(rex ? { rex } : {}) });
+      if (result.ok) {
+        // The start put the message in as the session's first turn: delivered in the same snapshot that moves it,
+        // so no wake ever sees it on the session undelivered (an Inbox stopped right after included).
+        // In T3 Code the session is a T3 thread (`to.host` "t3", so the T3 wake sends the replies), and what T3 runs it on is kept.
+        store.settleLaunch(root.id, { to: { host: used.agent, session: result.session }, session_ref: result.ref, ...(!viaRex && used.startsWithTurn ? { delivered: true } : {}), ...(rex ? { rex } : {}), ...(t3Record ? { t3: t3Record } : {}), ...("inner" in result && result.inner ? { inner: result.inner } : {}) });
+      } else store.settleLaunch(root.id, { error: { code: result.code, text: result.text, at: new Date(now()).toISOString() }, ...(rex ? { rex } : {}), ...(t3Record ? { t3: t3Record } : {}) });
       log(`Inbox launch ${launch.id}: ${result.ok ? `started ${result.ref}` : `did not start (${result.code})`}`);
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error);
@@ -1122,8 +1310,10 @@ ${result.text}`);
       }
       // Done. What it brings decides whether it starts without asking (decision 4a).
       let brings: string[] = [];
-      if (!host.trusts(launch.folder)) {
-        const offer = host.trustOffer?.({ folder: launch.folder, scratch: false }) ?? null;
+      // Started in T3 Code, the agent inside is still the person's own: its trust decides, as for any start.
+      const trusting = trustHostOf(launch, host);
+      if (!trusting.trusts(launch.folder)) {
+        const offer = trusting.trustOffer?.({ folder: launch.folder, scratch: false }) ?? null;
         if (offer) {
           const reading = offer.read();
           if (reading.warns) brings = bringsOf(reading.facts);
@@ -1203,6 +1393,9 @@ ${result.text}`);
   /** The host's `resume` once; a failure is kept (and the CLI looked at again, for screen 15). */
   const respawn = (root: InboxMessage, host: LaunchHost, forReply: string) => {
     const launch = root.launch!;
+    // T3 Code runs it: never "started again" here, and its polls never counted as quiet (that would read it stopped
+    // while it runs).
+    if (isAppOwned(launch)) return;
     const memo = memoOf(launch);
     respawning.add(launch.id);
     memo.startedAt = now();
@@ -1376,6 +1569,8 @@ ${result.text}`);
       return;
     }
     if (!host || launch.deleted_at || launch.error || !launch.session_ref || !root.to || respawning.has(launch.id) || starting.has(launch.id)) return;
+    // T3 Code runs it: a reply goes in through the T3 wake, and nothing here starts it again.
+    if (isAppOwned(launch)) return;
     // Only a session that connected once: one that never did is "not connected", and respawning it would not help.
     // A host that owns the process is the exception once that process ended (its line says a reply continues it).
     // One in Rex: Rex owns its process, so only once it connected, or once the person stopped it (Stop closed its
@@ -1483,6 +1678,8 @@ ${result.text}`);
   const stopLaunch = async (root: InboxMessage, host: LaunchHost): Promise<InboxRun | null> => {
     const launch = root.launch!;
     const state = stateOf(host);
+    // T3 Code runs it: nothing to stop from here, and the line stays as it is.
+    if (isAppOwned(launch)) return runOfRoot(root);
     // Cancel during a clone (E1, E7): git is stopped, and the partly cloned folder goes.
     const cloning = clones.get(launch.id);
     if (cloning) {
@@ -1539,7 +1736,7 @@ ${result.text}`);
    * switch (Claude Code's words, `settingsState`) and the scratch root. Off, those rows are hidden, so nothing else is
    * read (no Claude settings, no login shell).
    */
-  const settingsState = (rexHere?: boolean, rexShared?: boolean): { enabled: boolean; full_permissions: boolean } & Record<string, unknown> => ({
+  const settingsState = (rexHere?: boolean, rexShared?: boolean, t3Here?: { installed: boolean; open: boolean }): { enabled: boolean; full_permissions: boolean } & Record<string, unknown> => ({
     // Windows: launch has no support there (off unless config.json says true), so Settings shows no switch.
     ...(options.platform === "win32" ? { unsupported: true } : {}),
     ...(enabled()
@@ -1560,6 +1757,11 @@ ${result.text}`);
           // Not here because the Rex server that answered is another account's (a shared server): the row says that, not "isn't running".
           ...(rexShared ? { rex_shared: true as const } : {}),
           rex_agents: hostList.filter((host) => host.rexCommand).map((host) => host.agent),
+          // T3 Code: offered while it is on this computer (`t3_here`, its `t3` is there) or while it is the choice;
+          // `t3_open` whether it runs now (the row says new agents start in the background until it does). Read for
+          // Settings → Agents' own read from any window of this Inbox, as Rex is (files only: nothing is run or contacted).
+          ...(t3Here ? { t3_here: t3Here.installed, t3_open: t3Here.open } : {}),
+          t3_agents: hostList.filter((host) => Object.hasOwn(INBOX_T3_DRIVERS, host.agent)).map((host) => host.agent),
         }
       : { enabled: false, full_permissions: false }),
   });
@@ -1726,7 +1928,9 @@ ${result.text}`);
       // starts in Rex here, and the row has to show where the person is for Rex to be chosen at all (a window on
       // this computer opened on its tailnet address too). Never for the device door (a phone's or a linked machine's read).
       const rexHere = !door && !ahead && enabled() ? (await options.rex?.appAttachedNow()) === true : undefined;
-      return json({ launch: settingsState(rexHere, rexHere === false && options.rex?.shared?.() === true) });
+      // T3 Code's `t3` and its server, read from files: shown where Rex's row is, for the same reason (a Send from either window starts in T3 Code here).
+      const t3Here = !door && !ahead && enabled() ? await t3.here() : undefined;
+      return json({ launch: settingsState(rexHere, rexHere === false && options.rex?.shared?.() === true, t3Here) });
     }
     if (req.method !== "POST") return json({ error: "Use POST." }, 405);
     const body = await options.readBody(req);
@@ -1765,8 +1969,8 @@ ${result.text}`);
       }
       if ("start_in" in body) {
         // Settings → Agents' "Start new agents in": new starts only; one already started stays where it runs.
-        if (body.start_in !== "inbox" && body.start_in !== "rex") throw new InboxError("validation_error", 'start_in: "inbox" or "rex".', { field: "start_in" });
-        saveConfig({ inboxLaunch: { startIn: body.start_in === "rex" ? "rex" : undefined } as { startIn?: "rex" } });
+        if (body.start_in !== "inbox" && body.start_in !== "rex" && body.start_in !== "t3") throw new InboxError("validation_error", 'start_in: "inbox", "rex" or "t3".', { field: "start_in" });
+        saveConfig({ inboxLaunch: { startIn: body.start_in === "inbox" ? undefined : body.start_in } as { startIn?: "rex" | "t3" } });
         if (config().startIn !== body.start_in) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed.");
         return json({ launch: settingsState() });
       }
@@ -1797,11 +2001,16 @@ ${result.text}`);
     if (door && !door.window) return json(INBOX_MACHINE_WINDOW_ONLY_BODY, 403);
     switch (match[2]) {
       case "stop":
+        // An agent T3 Code runs: the Inbox can't stop it, and saying "stopped" would be false. Said in words an older
+        // linked window (which still offers Stop) shows as it is.
+        if (isAppOwned(launch)) throw new InboxError("launch_in_t3", INBOX_RUN_IN_T3_STOP);
         return json({ run: await stopLaunch(root, host) });
       case "open": {
         if (via === "tailnet") return localOnly();
         // In Rex its tab is the way in: Terminal would run a second copy (or a command that fails).
         if (inboxLaunchInRex(launch)) throw new InboxError("launch_in_rex", INBOX_RUN_IN_REX_OPEN);
+        // In T3 Code its thread is the way in.
+        if (isAppOwned(launch)) throw new InboxError("launch_in_t3", INBOX_RUN_IN_T3_OPEN);
         const e = await environment();
         // osascript is what decides, not the platform, so the e2e specs' fake runs on a Linux CI runner too. Asked
         // first: `terminal` may hand a session over, and a refused Open must change nothing.
@@ -1885,7 +2094,7 @@ ${result.text}`);
           // Nothing refused now (a second click, a stale window): the line as it stands, never a second start.
           if (!refusedForTrust(root)) return runNow();
           if (!isFolder(launch.folder)) throw new InboxError("folder_missing", `${options.displayFolder(launch.folder)} isn't there any more.`);
-          const offer = trustOfferOf(host, launch);
+          const offer = trustOfferOf(trustHostOf(launch, host), launch);
           // The person agreed to the line they read: a folder that changed since gets a new read, and a new click.
           const { warning } = offer.read();
           if ((body.warning ?? null) !== warning) throw new InboxError("trust_warning_changed", `This folder changed, so nothing was saved. ${warning ?? "It no longer has anything to warn about."} Click Trust folder again if that's fine.`);
@@ -1962,6 +2171,11 @@ ${result.text}`);
     if (!launch.error) {
       // Started but never connected (or cut off by an Inbox restart): respawn the session it made, or start anew without one.
       if (runOfRoot(root)?.state !== "failed") throw new InboxError("validation_error", "That launch did not fail.");
+      // T3 Code runs the thread it made: nothing here starts it again, and the line stays as it reads (an older window
+      // still offers Try again; it is told why, and nothing changes).
+      if (isAppOwned(launch) && launch.session_ref) throw new InboxError("launch_in_t3", INBOX_RUN_IN_T3_AGAIN);
+      // Reading the line just began taking the thread its agent wrote from (`settleWritten`): that is the start.
+      if (starting.has(launch.id)) return;
       if (launch.session_ref && root.to && !root.to.session.startsWith("launch:")) respawn(root, host, memo.respawn?.for ?? root.id);
       // No session was made: a first start, not "again".
       else void run(root, host, false);
@@ -2290,6 +2504,8 @@ ${result.text}`);
         // came from (this computer's window, a phone, the tailnet, a linked machine). A routine's run (`background`)
         // always runs in the background: no new tab per run.
         ...(config().startIn === "rex" && host.rexCommand && input.background !== true ? { rex: {} } : {}),
+        // Start new agents in T3 Code: the same, for an agent T3 Code runs (Claude Code, Codex, OpenCode, Pi).
+        ...(config().startIn === "t3" && Object.hasOwn(INBOX_T3_DRIVERS, host.agent) && input.background !== true ? { t3: {} } : {}),
       };
       // Default sent while the lists were being read or could not be read (no menu to pick from): the saved pick stays.
       const picked = !!(target.choice?.model || target.choice?.effort || target.choice?.primary_agent);
@@ -2453,10 +2669,10 @@ ${result.text}`);
         ? runLine
         : {
             ...runLine,
-            ...(host.trustCoversHome?.(root.launch) ? { trust_covers_home: true as const } : {}),
+            ...(trustHostOf(root.launch, host).trustCoversHome?.(root.launch) ? { trust_covers_home: true as const } : {}),
             ...(samePlace(root.launch.folder, options.homeDir) ? { home_folder: true as const } : {}),
           };
-      const offer = owner && line?.untrusted ? host.trustOffer?.(root.launch) : null;
+      const offer = owner && line?.untrusted ? trustHostOf(root.launch, host).trustOffer?.(root.launch) : null;
       return offer ? { ...line!, trust: { warning: offer.read().warning } } : line;
     },
 
@@ -2604,13 +2820,13 @@ ${result.text}`);
      * run line's state (null: no line, which is live and idle, or resting with nothing waiting on it). An agent with
      * no host here (a downgrade) is left out, as it has no line.
      */
-    agents(): { launch_id: string; session: string; thread_id: string; host: string; project_id: string; started_at: string; started: boolean; run: InboxRun["state"] | null; scratch: string | null; scheduled: boolean; rex: boolean }[] {
+    agents(): { launch_id: string; session: string; thread_id: string; host: string; project_id: string; started_at: string; started: boolean; run: InboxRun["state"] | null; scratch: string | null; scheduled: boolean; inner?: InboxLaunchInner; rex: boolean; t3: boolean }[] {
       return inOnePass(() =>
         roots().flatMap((root) => {
           const launch = root.launch!;
           const session = inboxLaunchedSession(root);
           if (launch.deleted_at || !session || !hostOf(launch)) return [];
-          return [{ launch_id: launch.id, session, thread_id: root.thread_id, host: launch.agent, project_id: root.project_id, started_at: launch.started_at, started: !!launch.session_ref, run: runOfRoot(root)?.state ?? null, scratch: launch.scratch ? basename(launch.folder) : null, scheduled: !!root.scheduled_run, rex: inboxLaunchRexUnstoppable(launch) }];
+          return [{ launch_id: launch.id, session, thread_id: root.thread_id, host: launch.agent, project_id: root.project_id, started_at: launch.started_at, started: !!launch.session_ref, run: runOfRoot(root)?.state ?? null, scratch: launch.scratch ? basename(launch.folder) : null, scheduled: !!root.scheduled_run, ...(launch.inner ? { inner: launch.inner } : {}), rex: inboxLaunchRexUnstoppable(launch), t3: inboxLaunchInT3(launch) }];
         }),
       );
     },

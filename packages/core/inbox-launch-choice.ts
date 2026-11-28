@@ -205,6 +205,96 @@ export function openCodeSessionModel(model: string | undefined, variant: string 
   return { providerID: model.slice(0, at), id: model.slice(at + 1), ...(inboxLaunchTokenOk(variant) ? { variant } : {}) };
 }
 
+/**
+ * The Inbox's agents T3 Code can run as a thread (Settings → Agents' "Start new agents in" T3 Code), by the T3 driver
+ * that runs each. T3's built-in instance of a driver has the driver's own id (`defaultInstanceIdForDriver`).
+ */
+export const INBOX_T3_DRIVERS: Readonly<Record<string, string>> = { "claude-code": "claudeAgent", codex: "codex", opencode: "opencode", pi: "pi" };
+
+/** T3's agents by driver, in the names this app uses. */
+const T3_AGENT_NAMES: Record<string, string> = {
+  claudeAgent: "Claude Code",
+  codex: "Codex",
+  opencode: "OpenCode",
+  pi: "Pi",
+  cursor: "Cursor",
+  antigravity: "Antigravity",
+  kiro: "Kiro",
+  grok: "Grok",
+};
+
+/** The agent a T3 provider instance runs, in words: T3's own display name, else this table (by driver, then instance), else the instance id. */
+export function t3AgentName(instance: string, driver?: string | null, displayName?: string | null): string {
+  const shown = displayName?.replace(/\s+/g, " ").trim();
+  if (shown) return shown.slice(0, 60);
+  return (driver ? T3_AGENT_NAMES[driver] : undefined) ?? T3_AGENT_NAMES[instance] ?? instance;
+}
+
+/** A T3 provider instance and one of its models, both safe on a command line (`--provider=`, `--model=`). */
+export interface T3ModelPick {
+  provider: string;
+  model: string;
+}
+
+/** A pick only when both are plain: an instance id is a slug with no "/" (T3's PROVIDER_SLUG_PATTERN), a model a launch token. */
+function t3PickOf(provider: unknown, model: unknown): T3ModelPick | null {
+  if (typeof provider !== "string" || !/^[a-zA-Z][a-zA-Z0-9_-]{0,127}$/.test(provider) || !inboxLaunchTokenOk(model)) return null;
+  return { provider, model };
+}
+
+/** What a `t3 … --json` printed: all of it, else its last line (T3 may log a line first). Undefined when neither is JSON. */
+function t3Json(stdout: string): unknown {
+  for (const text of [stdout.trim(), stdout.trim().split("\n").pop() ?? ""]) {
+    try {
+      return JSON.parse(text) as unknown;
+    } catch {
+      // The next.
+    }
+  }
+  return undefined;
+}
+
+/**
+ * The model T3 already ran this agent on in this project: the newest thread of `t3 thread list --json` (newest first,
+ * T3's `OrchestratorMcpThreadListItem`) whose provider instance is the driver's own. Null when none did.
+ */
+export function t3NewestModelOf(stdout: string, driver: string): T3ModelPick | null {
+  const threads = t3Json(stdout);
+  if (!Array.isArray(threads)) return null;
+  for (const thread of threads as { providerInstanceId?: unknown; model?: unknown }[]) {
+    if (thread?.providerInstanceId !== driver) continue;
+    const pick = t3PickOf(thread.providerInstanceId, thread.model);
+    if (pick) return pick;
+  }
+  return null;
+}
+
+/**
+ * The model T3 lists first for this agent, from `orchestrator_capabilities` (T3's `OrchestratorMcpCapabilitiesResult`:
+ * `providers[]` with `providerInstanceId`, `driverKind`, `models[].id`, `constraints`). T3 orders each list itself (the
+ * person's favorites and its own preferences first), so its first model is T3's own pick for that agent. Only a
+ * provider T3 says can run work now (no `constraints`): one it says can't (signed out, no usage left) would fail its
+ * first turn in T3. Null when T3 lists none.
+ */
+export function t3ListedModelOf(answer: unknown, driver: string): T3ModelPick | null {
+  const providers = (answer as { providers?: unknown } | null)?.providers;
+  if (!Array.isArray(providers)) return null;
+  const ofDriver = (providers as { providerInstanceId?: unknown; driverKind?: unknown; models?: unknown; constraints?: unknown }[]).filter((p) => p?.driverKind === driver && Array.isArray(p.models));
+  const ready = (p: { constraints?: unknown }) => !Array.isArray(p.constraints) || p.constraints.length === 0;
+  for (const provider of ofDriver.filter(ready)) {
+    for (const entry of provider.models as { id?: unknown }[]) {
+      const pick = t3PickOf(provider.providerInstanceId, entry?.id);
+      if (pick) return pick;
+    }
+  }
+  return null;
+}
+
+/** "Claude Code · opus": what an agent started in T3 Code runs on there, as its meta line and agent row say it. */
+export function launchInnerWords(inner: { agent: string; model: string } | null | undefined): string | null {
+  return inner?.agent && inner.model ? `${inner.agent} · ${inner.model}` : null;
+}
+
 export function launchChoiceLine(choice: InboxLaunchChoice | null | undefined, shortModel = (model: string) => model): string | null {
   if (!choice?.model && !choice?.effort && !choice?.primary_agent) return null;
   return [choice.model ? shortModel(choice.model) : null, choice.effort ?? null, choice.primary_agent ?? null].filter(Boolean).join(" · ");

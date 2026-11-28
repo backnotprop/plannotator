@@ -190,7 +190,7 @@ const AgentRow = memo(
     const named = agentIsNamed(entry.agent);
     // Stop and Delete as the launch's thread offers them (Thread.tsx `launchMenu`), for an agent the Inbox launched.
     const launch = entry.agent.launch;
-    const onStop = launch && props.onStop && inboxLaunchStops(launch.started === true, launch.run ?? null, launch.rex === true) ? props.onStop : undefined;
+    const onStop = launch && props.onStop && inboxLaunchStops(launch.started === true, launch.run ?? null, launch.rex === true, launch.t3 === true) ? props.onStop : undefined;
     const onDelete = launch ? props.onDelete : undefined;
     // Show in Rex only where it works now (the list said so for this window): never a dead item.
     const onShowInRex = entry.agent.place?.show === true && !props.phone ? props.onShowInRex : undefined;

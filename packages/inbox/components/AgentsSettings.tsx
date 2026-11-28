@@ -23,7 +23,7 @@ import { clockTime, dayWords, formatCount } from '../format';
 import { codexAccountLine } from '../codexAccount';
 import { hostLabel } from '../compose/model';
 import { launchStartIn } from '../data/actions/launchStartIn';
-import { INBOX_REX_SERVER_AWAY_SETTINGS, INBOX_REX_SHARED_AGAIN } from '@plannotator/core/inbox-run-line';
+import { INBOX_REX_SERVER_AWAY_SETTINGS, INBOX_REX_SHARED_AGAIN, INBOX_T3_NOT_HERE_SETTINGS } from '@plannotator/core/inbox-run-line';
 
 /** The agents New message starts, as Settings names them in "Start new agents in". */
 const REX_LAUNCH_AGENTS = ['claude-code', 'pi', 'codex', 'opencode'];
@@ -652,8 +652,9 @@ export function AgentsSettings({
 }) {
   const [launchState, setLaunchState] = useState(launch ?? null);
   const [launchBusy, setLaunchBusy] = useState(false);
-  // `rex_here` (and `rex_shared` with it) comes only from this pane's own read (the window's settings model never asks Rex): kept across the model's changes.
-  useEffect(() => setLaunchState((was) => (launch ? { ...launch, rex_here: was?.rex_here, rex_shared: was?.rex_shared } : null)), [launch?.enabled, launch?.full_permissions, launch?.follows, launch?.needs_consent, launch?.bypass_off, launch?.own_mode, launch?.scratch_dir, launch?.settings_file]);
+  // `rex_here` (and `rex_shared` with it), and T3 Code's `t3_here` and `t3_open`, come only from this pane's own read (the
+  // window's settings model never asks): kept across the model's changes.
+  useEffect(() => setLaunchState((was) => (launch ? { ...launch, rex_here: was?.rex_here, rex_shared: was?.rex_shared, t3_here: was?.t3_here, t3_open: was?.t3_open } : null)), [launch?.enabled, launch?.full_permissions, launch?.follows, launch?.needs_consent, launch?.bypass_off, launch?.own_mode, launch?.scratch_dir, launch?.settings_file]);
   // Shown: the switches as they stand now (full permissions never set: it follows the login shell, read again here).
   useEffect(() => {
     if (!launch) return;
@@ -666,8 +667,13 @@ export function AgentsSettings({
       live = false;
     };
   }, [launch?.enabled]);
-  /** A save's answer: it never asks Rex (`rex_here` absent), so the pane keeps what its own read said. */
-  const takeLaunch = (next: InboxLaunchSettings) => setLaunchState((was) => (next.rex_here !== undefined ? next : { ...next, rex_here: was?.rex_here, rex_shared: was?.rex_shared }));
+  /** A save's answer: it never asks Rex or T3 Code (`rex_here`, `t3_here` absent), so the pane keeps what its own read said. */
+  const takeLaunch = (next: InboxLaunchSettings) =>
+    setLaunchState((was) => ({
+      ...next,
+      ...(next.rex_here !== undefined ? {} : { rex_here: was?.rex_here, rex_shared: was?.rex_shared }),
+      ...(next.t3_here !== undefined ? {} : { t3_here: was?.t3_here, t3_open: was?.t3_open }),
+    }));
   // "Start agents from New message": config.json `inboxLaunch.enabled`, read live (New message's New session rows follow).
   const toggleEnabled = async () => {
     if (!launchState || launchBusy) return;
@@ -689,10 +695,11 @@ export function AgentsSettings({
       setLaunchBusy(false);
     }
   };
-  // "Start new agents in" (`inboxLaunch.startIn`): in the background, or Rex. Rex is offered while it is on that
+  // "Start new agents in" (`inboxLaunch.startIn`): in the background, Rex, or T3 Code. Rex is offered while it is on that
   // computer (`rex_here`: a Mac's app attached there; on Linux or FreeBSD, `rex_headless`, this account's own Rex
-  // server answering), or while it is the choice (so it can be turned back); the agents that can't run in Rex say so.
-  const pickStartIn = async (next: 'inbox' | 'rex') => {
+  // server answering), T3 Code while its `t3` is (`t3_here`), each also while it is the choice (so it can be turned
+  // back); the agents that can't run there say so.
+  const pickStartIn = async (next: 'inbox' | 'rex' | 't3') => {
     if (!launchState || launchBusy || launchState.start_in === next) return;
     setLaunchBusy(true);
     setError(null);
@@ -705,28 +712,50 @@ export function AgentsSettings({
     }
   };
   const inRex = launchState?.start_in === 'rex';
+  const inT3 = launchState?.start_in === 't3';
   const rexNames = (launchState?.rex_agents ?? []).map(hostLabel);
   const notRexNames = REX_LAUNCH_AGENTS.filter((id) => !(launchState?.rex_agents ?? []).includes(id)).map(hostLabel);
+  const t3Names = (launchState?.t3_agents ?? []).map(hostLabel);
+  const notT3Names = REX_LAUNCH_AGENTS.filter((id) => !(launchState?.t3_agents ?? []).includes(id)).map(hostLabel);
+  const offersRex = rexNames.length > 0 && (!!launchState?.rex_here || inRex);
+  const offersT3 = t3Names.length > 0 && (!!launchState?.t3_here || inT3);
+  const places = ['inbox' as const, ...(offersRex ? ['rex' as const] : []), ...(offersT3 ? ['t3' as const] : [])];
+  const placeWords = { inbox: 'In the background', rex: 'Rex', t3: 'T3 Code' } as const;
   const startInRow =
-    launchState?.enabled && rexNames.length > 0 && (launchState.rex_here || inRex) ? (
+    launchState?.enabled && (offersRex || offersT3) ? (
       <Row
         k="Start new agents in"
         v={
           <span className="ib-seg" role="group" aria-label="Start new agents in">
-            {(['inbox', 'rex'] as const).map((where) => (
+            {places.map((where) => (
               <button key={where} type="button" className="ib-seg-o" aria-pressed={(launchState.start_in ?? 'inbox') === where} data-on={(launchState.start_in ?? 'inbox') === where ? '' : undefined} disabled={launchBusy} onClick={() => void pickStartIn(where)} data-launch-start-in={where}>
-                {where === 'inbox' ? 'In the background' : 'Rex'}
+                {placeWords[where]}
               </button>
             ))}
           </span>
         }
         sub={
           <>
-            In Rex, each new agent runs in its own tab of a Rex session for its project, and keeps running there after the Inbox closes. {listWords(rexNames)} can start in Rex
-            {notRexNames.length > 0 ? `; ${listWords(notRexNames)} always ${notRexNames.length === 1 ? 'starts' : 'start'} in the background.` : '.'}
+            {offersRex && !inT3 && (
+              <span className="block" data-launch-start-in-rex="">
+                In Rex, each new agent runs in its own tab of a Rex session for its project, and keeps running there after the Inbox closes. {listWords(rexNames)} can start in Rex
+                {notRexNames.length > 0 ? `; ${listWords(notRexNames)} always ${notRexNames.length === 1 ? 'starts' : 'start'} in the background.` : '.'}
+              </span>
+            )}
+            {offersT3 && !inRex && (
+              <span className="block" data-launch-start-in-t3="">
+                In T3 Code, each new agent runs as a thread of T3 Code for its project, and keeps running there after the Inbox closes. {listWords(t3Names)} can start in T3 Code
+                {notT3Names.length > 0 ? `; ${listWords(notT3Names)} always ${notT3Names.length === 1 ? 'starts' : 'start'} in the background.` : '.'}
+              </span>
+            )}
             {inRex && launchState.rex_here === false && (
               <span className="block" data-launch-rex-away="">
                 {launchState.rex_shared ? INBOX_REX_SHARED_AGAIN : launchState.rex_headless ? INBOX_REX_SERVER_AWAY_SETTINGS : "Rex isn't open on this computer now, so new agents start in the background until it is."}
+              </span>
+            )}
+            {inT3 && launchState.t3_open === false && (
+              <span className="block" data-launch-t3-away="">
+                {INBOX_T3_NOT_HERE_SETTINGS}
               </span>
             )}
           </>

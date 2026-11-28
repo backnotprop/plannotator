@@ -518,6 +518,11 @@
       "machine",
       "name"
     ],
+    "InboxLaunchInner": [
+      "agent",
+      "model",
+      "provider"
+    ],
     "InboxLaunchRecord": [
       "agent",
       "folder",

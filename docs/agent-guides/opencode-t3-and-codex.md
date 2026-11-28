@@ -331,6 +331,10 @@ Inbox's way into a thread once T3 released its Claude.
   binary in `test.yml`); `scripts/install.test.ts` ("optional T3 hook"),
   `packages/server/uninstall.test.ts`, `packages/ai/session-bridge-pull.test.ts`.
 
+### T3 Code: agents the Inbox starts there
+
+Settings → Agents' "Start new agents in" T3 Code starts the person's Claude Code, Codex, OpenCode or Pi as a new T3 thread (`inbox-launch-t3.ts`; the flow, the words and the fallbacks are in `inbox-launch.md`, "Start in T3 Code"). The thread is T3's: its prompts wait in T3's app, it has no Stop from the Inbox, and replies go in through the T3 wake below (`t3 thread send`). It runs in exactly the Inbox's folder (`t3 project add` first). The model is the person's pick in New message, as Rex starts it; none picked, the newest thread T3 ran that agent on in the project, else T3's first listed model for it, read once with a read-only `mcp-client` session T3 issues for a minute (`t3 auth session issue`) and revoked after. That session never reaches disk, a log, a command line or any address but T3's own loopback `/mcp`, and its scope (`orchestration:read`) gives nothing a local process could not already ask that T3 for. T3 Code not running, too old for that command, or refusing: the agent starts in the background and its line says why.
+
 ### Codex Stop hook: which turn the plan belongs to
 
 Codex has no `ExitPlanMode`, so plan review rides its experimental `Stop` hook:

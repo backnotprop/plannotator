@@ -13,7 +13,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { inboxToolCostText, type InboxAgentRow, type InboxAgentsModel } from '@plannotator/core/inbox-types';
 import type { InboxLaunchSettings } from './api';
-import { INBOX_REX_SERVER_AWAY_SETTINGS, INBOX_REX_SHARED_AGAIN } from '@plannotator/core/inbox-run-line';
+import { INBOX_REX_SERVER_AWAY_SETTINGS, INBOX_REX_SHARED_AGAIN, INBOX_T3_NOT_HERE_SETTINGS } from '@plannotator/core/inbox-run-line';
 
 const hasDom = typeof document !== 'undefined';
 const { AgentsSettings, repliesOf, offWords } = (hasDom ? await import('./components/AgentsSettings') : {}) as typeof import('./components/AgentsSettings');
@@ -244,6 +244,54 @@ test.skipIf(!hasDom)('"Start new agents in": only while Rex is open here or chos
   host?.remove();
   const away = mount(model(), { ...base, rex_here: false, start_in: 'rex' });
   expect(away.querySelector('[data-launch-rex-away]')).not.toBeNull();
+});
+
+test.skipIf(!hasDom)('"Start new agents in" T3 Code: offered while T3 Code is on this computer or chosen; saves the choice; Rex\'s sentence with T3 Code\'s name; says when T3 Code isn\'t open', async () => {
+  const base: InboxLaunchSettings = { enabled: true, full_permissions: false, rex_agents: ['claude-code', 'pi'], t3_agents: ['claude-code', 'pi', 'codex', 'opencode'] };
+  // No T3 Code (and no Rex): no row.
+  expect(mount(model(), { ...base, t3_here: false }).querySelector('[data-launch-start-in-row]')).toBeNull();
+  act(() => root?.unmount());
+  host?.remove();
+  let state: InboxLaunchSettings = { ...base, t3_here: true, t3_open: true, start_in: 'inbox' };
+  const posts: unknown[] = [];
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    const body = init?.body ? JSON.parse(String(init.body)) : null;
+    if ((init?.method ?? 'GET') === 'POST') {
+      posts.push(body);
+      // A save's answer never reads T3 Code: no `t3_here`, no `t3_open`.
+      const { t3_here: _here, t3_open: _open, ...saved } = state;
+      state = { ...state, start_in: body.start_in };
+      return new Response(JSON.stringify({ launch: { ...saved, start_in: body.start_in } }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    return new Response(JSON.stringify({ launch: state }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }) as typeof fetch;
+  const settle = () => act(async () => void (await new Promise((resolve) => setTimeout(resolve, 0))));
+  const el = mount(model(), state);
+  await settle();
+  const row = () => el.querySelector('[data-launch-start-in-row]')!;
+  expect([...row().querySelectorAll('[data-launch-start-in]')].map((b) => [b.textContent, b.getAttribute('aria-pressed')])).toEqual([
+    ['In the background', 'true'],
+    ['T3 Code', 'false'],
+  ]);
+  expect(row().querySelector('[data-launch-start-in-t3]')!.textContent).toBe('In T3 Code, each new agent runs as a thread of T3 Code for its project, and keeps running there after the Inbox closes. Claude Code, Pi, Codex and OpenCode can start in T3 Code.');
+  await act(async () => (row().querySelector('[data-launch-start-in="t3"]') as HTMLButtonElement).click());
+  await settle();
+  expect(posts).toEqual([{ start_in: 't3' }]);
+  expect(row().getAttribute('data-launch-start-in-row')).toBe('t3');
+  // Kept across the save: T3 Code is open, so nothing says otherwise.
+  expect(row().querySelector('[data-launch-t3-away]')).toBeNull();
+  act(() => root?.unmount());
+  host?.remove();
+  // Both here: three places, and only the chosen one's sentence.
+  const both = mount(model(), { ...base, rex_here: true, t3_here: true, t3_open: true, start_in: 'rex' });
+  expect([...both.querySelectorAll('[data-launch-start-in]')].map((b) => b.textContent)).toEqual(['In the background', 'Rex', 'T3 Code']);
+  expect(both.querySelector('[data-launch-start-in-rex]')).not.toBeNull();
+  expect(both.querySelector('[data-launch-start-in-t3]')).toBeNull();
+  act(() => root?.unmount());
+  host?.remove();
+  // T3 Code chosen, then closed: the choice stays, and the row says what happens meanwhile.
+  const away = mount(model(), { ...base, t3_here: true, t3_open: false, start_in: 't3' });
+  expect(away.querySelector('[data-launch-t3-away]')!.textContent).toBe(INBOX_T3_NOT_HERE_SETTINGS);
 });
 
 test.skipIf(!hasDom)('"Start new agents in", Rex chosen and not here: the reason the read gives (a shared server is running, so never "isn\'t running"), kept across a save', async () => {

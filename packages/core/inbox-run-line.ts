@@ -71,6 +71,34 @@ export const INBOX_REX_REFUSED_AGAIN = "Rex didn't open a tab for it.";
 /** Open in Terminal for a session that runs in Rex (its line offers none; an older window's press). */
 export const INBOX_RUN_IN_REX_OPEN = "This agent runs in Rex. Open its tab there.";
 
+// ── Started in T3 Code (Settings → Agents' "Start new agents in" T3 Code): each sentence is Rex's, the name swapped ──
+
+/** A start in T3 Code whose thread never connected: the failed line's cause (`INBOX_RUN_REX_NOT_CONNECTED`'s twin). */
+export const INBOX_RUN_T3_NOT_CONNECTED = "Look at its thread there.";
+/** The run line's note for a start that went to the background because T3 Code was not open (Rex's "Rex isn't open on this computer, …"). */
+export const INBOX_T3_NOT_HERE = "T3 Code isn't open on this computer, so it started in the background.";
+/** The same because T3 Code said no: no model for that agent, a refused token or start (Rex's "Rex didn't open a tab for it, …"). */
+export const INBOX_T3_REFUSED = "T3 Code didn't start a thread for it, so it started in the background.";
+/**
+ * The run line's note for a start T3 Code refused, saying what it refused when it said: the model (the person's, or
+ * the one it was tried on), the person's effort, no model at all for that agent, or the folder; else `INBOX_T3_REFUSED`.
+ */
+export function inboxT3RefusedWords(t3: { why?: "no_model" | "project"; declined?: string; declined_effort?: string } | undefined): string {
+  if (t3?.declined) return `T3 Code didn't take the model ${t3.declined}, so it started in the background.`;
+  if (t3?.declined_effort) return `T3 Code didn't take the effort ${t3.declined_effort}, so it started in the background.`;
+  if (t3?.why === "no_model") return "T3 Code has no model for it here, so it started in the background.";
+  if (t3?.why === "project") return "T3 Code didn't add this folder as a project, so it started in the background.";
+  return INBOX_T3_REFUSED;
+}
+/** Settings → Agents, T3 Code chosen and not open (Rex's "Rex isn't open on this computer now, …"). */
+export const INBOX_T3_NOT_HERE_SETTINGS = "T3 Code isn't open on this computer now, so new agents start in the background until it is.";
+/** Open in Terminal for an agent T3 Code runs (its line offers none; an older window's press). `INBOX_RUN_IN_REX_OPEN`'s twin. */
+export const INBOX_RUN_IN_T3_OPEN = "This agent runs in T3 Code. Open its thread there.";
+/** Stop for an agent T3 Code runs: T3 has no Stop from outside (its line offers none; an older window's press). */
+export const INBOX_RUN_IN_T3_STOP = "This agent runs in T3 Code. Stop it in its thread there.";
+/** Try again on an agent T3 Code runs that never connected: nothing here starts it again (an older window's press). */
+export const INBOX_RUN_IN_T3_AGAIN = "This agent runs in T3 Code. Look at its thread there.";
+
 /** A start that has not connected within this long is not "starting" any more. */
 export const INBOX_RUN_START_GRACE_MS = 60_000;
 
@@ -109,6 +137,8 @@ export interface InboxRunEvidence {
   stoppedNote?: string | null;
   /** What of Plannotator's connects the session ("plugin" when not given; Pi's "extension"). */
   connector?: string;
+  /** False when the Inbox can't start the session again (T3 Code runs it): the "not connected" line offers no Try again. */
+  restartable?: boolean;
   /** `cd <folder> && claude attach <ref>`; null before the session exists. */
   attachCommand: string | null;
   /** The launch's folder as the person knows it (`~/…`), for the failed line of a folder the Send made. */
@@ -121,6 +151,8 @@ export interface InboxRunEvidence {
   permissionSince?: number | null;
   /** A start in Rex (`InboxRun.rex`): on every line it gives. */
   rex?: InboxRun["rex"];
+  /** A start in T3 Code (`InboxRun.t3`): on every line it gives. */
+  t3?: InboxRun["t3"];
 }
 
 const iso = (ms: number | null) => (ms === null ? null : new Date(ms).toISOString());
@@ -183,6 +215,7 @@ export function inboxRunOf(e: InboxRunEvidence): InboxRun | null {
     untrusted: false,
     attach_command: e.attachCommand,
     ...(e.rex ? { rex: e.rex } : {}),
+    ...(e.t3 ? { t3: e.t3 } : {}),
     // A clone that is done: the line after it still names it (E11's "Cloned into …", E10's trust words).
     ...(clone && clone.state === "done" ? { clone: cloneOf() } : {}),
     ...extra,
@@ -217,7 +250,7 @@ export function inboxRunOf(e: InboxRunEvidence): InboxRun | null {
   if (inGrace) return starting();
   const hostStopped = e.host === "absent" || host?.state === "stopped" || host?.state === "done";
   // The person's Stop says stopped, even before the agent took its first message (a Rex tab closed by Stop).
-  if (!e.seenLive && !hostStopped && e.stoppedByPersonAt === null) return line("failed", { cause: e.rex?.line !== undefined && !e.rex.unavailable && !e.rex.refused ? INBOX_RUN_REX_NOT_CONNECTED : `Started, but not connected to the Inbox. Is Plannotator's ${e.connector ?? "plugin"} on in that folder?` });
+  if (!e.seenLive && !hostStopped && e.stoppedByPersonAt === null) return line("failed", { cause: e.rex?.line !== undefined && !e.rex.unavailable && !e.rex.refused ? INBOX_RUN_REX_NOT_CONNECTED : e.t3?.started ? INBOX_RUN_T3_NOT_CONNECTED : `Started, but not connected to the Inbox. Is Plannotator's ${e.connector ?? "plugin"} on in that folder?`, ...(e.restartable === false ? { no_retry: true as const } : {}) });
   const byPerson = e.stoppedByPersonAt !== null;
   // Not the person's Stop: the host's own words, when it has some.
   return line("stopped", { stopped_by_person: byPerson, since: iso(e.stoppedByPersonAt), ...(!byPerson && e.stoppedNote ? { cause: e.stoppedNote } : {}) });

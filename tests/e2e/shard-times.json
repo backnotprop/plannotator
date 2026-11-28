@@ -108,6 +108,7 @@
   "inbox-launch-permission.spec.ts": 152,
   "inbox-launch-pi.spec.ts": 179,
   "inbox-launch-scratch.spec.ts": 20,
+  "inbox-launch-t3.spec.ts": 6,
   "inbox-launch-trust-compose.spec.ts": 15,
   "inbox-launch-trust.spec.ts": 10,
   "inbox-link-through.spec.ts": 150,

@@ -1775,7 +1775,14 @@
                 }
               ]
             },
+            "inner": {
+              "$ref": "#/$defs/InboxLaunchInner"
+            },
             "rex": {
+              "type": "boolean",
+              "const": true
+            },
+            "t3": {
               "type": "boolean",
               "const": true
             }
@@ -3630,6 +3637,27 @@
       "additionalProperties": true,
       "x-source": "packages/core/inbox-types.ts"
     },
+    "InboxLaunchInner": {
+      "type": "object",
+      "properties": {
+        "provider": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "agent": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "model",
+        "agent"
+      ],
+      "additionalProperties": true,
+      "x-source": "packages/core/inbox-types.ts"
+    },
     "InboxLaunchRecord": {
       "type": "object",
       "properties": {
@@ -3692,6 +3720,9 @@
         "effort": {
           "type": "string"
         },
+        "inner": {
+          "$ref": "#/$defs/InboxLaunchInner"
+        },
         "primary_agent": {
           "type": "string"
         },
@@ -3713,6 +3744,9 @@
         },
         "rex": {
           "$ref": "#/$defs/InboxLaunchRex"
+        },
+        "t3": {
+          "$ref": "#/$defs/InboxLaunchT3"
         }
       },
       "required": [
@@ -3752,6 +3786,35 @@
           "type": "string"
         },
         "block": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true,
+      "x-source": "packages/core/inbox-types.ts"
+    },
+    "InboxLaunchT3": {
+      "type": "object",
+      "properties": {
+        "unavailable": {
+          "type": "boolean",
+          "const": true
+        },
+        "refused": {
+          "type": "boolean",
+          "const": true
+        },
+        "why": {
+          "type": "string",
+          "enum": [
+            "no_model",
+            "project"
+          ],
+          "x-open": true
+        },
+        "declined": {
+          "type": "string"
+        },
+        "declined_effort": {
           "type": "string"
         }
       },
@@ -6646,6 +6709,10 @@
           "type": "boolean",
           "const": true
         },
+        "no_retry": {
+          "type": "boolean",
+          "const": true
+        },
         "home_folder": {
           "type": "boolean",
           "const": true
@@ -6848,6 +6915,38 @@
           "required": [
             "line"
           ],
+          "additionalProperties": true
+        },
+        "t3": {
+          "type": "object",
+          "properties": {
+            "started": {
+              "type": "boolean",
+              "const": true
+            },
+            "unavailable": {
+              "type": "boolean",
+              "const": true
+            },
+            "refused": {
+              "type": "boolean",
+              "const": true
+            },
+            "why": {
+              "type": "string",
+              "enum": [
+                "no_model",
+                "project"
+              ],
+              "x-open": true
+            },
+            "declined": {
+              "type": "string"
+            },
+            "declined_effort": {
+              "type": "string"
+            }
+          },
           "additionalProperties": true
         }
       },

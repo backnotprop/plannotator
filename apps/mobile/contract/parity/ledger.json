@@ -23841,6 +23841,230 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-enum-inboxlauncht3-why-no-model",
+      "title": "enum:InboxLaunchT3.why.no_model",
+      "surface": [
+        "enum:InboxLaunchT3.why.no_model"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-28",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxlauncht3-why-project",
+      "title": "enum:InboxLaunchT3.why.project",
+      "surface": [
+        "enum:InboxLaunchT3.why.project"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-28",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxrun-t3-why-no-model",
+      "title": "enum:InboxRun.t3.why.no_model",
+      "surface": [
+        "enum:InboxRun.t3.why.no_model"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-28",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxrun-t3-why-project",
+      "title": "enum:InboxRun.t3.why.project",
+      "surface": [
+        "enum:InboxRun.t3.why.project"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-28",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxlaunchinner-agent",
+      "title": "field:InboxLaunchInner.agent",
+      "surface": [
+        "field:InboxLaunchInner.agent"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-28",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxlaunchinner-model",
+      "title": "field:InboxLaunchInner.model",
+      "surface": [
+        "field:InboxLaunchInner.model"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-28",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxlaunchinner-provider",
+      "title": "field:InboxLaunchInner.provider",
+      "surface": [
+        "field:InboxLaunchInner.provider"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-28",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxlaunchrecord-inner",
+      "title": "field:InboxLaunchRecord.inner",
+      "surface": [
+        "field:InboxLaunchRecord.inner"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-28",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxlaunchrecord-t3",
+      "title": "field:InboxLaunchRecord.t3",
+      "surface": [
+        "field:InboxLaunchRecord.t3"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-28",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxlauncht3-declined",
+      "title": "field:InboxLaunchT3.declined",
+      "surface": [
+        "field:InboxLaunchT3.declined"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-28",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxlauncht3-declined-effort",
+      "title": "field:InboxLaunchT3.declined_effort",
+      "surface": [
+        "field:InboxLaunchT3.declined_effort"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-28",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxlauncht3-refused",
+      "title": "field:InboxLaunchT3.refused",
+      "surface": [
+        "field:InboxLaunchT3.refused"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-28",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxlauncht3-unavailable",
+      "title": "field:InboxLaunchT3.unavailable",
+      "surface": [
+        "field:InboxLaunchT3.unavailable"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-28",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxlauncht3-why",
+      "title": "field:InboxLaunchT3.why",
+      "surface": [
+        "field:InboxLaunchT3.why"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-28",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxrun-no-retry",
+      "title": "field:InboxRun.no_retry",
+      "surface": [
+        "field:InboxRun.no_retry"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-28",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxrun-t3",
+      "title": "field:InboxRun.t3",
+      "surface": [
+        "field:InboxRun.t3"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-28",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }

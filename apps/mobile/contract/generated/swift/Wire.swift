@@ -2687,19 +2687,23 @@ public struct InboxAgentLaunch: Codable, Hashable, Sendable {
   public var started: Bool?
   public var run: InboxAgentLaunchRun?
   public var scratch: String?
+  public var inner: InboxLaunchInner?
   public var rex: Bool?
+  public var t3: Bool?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
-  static let knownKeys: Set<String> = ["id", "thread_id", "started", "run", "scratch", "rex"]
+  static let knownKeys: Set<String> = ["id", "thread_id", "started", "run", "scratch", "inner", "rex", "t3"]
 
-  public init(id: String, threadId: ThreadID, started: Bool? = nil, run: InboxAgentLaunchRun? = nil, scratch: String? = nil, rex: Bool? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(id: String, threadId: ThreadID, started: Bool? = nil, run: InboxAgentLaunchRun? = nil, scratch: String? = nil, inner: InboxLaunchInner? = nil, rex: Bool? = nil, t3: Bool? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.id = id
     self.threadId = threadId
     self.started = started
     self.run = run
     self.scratch = scratch
+    self.inner = inner
     self.rex = rex
+    self.t3 = t3
     self.unknownFields = unknownFields
   }
 
@@ -2710,7 +2714,9 @@ public struct InboxAgentLaunch: Codable, Hashable, Sendable {
     self.started = try c.decodeIfPresent(Bool.self, forKey: WireKey("started"))
     self.run = try c.decodeIfPresent(InboxAgentLaunchRun.self, forKey: WireKey("run"))
     self.scratch = try c.decodeIfPresent(String.self, forKey: WireKey("scratch"))
+    self.inner = try c.decodeIfPresent(InboxLaunchInner.self, forKey: WireKey("inner"))
     self.rex = try c.decodeIfPresent(Bool.self, forKey: WireKey("rex"))
+    self.t3 = try c.decodeIfPresent(Bool.self, forKey: WireKey("t3"))
     self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
   }
 
@@ -2721,7 +2727,9 @@ public struct InboxAgentLaunch: Codable, Hashable, Sendable {
     try c.encodeIfPresent(self.started, forKey: WireKey("started"))
     try c.encodeIfPresent(self.run, forKey: WireKey("run"))
     try c.encodeIfPresent(self.scratch, forKey: WireKey("scratch"))
+    try c.encodeIfPresent(self.inner, forKey: WireKey("inner"))
     try c.encodeIfPresent(self.rex, forKey: WireKey("rex"))
+    try c.encodeIfPresent(self.t3, forKey: WireKey("t3"))
     try WireKey.write(unknownFields, to: &c)
   }
 }
@@ -5389,6 +5397,40 @@ public struct InboxLaunchFrom: Codable, Hashable, Sendable {
 }
 
 /// From `packages/core/inbox-types.ts`.
+public struct InboxLaunchInner: Codable, Hashable, Sendable {
+  public var provider: String
+  public var model: String
+  public var agent: String
+  /// Fields this app does not know: kept, and written back when encoded.
+  public var unknownFields: [String: JSONValue] = [:]
+
+  static let knownKeys: Set<String> = ["provider", "model", "agent"]
+
+  public init(provider: String, model: String, agent: String, unknownFields: [String: JSONValue] = [:]) {
+    self.provider = provider
+    self.model = model
+    self.agent = agent
+    self.unknownFields = unknownFields
+  }
+
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: WireKey.self)
+    self.provider = try c.decode(String.self, forKey: WireKey("provider"))
+    self.model = try c.decode(String.self, forKey: WireKey("model"))
+    self.agent = try c.decode(String.self, forKey: WireKey("agent"))
+    self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: WireKey.self)
+    try c.encode(self.provider, forKey: WireKey("provider"))
+    try c.encode(self.model, forKey: WireKey("model"))
+    try c.encode(self.agent, forKey: WireKey("agent"))
+    try WireKey.write(unknownFields, to: &c)
+  }
+}
+
+/// From `packages/core/inbox-types.ts`.
 public struct InboxLaunchRecord: Codable, Hashable, Sendable {
   public var id: String
   public var agent: InboxLaunchAgent
@@ -5406,17 +5448,19 @@ public struct InboxLaunchRecord: Codable, Hashable, Sendable {
   public var bypassAvailable: Bool?
   public var model: String?
   public var effort: String?
+  public var inner: InboxLaunchInner?
   public var primaryAgent: String?
   public var error: InboxLaunchError?
   public var deletedAt: String?
   public var from: InboxLaunchFrom?
   public var rex: InboxLaunchRex?
+  public var t3: InboxLaunchT3?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
-  static let knownKeys: Set<String> = ["id", "agent", "session_ref", "session", "folder", "scratch", "scratch_inode", "made_folder", "made_inode", "clone", "started_at", "full_permissions", "own_mode", "bypass_available", "model", "effort", "primary_agent", "error", "deleted_at", "from", "rex"]
+  static let knownKeys: Set<String> = ["id", "agent", "session_ref", "session", "folder", "scratch", "scratch_inode", "made_folder", "made_inode", "clone", "started_at", "full_permissions", "own_mode", "bypass_available", "model", "effort", "inner", "primary_agent", "error", "deleted_at", "from", "rex", "t3"]
 
-  public init(id: String, agent: InboxLaunchAgent, sessionRef: String? = nil, session: String? = nil, folder: String, scratch: Bool, scratchInode: String? = nil, madeFolder: Bool? = nil, madeInode: String? = nil, clone: InboxLaunchClone? = nil, startedAt: String, fullPermissions: Bool? = nil, ownMode: Bool? = nil, bypassAvailable: Bool? = nil, model: String? = nil, effort: String? = nil, primaryAgent: String? = nil, error: InboxLaunchError? = nil, deletedAt: String? = nil, from: InboxLaunchFrom? = nil, rex: InboxLaunchRex? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(id: String, agent: InboxLaunchAgent, sessionRef: String? = nil, session: String? = nil, folder: String, scratch: Bool, scratchInode: String? = nil, madeFolder: Bool? = nil, madeInode: String? = nil, clone: InboxLaunchClone? = nil, startedAt: String, fullPermissions: Bool? = nil, ownMode: Bool? = nil, bypassAvailable: Bool? = nil, model: String? = nil, effort: String? = nil, inner: InboxLaunchInner? = nil, primaryAgent: String? = nil, error: InboxLaunchError? = nil, deletedAt: String? = nil, from: InboxLaunchFrom? = nil, rex: InboxLaunchRex? = nil, t3: InboxLaunchT3? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.id = id
     self.agent = agent
     self.sessionRef = sessionRef
@@ -5433,11 +5477,13 @@ public struct InboxLaunchRecord: Codable, Hashable, Sendable {
     self.bypassAvailable = bypassAvailable
     self.model = model
     self.effort = effort
+    self.inner = inner
     self.primaryAgent = primaryAgent
     self.error = error
     self.deletedAt = deletedAt
     self.from = from
     self.rex = rex
+    self.t3 = t3
     self.unknownFields = unknownFields
   }
 
@@ -5459,11 +5505,13 @@ public struct InboxLaunchRecord: Codable, Hashable, Sendable {
     self.bypassAvailable = try c.decodeIfPresent(Bool.self, forKey: WireKey("bypass_available"))
     self.model = try c.decodeIfPresent(String.self, forKey: WireKey("model"))
     self.effort = try c.decodeIfPresent(String.self, forKey: WireKey("effort"))
+    self.inner = try c.decodeIfPresent(InboxLaunchInner.self, forKey: WireKey("inner"))
     self.primaryAgent = try c.decodeIfPresent(String.self, forKey: WireKey("primary_agent"))
     self.error = try c.decodeIfPresent(InboxLaunchError.self, forKey: WireKey("error"))
     self.deletedAt = try c.decodeIfPresent(String.self, forKey: WireKey("deleted_at"))
     self.from = try c.decodeIfPresent(InboxLaunchFrom.self, forKey: WireKey("from"))
     self.rex = try c.decodeIfPresent(InboxLaunchRex.self, forKey: WireKey("rex"))
+    self.t3 = try c.decodeIfPresent(InboxLaunchT3.self, forKey: WireKey("t3"))
     self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
   }
 
@@ -5485,11 +5533,13 @@ public struct InboxLaunchRecord: Codable, Hashable, Sendable {
     try c.encodeIfPresent(self.bypassAvailable, forKey: WireKey("bypass_available"))
     try c.encodeIfPresent(self.model, forKey: WireKey("model"))
     try c.encodeIfPresent(self.effort, forKey: WireKey("effort"))
+    try c.encodeIfPresent(self.inner, forKey: WireKey("inner"))
     try c.encodeIfPresent(self.primaryAgent, forKey: WireKey("primary_agent"))
     try c.encodeIfPresent(self.error, forKey: WireKey("error"))
     try c.encodeIfPresent(self.deletedAt, forKey: WireKey("deleted_at"))
     try c.encodeIfPresent(self.from, forKey: WireKey("from"))
     try c.encodeIfPresent(self.rex, forKey: WireKey("rex"))
+    try c.encodeIfPresent(self.t3, forKey: WireKey("t3"))
     try WireKey.write(unknownFields, to: &c)
   }
 }
@@ -5560,6 +5610,76 @@ public enum InboxLaunchRexWhy: Codable, Hashable, Sendable, RawRepresentable {
     switch self {
     case .server: return "server"
     case .shared: return "shared"
+    case .unknown(let value): return value
+    }
+  }
+
+  public init(from decoder: Decoder) throws { self.init(rawValue: try decoder.singleValueContainer().decode(String.self)) }
+  public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
+}
+
+/// From `packages/core/inbox-types.ts`.
+public struct InboxLaunchT3: Codable, Hashable, Sendable {
+  public var unavailable: Bool?
+  public var refused: Bool?
+  public var why: InboxLaunchT3Why?
+  public var declined: String?
+  public var declinedEffort: String?
+  /// Fields this app does not know: kept, and written back when encoded.
+  public var unknownFields: [String: JSONValue] = [:]
+
+  static let knownKeys: Set<String> = ["unavailable", "refused", "why", "declined", "declined_effort"]
+
+  public init(unavailable: Bool? = nil, refused: Bool? = nil, why: InboxLaunchT3Why? = nil, declined: String? = nil, declinedEffort: String? = nil, unknownFields: [String: JSONValue] = [:]) {
+    self.unavailable = unavailable
+    self.refused = refused
+    self.why = why
+    self.declined = declined
+    self.declinedEffort = declinedEffort
+    self.unknownFields = unknownFields
+  }
+
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: WireKey.self)
+    self.unavailable = try c.decodeIfPresent(Bool.self, forKey: WireKey("unavailable"))
+    self.refused = try c.decodeIfPresent(Bool.self, forKey: WireKey("refused"))
+    self.why = try c.decodeIfPresent(InboxLaunchT3Why.self, forKey: WireKey("why"))
+    self.declined = try c.decodeIfPresent(String.self, forKey: WireKey("declined"))
+    self.declinedEffort = try c.decodeIfPresent(String.self, forKey: WireKey("declined_effort"))
+    self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: WireKey.self)
+    try c.encodeIfPresent(self.unavailable, forKey: WireKey("unavailable"))
+    try c.encodeIfPresent(self.refused, forKey: WireKey("refused"))
+    try c.encodeIfPresent(self.why, forKey: WireKey("why"))
+    try c.encodeIfPresent(self.declined, forKey: WireKey("declined"))
+    try c.encodeIfPresent(self.declinedEffort, forKey: WireKey("declined_effort"))
+    try WireKey.write(unknownFields, to: &c)
+  }
+}
+
+public enum InboxLaunchT3Why: Codable, Hashable, Sendable, RawRepresentable {
+  case noModel
+  case project
+  /// A value this app does not know (a newer Inbox).
+  case unknown(String)
+
+  public static let known: [InboxLaunchT3Why] = [.noModel, .project]
+
+  public init(rawValue: String) {
+    switch rawValue {
+    case "no_model": self = .noModel
+    case "project": self = .project
+    default: self = .unknown(rawValue)
+    }
+  }
+
+  public var rawValue: String {
+    switch self {
+    case .noModel: return "no_model"
+    case .project: return "project"
     case .unknown(let value): return value
     }
   }
@@ -9174,6 +9294,7 @@ public struct InboxRun: Codable, Hashable, Sendable {
   public var cause: String?
   public var untrusted: Bool
   public var turnError: Bool?
+  public var noRetry: Bool?
   public var homeFolder: Bool?
   public var trustCoversHome: Bool?
   public var trust: InboxRunTrust?
@@ -9181,12 +9302,13 @@ public struct InboxRun: Codable, Hashable, Sendable {
   public var madeFolder: String?
   public var clone: InboxRunClone?
   public var rex: InboxRunRex?
+  public var t3: InboxRunT3?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
-  static let knownKeys: Set<String> = ["state", "launch_id", "agent", "project", "folder", "since", "again", "stopped_by_person", "cause", "untrusted", "turn_error", "home_folder", "trust_covers_home", "trust", "attach_command", "made_folder", "clone", "rex"]
+  static let knownKeys: Set<String> = ["state", "launch_id", "agent", "project", "folder", "since", "again", "stopped_by_person", "cause", "untrusted", "turn_error", "no_retry", "home_folder", "trust_covers_home", "trust", "attach_command", "made_folder", "clone", "rex", "t3"]
 
-  public init(state: InboxRunState, launchId: String, agent: InboxLaunchAgent, project: String, folder: String, since: String? = nil, again: Bool, stoppedByPerson: Bool, cause: String? = nil, untrusted: Bool, turnError: Bool? = nil, homeFolder: Bool? = nil, trustCoversHome: Bool? = nil, trust: InboxRunTrust? = nil, attachCommand: String? = nil, madeFolder: String? = nil, clone: InboxRunClone? = nil, rex: InboxRunRex? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(state: InboxRunState, launchId: String, agent: InboxLaunchAgent, project: String, folder: String, since: String? = nil, again: Bool, stoppedByPerson: Bool, cause: String? = nil, untrusted: Bool, turnError: Bool? = nil, noRetry: Bool? = nil, homeFolder: Bool? = nil, trustCoversHome: Bool? = nil, trust: InboxRunTrust? = nil, attachCommand: String? = nil, madeFolder: String? = nil, clone: InboxRunClone? = nil, rex: InboxRunRex? = nil, t3: InboxRunT3? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.state = state
     self.launchId = launchId
     self.agent = agent
@@ -9198,6 +9320,7 @@ public struct InboxRun: Codable, Hashable, Sendable {
     self.cause = cause
     self.untrusted = untrusted
     self.turnError = turnError
+    self.noRetry = noRetry
     self.homeFolder = homeFolder
     self.trustCoversHome = trustCoversHome
     self.trust = trust
@@ -9205,6 +9328,7 @@ public struct InboxRun: Codable, Hashable, Sendable {
     self.madeFolder = madeFolder
     self.clone = clone
     self.rex = rex
+    self.t3 = t3
     self.unknownFields = unknownFields
   }
 
@@ -9221,6 +9345,7 @@ public struct InboxRun: Codable, Hashable, Sendable {
     self.cause = try c.decodeIfPresent(String.self, forKey: WireKey("cause"))
     self.untrusted = try c.decode(Bool.self, forKey: WireKey("untrusted"))
     self.turnError = try c.decodeIfPresent(Bool.self, forKey: WireKey("turn_error"))
+    self.noRetry = try c.decodeIfPresent(Bool.self, forKey: WireKey("no_retry"))
     self.homeFolder = try c.decodeIfPresent(Bool.self, forKey: WireKey("home_folder"))
     self.trustCoversHome = try c.decodeIfPresent(Bool.self, forKey: WireKey("trust_covers_home"))
     self.trust = try c.decodeIfPresent(InboxRunTrust.self, forKey: WireKey("trust"))
@@ -9228,6 +9353,7 @@ public struct InboxRun: Codable, Hashable, Sendable {
     self.madeFolder = try c.decodeIfPresent(String.self, forKey: WireKey("made_folder"))
     self.clone = try c.decodeIfPresent(InboxRunClone.self, forKey: WireKey("clone"))
     self.rex = try c.decodeIfPresent(InboxRunRex.self, forKey: WireKey("rex"))
+    self.t3 = try c.decodeIfPresent(InboxRunT3.self, forKey: WireKey("t3"))
     self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
   }
 
@@ -9244,6 +9370,7 @@ public struct InboxRun: Codable, Hashable, Sendable {
     try c.encode(self.cause, forKey: WireKey("cause"))
     try c.encode(self.untrusted, forKey: WireKey("untrusted"))
     try c.encodeIfPresent(self.turnError, forKey: WireKey("turn_error"))
+    try c.encodeIfPresent(self.noRetry, forKey: WireKey("no_retry"))
     try c.encodeIfPresent(self.homeFolder, forKey: WireKey("home_folder"))
     try c.encodeIfPresent(self.trustCoversHome, forKey: WireKey("trust_covers_home"))
     try c.encodeIfPresent(self.trust, forKey: WireKey("trust"))
@@ -9251,6 +9378,7 @@ public struct InboxRun: Codable, Hashable, Sendable {
     try c.encodeIfPresent(self.madeFolder, forKey: WireKey("made_folder"))
     try c.encodeIfPresent(self.clone, forKey: WireKey("clone"))
     try c.encodeIfPresent(self.rex, forKey: WireKey("rex"))
+    try c.encodeIfPresent(self.t3, forKey: WireKey("t3"))
     try WireKey.write(unknownFields, to: &c)
   }
 }
@@ -9534,6 +9662,79 @@ public enum InboxRunState: Codable, Hashable, Sendable, RawRepresentable {
     case .waitingAnswer: return "waiting_answer"
     case .waitingTerminal: return "waiting_terminal"
     case .working: return "working"
+    case .unknown(let value): return value
+    }
+  }
+
+  public init(from decoder: Decoder) throws { self.init(rawValue: try decoder.singleValueContainer().decode(String.self)) }
+  public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
+}
+
+public struct InboxRunT3: Codable, Hashable, Sendable {
+  public var started: Bool?
+  public var unavailable: Bool?
+  public var refused: Bool?
+  public var why: InboxRunT3Why?
+  public var declined: String?
+  public var declinedEffort: String?
+  /// Fields this app does not know: kept, and written back when encoded.
+  public var unknownFields: [String: JSONValue] = [:]
+
+  static let knownKeys: Set<String> = ["started", "unavailable", "refused", "why", "declined", "declined_effort"]
+
+  public init(started: Bool? = nil, unavailable: Bool? = nil, refused: Bool? = nil, why: InboxRunT3Why? = nil, declined: String? = nil, declinedEffort: String? = nil, unknownFields: [String: JSONValue] = [:]) {
+    self.started = started
+    self.unavailable = unavailable
+    self.refused = refused
+    self.why = why
+    self.declined = declined
+    self.declinedEffort = declinedEffort
+    self.unknownFields = unknownFields
+  }
+
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: WireKey.self)
+    self.started = try c.decodeIfPresent(Bool.self, forKey: WireKey("started"))
+    self.unavailable = try c.decodeIfPresent(Bool.self, forKey: WireKey("unavailable"))
+    self.refused = try c.decodeIfPresent(Bool.self, forKey: WireKey("refused"))
+    self.why = try c.decodeIfPresent(InboxRunT3Why.self, forKey: WireKey("why"))
+    self.declined = try c.decodeIfPresent(String.self, forKey: WireKey("declined"))
+    self.declinedEffort = try c.decodeIfPresent(String.self, forKey: WireKey("declined_effort"))
+    self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: WireKey.self)
+    try c.encodeIfPresent(self.started, forKey: WireKey("started"))
+    try c.encodeIfPresent(self.unavailable, forKey: WireKey("unavailable"))
+    try c.encodeIfPresent(self.refused, forKey: WireKey("refused"))
+    try c.encodeIfPresent(self.why, forKey: WireKey("why"))
+    try c.encodeIfPresent(self.declined, forKey: WireKey("declined"))
+    try c.encodeIfPresent(self.declinedEffort, forKey: WireKey("declined_effort"))
+    try WireKey.write(unknownFields, to: &c)
+  }
+}
+
+public enum InboxRunT3Why: Codable, Hashable, Sendable, RawRepresentable {
+  case noModel
+  case project
+  /// A value this app does not know (a newer Inbox).
+  case unknown(String)
+
+  public static let known: [InboxRunT3Why] = [.noModel, .project]
+
+  public init(rawValue: String) {
+    switch rawValue {
+    case "no_model": self = .noModel
+    case "project": self = .project
+    default: self = .unknown(rawValue)
+    }
+  }
+
+  public var rawValue: String {
+    switch self {
+    case .noModel: return "no_model"
+    case .project: return "project"
     case .unknown(let value): return value
     }
   }
@@ -12131,6 +12332,7 @@ public enum WireErrorCode: Codable, Hashable, Sendable, RawRepresentable {
   case lanUnavailable
   case lastAgent
   case launchInRex
+  case launchInT3
   case launchNotFound
   case launchOff
   case linkFailed
@@ -12204,7 +12406,7 @@ public enum WireErrorCode: Codable, Hashable, Sendable, RawRepresentable {
   /// A value this app does not know (a newer Inbox).
   case unknown(String)
 
-  public static let known: [WireErrorCode] = [.ackAfterReply, .ackNotAllowed, .ackSent, .ackStale, .actionAlreadySent, .actionClosed, .agentHasIt, .agentNotAcceptedHere, .agentUnavailable, .alreadyCombined, .alreadyDelivered, .alreadyOwner, .annotationClosed, .annotationNotAllowed, .annotationNotFound, .appNotAvailable, .artifactNotFound, .artifactPinsNewer, .askBusy, .askDamaged, .askFull, .askNoBridge, .askNoLivePath, .askNoOwner, .askUnreadable, .attachmentChangedType, .attachmentMissing, .attachmentNotAudio, .attachmentNotFound, .attachmentNotHtml, .attachmentNotImage, .attachmentNotText, .attachmentNotVideo, .attachmentTooLarge, .batchIdReused, .cannotTakeBack, .cardBacklogPersonOnly, .cardDroppedByPerson, .cardNoProject, .cardNotFound, .cardOtherProject, .cardPersonOnly, .codeNotAcceptedHere, .codeReviewOff, .configNotSaved, .cookieHostEnvDecides, .cookieHostUrlHostInUse, .crossOrigin, .deviceNotFound, .deviceRevoked, .deviceRouteNotFound, .deviceTokenInvalid, .deviceTokenMissing, .draftConflict, .experimentalEnvDecides, .folderMissing, .folderUnavailable, .guideNotFound, .handoffSettled, .idempotencyKeyReused, .initiativeExists, .initiativeNotFound, .initiativePersonOnly, .internalError, .introductionPending, .invalidDone, .invalidSupersedes, .lanUnavailable, .lastAgent, .launchInRex, .launchNotFound, .launchOff, .linkFailed, .linkToSelf, .linkedPageMissing, .linkedPageNotHtml, .linkedPageOutside, .linkedPageRefused, .linkedPageTooLarge, .liveNotAnswering, .liveSiteNotFound, .liveUnavailable, .localOnly, .machineMismatch, .machineNeedsUpdate, .machineNotAcceptedHere, .machineNotLinked, .machineUnreachable, .machinesViewRefused, .markupTooLarge, .messageNotFound, .modeNeedsLive, .noWayBack, .notAddressed, .notInThread, .nothingToReask, .nothingToTidy, .offerExpired, .openNotAllowed, .openUnavailable, .originNotAllowed, .ownerOnly, .pairingCodeWrong, .pinsNewer, .priorityNewer, .projectNotFound, .projectUnresolved, .questionAlreadySent, .questionNotFound, .questionOpen, .questionRevisionConflict, .questionSetAside, .questionSuperseded, .relayUploadUnavailable, .scratchUnavailable, .sendNowUnavailable, .sessionNotLive, .sessionStillLive, .snoozePast, .snoozesNewer, .systemOff, .tagHostMismatch, .tagNeedsUpdate, .tagsNewer, .tailnetUnavailable, .tailscaleEnvDecides, .tailscaleUnavailable, .takenBack, .threadMovedOn, .threadNameTaken, .threadNotFound, .threadResolved, .trustFailed, .trustWarningChanged, .uploadNoSpace, .uploadNotFound, .uploadRefused, .uploadTooLarge, .validationError, .windowOnly]
+  public static let known: [WireErrorCode] = [.ackAfterReply, .ackNotAllowed, .ackSent, .ackStale, .actionAlreadySent, .actionClosed, .agentHasIt, .agentNotAcceptedHere, .agentUnavailable, .alreadyCombined, .alreadyDelivered, .alreadyOwner, .annotationClosed, .annotationNotAllowed, .annotationNotFound, .appNotAvailable, .artifactNotFound, .artifactPinsNewer, .askBusy, .askDamaged, .askFull, .askNoBridge, .askNoLivePath, .askNoOwner, .askUnreadable, .attachmentChangedType, .attachmentMissing, .attachmentNotAudio, .attachmentNotFound, .attachmentNotHtml, .attachmentNotImage, .attachmentNotText, .attachmentNotVideo, .attachmentTooLarge, .batchIdReused, .cannotTakeBack, .cardBacklogPersonOnly, .cardDroppedByPerson, .cardNoProject, .cardNotFound, .cardOtherProject, .cardPersonOnly, .codeNotAcceptedHere, .codeReviewOff, .configNotSaved, .cookieHostEnvDecides, .cookieHostUrlHostInUse, .crossOrigin, .deviceNotFound, .deviceRevoked, .deviceRouteNotFound, .deviceTokenInvalid, .deviceTokenMissing, .draftConflict, .experimentalEnvDecides, .folderMissing, .folderUnavailable, .guideNotFound, .handoffSettled, .idempotencyKeyReused, .initiativeExists, .initiativeNotFound, .initiativePersonOnly, .internalError, .introductionPending, .invalidDone, .invalidSupersedes, .lanUnavailable, .lastAgent, .launchInRex, .launchInT3, .launchNotFound, .launchOff, .linkFailed, .linkToSelf, .linkedPageMissing, .linkedPageNotHtml, .linkedPageOutside, .linkedPageRefused, .linkedPageTooLarge, .liveNotAnswering, .liveSiteNotFound, .liveUnavailable, .localOnly, .machineMismatch, .machineNeedsUpdate, .machineNotAcceptedHere, .machineNotLinked, .machineUnreachable, .machinesViewRefused, .markupTooLarge, .messageNotFound, .modeNeedsLive, .noWayBack, .notAddressed, .notInThread, .nothingToReask, .nothingToTidy, .offerExpired, .openNotAllowed, .openUnavailable, .originNotAllowed, .ownerOnly, .pairingCodeWrong, .pinsNewer, .priorityNewer, .projectNotFound, .projectUnresolved, .questionAlreadySent, .questionNotFound, .questionOpen, .questionRevisionConflict, .questionSetAside, .questionSuperseded, .relayUploadUnavailable, .scratchUnavailable, .sendNowUnavailable, .sessionNotLive, .sessionStillLive, .snoozePast, .snoozesNewer, .systemOff, .tagHostMismatch, .tagNeedsUpdate, .tagsNewer, .tailnetUnavailable, .tailscaleEnvDecides, .tailscaleUnavailable, .takenBack, .threadMovedOn, .threadNameTaken, .threadNotFound, .threadResolved, .trustFailed, .trustWarningChanged, .uploadNoSpace, .uploadNotFound, .uploadRefused, .uploadTooLarge, .validationError, .windowOnly]
 
   public init(rawValue: String) {
     switch rawValue {
@@ -12278,6 +12480,7 @@ public enum WireErrorCode: Codable, Hashable, Sendable, RawRepresentable {
     case "lan_unavailable": self = .lanUnavailable
     case "last_agent": self = .lastAgent
     case "launch_in_rex": self = .launchInRex
+    case "launch_in_t3": self = .launchInT3
     case "launch_not_found": self = .launchNotFound
     case "launch_off": self = .launchOff
     case "link_failed": self = .linkFailed
@@ -12424,6 +12627,7 @@ public enum WireErrorCode: Codable, Hashable, Sendable, RawRepresentable {
     case .lanUnavailable: return "lan_unavailable"
     case .lastAgent: return "last_agent"
     case .launchInRex: return "launch_in_rex"
+    case .launchInT3: return "launch_in_t3"
     case .launchNotFound: return "launch_not_found"
     case .launchOff: return "launch_off"
     case .linkFailed: return "link_failed"
@@ -12575,6 +12779,7 @@ extension WireErrorCode {
     "lan_unavailable": 409,
     "last_agent": 409,
     "launch_in_rex": 409,
+    "launch_in_t3": 409,
     "launch_not_found": 404,
     "launch_off": 404,
     "link_failed": 502,

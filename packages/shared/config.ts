@@ -869,10 +869,11 @@ export interface PlannotatorConfig {
    * "Scratch folders", where "New scratch folder" makes each new folder (an
    * absolute path; default `<dataDir>/scratch`). Moving it applies to new
    * folders only. `startIn`: Settings → Agents' "Start new agents in": `rex` starts each new agent that can run in
-   * Rex in a tab of Rex (superlogical.com/rex) when Rex is on this computer; anything else (the default) runs it in
+   * Rex in a tab of Rex (superlogical.com/rex) when Rex is on this computer; `t3` starts each new agent that T3 Code
+   * can run as a thread of T3 Code when T3 Code is open on this computer; anything else (the default) runs it in
    * the background.
    */
-  inboxLaunch?: { enabled?: boolean; fullPermissions?: boolean; model?: string; settingsFile?: string; scratchDir?: string; startIn?: "inbox" | "rex" };
+  inboxLaunch?: { enabled?: boolean; fullPermissions?: boolean; model?: string; settingsFile?: string; scratchDir?: string; startIn?: "inbox" | "rex" | "t3" };
   /**
    * Inject a Plannotator Flavored Markdown reminder into every EnterPlanMode
    * call so the agent is aware it can enrich plans with code-file links,
@@ -2062,12 +2063,12 @@ function parseLaunchFlag(value: unknown): boolean | undefined {
  * so as the default. `model` only when it is a plain model name;
  * `settingsFile` (Claude settings file) as typed, read at each start;
  * `scratchDir` only when it is an absolute path other than `/` (null: the default, `<dataDir>/scratch`);
- * `startIn` `rex` only when it says exactly that (anything else: `inbox`).
+ * `startIn` `rex` or `t3` only when it says exactly that (anything else: `inbox`).
  */
 export function resolveInboxLaunch(
   config: PlannotatorConfig,
   platform: NodeJS.Platform = process.platform,
-): { enabled: boolean; fullPermissions: boolean | null; model: string | null; settingsFile: string | null; scratchDir: string | null; startIn: "inbox" | "rex" } {
+): { enabled: boolean; fullPermissions: boolean | null; model: string | null; settingsFile: string | null; scratchDir: string | null; startIn: "inbox" | "rex" | "t3" } {
   const raw: unknown = config.inboxLaunch;
   const value = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as NonNullable<PlannotatorConfig["inboxLaunch"]>) : {};
   // `"inboxLaunch": false` (or "off") by hand: the whole feature off.
@@ -2079,7 +2080,7 @@ export function resolveInboxLaunch(
     model: typeof value.model === "string" && LAUNCH_MODEL.test(value.model) ? value.model : null,
     settingsFile: typeof value.settingsFile === "string" && value.settingsFile.trim() ? value.settingsFile.trim() : null,
     scratchDir: typeof value.scratchDir === "string" && isAbsolute(value.scratchDir) && resolve(value.scratchDir) !== resolve("/") ? resolve(value.scratchDir) : null,
-    startIn: value.startIn === "rex" ? "rex" : "inbox",
+    startIn: value.startIn === "rex" || value.startIn === "t3" ? value.startIn : "inbox",
   };
 }
 

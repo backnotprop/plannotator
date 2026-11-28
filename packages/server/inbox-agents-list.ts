@@ -44,7 +44,7 @@
 
 import { basename } from "node:path";
 import type { InboxFirstSeen } from "./inbox-first-seen";
-import { INBOX_AGENT_FACES_KEPT, INBOX_AGENTS_LISTED_MAX, inboxAgentNamesChecked, readInboxAgentFaces, type InboxAgent, type InboxAgentsGroup, type InboxRunState } from "@plannotator/core/inbox-types";
+import { INBOX_AGENT_FACES_KEPT, INBOX_AGENTS_LISTED_MAX, inboxAgentNamesChecked, readInboxAgentFaces, type InboxAgent, type InboxLaunchInner, type InboxAgentsGroup, type InboxRunState } from "@plannotator/core/inbox-types";
 import { contextPercentOf, effortLevelOf, modelIdOf, type InboxAgentSession } from "./inbox-sessions";
 import { withAgentStatusMark } from "./inbox-agent-mark";
 
@@ -63,8 +63,12 @@ export interface InboxAgentLaunch {
   scratch: string | null;
   /** A routine's run (its root is a run divider). */
   scheduled?: boolean;
+  /** Started in T3 Code: the agent and model T3 runs its thread on. */
+  inner?: InboxLaunchInner;
   /** It runs in a Rex tab whose pane the Inbox never learned, so it offers no Stop. */
   rex?: boolean;
+  /** It runs in T3 Code, which has no Stop from outside: no Stop. */
+  t3?: boolean;
 }
 
 /** One thread waiting on the person, by the session that owns it. */
@@ -214,7 +218,7 @@ export function inboxAgentsGroup(evidence: InboxAgentsEvidence, cap = INBOX_AGEN
       ...(known ?? { host: launch.host, project: evidence.projectById(launch.project_id), started_at: launch.started_at, last_seen_at: null }),
       id: launch.launch_id,
       session,
-      launch: { id: launch.launch_id, thread_id: launch.thread_id, started: launch.started, run, scratch: launch.scratch, ...(launch.rex ? { rex: true as const } : {}) },
+      launch: { id: launch.launch_id, thread_id: launch.thread_id, started: launch.started, run, scratch: launch.scratch, ...(launch.inner ? { inner: launch.inner } : {}), ...(launch.rex ? { rex: true as const } : {}), ...(launch.t3 ? { t3: true as const } : {}) },
       host: known?.host ?? launch.host,
       state: working ? "working" : ended ? "ended" : "idle",
       waiting: 0,

@@ -131,14 +131,14 @@ async function settle(turns = 4) {
   }
 }
 
-async function draw(thread: InboxThread, machine: MachineView | null) {
+async function draw(thread: InboxThread, machine: MachineView | null, run: InboxRun = RUN) {
   host = document.createElement('div');
   host.className = 'pn-inbox';
   document.body.appendChild(host);
   act(() => {
     root = createRoot(host!);
     root.render(
-      <ThreadPane thread={thread} machine={machine} sent={null} onQuestions={() => {}} onChanged={async () => {}} onClose={() => {}} file={null} onOpenFile={() => {}} onOpenGuide={() => {}} run={RUN} remote={false} />,
+      <ThreadPane thread={thread} machine={machine} sent={null} onQuestions={() => {}} onChanged={async () => {}} onClose={() => {}} file={null} onOpenFile={() => {}} onOpenGuide={() => {}} run={run} remote={false} />,
     );
   });
   await settle();
@@ -185,6 +185,72 @@ test.skipIf(!hasDom)('the header names the machine that started it, unless it wa
   scheduled.messages[0] = { ...scheduled.messages[0]!, scheduled_run: { scheduled_id: 'sch_a', name: 'CSV export', run: 1, due_at: '2026-11-06T09:12:00.000Z', by: 'schedule' } };
   await draw(scheduled, null);
   expect(started()).toBe('Routine · Claude Code in billing-svc');
+  act(() => root!.unmount());
+  host!.remove();
+  // Started in T3 Code: the agent the person picked, then where it runs and the model T3 runs it on (T3 picks it there,
+  // so not the model asked for).
+  const t3 = threadOf(null);
+  const launch = { ...t3.messages[0]!.launch!, model: 'sonnet', t3: {}, inner: { provider: 'claudeAgent', model: 'opus', agent: 'Claude Code' } };
+  t3.messages[0] = { ...t3.messages[0]!, to: { host: 't3', session: 'thread:project:a:b' }, launch };
+  await draw(t3, null);
+  expect(started()).toBe('You started Claude Code in billing-svcIn T3 Code · opus');
+  act(() => root!.unmount());
+  host!.remove();
+  // T3 didn't take the person's model: the thread says so beside the one it runs.
+  const declined = threadOf(null);
+  declined.messages[0] = { ...declined.messages[0]!, to: { host: 't3', session: 'thread:project:a:c' }, launch: { ...launch, t3: { declined: 'sonnet' } } };
+  await draw(declined, null);
+  expect(host!.querySelector('[data-launch-t3]')!.textContent).toBe("In T3 Code · opus (T3 Code didn't take sonnet)");
+  expect(host!.querySelector('[data-launch-choice]')).toBeNull();
+  act(() => root!.unmount());
+  host!.remove();
+  // One that fell back to the background reads as any other, with what was asked.
+  const away = threadOf(null);
+  away.messages[0] = { ...away.messages[0]!, launch: { ...away.messages[0]!.launch!, model: 'sonnet', t3: { unavailable: true } } };
+  await draw(away, null);
+  expect(started()).toBe('You started Claude Code in billing-svcsonnet');
+});
+
+test.skipIf(!hasDom)("an agent started in T3 Code: Rex's words with T3 Code's name, no Stop, no Open in Terminal, and no Try again when it never reached the Inbox", async () => {
+  const inT3 = () => {
+    const t3 = threadOf(null);
+    t3.messages[0] = { ...t3.messages[0]!, to: { host: 't3', session: 'thread:project:a:b' }, launch: { ...t3.messages[0]!.launch!, t3: {} } };
+    return t3;
+  };
+  const text = () => host!.querySelector('[data-run]')!.textContent ?? '';
+  const redraw = async (thread: InboxThread, run: InboxRun) => {
+    act(() => root!.unmount());
+    host!.remove();
+    await draw(thread, null, run);
+  };
+  await draw(inT3(), null, { ...RUN, state: 'starting', t3: {}, attach_command: null } as InboxRun);
+  expect(text()).toBe('Starting Claude Code in T3 Code…');
+  expect(host!.querySelector('[data-run-stop]')).toBeNull();
+  await redraw(inT3(), { ...RUN, state: 'starting', t3: { started: true }, attach_command: null } as InboxRun);
+  expect(text()).toBe('Started in T3 Code');
+  expect(host!.querySelector('[data-run-stop]')).toBeNull();
+  await redraw(inT3(), { ...RUN, state: 'failed', t3: { started: true }, cause: 'Look at its thread there.', attach_command: null, no_retry: true } as InboxRun);
+  expect(text()).toBe("Claude Code opened in T3 Code but hasn't connected to the Inbox. Look at its thread there. Your message is kept.");
+  expect(host!.querySelector('[data-run-retry]')).toBeNull();
+  expect(host!.querySelector('[data-run-open]')).toBeNull();
+  expect(host!.querySelector('[data-run-stop]')).toBeNull();
+  // T3 Code not open, or it said no: in the background, with Stop, and the line says why.
+  await redraw(threadOf(null), { ...RUN, state: 'working', t3: { unavailable: true } } as InboxRun);
+  expect(host!.querySelector('[data-run-t3-away]')!.textContent).toBe("T3 Code isn't open on this computer, so it started in the background.");
+  expect(host!.querySelector('[data-run-stop]')).not.toBeNull();
+  await redraw(threadOf(null), { ...RUN, state: 'working', t3: { refused: true } } as InboxRun);
+  expect(host!.querySelector('[data-run-t3-refused]')!.textContent).toBe("T3 Code didn't start a thread for it, so it started in the background.");
+  // What T3 refused, when it said.
+  await redraw(threadOf(null), { ...RUN, state: 'working', t3: { refused: true, declined: 'sonnet' } } as InboxRun);
+  expect(host!.querySelector('[data-run-t3-refused]')!.textContent).toBe("T3 Code didn't take the model sonnet, so it started in the background.");
+  await redraw(threadOf(null), { ...RUN, state: 'working', t3: { refused: true, declined_effort: 'max' } } as InboxRun);
+  expect(host!.querySelector('[data-run-t3-refused]')!.textContent).toBe("T3 Code didn't take the effort max, so it started in the background.");
+  await redraw(threadOf(null), { ...RUN, state: 'working', t3: { refused: true, why: 'no_model' } } as InboxRun);
+  expect(host!.querySelector('[data-run-t3-refused]')!.textContent).toBe('T3 Code has no model for it here, so it started in the background.');
+  // Another agent's not-connected line keeps Try again.
+  const cause = "Started, but not connected to the Inbox. Is Plannotator's plugin on in that folder?";
+  await redraw(threadOf(null), { ...RUN, state: 'failed', cause, attach_command: null } as InboxRun);
+  expect(host!.querySelector('[data-run-retry]')).not.toBeNull();
 });
 
 test.skipIf(!hasDom)("a prompt only Claude Code's own dialog can approve: on another machine it says where, offers Copy attach command, never Approve in Terminal", async () => {

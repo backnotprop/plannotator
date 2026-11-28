@@ -15,7 +15,7 @@
  */
 import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { InboxAuthor, InboxMessage } from "@plannotator/core/inbox-types";
 import { inboxModClaimDir } from "@plannotator/shared/inbox/claims";
@@ -611,5 +611,18 @@ describe("a Claude thread in T3 Code", () => {
     expect(claims.make("msg_1", `${long}:0`, `${long}:0`)).toBe(true);
     expect(claims.make("msg_1", `${long}:1`, `${long}:1`)).toBe(true);
     expect(claims.has("msg_1", `${long}:1`)).toBe(true);
+  });
+});
+
+describe("in a test run, only a t3 in a temp folder", () => {
+  test("a t3 launcher whose real file is outside the temp folder is never taken: T3 is not here, and no wake runs it", () => {
+    // The fake T3 home's own launcher, in the temp folder: here.
+    const ok = world({ env: { PLANNOTATOR_TEST_SANDBOX: "1" } });
+    expect(ok.local().installed()).toBe(true);
+    // The same place naming a file outside it (as a real T3CODE_HOME or a PATH entry would): not here.
+    const outside = world({ t3Home: false, env: { PLANNOTATOR_TEST_SANDBOX: "1" } });
+    mkdirSync(join(outside.agents.home, ".t3", "bin"), { recursive: true });
+    symlinkSync("/usr/bin/true", join(outside.agents.home, ".t3", "bin", "t3"));
+    expect(outside.local().installed()).toBe(false);
   });
 });

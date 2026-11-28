@@ -65,6 +65,7 @@ import {
   type InboxReaction,
   type InboxAddressee,
   type InboxLaunchClone,
+  type InboxLaunchInner,
   type InboxLaunchError,
   type InboxLaunchRecord,
   type InboxReplyViewing,
@@ -8228,22 +8229,58 @@ export class InboxStore {
    */
   settleLaunch(
     messageId: string,
-    outcome: { to: InboxAddressee; session_ref: string; rex?: InboxLaunchRecord["rex"] } | { error: InboxLaunchError | null; rex?: InboxLaunchRecord["rex"] } | { deleted_at: string } | { clone: InboxLaunchClone; made_inode?: string | null },
+    outcome:
+      | { to: InboxAddressee; session_ref: string; delivered?: boolean; rex?: InboxLaunchRecord["rex"]; t3?: InboxLaunchRecord["t3"]; inner?: InboxLaunchInner }
+      | { error: InboxLaunchError | null; rex?: InboxLaunchRecord["rex"]; t3?: InboxLaunchRecord["t3"] }
+      | { deleted_at: string }
+      | { clone: InboxLaunchClone; made_inode?: string | null },
   ): InboxMessage {
     const message = this.messages.get(messageId);
     if (!message?.launch) throw new InboxError("message_not_found", `No launched thread ${messageId}.`);
+    if ("to" in outcome) return this.settleLaunchStarted(message, outcome);
     // A clone's folder: a new identity when the Inbox made it again, or none (`null`) once it is gone or no longer
     // the Inbox's, so a later Cancel never removes a folder made at that path since.
     const { made_folder: _madeFolder, made_inode: _madeInode, ...unmade } = message.launch;
     const next: InboxMessage =
       "clone" in outcome
         ? { ...message, launch: { ...(outcome.made_inode === null ? unmade : message.launch), clone: outcome.clone, ...(outcome.made_inode ? { made_folder: true as const, made_inode: outcome.made_inode } : {}) } }
-        : "to" in outcome
-        ? { ...message, to: { host: outcome.to.host, session: outcome.to.session }, launch: { ...message.launch, session: outcome.to.session, session_ref: outcome.session_ref, error: null, ...(outcome.rex ? { rex: outcome.rex } : {}) } }
         : "error" in outcome
-          ? { ...message, launch: { ...message.launch, error: outcome.error, ...(outcome.rex ? { rex: outcome.rex } : {}) } }
+          ? { ...message, launch: { ...message.launch, error: outcome.error, ...(outcome.rex ? { rex: outcome.rex } : {}), ...(outcome.t3 ? { t3: outcome.t3 } : {}) } }
           : { ...message, launch: { ...message.launch, deleted_at: outcome.deleted_at } };
     this.appendMessage(next, this.stamp());
+    return next;
+  }
+
+  /**
+   * Started: the root moves from its placeholder to the real session. `delivered`: the start put the root in as the
+   * session's first turn (T3 Code), so the same snapshot records it delivered: no wake ever sees it addressed to the
+   * session and undelivered, even if the Inbox stops right after. With it (T3 Code only), a reply the person wrote
+   * while it started was addressed to the placeholder: it moves too (one snapshot each), so the T3 wake sends it like
+   * any later reply. Other starts leave such a reply where it is, as before (their session takes its placeholder's).
+   */
+  private settleLaunchStarted(message: InboxMessage, outcome: { to: InboxAddressee; session_ref: string; delivered?: boolean; rex?: InboxLaunchRecord["rex"]; t3?: InboxLaunchRecord["t3"]; inner?: InboxLaunchInner }): InboxMessage {
+    const placeholder = message.to?.session ?? null;
+    const at = this.stamp();
+    const to = { host: outcome.to.host, session: outcome.to.session };
+    const { t3_wait: _t3Wait, ...kept } = message;
+    const delivered = outcome.delivered === true && !message.delivery;
+    const next: InboxMessage = {
+      ...(delivered ? kept : message),
+      to,
+      // Started in T3 Code: what T3 runs it on (`inner`). Fell back to the background: why (`t3`).
+      launch: { ...message.launch!, session: outcome.to.session, session_ref: outcome.session_ref, error: null, ...(outcome.rex ? { rex: outcome.rex } : {}), ...(outcome.t3 ? { t3: outcome.t3 } : {}), ...(outcome.inner ? { inner: outcome.inner } : {}) },
+      ...(delivered ? { delivery: { state: "delivered" as const, host: outcome.to.host, session: outcome.to.session, at } } : {}),
+    };
+    this.appendMessage(next, at);
+    if (delivered) this.markAgentChecked(message.thread_id, this.messageSeq.get(message.id) ?? 0, at, outcome.to.session);
+    if (outcome.delivered === true && placeholder?.startsWith("launch:") && placeholder !== outcome.to.session) {
+      for (const later of this.threadMessages(message.thread_id)) {
+        if (later.id === message.id || later.author.kind !== "person" || later.delivery || later.launch) continue;
+        if (later.to?.session !== placeholder) continue;
+        const { t3_wait: _wait, ...rest } = later;
+        this.appendMessage({ ...rest, to }, this.stamp());
+      }
+    }
     return next;
   }
 

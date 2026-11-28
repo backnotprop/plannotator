@@ -1278,7 +1278,8 @@ export interface InboxAddressee {
 /**
  * Launch (start an agent from compose): the agents the Inbox can start a
  * session of, one per line: Claude Code (`claude --bg`), Pi (`pi --mode rpc`, owned by the Inbox), Codex
- * (`codex app-server`, owned by the Inbox).
+ * (`codex app-server`, owned by the Inbox), OpenCode 2 (`opencode2 serve`, owned by the Inbox). Each can also start
+ * in Rex or in T3 Code instead of in the background (Settings → Agents' "Start new agents in": `rex`, `t3`).
  */
 export type InboxLaunchAgent =
   | "claude-code"
@@ -1359,6 +1360,8 @@ export interface InboxLaunchRecord {
   /** Fixed at Send, so Try again and every restart start the same. */
   model?: string;
   effort?: string;
+  /** Started in T3 Code: the agent and model T3 runs its thread on (T3's own pick, not `model`). Absent otherwise. */
+  inner?: InboxLaunchInner;
   /** OpenCode's own primary agent the session started as (build, plan, …); absent: its default. */
   primary_agent?: string;
   error?: InboxLaunchError | null;
@@ -1374,6 +1377,33 @@ export interface InboxLaunchRecord {
    * started in the background as usual. Empty until the start.
    */
   rex?: InboxLaunchRex;
+  /**
+   * Settings → Agents' "Start new agents in" said T3 Code when it was made (fixed at Send): the agent runs as a thread
+   * of T3 Code (t3.codes) instead of in the background, and T3 owns it (its turns, its prompts, its Stop). Empty from
+   * Send on: it is a T3 Code start until it falls back. `unavailable`: T3 Code was not open on this computer at the
+   * start, so it started in the background as usual; `refused`: T3 Code said no (no model for that agent, a refused
+   * token or start), so it started in the background as usual.
+   */
+  t3?: InboxLaunchT3;
+}
+
+/**
+ * `InboxLaunchRecord.t3`. With `refused`, what T3 refused, for the run line: `why` "no_model" (no model for that agent),
+ * "project" (it didn't add the folder); `declined`, the model it didn't take; `declined_effort`, the effort it didn't
+ * take. Started (no `refused`) with either: T3 didn't take the person's model (or effort), so the thread runs on
+ * T3's own.
+ */
+export interface InboxLaunchT3 {
+  unavailable?: true;
+  refused?: true;
+  why?: "no_model" | "project";
+  declined?: string;
+  declined_effort?: string;
+}
+
+/** The launch runs (or starts) as a T3 Code thread: it asked for T3 Code and didn't fall back to the background. */
+export function inboxLaunchInT3(launch: Pick<InboxLaunchRecord, "t3">): boolean {
+  return !!launch.t3 && !launch.t3.unavailable && !launch.t3.refused;
 }
 
 /** `InboxLaunchRecord.rex`. `session` and `block`: the Rex session and the pane Rex made for it (Stop closes that pane). */
@@ -1421,6 +1451,13 @@ export interface InboxLaunchClone {
   ended_at?: string;
 }
 
+/** What an agent started in T3 Code runs on there: T3's provider instance (`claudeAgent`), its model (`opus`) and the agent in words ("Claude Code"). */
+export interface InboxLaunchInner {
+  provider: string;
+  model: string;
+  agent: string;
+}
+
 /** The linked machine a launch was started from: its Inbox id (`ibx_…`) and its name as this Inbox knows it. */
 export interface InboxLaunchFrom {
   machine: string;
@@ -1434,14 +1471,20 @@ export type InboxRunState = "starting" | "working" | "waiting_answer" | "waiting
  * Whether Stop is offered for a launch: it started (the host gave it a session) and it runs, at rest (no line) or
  * starting, working or at a prompt in Terminal. A prompt in the window has its own Stop on the permission card.
  * `rex`: it runs in Rex and the Inbox has no pane of it to close (`inboxLaunchRexUnstoppable`), so no Stop.
+ * `t3`: it runs in T3 Code (`inboxLaunchInT3`), which has no Stop from outside, so no Stop.
  */
-export function inboxLaunchStops(started: boolean, run: InboxRunState | null, rex = false): boolean {
-  return !rex && started && (run === null || run === "working" || run === "waiting_terminal" || run === "starting");
+export function inboxLaunchStops(started: boolean, run: InboxRunState | null, rex = false, t3 = false): boolean {
+  return !rex && !t3 && started && (run === null || run === "working" || run === "waiting_terminal" || run === "starting");
 }
 
 /** A launch in Rex the Inbox cannot stop: it never learned the pane Rex made for it (`InboxLaunchRex.block`). */
 export function inboxLaunchRexUnstoppable(launch: Pick<InboxLaunchRecord, "rex" | "session_ref">): boolean {
   return inboxLaunchInRex(launch) && !launch.rex?.block;
+}
+
+/** A run line's launch runs as a T3 Code thread (`InboxRun.t3`, not one that started in the background instead). */
+export function inboxRunInT3(run: Pick<InboxRun, "t3"> | null | undefined): boolean {
+  return !!run?.t3 && !run.t3.unavailable && !run.t3.refused;
 }
 
 /** A run line's launch runs in a Rex tab (`InboxRun.rex`, not one that started in the background instead). */
@@ -1469,6 +1512,8 @@ export interface InboxRun {
   untrusted: boolean;
   /** `failed` because the session's last turn ended in an error (its note is in the thread): Try again sends the message again. */
   turn_error?: true;
+  /** `failed` with nothing the Inbox can start again (an agent T3 Code runs, that never reached the Inbox): no Try again. */
+  no_retry?: true;
   /** With `untrusted`: the folder is the home folder, which is never trusted (the how-to says to start inside it). */
   home_folder?: true;
   /** With `untrusted`: trust here would cover home (a repo rooted there) or the folder is `/`; the how-to says to start in a project with its own repo. Wins over `home_folder`, which home in such a repo carries too, for a window that predates this. */
@@ -1493,6 +1538,12 @@ export interface InboxRun {
    * pane, so Stop closes it (or, run on in a pane the Inbox did not open, ends just its process).
    */
   rex?: { line: string | null; unavailable?: true; why?: "server" | "shared"; refused?: true; waiting?: "permission" | "question" | "auth" | "other"; held?: "may_run" | "still_runs"; stops?: true };
+  /**
+   * Started in T3 Code (`InboxLaunchRecord.t3`): `{}` while T3 Code is asked, `started` once it made the thread;
+   * `unavailable`: T3 Code was not open here, so it started in the background; `refused`: T3 Code said no, so it started
+   * in the background. Absent: not a T3 Code start. Additive.
+   */
+  t3?: { started?: true; unavailable?: true; refused?: true; why?: "no_model" | "project"; declined?: string; declined_effort?: string };
 }
 
 /** How a person's reply or New message reached an agent session (`InboxMessage.delivery`). */
@@ -3988,7 +4039,7 @@ export interface InboxAgent {
    * run line's state (`run`, null: no line) and the name of the scratch folder its Delete removes (`scratch`, null in
    * a project), absent from an older Inbox.
    */
-  launch?: { id: string; thread_id: string; started?: boolean; run?: InboxRunState | null; scratch?: string | null; rex?: true };
+  launch?: { id: string; thread_id: string; started?: boolean; run?: InboxRunState | null; scratch?: string | null; inner?: InboxLaunchInner; rex?: true; t3?: true };
   /** `claude-code`, `codex`, `pi`, ... (`InboxAuthor.host`); null when nothing said. */
   host: string | null;
   /** The app it runs in when not its host's own (`INBOX_OH_MY_PI_RUNTIME`): its name is that app's (`inboxHostName`). Additive. */
