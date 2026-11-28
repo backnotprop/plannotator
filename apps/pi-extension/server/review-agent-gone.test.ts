@@ -50,6 +50,26 @@ const send = (url: string, body: Record<string, unknown> = { approved: false, fe
 	fetch(`${url}/api/feedback`, { method: "POST", headers: json, body: JSON.stringify(body) });
 
 describe("Send when the agent is gone (Pi)", () => {
+	test("a recoverable host resumes before Send, otherwise its draft stays", () =>
+		sandboxed(async () => {
+			let presence: "gone" | "here" = "gone";
+			let recover = false;
+			const server = await startReviewServer({
+				rawPatch: patch(), gitRef: "HEAD", htmlContent: MINIMAL_HTML,
+				agentPresence: () => presence,
+				reviveAgent: async () => { if (recover) presence = "here"; },
+			});
+			try {
+				await saveDraft(server.url);
+				expect((await send(server.url)).status).toBe(410);
+				expect((await (await fetch(`${server.url}/api/draft`)).json()).codeAnnotations).toEqual(DRAFT_COMMENTS);
+				recover = true;
+				expect((await send(server.url)).status).toBe(200);
+			} finally {
+				server.stop();
+			}
+		}));
+
 	test("is refused with agent_gone; the draft stays and nothing is archived", () =>
 		sandboxed(async (dataDir) => {
 			const server = await startReviewServer({ rawPatch: patch(), gitRef: "HEAD", htmlContent: MINIMAL_HTML, project: "demo", agentPresence: () => "gone" });

@@ -177,6 +177,16 @@ describe.skipIf(process.platform === "win32")("the stdout probe on a real pipe",
 });
 
 describe("a Claude Code mod launch's lease", () => {
+  test("a stopped T3 process cannot receive Send even while its old lease is fresh", () => {
+    const watch = modLeaseAgentWatch({
+      readLease: () => JSON.stringify({ owner: "old", at: 1, pid: 777 }),
+      now: () => 1000,
+      pidAlive: () => false,
+      requireLivePid: true,
+    });
+    expect(watch.presence()).toBe("gone");
+  });
+
   /** The CLI's clock and the mod's stamps are unrelated on purpose (M4): the mod's `at` runs an hour ahead. */
   function leaseRun(start = 1_000_000, modClockAhead = 60 * 60_000) {
     let now = start;

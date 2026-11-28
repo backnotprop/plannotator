@@ -160,6 +160,7 @@ import { readHostMessages, takeHostMessagesPath } from "./host-messages";
 import { exitOnPortInUse } from "./port-in-use";
 import { exitWhenParentGone } from "./orphan-plan-review";
 import { cliReviewAgentWatch, endReviewWhenAgentGone, noTabMsFromEnv } from "./review-agent-watch";
+import { reviewT3Reviver } from "./review-t3-wake";
 import { parseModPlanInput, readModPlanRevision, writeModPlanRevisionAck } from "./claude-mod-plan";
 import { INBOX_SESSION_HOST_NAMES, inboxHostSessionFromEnv } from "./inbox-mcp-shim";
 import { isInboxSessionId } from "@plannotator/core/inbox-types";
@@ -1791,6 +1792,7 @@ if (args[0] === "sessions") {
   const agentWatch = liveSession ? null : cliReviewAgentWatch();
   const server = await startReviewServer({
     agentPresence: agentWatch ? () => agentWatch.presence() : undefined,
+    reviveAgent: reviewT3Reviver(agentWatch),
     liveReviewAgent: reviewLiveTargetOf(process.env.PLANNOTATOR_SESSION_TAG),
     liveReviewKey: liveSession ? { key: liveSession.key, title: liveSession.title } : null,
     rawPatch,

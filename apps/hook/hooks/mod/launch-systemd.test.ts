@@ -7,6 +7,7 @@ import { cleanupArgv, launchArgv } from './launch'
 
 const systemd = process.platform === 'linux' ? Bun.which('systemd-run') : null
 const systemctl = process.platform === 'linux' ? Bun.which('systemctl') : null
+const setsid = process.platform === 'linux' ? Bun.which('setsid') : null
 const supportsScope = !!systemd && !!systemctl && Bun.spawnSync([systemd, '--user', '--scope', '--quiet', '--collect', '--', 'true'], { stdout: 'ignore', stderr: 'ignore' }).exitCode === 0
 
 async function waitFor(path: string): Promise<void> {
@@ -97,6 +98,37 @@ describe.skipIf(process.platform !== 'linux')('detached launch without a usable 
 })
 
 describe.skipIf(!supportsScope)('detached launch inside a systemd user scope', () => {
+  test.skipIf(!setsid)('review and exit waiter survive the agent process group being terminated', async () => {
+    const { root, dir } = sandbox()
+    const unit = `plannotator-mod-test-${process.pid}-${crypto.randomUUID()}`
+    const worker = ['/bin/sh', '-c', 'while [ ! -e "$1/release" ]; do sleep 0.05; done; echo done; exit 7', 'worker', root]
+    const parent = Bun.spawn([setsid!, systemd!, '--user', '--scope', '--quiet', '--unit', unit, '--', '/bin/sh', '-c', '"$@"; sleep 60', 'parent', ...launchArgv(dir, worker)], {
+      env: { ...process.env, PLANNOTATOR_DATA_DIR: root, PLANNOTATOR_BROWSER: NO_BROWSER },
+      stdin: 'ignore', stdout: 'ignore', stderr: 'ignore',
+    })
+    let pid: number | undefined
+    try {
+      await waitFor(join(dir, 'pid'))
+      await waitFor(join(dir, 'scope-started'))
+      pid = Number(readFileSync(join(dir, 'pid'), 'utf8').trim())
+      const pgid = Bun.spawnSync(['ps', '-o', 'pgid=', '-p', String(parent.pid)]).stdout.toString().trim()
+      expect(pgid).toBe(String(parent.pid))
+      process.kill(-parent.pid, 'SIGTERM')
+      await parent.exited
+      expect(() => process.kill(pid!, 0)).not.toThrow()
+      writeFileSync(join(root, 'release'), '')
+      await waitFor(join(dir, 'exit'))
+      expect(readFileSync(join(dir, 'exit'), 'utf8').trim()).toBe('7')
+      expect(readFileSync(join(dir, 'stdout'), 'utf8').trim()).toBe('done')
+      pid = undefined
+    } finally {
+      Bun.spawnSync([systemctl!, '--user', 'stop', `${unit}.scope`], { stdout: 'ignore', stderr: 'ignore' })
+      if (pid) { try { process.kill(pid, 'SIGTERM') } catch {} }
+      parent.kill()
+      await parent.exited
+    }
+  }, 20_000)
+
   test('server and its exit waiter survive the old scope stopping', async () => {
     const { root, dir } = sandbox()
     const unit = `plannotator-mod-test-${process.pid}-${crypto.randomUUID()}`

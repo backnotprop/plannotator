@@ -374,6 +374,8 @@ export interface ReviewServerOptions {
    * Absent: the host cannot tell, and every decision is taken as before.
    */
   agentPresence?: () => AgentPresence;
+  /** Give a temporarily stopped host one chance to resume before refusing Send. */
+  reviveAgent?: () => Promise<void>;
 }
 
 export interface ReviewServerResult {
@@ -1969,6 +1971,7 @@ export async function startReviewServer(
 
   // Decision promise
   let reviewDecided = false;
+  let agentRevival: Promise<void> | undefined;
   let resolveDecision: (result: {
     approved: boolean;
     feedback: string;
@@ -4395,7 +4398,13 @@ export async function startReviewServer(
               // draft, or answer ok for feedback nobody will receive.
               if (reviewDecided) return reviewAlreadyDecided();
               // Nobody left to receive it: keep the draft, archive nothing.
-              const refusal = agentRefusal(body, options.agentPresence);
+              let refusal = agentRefusal(body, options.agentPresence);
+              if (refusal?.body.code === "agent_gone" && options.reviveAgent) {
+                agentRevival ??= Promise.resolve().then(() => options.reviveAgent!()).catch(() => {}).finally(() => { agentRevival = undefined; });
+                await agentRevival;
+                if (reviewDecided) return reviewAlreadyDecided();
+                refusal = agentRefusal(body, options.agentPresence);
+              }
               if (refusal) return Response.json(refusal.body, { status: refusal.status });
 
               // Archive BEFORE the draft delete: a failed write keeps the
