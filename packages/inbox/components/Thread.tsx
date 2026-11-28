@@ -188,7 +188,7 @@ import { openQuestionsShown, reaskItemLabel, skipToggledAnswer, threadOpenAction
 import { newUuid } from '../uuid';
 import { ShortcutHint, useShortcutAria, useShortcutHintShown, withShortcut } from '../shortcuts/hint';
 import { lastInput, traversedJustNow } from '../lastInput';
-import { bareKeyAllowed, inOverlay, keyboardFocused, keyTarget, modalOpen } from '../shortcuts/guards';
+import { bareKeyAllowed, inOverlay, isComposingKey, keyboardFocused, keyTarget, modalOpen } from '../shortcuts/guards';
 import { INBOX_SHORTCUT_EXTRAS } from '../shortcuts/extras';
 import { useShortcutScope } from '../panes/scope';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
@@ -5407,10 +5407,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   void send();
                 }
               } else if (event.key === 'Escape') {
-                event.preventDefault();
                 event.stopPropagation();
-                if (route.open) routeBack();
-                else setAside();
+                if (isComposingKey(event.nativeEvent)) return;
+                event.preventDefault();
+                (route.open ? routeBack : setAside)();
               }
             }}
             files={replyFiles.files}
