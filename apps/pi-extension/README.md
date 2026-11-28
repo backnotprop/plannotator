@@ -70,14 +70,20 @@ also detects and removes the extension through Pi.
 ## Oh My Pi (OMP)
 
 [Oh My Pi](https://omp.sh) loads Pi extensions as OMP plugins, so this
-extension runs in OMP too. Install it, then restart OMP:
+extension runs in OMP too. The Plannotator installer installs it in OMP when
+it finds `omp`, and updates it on each update; `plannotator inbox` does too if
+it is still missing. Type `/restart` in each open OMP session to load it. By
+hand, the same is:
 
 ```bash
 omp plugin install @plannotator/pi-extension
 ```
 
 Update with `omp plugin upgrade @plannotator/pi-extension`, then type
-`/restart` in each open OMP session to load the new version. Remove with
+`/restart` in each open OMP session to load the new version. A version you
+pinned (`omp plugin install @plannotator/pi-extension@0.28.60`) is left as
+it is by the installer and the Inbox, and so is a local build (`link:`,
+`file:`, a path or git). Remove with
 `omp plugin uninstall @plannotator/pi-extension`.
 
 Open reviews with the extension's commands: `/plannotator-review`,
@@ -97,6 +103,12 @@ one short line each in its system prompt (about 50 tokens for this one), and
 loads the full description only when the agent reads it, so the agent finds it
 as `xd://plannotator`. To keep it out, set `PLANNOTATOR_AGENT_TOOL=0` or
 `{ "agentTool": false }` in `~/.plannotator/config.json`, then restart OMP.
+
+The extension's `plannotator_inbox` tool, which sends to your
+[Plannotator Inbox](https://plannotator.ai/docs/reference/inbox/) and lets your
+reply there wake the session, is also **on by default in OMP** (off on Pi). It
+reads the same switch as Pi: `PLANNOTATOR_INBOX_TOOL=0` or
+`{ "inboxTool": { "pi": false } }` keeps it out.
 
 Start plan mode with `omp --plan` or `/plannotator-plan-mode`. With the
 extension loaded, `--plan` starts Plannotator's plan mode instead of choosing a

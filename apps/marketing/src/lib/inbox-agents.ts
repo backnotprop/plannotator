@@ -488,7 +488,7 @@ export const AGENTS: Agent[] = [
     other: [
       onWindows,
       { title: 'Turn the tool on without the Inbox', steps: [{ do: 'Merge this into your Plannotator config. Then `/reload` in Pi.', file: '~/.plannotator/config.json', code: '{ "inboxTool": { "pi": true } }' }] },
-      { title: 'Oh My Pi', steps: [{ do: 'Install the extension as an OMP plugin. Then restart OMP.', code: 'omp plugin install @plannotator/pi-extension' }] },
+      { title: 'Oh My Pi', steps: [{ do: 'The installer and `plannotator inbox` install the extension in OMP when they find `omp`, and its Inbox tool is on there. Restart OMP once.', code: '/restart' }] },
       { title: 'Through MCP', steps: [{ do: 'Pi 0.99 or newer. Replies don’t wake Pi this way.', code: 'pi mcp add plannotator-inbox -- plannotator inbox mcp' }] },
     ],
     check: wakeCheck('Pi'),

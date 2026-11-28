@@ -14,7 +14,7 @@
  * Node-safe (vendored into the Pi extension's `generated/inbox/`): `node:` modules only.
  */
 
-import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 export interface PiSessionClaim {
@@ -110,4 +110,44 @@ export function readPiSessionClaims(dataDir: string): PiSessionClaim[] {
     }
   }
   return claims;
+}
+
+/** Whether any claim file names `pid`: no file, no session, so the caller need not read the process's start time. */
+export function piSessionClaimFileOfPid(dataDir: string, pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 1) return false;
+  try {
+    return readdirSync(piSessionClaimDirOf(dataDir)).some((name) => name.endsWith(`.${pid}.json`));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The session `pid` claims now, or null: the Pi (or Oh My Pi) process that started the Inbox's stdio MCP shim as
+ * its MCP server says which session it runs here, and says it again on `/new`, `/resume` and an OMP session
+ * switch, so the shim reads it at every tool call. Reads only that pid's files and removes nothing.
+ *
+ * `notBeforeMs`: when the process now running as `pid` started (null: unknown, as on Windows). A claim written
+ * before then is a dead process's (killed, so it never released it) whose pid was reused, maybe by another
+ * agent: it is not this process's session. A live process's claim is always written after it started.
+ */
+export function piSessionClaimOfPid(dataDir: string, pid: number, notBeforeMs: number | null = null): string | null {
+  if (!Number.isInteger(pid) || pid <= 1) return null;
+  const dir = piSessionClaimDirOf(dataDir);
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return null;
+  }
+  for (const name of names) {
+    if (!name.endsWith(`.${pid}.json`)) continue;
+    const file = join(dir, name);
+    try {
+      if (notBeforeMs !== null && statSync(file).mtimeMs < notBeforeMs) continue;
+      const claim = parseClaim(readFileSync(file, "utf8"));
+      if (claim?.pid === pid) return claim.session;
+    } catch {}
+  }
+  return null;
 }

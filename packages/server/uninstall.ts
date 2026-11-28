@@ -42,7 +42,7 @@ import { takeDownInboxTailnet } from "./inbox-devices";
 import { hasTailnetDoorRecord, readTailnetDoorRecord } from "./inbox-tailnet-door";
 import { takeDownInboxTailscale } from "./inbox-tailscale";
 import { inboxLoginItem } from "./inbox-scheduled-login";
-import { agentHomeAllowed, forgetInboxAgents, planInboxAgentRemoval, type AgentEnvironment } from "./inbox-agents";
+import { OMP_EXTENSION_PACKAGE, agentHomeAllowed, forgetInboxAgents, ompExtension, planInboxAgentRemoval, type AgentEnvironment } from "./inbox-agents";
 import { qwenTrustRemoval, type QwenRevokeResult } from "./inbox-qwen-trust";
 import { hermesPluginInstalled } from "./inbox-hermes";
 import { HERMES_PLUGIN_REMOVE } from "@plannotator/core/inbox-hermes";
@@ -295,6 +295,7 @@ export interface UninstallEnvironment {
     command: string,
     args: readonly string[],
     env?: Readonly<Record<string, string>>,
+    cwd?: string,
   ) => Promise<UninstallCommandResult>;
   readonly scheduleWindowsSelfDelete: (
     target: string,
@@ -825,6 +826,12 @@ async function removeHostPlugins(
     command: string;
     args: readonly string[];
     references: () => HostReferences;
+    /** Its failure is a warning with the command, never an uninstall error (an extension another agent loads). */
+    optional?: boolean;
+    /** Why it is left as it is (a local build the person put there), said as a warning; null: remove it. */
+    leave?: () => string | null;
+    /** Run from this folder (Oh My Pi's from home, as the installers do, never a project's plugin scope). */
+    cwd?: string;
   }> = [
     {
       label: "Claude Code plugin plannotator@plannotator",
@@ -878,6 +885,26 @@ async function removeHostPlugins(
       },
     },
     {
+      // The installers and the Inbox add it with `omp plugin install`; OMP's own `plugin uninstall` removes it
+      // (can1357/oh-my-pi packages/coding-agent/src/cli/plugin-cli.ts handleUninstall, 7f38fc6). Found when OMP's
+      // plugin manifest lists it.
+      label: `Oh My Pi extension ${OMP_EXTENSION_PACKAGE}`,
+      owner: "Oh My Pi",
+      command: "omp",
+      args: ["plugin", "uninstall", OMP_EXTENSION_PACKAGE],
+      optional: true,
+      cwd: environment.homeDir,
+      // A local build (a link `omp plugin link` made, a git spec) is the person's own: left, and said.
+      leave: () => {
+        const ext = ompExtension(agentEnvironmentOf(environment));
+        return ext?.local ? `Left as is: Oh My Pi extension ${OMP_EXTENSION_PACKAGE} is a local build (${ext.spec}). To remove it, run \`omp plugin uninstall ${OMP_EXTENSION_PACKAGE}\`.` : null;
+      },
+      references: () => {
+        const ext = ompExtension(agentEnvironmentOf(environment));
+        return { references: ext ? [join(ext.dir, "package.json")] : [], otherScopes: [], unreadable: [] };
+      },
+    },
+    {
       // The installers add it with `qwen extensions install`; Qwen's own
       // command removes it from its extension store.
       label: "Qwen Code extension plannotator",
@@ -900,6 +927,11 @@ async function removeHostPlugins(
 
   const retry = formatUninstallRetryCommand(request);
   for (const action of actions) {
+    const left = action.leave?.() ?? null;
+    if (left) {
+      state.warnings.push(left);
+      continue;
+    }
     const scan = action.references();
     if (scan.unreadable.length > 0) {
       for (const unreadable of scan.unreadable) reportUnreadableConfig(action.owner, unreadable, request, state);
@@ -918,6 +950,10 @@ async function removeHostPlugins(
     const executable = environment.which(action.command);
     const manualCommand = [action.command, ...action.args].join(" ");
     const byHand = (entries: readonly string[]) => `remove only these Plannotator entries by hand: ${entries.join("; ")}. Keep everything else, then run \`${retry}\` again.`;
+    if (!executable && action.optional) {
+      state.warnings.push(`Skipped: ${action.label} (${action.command} is not on PATH). To remove it, run \`${manualCommand}\`.`);
+      continue;
+    }
     if (!executable) {
       state.errors.push(
         `${action.label} was detected but ${action.command} is unavailable; it was not removed. Manual cleanup: restore ${action.command} on PATH and run \`${manualCommand}\`. After it succeeds, rerun \`${retry}\`. If ${action.owner} was uninstalled for good, ${byHand(references)}`,
@@ -929,17 +965,21 @@ async function removeHostPlugins(
       state.planned.push(action.label);
       continue;
     }
-    const result = await environment.runCommand(executable, action.args);
+    const result = await environment.runCommand(executable, action.args, undefined, action.cwd);
     if (result.exitCode === 0) {
       // Only what that command removes counts: another scope's install was named above.
       const remaining = action.references();
       for (const unreadable of remaining.unreadable) reportUnreadableConfig(action.owner, unreadable, request, state);
       if (remaining.unreadable.length > 0) continue;
-      if (remaining.references.length > 0) {
+      if (remaining.references.length > 0 && action.optional) {
+        state.warnings.push(`${action.label} is still there after \`${manualCommand}\` reported success. To remove it, run \`${manualCommand}\` again.`);
+      } else if (remaining.references.length > 0) {
         state.errors.push(`${action.label} is still there after \`${manualCommand}\` reported success. To continue, ${byHand(remaining.references)}`);
       } else {
         state.removed.push(action.label);
       }
+    } else if (action.optional) {
+      state.warnings.push(`${action.label} was not removed (${result.timedOut ? "command timed out" : `exit ${result.exitCode}`}). To remove it, run \`${manualCommand}\`.`);
     } else {
       state.errors.push(
         `${action.label} was not removed automatically (${result.timedOut ? "command timed out" : `exit ${result.exitCode}`}). Manual cleanup: run \`${manualCommand}\` directly and resolve the host error until it succeeds. Then rerun \`${retry}\`. If ${action.command} keeps refusing because ${action.owner} no longer has it installed, ${action.command === "claude" ? `run \`claude plugin disable ${pluginId} --scope user\` to turn off its settings key, or ` : ""}${byHand(references)}`,
@@ -2556,6 +2596,7 @@ async function defaultRunCommand(
   command: string,
   args: readonly string[],
   env?: Readonly<Record<string, string>>,
+  cwd?: string,
 ): Promise<UninstallCommandResult> {
   let proc: Bun.Subprocess<"ignore", "pipe", "ignore">;
   try {
@@ -2564,6 +2605,7 @@ async function defaultRunCommand(
       stdout: "pipe",
       stderr: "ignore",
       env: { ...process.env, ...env },
+      cwd,
       windowsHide: true,
     });
   } catch {

@@ -2962,6 +2962,7 @@ export type InboxAgentId =
   | "cline"
   | "kiro"
   | "pi"
+  | "oh-my-pi"
   | "opencode"
   | "dsh"
   | "muse"
@@ -2981,6 +2982,7 @@ export const INBOX_AGENT_IDS: readonly InboxAgentId[] = [
   "cline",
   "kiro",
   "pi",
+  "oh-my-pi",
   "opencode",
   "dsh",
   "muse",
@@ -3001,6 +3003,7 @@ export const INBOX_AGENT_LABELS: Readonly<Record<InboxAgentId, string>> = {
   cline: "Cline",
   kiro: "Kiro",
   pi: "Pi",
+  "oh-my-pi": "Oh My Pi",
   opencode: "OpenCode",
   dsh: "DeepSeek Harness",
   muse: "Muse Code",
@@ -3023,6 +3026,12 @@ export function inboxElsewhereText(moved: { agent: InboxAgentId; path: string | 
   const why = `${moved.agent === "qwen" ? "this Inbox has another QWEN_HOME, so it" : "this Inbox"} looks in ${moved.now ?? "another file"}`;
   return `${label} is connected in ${moved.path ?? "another file"}, but ${why}. Plannotator left both as they are; Settings → Agents shows it off here, and turning it on moves it.`;
 }
+
+/**
+ * Settings' line for an Oh My Pi whose Plannotator extension is a local build (a `link:`, `file:`, path, git or
+ * workspace spec in OMP's plugin manifest): the Inbox and the installers never install or upgrade over it.
+ */
+export const OMP_LOCAL_BUILD_REASON = "A local build is installed in Oh My Pi, left as is.";
 
 export function inboxGrantText(grant: { agent: InboxAgentId; setting: string; undo: string }): string {
   return `Plannotator turned on ${INBOX_AGENT_LABELS[grant.agent]}'s ${grant.setting}, so your replies can start a turn in the session that asked. To turn it off: ${grant.undo}`;
@@ -3066,6 +3075,21 @@ export interface InboxConnectReport {
   granted?: { agent: InboxAgentId; setting: string; undo: string }[];
   /** Why registering as a trusted sender failed this run, said once per reason. */
   trust_failed?: { agent: InboxAgentId; reason: string }[];
+  /** Agents whose Plannotator extension this run started installing in the background (Oh My Pi): said in the terminal. */
+  installing?: InboxAgentId[];
+  /** Agents whose Plannotator extension the Inbox installed (Oh My Pi): open sessions load it after a restart. */
+  installed?: InboxAgentId[];
+}
+
+/** After the Inbox installed an agent's extension: what loads it in open sessions. */
+export function inboxInstalledText(agent: InboxAgentId): string {
+  const label = INBOX_AGENT_LABELS[agent];
+  return `Installed Plannotator's extension in ${label}. Type /restart in each open ${label} session to load it.`;
+}
+
+/** While the Inbox installs an agent's extension in the background. */
+export function inboxInstallingText(agent: InboxAgentId): string {
+  return `Installing Plannotator's extension in ${INBOX_AGENT_LABELS[agent]} in the background; the Inbox says when it is done.`;
 }
 
 /** The agents whose own instructions file can carry the Inbox note (packages/server/inbox-agent-notes.ts). */

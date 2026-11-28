@@ -85,7 +85,7 @@ import { INBOX_AGENT_LABELS, INBOX_AUTO_SEND_AFTER_MS, INBOX_NOTE_AGENT_IDS, typ
 import { writeUrlQr } from "@plannotator/server/qr";
 import { shellLine } from "@plannotator/inbox/harnesses";
 import { getCliVersion, hasHelpFlag } from "./cli";
-import { inboxClaudeMcpSessionFromEnv, inboxHostSessionFromEnv, inboxQwenShimContext, inboxSessionProjectFromEnv, inboxT3EntryIdle, runInboxMcpShim } from "./inbox-mcp-shim";
+import { inboxClaudeMcpSessionFromEnv, inboxHostSessionFromEnv, inboxPiParentReader, inboxQwenShimContext, inboxSessionProjectFromEnv, inboxT3EntryIdle, runInboxMcpShim } from "./inbox-mcp-shim";
 import { runPermissionHook } from "./inbox-permission-hook";
 import { runInboxLinkCommand } from "./inbox-link-command";
 import { INBOX_CONNECTION_USAGE, runInboxConnectionCommand, stdinLines } from "./inbox-connection-command";
@@ -797,6 +797,7 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
       claude: inboxClaudeMcpSessionFromEnv(process.env),
       sessionProject: inboxSessionProjectFromEnv(process.env),
       qwen: inboxQwenShimContext(process.env, homedir(), process.cwd(), process.ppid),
+      piParent: inboxPiParentReader(dataDir),
       askAiChild: isAskAiChild(process.env),
       t3EntryIdle: inboxT3EntryIdle(args.includes("--t3"), process.env),
     });

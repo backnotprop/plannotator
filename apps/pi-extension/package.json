@@ -27,6 +27,12 @@
       "./"
     ]
   },
+  "//plannotator": "What this extension does that the Plannotator Inbox reads from the installed package (packages/server/inbox-agents.ts ompExtension): omp-inbox-tool-default, its plannotator_inbox tool is on in Oh My Pi with nothing configured.",
+  "plannotator": {
+    "features": [
+      "omp-inbox-tool-default"
+    ]
+  },
   "files": [
     "index.ts",
     "bundled-skill.ts",

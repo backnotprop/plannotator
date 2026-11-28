@@ -72,6 +72,7 @@ Agents use it from their next session. PLANNOTATOR_INBOX_CONNECT=0 skips this st
 |-------|------------|---------------|
 | Claude Code | the Plannotator plugin is enabled | nothing: the plugin already gives it the `plannotator_inbox` tool |
 | Pi, OpenCode | Plannotator's extension or plugin is installed | the inbox tool turned on (`inboxTool` in `~/.plannotator/config.json`) |
+| Oh My Pi | `omp` on your `PATH`, or Plannotator's extension in `~/.omp/plugins` | Plannotator's extension, installed with `omp plugin install @plannotator/pi-extension` (or moved to the newest with `omp plugin upgrade`) when it is missing or has no Inbox tool on by default in Oh My Pi. The install runs in the background, so the Inbox opens at once. A version you pinned in Oh My Pi, or a local build (`link:`, `file:`, a path or git), is left alone. The inbox tool is on by default in Oh My Pi, so nothing is written to `config.json`. |
 | DeepSeek Harness | Plannotator's plugin (`@plannotator/dsh`) is in a DSH profile (`~/.dsh/profiles`, or `$DSH_HOME/profiles`) | the inbox tool turned on. Without the plugin, add it yourself: `dsh plugin --profile <profile> add @plannotator/dsh`. Plannotator never runs `dsh`. |
 | Hermes Agent | Plannotator's plugin is in `~/.hermes/plugins/plannotator` (or `$HERMES_HOME`) | the inbox tool turned on, and `hermes config set plugins.entries.plannotator.allow_gateway_injection true` so a reply can start a turn. Without the plugin, add it yourself: `hermes plugins install backnotprop/plannotator/apps/hermes-plugin --enable`. |
 | Pi without the extension | Pi 0.99 or later on your `PATH` (older Pi has no `pi mcp`: connect it by hand) | `pi mcp add plannotator-inbox` |
@@ -222,6 +223,12 @@ export PLANNOTATOR_INBOX_TOOL=1
 ```
 
 Start a new Pi session (or `/reload`). A reply arrives as a follow-up message once Pi is idle, and Pi never interrupts a run for it; **Send now** steers it into the running run instead. The thread shows "Delivered to Pi". The tool is inactive in print and JSON mode, because nothing could deliver a reply there.
+
+### Oh My Pi
+
+Nothing to do. The Plannotator installer installs the Pi extension in Oh My Pi when it finds `omp` (`omp plugin install @plannotator/pi-extension`), and updates it on each update; `plannotator inbox` does the same in the background if it is still missing, and says when it is done. A version you pinned in Oh My Pi (`omp plugin install @plannotator/pi-extension@0.28.60`), or a local build (`link:`, `file:`, a path or git), is left as it is. The inbox tool is on by default in Oh My Pi. Restart Oh My Pi once (`/restart` in a running session) so it loads the extension. A reply then arrives as a new turn once the session is idle, as on Pi.
+
+Oh My Pi reads Pi's setting: `{ "inboxTool": { "pi": false } }` in `~/.plannotator/config.json`, or `PLANNOTATOR_INBOX_TOOL=0`, turns the tool off in both. In the Inbox's Settings, Oh My Pi and Pi share this switch.
 
 ### OpenCode
 

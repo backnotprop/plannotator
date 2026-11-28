@@ -41,6 +41,8 @@ public enum Words {
   public static let agentKiro = "Kiro"
   /// agent.pi: packages/core/inbox-types.ts INBOX_AGENT_LABELS pi
   public static let agentPi = "Pi"
+  /// agent.oh-my-pi: packages/core/inbox-types.ts INBOX_AGENT_LABELS oh-my-pi
+  public static let agentOhMyPi = "Oh My Pi"
   /// agent.opencode: packages/core/inbox-types.ts INBOX_AGENT_LABELS opencode
   public static let agentOpencode = "OpenCode"
   /// agent.dsh: packages/core/inbox-types.ts INBOX_AGENT_LABELS dsh
@@ -159,6 +161,7 @@ public enum Words {
     "cline": agentCline,
     "kiro": agentKiro,
     "pi": agentPi,
+    "oh-my-pi": agentOhMyPi,
     "opencode": agentOpencode,
     "dsh": agentDsh,
     "muse": agentMuse,

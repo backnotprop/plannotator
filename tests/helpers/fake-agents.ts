@@ -26,7 +26,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-export const FAKE_AGENT_BINS = ["codex", "gemini", "qwen", "devin", "amp", "cline", "pi", "opencode", "dsh", "openclaw", "hermes", "cursor-agent", "kiro-cli", "muse"] as const;
+export const FAKE_AGENT_BINS = ["codex", "gemini", "qwen", "devin", "amp", "cline", "pi", "opencode", "dsh", "openclaw", "hermes", "cursor-agent", "kiro-cli", "muse", "omp"] as const;
 export type FakeAgentBin = (typeof FAKE_AGENT_BINS)[number];
 
 export interface FakeAgents {
@@ -178,6 +178,38 @@ function main() {
       process.stdout.write("Removed controller.\n");
     }
     process.exit(0);
+  }
+  // omp plugin install|upgrade|uninstall <npm name> (Oh My Pi): kept in ~/.omp/plugins as OMP does (bun writes
+  // "^<version>" for a bare name, the exact version for "name@1.2.3"), the package under node_modules, at
+  // FAKE_OMP_LATEST (default 9.9.9), saying the OMP default feature unless FAKE_OMP_FEATURE=0 (an older release).
+  // FAKE_OMP_DELAY_MS: each call takes that long first (a slow download).
+  if (name === "omp" && args[0] === "plugin" && ["install", "upgrade", "uninstall"].includes(args[1])) {
+    const finish = () => {
+      const spec = args[2] || "";
+      const at = spec.lastIndexOf("@");
+      const pkg = at > 0 ? spec.slice(0, at) : spec;
+      const version = at > 0 ? spec.slice(at + 1) : process.env.FAKE_OMP_LATEST || "9.9.9";
+      const dir = path.join(fakeHome, ".omp", "plugins");
+      const manifest = readJson(path.join(dir, "package.json"));
+      manifest.dependencies = Object.assign({}, manifest.dependencies);
+      if (args[1] === "uninstall") {
+        delete manifest.dependencies[pkg];
+        writeJson(path.join(dir, "package.json"), manifest);
+        fs.rmSync(path.join(dir, "node_modules", ...pkg.split("/")), { recursive: true, force: true });
+        process.stdout.write("Uninstalled " + pkg + "\n");
+        process.exit(0);
+      }
+      manifest.dependencies[pkg] = at > 0 ? version : "^" + version;
+      writeJson(path.join(dir, "package.json"), manifest);
+      const features = process.env.FAKE_OMP_FEATURE === "0" ? {} : { plannotator: { features: ["omp-inbox-tool-default"] } };
+      writeJson(path.join(dir, "node_modules", ...pkg.split("/"), "package.json"), Object.assign({ name: pkg, version }, features));
+      process.stdout.write((args[1] === "install" ? "Installed " : "Upgraded ") + pkg + "@" + version + "\n");
+      process.exit(0);
+    };
+    const delay = Number(process.env.FAKE_OMP_DELAY_MS || 0);
+    if (delay > 0) setTimeout(finish, delay);
+    else finish();
+    return;
   }
   if (args[0] !== "mcp") process.exit(0);
   switch (name) {

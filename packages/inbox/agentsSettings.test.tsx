@@ -573,3 +573,28 @@ test.skipIf(!hasDom)("Codex's group reads its account once: the plan and the lim
   expect(rows(group(out, 'codex')).at(-1)).toEqual({ k: 'Account', v: 'Not signed in', sw: null, sub: 'Run codex login in Terminal to sign in.' });
   expect(group(out, 'codex').querySelector('[data-codex-account] code')?.textContent).toBe('codex login');
 });
+
+test.skipIf(!hasDom)('Pi and Oh My Pi share one switch: both rows say so when both are shown, neither when Pi is alone; a pinned OMP says why it is off', () => {
+  const words = 'Oh My Pi and Pi share this switch.';
+  const pinned = "Plannotator's extension is pinned to 0.28.60 in Oh My Pi, a version with its Inbox tool off there by default. omp plugin install @plannotator/pi-extension moves it to the newest.";
+  const both = mount(
+    model({
+      agents: [
+        tool('pi', 'Pi'),
+        tool('oh-my-pi', 'Oh My Pi', { reach: { kind: 'tool', on: false, state: 'off', path: null, locked: false, reason: pinned } }),
+      ],
+    }),
+  );
+  expect(rows(group(both, 'pi'))[0]!.sub).toContain(words);
+  expect(rows(group(both, 'oh-my-pi'))[0]!.sub).toBe(`${pinned} ${words}`);
+  act(() => root?.unmount());
+  host?.remove();
+  const alone = mount(model({ agents: [tool('pi', 'Pi')] }));
+  expect(alone.textContent).not.toContain(words);
+});
+
+test.skipIf(!hasDom)('a local build of the extension in Oh My Pi is said on its row, on or off', () => {
+  const words = 'A local build is installed in Oh My Pi, left as is.';
+  const el = mount(model({ agents: [tool('oh-my-pi', 'Oh My Pi', { reach: { kind: 'tool', on: true, state: 'connected', path: null, locked: false, reason: words } })] }));
+  expect(rows(group(el, 'oh-my-pi'))[0]!.sub).toBe(words);
+});

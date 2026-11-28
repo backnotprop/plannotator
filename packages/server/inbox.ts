@@ -451,6 +451,7 @@ import {
   createAgentEnvironment,
   createAgentEnvironmentFor,
   displayPath,
+  forgetOmpToolBeforeOff,
   inboxAgentReach,
   inboxConnectDisabled,
   inboxPluginStatus,
@@ -2674,7 +2675,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
   void autoNotes();
   const connectAgents = (): Promise<InboxConnectReport> => {
-    connecting ??= connectInboxAgents({ dataDir, selfCommand, environment: agentEnvironment, signal: connectStop.signal })
+    connecting ??= connectInboxAgents({ dataDir, selfCommand, environment: agentEnvironment, signal: connectStop.signal, version })
       .then(async (report) => {
         await autoNotes();
         return report;
@@ -2712,7 +2713,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
               chosen_off: toolEnv === undefined && configuredInboxTool(config, host) === false,
               ...(modOff ? { mod_off: true } : {}),
             }
-          : null;
+          : id === "oh-my-pi" && detected
+            ? // Oh My Pi, found: its own state (the Pi extension's tool, on by default there), never Pi's switch.
+              { on: reach.on, locked: toolEnv !== undefined, chosen_off: toolEnv === undefined && configuredInboxTool(config, "pi") === false }
+            : null;
         // No tool (the inboxTool switch, or Claude Code's mod off): no reminder.
         const reminder = host && INBOX_REMINDER_HOSTS.includes(host)
           ? { on: !modOff && resolveInboxReminder(config, env, host), locked: toolEnv !== undefined, needs_tool: modOff || !resolveInboxTool(config, env, host) }
@@ -4390,6 +4394,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (validateOnly) return inboxToolState();
     // Every other entry is kept, a host this version does not know included.
     saveConfig({ inboxTool: inboxToolWith(loadConfig().inboxTool, changes) });
+    if (changes.pi !== undefined) forgetOmpToolBeforeOff(dataDir);
     const saved = loadConfig();
     for (const [host, value] of Object.entries(changes)) {
       if (configuredInboxTool(saved, host as InboxToolHost) !== value) {

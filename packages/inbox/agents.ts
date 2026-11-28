@@ -12,6 +12,7 @@ import {
   INBOX_NOTE_AUTO_AGENT_IDS,
   inboxElsewhereText,
   inboxGrantText,
+  inboxInstalledText,
   type InboxAgentId,
   type InboxAgentRow,
   type InboxAgentsModel,
@@ -74,6 +75,7 @@ export function cardReport(model: InboxAgentsModel): InboxConnectReport | null {
     (report.manual_why?.length ?? 0) +
     (report.trusted?.length ?? 0) +
     (report.granted?.length ?? 0) +
+    (report.installed?.length ?? 0) +
     (report.trust_failed?.length ?? 0) +
     (report.elsewhere?.length ?? 0);
   return news > 0 ? report : null;
@@ -113,6 +115,8 @@ export interface BandLines {
   /** Agents this run registered Plannotator with as a trusted sender (Qwen Code): how far that reaches, and how to undo it. */
   trusted: string | null;
   granted: { agent: InboxAgentId; text: string }[];
+  /** Extensions the Inbox installed (Oh My Pi): open sessions load them after a restart. */
+  installed: { agent: InboxAgentId; text: string }[];
   /** Agents whose trusted sender failed, or was removed in the agent: replies wait until they read the Inbox. */
   trustFailed: { agent: InboxAgentId; text: string }[];
   byHand: string | null;
@@ -131,6 +135,7 @@ export function bandLines(report: InboxConnectReport): BandLines {
       ? `Plannotator can now send your replies straight into any running ${joinNames(report.trusted.map(label))} session, without it asking you first. Turn this off in Settings → Agents.`
       : null,
     granted: (report.granted ?? []).map((grant) => ({ agent: grant.agent, text: inboxGrantText(grant) })),
+    installed: (report.installed ?? []).map((agent) => ({ agent, text: inboxInstalledText(agent) })),
     trustFailed: (report.trust_failed ?? []).map((f) => ({ agent: f.agent, text: `${label(f.agent)} won't get your replies by itself: ${sentence(tidyReason(f.reason))}` })),
     byHand: manual.length > 0 ? `${joinNames(manual.map(label))} ${manual.length === 1 ? 'needs' : 'need'} connecting yourself:` : null,
     failed: report.failed.map((f) => ({ agent: f.agent, text: `Couldn't connect ${label(f.agent)}: ${sentence(tidyReason(f.reason))}` })),

@@ -134,3 +134,9 @@ test('the line shows only with news not said yet: an unseen report or a note wri
   expect(connectLineNews(model({ notes_auto: [CLAUDE_NOTE] }))).toEqual({ report: null, notes: [CLAUDE_NOTE] });
   expect(connectLineNews(model({ last_report: { ...REPORT, seen: false } }))?.report?.added).toEqual(['codex', 'gemini']);
 });
+
+test.skipIf(!hasDom)('an Oh My Pi install finished in the background: said under what was connected, with the /restart it needs', () => {
+  const { el } = mount({ ...REPORT, added: ['oh-my-pi'], manual_why: [], installed: ['oh-my-pi'] });
+  expect(lines(el)).toContain("Installed Plannotator's extension in Oh My Pi. Type /restart in each open Oh My Pi session to load it.");
+  expect(el.querySelector('[data-connect-installed]')).not.toBeNull();
+});

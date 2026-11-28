@@ -96,6 +96,11 @@
       "parts": [],
       "source": "packages/core/inbox-types.ts INBOX_AGENT_LABELS pi"
     },
+    "agent.oh-my-pi": {
+      "text": "Oh My Pi",
+      "parts": [],
+      "source": "packages/core/inbox-types.ts INBOX_AGENT_LABELS oh-my-pi"
+    },
     "agent.opencode": {
       "text": "OpenCode",
       "parts": [],
