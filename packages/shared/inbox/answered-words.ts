@@ -1,8 +1,7 @@
-import { cutText } from "./text-cut";
-import { INBOX_REOPENED_HEADING, splitInboxReplyBody } from "./inbox-questions";
-import { withoutInboxReplyQuoteLead } from "./inbox-reply-quote";
-import { withoutInboxSkillsBlock } from "./skill-reference-block";
-import type { InboxAnsweredInReplyRequest, InboxQuestionRecord } from "./inbox-types";
+import { INBOX_REOPENED_HEADING, cutText, splitInboxReplyBody } from "@plannotator/core/inbox-questions";
+import { withoutInboxReplyQuoteLead } from "@plannotator/core/inbox-reply-quote";
+import { withoutInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
+import type { InboxAnsweredInReplyRequest, InboxQuestionRecord } from "@plannotator/core/inbox-types";
 
 export const INBOX_ANSWERED_QUOTE_MAX = 500;
 

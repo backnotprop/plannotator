@@ -1,4 +1,4 @@
-import { inboxAnsweredQuote, inboxReplyOwnWords } from "@plannotator/core/inbox-answered-in-reply";
+import { inboxAnsweredQuote, inboxReplyOwnWords } from "./answered-words";
 import { inboxQuestionState, isInboxQuestionSupersedable, parseInboxSupersedeRef } from "@plannotator/core/inbox-questions";
 import { isInboxNote, type InboxAnsweredInReply, type InboxAnsweredInReplyRequest, type InboxAuthor, type InboxMessage, type InboxQuestionRecord } from "@plannotator/core/inbox-types";
 import { InboxError } from "./schema";

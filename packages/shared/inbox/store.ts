@@ -43,7 +43,7 @@ import {
 import type { InboxPictureItPage } from "@plannotator/core/picture-it-page";
 import { inboxStoredSkips, inboxSupersedeSkipState, type InboxStoredMessage, type InboxSupersedeSkip } from "./supersede-skips";
 import { planInboxAnsweredInReply, type InboxAnsweredView } from "./answered-in-reply";
-import { composeInboxAnsweredReopenedBody, normalizeInboxAnsweredRequests } from "@plannotator/core/inbox-answered-in-reply";
+import { composeInboxAnsweredReopenedBody, normalizeInboxAnsweredRequests } from "./answered-words";
 import { inboxFileQuestionTwin } from "@plannotator/core/inbox-file-question-twin";
 import { inboxTwinChoicesRefusal } from "@plannotator/core/inbox-choice-twins";
 import { withoutInboxSkillsBlock } from "@plannotator/core/skill-reference-block";

@@ -72,7 +72,7 @@ const card = () => page.locator(`[data-message-id="${first.message_id}"] [data-q
 test('the person answers in words, the agent takes it as the answer, and Reopen gives the question back', async () => {
   await page.locator(`.ib-lbody [data-thread-id="${first.thread_id}"]`).click();
   await expect(page.locator('.ib-pfoot')).toContainText('2 open questions');
-  await page.getByRole('button', { name: 'Reply', exact: true }).click();
+  await page.locator('.ib-pfoot').getByRole('button', { name: 'Reply', exact: true }).click();
   await page.getByRole('textbox', { name: 'Reply to Claude Code' }).fill(WORDS);
   await page.locator('.ib-pfoot').getByRole('button', { name: 'Send', exact: true }).click();
   const reply = await claude.nextReply(first.thread_id, 20);

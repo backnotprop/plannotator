@@ -65,7 +65,6 @@
     "./inbox-hermes": "./inbox-hermes.ts",
     "./inbox-project-labels": "./inbox-project-labels.ts",
     "./inbox-questions": "./inbox-questions.ts",
-    "./inbox-answered-in-reply": "./inbox-answered-in-reply.ts",
     "./inbox-decisions": "./inbox-decisions.ts",
     "./inbox-reask": "./inbox-reask.ts",
     "./inbox-file-question-twin": "./inbox-file-question-twin.ts",
