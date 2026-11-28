@@ -20,6 +20,7 @@ import { shipsOf, startShip, useShipTakers, type ShipTo } from '../data/ships';
 import { useComposeSessions } from '../compose/useComposeSessions';
 import { useMachineLaunches } from '../compose/useMachineLaunches';
 import { pullThreadDefault, pullThreadOptions, type PullThreadOption } from './threadTo';
+import { REVIEW_KEY_REUSE_MS } from '../prs/reviewStarts';
 
 /** What a row's Ship is about: one open pull request, and the review thread it ships in, if it has one. */
 export interface ShipTarget {
@@ -131,9 +132,10 @@ const whyOf = (cause: unknown, fallback: string) => (cause instanceof Error && c
  * The new thread's start of a Ship that did not come back (no answer in time, the network gone), by computer, PR and
  * agent, in memory while the window is open: a press again sends that exact start (its key, body and name), so the
  * Inbox answers the thread it started and never starts a second thread or agent. Forgotten once it started, or was
- * refused or held and cancelled (nothing started: a press again is a new start).
+ * refused or held and cancelled (nothing started: a press again is a new start), and once `REVIEW_KEY_REUSE_MS` old
+ * (as Start review thread's key): a Ship pressed much later is a new one.
  */
-const shipStarts = new Map<string, { key: string; body: string; name: string }>();
+const shipStarts = new Map<string, { key: string; body: string; name: string; at: number }>();
 
 /**
  * Ship it with `option`: in the review's thread when the agent is on that thread's computer, else in a new thread on
@@ -163,7 +165,8 @@ export async function shipPull(target: ShipTarget, option: ShipOption, machineNa
   }
   const one = { ...target.stack, layers: [target.pull] };
   const series = `${there ?? ''}\u0000${target.pull.key}\u0000${JSON.stringify(option.to)}`;
-  const start = shipStarts.get(series) ?? { key: newUuid(), body: shipMessage(target.pull), name: pullHandoffThreadName(one, null) };
+  const kept = shipStarts.get(series);
+  const start = kept && Date.now() - kept.at < REVIEW_KEY_REUSE_MS ? kept : { key: newUuid(), body: shipMessage(target.pull), name: pullHandoffThreadName(one, null), at: Date.now() };
   shipStarts.set(series, start);
   let thread: Awaited<ReturnType<typeof inboxApi.startThread>>;
   try {

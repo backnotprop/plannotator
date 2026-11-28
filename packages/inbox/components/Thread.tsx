@@ -3090,9 +3090,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       // The box's words, or (the box closed) the words kept as its draft: the foot's Send carries them too.
       // Before anything goes, the draft's saves are answered (a save landing after the Send would bring the
       // words back), and the Send names the `updated_at` its words were saved as, so the server clears that
-      // draft only, never a newer one another window saved meanwhile.
-      // The Send claims the thread as it starts: the words waiting are saved, every save in flight is
-      // answered, and no save of this thread runs until it ends (the box is read-only meanwhile).
+      // draft only, never a newer one another window saved meanwhile. The Send claims the thread as it starts: the
+      // words waiting are saved, every save in flight is answered, and no save of this thread runs until it ends.
       // A Send of these same words earlier could not be confirmed (the Inbox was down): its reply is looked for
       // first. There, that Send is finished and nothing goes again; not there, this is an ordinary new Send.
       const earlier = unconfirmed.get(current.thread_id);
@@ -3100,6 +3099,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       if (!earlier?.late) unconfirmed.delete(current.thread_id);
       if (earlier && Date.now() - earlier.at < UNCONFIRMED_MS && box.open && earlier.words === boxWords()) {
         const landed = await replyLanded(current.thread_id, earlier.key);
+        if (left()) return; // Left during the look: nothing is finished in the other thread; read again on return.
         if (landed === 'unknown') {
           unconfirmed.set(current.thread_id, earlier);
           setError('Still no answer from the Inbox, so nothing was sent. Try again in a moment.');

@@ -664,11 +664,13 @@ const otherPane = () => (
     <ThreadPane thread={otherThread()} sent={null} onQuestions={() => {}} onChanged={async () => {}} onClose={() => {}} file={null} onOpenFile={() => {}} onOpenGuide={() => {}} phone />
   </div>
 );
-/** A second thread, with its own draft; its replies never answer (`otherPosts` counts them). */
+/** A second thread, with its own draft; its replies never answer (`otherPosts` counts them, `otherDraftWrites` its draft's writes). */
 let otherPosts = 0;
+let otherDraftWrites: string[] = [];
 function withOther(): void {
   const inner = globalThis.fetch;
   otherPosts = 0;
+  otherDraftWrites = [];
   const draft = { v: 1, thread_id: OTHER, body: OTHER_WORDS, created_at: '2026-11-27T10:05:00.000Z', updated_at: '2026-11-27T10:05:00.000Z' };
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const at = String(input);
@@ -677,7 +679,10 @@ function withOther(): void {
       return silent(init);
     }
     if (at.endsWith(`/threads/${OTHER}`)) return Response.json({ serverSession: 's', thread: otherThread() });
-    if (at.includes(`/threads/${OTHER}/draft`)) return Response.json({ serverSession: 's', draft });
+    if (at.includes(`/threads/${OTHER}/draft`)) {
+      if (init?.method === 'POST') otherDraftWrites.push(at);
+      return Response.json({ serverSession: 's', draft });
+    }
     return inner(input, init);
   }) as typeof fetch;
 }
@@ -710,6 +715,43 @@ test.skipIf(!hasDom)('Send again whose person goes to another thread during its 
   await until(() => state(el).words === null || state(el).words === '', LIMIT * 6);
   landLate();
   expect(wordKeys()).toEqual([first, first]);
+  expect(stored.size).toBe(1);
+});
+
+test.skipIf(!hasDom)("Send again's look for the first reply answers after the person went to another thread: that thread is untouched; back, the reply is seen as gone", async () => {
+  replyMode = 'hang';
+  const el = await open();
+  await pressSend(el);
+  await until(() => state(el).line !== null, LIMIT * 6);
+  // The first request reaches the Inbox now; the pane has not drawn it yet.
+  landLate();
+  withOther();
+  let open_ = () => {};
+  threadGate = new Promise<void>((resolve) => (open_ = resolve));
+  const reads = threadReads;
+  await pressSend(el);
+  await until(() => threadReads > reads, LIMIT * 4);
+  act(() => root!.render(otherPane()));
+  await settle(4);
+  type(el, 'Yearly, with a discount.');
+  await settle(2);
+  const writes = otherDraftWrites.length;
+  // The slow look answers now: the reply is there.
+  threadGate = null;
+  open_();
+  await settle(8);
+  expect(state(el).words).toBe('Yearly, with a discount.');
+  expect(state(el).line).toBe(null);
+  expect(liveText(el).includes('Your reply went.')).toBe(false);
+  expect(otherDraftWrites.slice(writes).some((at) => at.endsWith('/delete'))).toBe(false);
+  expect(unconfirmed.has(OTHER)).toBe(false);
+  expect(!!unconfirmed.get(THREAD)?.late).toBe(true);
+  // Back: the thread drawn with the reply finishes it the usual way.
+  act(() => root!.render(pane(false)));
+  await settle(6);
+  expect(liveText(el)).toContain('Your reply went.');
+  expect(unconfirmed.has(THREAD)).toBe(false);
+  expect(replyPosts.length).toBe(1);
   expect(stored.size).toBe(1);
 });
 
