@@ -17,6 +17,7 @@ We start nothing that lives on its own. Claude's own supervisor hosts the sessio
 - `packages/server/inbox-launch-pi.ts`: Pi's host (`createPiLaunchHost`): one `pi --mode rpc` process per session, owned by the Inbox (see "Pi").
 - `packages/server/inbox-launch-opencode.ts`: OpenCode 2's host (`createOpenCodeLaunchHost`): one private `opencode2 serve` per session, owned by the Inbox; its permissions on the card in `inbox-launch-opencode-permission.ts` (see "OpenCode").
 - `packages/server/inbox-launch-codex.ts`: Codex's host (`createCodexLaunchHost`): one `codex app-server` per thread, owned by the Inbox; its approvals on the card in `inbox-launch-codex-permission.ts` (see "Codex").
+- `packages/server/inbox-launch-bridge.ts`: a launch bridge's hosts (`createLaunchBridgeHosts`): an app on this computer that hosts the agents, off unless `PLANNOTATOR_LAUNCH_BRIDGE` is set (see "An app that hosts the agents (launch bridge)").
 - `packages/server/inbox-launch-env.ts`: the login-shell env, the drop list, the settings-file env and the spawn env.
 - `packages/core/inbox-run-line.ts`: `inboxRunOf`, the run line computed on read (never stored).
 - `packages/core/inbox-scratch.ts`: the scratch folder's name (`inboxScratchSlug`, then `-2`, `-3`).
@@ -32,6 +33,7 @@ We start nothing that lives on its own. Claude's own supervisor hosts the sessio
 - `processEnded(ref)`: a host that owns its session's process says no process of its own runs that session now (it ended, or this Inbox never ran one). A reply then starts the session again even when it never connected (no `root.delivery`), so a stopped line that says a reply continues it is true. Without it, a session that never connected is never started again by a reply (Try again is the way). Pi's.
 - `terminalFailed(launch, command)`: Open in Terminal's osascript failed for that command, so the host undoes what `terminal` did for it (Pi: the hand-off is withdrawn, and a restart it called off goes on).
 - `connector`: what of Plannotator's connects a session, in the never-connected line's words ("Started, but not connected to the Inbox. Is Plannotator's <connector> on in that folder?"): "plugin" by default, Pi's "extension".
+- `routeHost`, `openIn`, `open(launch)`, and `start`'s `source` and `reconcile`: a host in another app (a launch bridge, below). `routeHost` is the host its sessions connect as: the root's `to.host` and the Agents row's host, in place of the agent (the record's `agent` stays). With `open`, Open calls it and never starts a Terminal, and the run line carries `open_in` (`openIn`), so its button reads "Open in <app>". A non-zero `stop` from such a host is refused (`409 stop_unavailable`, in its words): the session still runs there. `source` is the launched message and its thread; `reconcile` is true for Try again of a failed start.
 - A `resume` that throws (or rejects) is a failed restart: the engine writes the error to `start.log` and the line shows Failed, "It did not start again.", with Try again. It is never an unhandled rejection, which would end the Inbox.
 
 The permission card names the agent from its question's author (`agentNameOf` in `PermissionCard.tsx`: the author's name, Claude Code when there is none; "Claude" in the deny field for Claude Code). Still Claude-worded, for the agent that needs it to change: the card's Auto/Full choices, and Settings → Agents' launch row (`settingsState`, read from the Claude host: Claude Code's bypass mode and its settings).
@@ -263,6 +265,45 @@ A linked machine starts, stops and trusts agents here as this computer's window 
 - **Verified** against the real OpenCode 2.2.7 (scratch home, no account, a scripted local model): the server's start time (about 120 ms), `location` and `model` on session create (also on 2.0.19), `/api/plugin`'s plugin entry and version, the model list with variants, `permission.asked` and its `once`/`always`/`reject` replies. Not run: the real plugin with this change (it ships in the next release), a real model.
 - **Proof.** `packages/server/inbox-launch-opencode.test.ts` against the fake `opencode2` (`tests/helpers/fake-opencode-launch.ts`: `--version`, `--standalone api GET /api/model` and `GET /api/agent`, the server's API subset and event stream, and the plugin's bridge poll) and the shared stub bridge (`tests/helpers/stub-bridge.ts`): the row (missing, plugin missing, a plugin that can't launch, OpenCode too old), the start (env, session with model and variant, the root as the first turn), Stop and the restart that names the session, the card's Allow once, a plugin that fails to load. The plugin side: `apps/opencode-plugin/inbox-v2-wake.test.ts` "OpenCode 2 started by the Inbox". Browser: the OpenCode case in `tests/e2e/inbox-launch-claude.spec.ts`.
 
+### An app that hosts the agents (launch bridge)
+
+An app on this computer can host the agents the Inbox starts, as its own chats. The Inbox then starts, stops, resumes and opens them through the app, and messages still move over Plannotator's own connection in the chat (the app's plugin). Orca is the first app that uses it. The code: `packages/server/inbox-launch-bridge.ts`; the tests: `packages/server/inbox-launch-bridge.test.ts`.
+
+**Turning it on.** The app starts the Inbox with `PLANNOTATOR_LAUNCH_BRIDGE=<absolute path>` naming a private JSON file:
+
+```json
+{ "v": 1, "host": "<id>", "name": "<app name>", "dataDir": "<this Inbox's data folder>", "address": "<file>", "key": "<file>", "agents": ["codex"] }
+```
+
+- `host`: 1 to 40 of `a-z`, `0-9` and `-`, never an agent's own id. The host the app's sessions connect as.
+- `name`: 1 to 40 characters, no control characters. Every word the person reads uses it: "Claude in <name>", "Open in <name>".
+- `dataDir`: must be this Inbox's data folder, so an app set up for one Inbox never drives another.
+- `agents` (optional): the launch agents the app hosts, 1 to 4 of `claude-code`, `codex`, `opencode` and `pi`, each once. Absent: all four. An agent it does not list keeps Plannotator's own host and starts as it does without the bridge.
+- `address`: an absolute path to a private file `{ "v": 1, "port": N }`. `key`: an absolute path to a private file of exactly 32 raw bytes. Both are read again for every request, so the app may restart on another port.
+
+A private file is a regular file of this user, with no group or other permission bits, never a symbolic link, and small. On Windows only the regular-file and size checks apply. The config is read once, when the Inbox starts. Unset, or a config that does not hold, and the bridge is off: Plannotator behaves as it does without it, and a config that does not hold says why once in the Inbox log.
+
+**The hosts.** One per agent the config lists (every launch agent when `agents` is absent), named by its short name: "Claude in <name>", "Codex in <name>", "OpenCode in <name>", "Pi in <name>", with `routeHost` the config's `host` and `connector` "<name> plugin". The engine holds hosts by agent, so while the bridge is on each one takes the place of Plannotator's own host for that agent. New message offers an agent only while the app's catalog lists it and has the picked folder open.
+
+**The protocol.** Every request goes to `http://127.0.0.1:<port>`. No redirect is followed, an answer over 1 MiB is refused, a GET waits 5 s and a POST 45 s. The key is never sent: another process may hold the port while the app is down, so each request is signed and each answer proves it came from the app.
+
+- **The request** carries `Authorization: Plannotator-Bridge v1,<ts>,<nonce>,<sig>`. `ts` is the time in unix milliseconds, `nonce` 16 random bytes as lowercase hex, and `sig` the lowercase-hex HMAC-SHA256, under the 32 raw key bytes, of the UTF-8 text `request\n<METHOD>\n127.0.0.1:<port>\n<path with query, exactly as sent>\n<ts>\n<nonce>\n<sha256 hex of the body bytes>` (of the empty string for a GET). The port is signed, so a request taken from one port is refused on another.
+- **The answer** carries `Plannotator-Bridge-Proof: <hex>`, the HMAC-SHA256 under the key of `answer\n<nonce>\n<status code>\n<sha256 hex of the answer's body bytes>`. The Inbox reads the body as bytes and checks the proof with a constant-time compare before it reads anything in it. A missing or wrong proof counts as the app not answering ("<name> did not answer as itself."), for every action, and nothing in that body is used.
+- **The app's duties.** It checks each signature with a constant-time compare, refuses a `ts` more than 60 s from its own clock, refuses a nonce it has already seen within that window, and sends the proof on every answer, error answers too.
+
+| Request | Body or query | Used by |
+| --- | --- | --- |
+| `GET /api/lifecycle/catalog` | none; answers `{ ok, workspaces: [{ folder }], providers: [{ id }], sessions: { <session>: { busy, state, stopped? } } }` | `available`, `trusts`, `sessions` (one read stands for 2 s) |
+| `GET /api/lifecycle/status?session=` | the session; answers `{ ok, version: 1, session, complete: true, launches: [{ launchId, session, state: "created" }] }` | the owner check before Stop, Open, Resume and Delete |
+| `POST /api/lifecycle/start` | `{ launchId, messageId, threadId, provider, folder, model, effort, ownerAction: true, reconcile }`; answers `{ ok, session, ref }` with `ref` equal to `session` | `start` |
+| `POST /api/lifecycle/stop` | `{ launchId, session, ownerAction: true, actionId }` | `stop` |
+| `POST /api/lifecycle/resume` | the same; `removeAssociation: true` for Delete | `resume`, `remove` |
+| `POST /api/lifecycle/open` | the same | `open` (the run line's Open) |
+
+Stop, Open, Resume and Delete act only when `status` shows exactly one launch owning the session, in state `created` (for Open and Resume, this launch). Otherwise nothing is posted and the action is refused in words: Stop answers `409 stop_unavailable`, Open `409 open_unavailable`, Resume is a failed restart. A start without its message is refused before anything is posted.
+
+**What stays the person's own.** The app keeps its own permissions and settings. The Inbox writes no trust, bypass or settings file for its sessions (`startOf` is the person's own mode, no permission card is asked), and the app's chat keeps its history when a thread is deleted (`purge` does nothing). Open never starts a Terminal: it asks the app to show the chat, and the run line's button reads "Open in <name>" ("<name> did not open the chat; it is still there." when the window cannot reach the Inbox). There is no attach command.
+
 ### Window routes
 
 Same origin and `serverSession`, like every window write (`serverSession` required for Trust folder and a Send with `to.launch.trust`, `403 window_only`). Open is refused over the tailnet. The settings routes (the full-permissions switch, the scratch folder, and how a launch would start), Trust folder, starting an agent, Stop and Delete answer the owner over the tailnet as on the computer (owner ruling 2026-11-11: Tailscale is the owner's remote door, not a sharing feature). The person's reply, re-ask, tag or new message starts a stopped session again.
@@ -318,4 +359,5 @@ Tests: `packages/server/inbox-launch-windows.test.ts` (the pure rules everywhere
 - Trusting a folder: `tests/e2e/inbox-launch-trust-compose.spec.ts` (New message: desktop, 390 and 320 wide; `LAUNCH_TRUST_COMPOSE_SHOTS_DIR` saves the approved pictures' names), `tests/e2e/inbox-launch-trust.spec.ts` (the thread's button). The gate, the order, 409 and `trust_failed` on a real server with the fake host: `packages/server/inbox-launch-trust-send.test.ts`. The window's states: `packages/inbox/composeTrust.test.tsx`. The reading and the write: `packages/server/inbox-launch-claude-trust.test.ts`. `fakeLaunchHost` (`tests/helpers/fake-launch-host.ts`) reaches a real server through `startInboxServer`'s `launchHosts`.
 - A turn that ends in an error: `packages/server/inbox-launch-turn-error.test.ts` (one note, an Inbox restart included; only a launched session read; cleared by the next good turn; the 300-character rule; Try again sends the message again; the transcript reader), and the e2e journey's step 10, with the fake `claude`'s `apiError`.
 - Unit: `packages/core/inbox-run-line.test.ts`, `packages/server/inbox-launch-env.test.ts` (the switches a launch keeps), `packages/server/inbox-launched-wake.test.ts` (which wake is launched, and its lines per agent and folder), `apps/hook/hooks/mod/inbox-launched-reminder.test.ts` (the reminder on a launched Claude Code session's first wake), `packages/server/inbox-launch-claude.test.ts`, the launch block of `packages/inbox/composeModel.test.ts`.
+- A launch bridge: `packages/server/inbox-launch-bridge.test.ts`, against a fake app on 127.0.0.1 (off unless its config holds, the agents the config lists and the app offers, an unlisted agent kept on the Inbox's own host, requests only to loopback, signed with the port, never through a redirect, the key itself never sent, an answer without the app's proof ignored, the start's body, the owner check before Stop, Open and Resume, the 1 MiB cap, the port read again; on the engine, a launch that settles to the app's host with `open_in` on its line). The button's words: `packages/inbox/openInTerminal.test.tsx`.
 - Real CLI (manual, never in CI): `scripts/launch-smoke/`. It runs real `claude` sessions in a scratch folder against a test Inbox on its own data dir; read its header before running it.

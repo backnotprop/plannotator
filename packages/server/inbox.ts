@@ -288,6 +288,7 @@ import { createInboxLiveReview } from "./inbox-live-review";
 import { powerUpRoute } from "./inbox-power-up";
 import { INBOX_CROSS_SITE_BODY, INBOX_MACHINE_PULL_WINDOW_ONLY_BODY, INBOX_MACHINE_WINDOW_ONLY_BODY, isCrossSiteRequest, isWindowRequest } from "./inbox-cross-site";
 import { createInboxLaunch } from "./inbox-launch";
+import { createLaunchBridgeHosts } from "./inbox-launch-bridge";
 import { createInboxRex, type InboxRex, type InboxRexReach, type InboxRexStatus } from "./inbox-rex";
 import { inboxRaiseAfterFarShow } from "./inbox-rex-far";
 import { inboxRexHeadless, inboxRexSockets } from "./inbox-rex-where";
@@ -969,6 +970,8 @@ const ERROR_STATUS: Record<string, number> = {
   launch_in_rex: 409,
   launch_off: 404,
   open_unavailable: 409,
+  // Stop: the app hosting the session (a launch bridge) refused it; the session still runs.
+  stop_unavailable: 409,
   // Trust folder: the agent's own config could not be changed; nothing was, and the message stays kept.
   trust_failed: 409,
   // Trust folder: the folder's warning is no longer the one the person read; nothing was saved.
@@ -5540,7 +5543,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     log: (line) => process.stderr.write(`${line}\n`),
     // The permission hook runs this Plannotator.
     selfCommand,
-    hosts: options.launchHosts,
+    // A test's own hosts win; else an app named by PLANNOTATOR_LAUNCH_BRIDGE hosts the agents it offers (none when unset).
+    hosts: options.launchHosts ?? createLaunchBridgeHosts,
   });
   launchReady = true;
   // Routines (inbox-scheduled.ts): a run is a launch. The clock and the login item follow the switch.

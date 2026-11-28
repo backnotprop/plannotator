@@ -96,7 +96,15 @@ export function RunLine({
         setNote(cause.message);
         return;
       }
-      setError(cause instanceof InboxApiError ? cause.message : what === 'open' ? 'Terminal did not open; copy the command instead.' : 'That did not work; try again.');
+      setError(
+        cause instanceof InboxApiError
+          ? cause.message
+          : what === 'open'
+            ? run.open_in
+              ? `${run.open_in} did not open the chat; it is still there.`
+              : 'Terminal did not open; copy the command instead.'
+            : 'That did not work; try again.',
+      );
       // The folder changed since this line was read: draw the new warning for the next click.
       if (cause instanceof InboxApiError && cause.code === 'trust_warning_changed') onChanged();
     } finally {
@@ -129,7 +137,8 @@ export function RunLine({
   const openTerminal = (
     <button type="button" className="ib-btn ib-sm" disabled={busy !== null} onClick={() => void act('open')} data-run-open="">
       <Icon name="terminal" size={14} />
-      Open in Terminal
+      {/* A launch bridge's app shows the session itself (`open_in`). */}
+      {run.open_in ? `Open in ${run.open_in}` : 'Open in Terminal'}
     </button>
   );
   const attach = run.attach_command && (

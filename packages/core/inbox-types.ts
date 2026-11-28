@@ -1477,6 +1477,8 @@ export interface InboxRun {
   trust?: { warning: string | null };
   /** `claude attach <ref>` from the folder, for Copy; null before the session exists. */
   attach_command: string | null;
+  /** The app Open shows the session in (a launch bridge's name: "Open in <app>"); absent: Terminal. */
+  open_in?: string;
   /** `failed`, in a folder the Send made (Create a folder): that folder as the person knows it (`~/…`); the line says it was made and stays (E8). */
   made_folder?: string;
   /** A launch that clones first (E1-E11): the repo, the percent once git says one (after a few seconds), why it failed, and what it brings. */

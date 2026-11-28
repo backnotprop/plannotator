@@ -119,6 +119,7 @@ if (hasDom) {
   test('a session waiting on Terminal has the button on the Inbox\'s computer, and its press re-reads the line', async () => {
     await render(threadOf('4f1c9a2e'), runOf('waiting_terminal'), { remote: false });
     expect(open()).not.toBeNull();
+    expect(open()!.textContent).toBe('Open in Terminal');
     await act(async () => open()!.click());
     await settle();
     expect(posted).toEqual([`/api/inbox/launch/${LAUNCH}/open`]);
@@ -147,6 +148,19 @@ if (hasDom) {
     await act(async () => open()!.click());
     await settle();
     expect(posted).toEqual([`/api/inbox/launch/${LAUNCH}/open`]);
+  });
+
+  test('a session an app hosts (a launch bridge, `open_in`): the button names that app, and a failed Open says the chat is still there', async () => {
+    await render(threadOf('4f1c9a2e'), runOf('failed', { attach_command: null, cause: 'It did not start again.', open_in: 'Testapp' }));
+    expect(open()!.textContent).toBe('Open in Testapp');
+    const answered = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') throw new TypeError('Failed to fetch');
+      return answered(input, init);
+    }) as typeof fetch;
+    await act(async () => open()!.click());
+    await settle();
+    expect(host!.querySelector('[data-run-error]')!.textContent).toBe('Testapp did not open the chat; it is still there.');
   });
 
   test('a start that failed with no session and no folder to trust has no button: nothing to open', async () => {
