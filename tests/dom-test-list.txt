@@ -17,6 +17,7 @@ packages/ui/components/html-viewer/htmlLiveProtocol.test.tsx
 packages/ui/components/html-viewer/HtmlViewer.vimHud.test.tsx
 packages/ui/components/html-viewer/HtmlViewer.bridgeAsset.test.tsx
 packages/ui/components/html-viewer/HtmlViewer.sandbox.test.tsx
+packages/ui/components/html-viewer/HtmlViewer.resourcePolicy.test.tsx
 packages/ui/components/html-viewer/HtmlViewer.frameScale.test.tsx
 packages/ui/components/html-viewer/bridgeTouchSelection.test.tsx
 packages/ui/components/html-viewer/bridgeCollapsedRange.test.ts

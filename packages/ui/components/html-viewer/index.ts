@@ -8,6 +8,7 @@ export {
   type BridgeUnavailableInfo,
   type HtmlViewerInline,
   type HtmlViewerProps,
+  type HtmlResourcePolicy,
 } from "./HtmlViewer";
 export { BRIDGE_PROTOCOL_VERSION } from "./bridge-script";
 // Bridge protocol 2, for a host that builds the frame's document itself (README § "What a host must change for

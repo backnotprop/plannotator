@@ -309,11 +309,10 @@ export function buildSrcdocInjection({
  * the security boundary for the annotate surface; the page's CSP was written
  * for its standalone context, so it is removed before injection.
  *
- * The package adds a CSP `<meta>` to the srcdoc document only for a page its
- * server marked (`connect-src 'none'`, {@link injectNoNetworkCsp}); that
- * policy names no `script-src`, so nothing here blocks a `<script src>` on
- * the URL path. A CSP delivered as an HTTP header on the
- * HOST page is inherited by the srcdoc document, and the host must allow
+ * The opt-in `resourcePolicy` is applied after this removal. Without it,
+ * only server-marked pages get a CSP (`connect-src 'none'`, {@link injectNoNetworkCsp}).
+ * That policy does not block a `<script src>` on the URL path. A CSP header
+ * on the host page is inherited by the srcdoc document. The host must allow
  * `script-src` for the origin the asset is served from.
  */
 const META_CSP_RE =
@@ -417,4 +416,14 @@ export function injectIntoHead(rawHtml: string, injection: string): string {
     return html.slice(0, headClose) + injection + html.slice(headClose);
   }
   return injection + html;
+}
+
+/** Host resource restrictions for a single-file, inline-interactive document. */
+export const SELF_CONTAINED_CSP = "default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; img-src data:; font-src data:; connect-src 'none'; frame-src 'none'; object-src 'none'; worker-src 'none'; base-uri 'none'; form-action 'none'";
+
+/** Apply last: the parser must see the host policy and lock before author markup. */
+export function applySelfContainedPolicy(document: string): string {
+  const position = documentStart(document);
+  const policy = `<meta http-equiv="Content-Security-Policy" content="${SELF_CONTAINED_CSP}"><script>Object.defineProperty(window, "__plannotatorLiveConfig", { value: null, writable: false, configurable: false, enumerable: false });</script>`;
+  return document.slice(0, position) + policy + document.slice(position);
 }

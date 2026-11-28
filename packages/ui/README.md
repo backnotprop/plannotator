@@ -167,6 +167,40 @@ htmlEmbeds={{
 
 Absent → no pen, and the block is the frame it always was. With it, a pen at the end of the block's caption turns on the viewer's pinpoint over the page: the block frames the page again through `HtmlViewer` (`inline`, `frameUrl`, `sandbox={EMBED_SANDBOX}`), from `buildEmbedDocument(html, { closeHead: true })` (core; `closeHead` ends our `<head>` before the page so the bridge lands in it; absent → the document as before). That second document, and the viewer's chunk, load only once the pen is first turned on or the block has a comment to show. The host must serve it under `EMBED_RESPONSE_CSP` and nothing wider: never `'self'`, never `allow-same-origin`. A comment carries `Annotation.htmlBlockAnchor` (`@plannotator/core/html-block-anchor`: `{ v: 1, index, id, sourceLine }`) beside `htmlAnchor` / `elementContext`; a block draws only the comments made on its place and its source, and reports the rest unanchored. The text highlighter skips rows with `htmlBlockAnchor`. `utils/parser` exports `additionalTargetsExportBlock` beside `elementContextExportBlock` for a host that writes its own feedback entry.
 
+#### Self-contained HTML (`resourcePolicy`)
+
+Pass `resourcePolicy="self-contained"` to restrict resource loading in a single-file document. The exported `HtmlResourcePolicy` type is `"self-contained"`. With no option, the current sandbox, link guard, and server-marked `connect-src` policy are unchanged.
+
+```tsx
+import { HtmlViewer, type HtmlResourcePolicy } from "@plannotator/ui/components/html-viewer";
+
+const policy: HtmlResourcePolicy = "self-contained";
+// Keep the usual annotation state and callbacks in viewerProps.
+<HtmlViewer {...viewerProps} rawHtml={html} resourcePolicy={policy} />;
+```
+
+The viewer puts this host CSP before author markup, after a leading doctype when present:
+
+```text
+default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; img-src data:; font-src data:; connect-src 'none'; frame-src 'none'; object-src 'none'; worker-src 'none'; base-uri 'none'; form-action 'none'
+```
+
+Inline scripts (including event handlers and eval-based libraries), inline styles, and embedded `data:` images and fonts work. Remote and sibling-file resources, nested frames, workers, and data requests are blocked; `blob:` images are blocked too. The viewer locks `window.__plannotatorLiveConfig` to `null` before author scripts, so the page cannot select live bridge mode. The iframe sandbox is exactly `allow-scripts`. Changing the policy remounts the iframe and reloads its document.
+
+Conflicting props throw during render; the viewer does not fall back to unrestricted rendering:
+
+| Prop | Rejected value |
+| --- | --- |
+| `src`, `liveSession`, `liveSandbox` | Any supplied value |
+| `bridgeScriptUrl` | Any supplied value; only the inline bridge is supported |
+| `frameUrl` | Any supplied value |
+| `hostNavigates` | `true` |
+| `sandbox` | Any supplied value other than `"allow-scripts"` |
+
+A stricter host page CSP is inherited and intersects this policy. If it forbids inline scripts, it blocks the inline bridge and annotation cannot start. The inline path has no ready timeout or failure banner. A host that aliases the bridge to the lite module has no inline bridge and gets the existing missing-bridge error.
+
+`base-uri 'none'` makes the browser ignore `<base href>`; link relaying still reports the raw `href`. **Navigation is not blocked.** A page can navigate its own frame with `location`, meta refresh, or a link the bridge does not catch, and that request can reach the network. This is not a no-network guarantee. The sandbox still blocks top-level navigation and popups. Author code shares the bridge's realm: this option does not prevent bridge tampering or forged annotation text.
+
 #### HTML annotation parity seams (0.32.0)
 
 Everything a host needs around `HtmlViewer` to match Plannotator's HTML annotation experience, all additive and all defaulting to today's behavior. Requires `@plannotator/core` 0.25.0 (the `html-anchor` subpath), so install and publish core before ui:

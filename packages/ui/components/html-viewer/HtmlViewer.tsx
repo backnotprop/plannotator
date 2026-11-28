@@ -62,6 +62,7 @@ import {
 } from "./useHtmlAnnotation";
 import {
   THEME_TOKENS,
+  applySelfContainedPolicy,
   buildSrcdocInjection,
   buildThemeTokenPayload,
   hasHostThemeOptIn,
@@ -217,6 +218,8 @@ function parseVimBridgeCopy(value: unknown): string | null {
     : null;
 }
 
+export type HtmlResourcePolicy = "self-contained";
+
 /** Inputs for the sandboxed raw-HTML viewer and its parent-side annotation UI. */
 /** The fewest milliseconds between two honored `step` messages from the page. */
 export const STEP_MESSAGE_MIN_INTERVAL_MS = 150;
@@ -225,6 +228,10 @@ export const STEP_MESSAGE_MIN_INTERVAL_MS = 150;
 const REOPEN_ANSWER_MS = 3000;
 
 export interface HtmlViewerProps {
+  /** Restrict srcdoc resources to inline code/styles and data images/fonts.
+   * Requires the inline bridge and sandbox="allow-scripts"; conflicts throw.
+   * Changing this option reloads the frame. Navigation is not blocked. */
+  resourcePolicy?: HtmlResourcePolicy;
   rawHtml: string;
   /**
    * Optional: a `sandbox` for the live (`src`) frame. Absent: no sandbox, as
@@ -699,6 +706,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
   (
     {
       rawHtml,
+      resourcePolicy,
       liveSandbox,
       src,
       liveSession,
@@ -755,7 +763,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       onPageTap,
       touchSelection = false,
       hostNavigates = false,
-      sandbox = HTML_VIEWER_SANDBOX,
+      sandbox,
       allowCommentImages = true,
       frameUrl,
       pageNavigation = false,
@@ -765,6 +773,18 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     },
     ref,
   ) => {
+    if (resourcePolicy) {
+      const conflicts = { src, liveSession, liveSandbox, bridgeScriptUrl, frameUrl };
+      for (const [prop, value] of Object.entries(conflicts)) {
+        if (value !== undefined) {
+          throw new Error(`HtmlViewer resourcePolicy is incompatible with ${prop}`);
+        }
+      }
+      if (hostNavigates) throw new Error("HtmlViewer resourcePolicy is incompatible with hostNavigates");
+      if (sandbox !== undefined && sandbox !== "allow-scripts") {
+        throw new Error('HtmlViewer resourcePolicy requires sandbox="allow-scripts"');
+      }
+    }
     const iframeRef = useRef<HTMLIFrameElement>(null);
     const globalCommentButtonRef = useRef<HTMLButtonElement>(null);
     const [iframeHeight, setIframeHeight] = useState(600);
@@ -873,10 +893,11 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       // scripts run, and the link guard runs before every script (the shim
       // too). The URL path gets both from the bridge asset.
       const framed = bridgeUrl ? page : injectLinkGuard(injectSandboxShim(page), linkKey);
-      // A page its server opened outside the session's roots gets no network.
-      const html = hasNoNetworkMarker(rawHtml) ? injectNoNetworkCsp(framed) : framed;
+      // The opt-in policy already covers the server marker's connection restrictions.
+      const html = resourcePolicy ? applySelfContainedPolicy(framed)
+        : hasNoNetworkMarker(rawHtml) ? injectNoNetworkCsp(framed) : framed;
       return { html, linkKey };
-    }, [liveMode, rawHtml, hostTheme, diffActive, bridgeUrl, inlineMode]);
+    }, [liveMode, rawHtml, hostTheme, diffActive, bridgeUrl, inlineMode, resourcePolicy]);
     const srcdoc = framedDocument?.html;
 
     useLayoutEffect(() => {
@@ -1916,13 +1937,14 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
                 (`frameUrl`) keeps the srcdoc frame's sandbox. Srcdoc mode is
                 unchanged. */}
             <iframe
+              key={resourcePolicy ?? "default"}
               ref={iframeRef}
               allowFullScreen
               {...(src
                 ? { src, ...(liveSandbox ? { sandbox: liveSandbox } : {}) }
                 : servesFrame
                   ? { src: frameSrc, sandbox: srcdocSandbox(sandbox, hostNavigates) }
-                  : { srcDoc: srcdoc, sandbox: srcdocSandbox(sandbox, hostNavigates) })}
+                  : { srcDoc: srcdoc, sandbox: resourcePolicy ? "allow-scripts" : srcdocSandbox(sandbox, hostNavigates) })}
               style={{
                 width: "100%",
                 height: fullViewport ? "100%" : `${inlineFrame ? inlineFrame.height : iframeHeight}px`,
