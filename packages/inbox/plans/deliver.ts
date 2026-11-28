@@ -3,8 +3,9 @@
  * (Done, Restore: plan review's "# Direct Edits", packages/shared/direct-edits.ts, built by the Inbox). One way for
  * both (approval "plans-editing"), to the agent the page finds (`planAgentOf`):
  * - the plan has its Inbox thread (`thread_id`): the words go into it as the person's reply, at once;
- * - else an agent is live in the plan's project (the Inbox's live sessions, the ones New message lists; the session
- *   that wrote the plan first when it is one of them): New message opens to it filled in (compose/openComposer.ts),
+ * - else the session that wrote the plan, while it is live (the Inbox's live sessions, the ones New message lists),
+ *   wherever the Inbox files it (planAgent.ts), else an agent live in the plan's project: New message opens to it
+ *   filled in (compose/openComposer.ts),
  *   or on its own To list when several are live or the project is known by its folder's name only (an imported
  *   plan: two folders may share the name, and the list shows which is which); the person reads it and presses Send
  *   there, and the thread it starts becomes the plan's;
@@ -18,73 +19,15 @@
  */
 import { sha1Hex, type PlanRecord, type PlanVersion } from '@plannotator/core/plans';
 import { storage } from '@plannotator/ui/utils/storage';
-import type { InboxComposeSession } from '@plannotator/core/inbox-types';
-import { inboxApi, type ComposeSessionsModel } from '../api';
+import { inboxApi } from '../api';
 import { openComposer } from '../compose/openComposer';
-import { hostLabel } from '../compose/model';
 import { plansApi } from './client';
-
-/** The agent session that wrote the plan: the newest version that names one. */
-export interface PlanSession {
-  session: string;
-  host: string | null;
-  name: string | null;
-}
-
-export function planSession(versions: readonly PlanVersion[]): PlanSession | null {
-  for (let i = versions.length - 1; i >= 0; i--) {
-    const v = versions[i]!;
-    if (v.agent_session) return { session: v.agent_session, host: v.agent_host, name: v.agent_name };
-  }
-  return null;
-}
-
-/** The agent as the page names it: its session's name, else its host's ("Claude Code"), else "the agent". */
-export const planAgentLabel = (session: PlanSession | null) => session?.name || (session?.host ? hostLabel(session.host) : null) || 'the agent';
+import { planAgentOf, type PlanAgent } from './planAgent';
 
 /** The Inbox's words for a project with no live agent (the thread's and New message's). */
 export const noAgentWords = (project: string | null) => (project ? `No agent is running in ${project}` : 'No live session');
 
-/** Who a plan's words go to. */
-export type PlanAgent =
-  | { kind: 'thread'; thread: string; label: string }
-  | { kind: 'session'; session: string; host: string; label: string }
-  /** Several agents are live in the project, or one known by its folder's name only: New message opens on its To list. */
-  | { kind: 'pick'; label: string }
-  | { kind: 'none' };
-
-const lastPart = (root: string) => root.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? root;
-
-/**
- * The live sessions working in the plan's project: its Inbox project, its folder, or the name plan history files it
- * under. `sure`: matched by the project's id or folder; a match by the folder's name only (an imported plan knows no
- * more) may be another folder of the same name.
- */
-export function planLiveSessions(plan: Pick<PlanRecord, 'project_id' | 'project_root' | 'project_name'>, model: ComposeSessionsModel | null): (InboxComposeSession & { sure: boolean })[] {
-  if (!model) return [];
-  const sure = (project: { id: string | null; root: string }, root?: string) =>
-    (!!plan.project_id && project.id === plan.project_id) || (!!plan.project_root && (project.root === plan.project_root || root === plan.project_root));
-  const named = (project: { name: string; root: string }, root?: string) =>
-    !!plan.project_name && (project.name === plan.project_name || lastPart(project.root) === plan.project_name || (!!root && lastPart(root) === plan.project_name));
-  return model.projects.flatMap((group) =>
-    group.sessions.flatMap((s): (InboxComposeSession & { sure: boolean })[] => (sure(group.project, s.root) ? [{ ...s, sure: true }] : named(group.project, s.root) ? [{ ...s, sure: false }] : [])),
-  );
-}
-
-/**
- * Whom the plan's words go to now: its thread, else the live agent in its project: the plan's own session first,
- * else the one agent matched by the project's id or folder (one of the same name elsewhere does not count). Several,
- * or matched by the folder's name only: New message's To list, where the person sees which folder each agent is in.
- */
-export function planAgentOf(plan: PlanRecord, versions: readonly PlanVersion[], model: ComposeSessionsModel | null): PlanAgent {
-  const own = planSession(versions);
-  if (plan.thread_id) return { kind: 'thread', thread: plan.thread_id, label: planAgentLabel(own) };
-  const live = planLiveSessions(plan, model);
-  const sure = live.filter((s) => s.sure);
-  const chosen = live.find((s) => s.session === own?.session) ?? (sure.length === 1 ? sure[0]! : null);
-  if (chosen) return { kind: 'session', session: chosen.session, host: chosen.host, label: chosen.label || hostLabel(chosen.host) };
-  return live.length > 0 ? { kind: 'pick', label: 'the agent' } : { kind: 'none' };
-}
+export { planAgentLabel, planAgentOf, planAuthorLive, planLiveSessions, planSession, type PlanAgent, type PlanSession } from './planAgent';
 
 /** Whom the plan's words go to at the moment they are sent: the live sessions read again (a failed read: none known). */
 export async function planAgentNow(plan: PlanRecord, versions: readonly PlanVersion[]): Promise<PlanAgent> {
