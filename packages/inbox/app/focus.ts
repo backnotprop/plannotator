@@ -11,6 +11,7 @@ import { focusLost } from '../backFocus';
 import { focusFirst } from '../focusLanding';
 import { readRoute, type Route } from './route';
 import { hashOf, writeRoute } from './writeRoute';
+import { closeToWall } from './wallReturn';
 
 /**
  * Leave the screen on top for the one under it (a thread for the list, a
@@ -20,7 +21,7 @@ import { hashOf, writeRoute } from './writeRoute';
  * a new entry, so the browser's Back reopens what was just closed.
  */
 export function closeTo(route: Route): void {
-  if (!backOnClose(route, isPhone(), window.history)) writeRoute(route);
+  if (!closeToWall(route) && !backOnClose(route, isPhone(), window.history)) writeRoute(route);
 }
 
 /**

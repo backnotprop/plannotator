@@ -294,6 +294,7 @@
   "inbox-video.spec.ts": 18,
   "inbox-view-skill.spec.ts": 20,
   "inbox-voice.spec.ts": 452,
+  "inbox-wall-file-close.spec.ts": 20,
   "inbox-whats-new-behind.spec.ts": 2,
   "inbox-whats-new-tailnet.spec.ts": 2,
   "inbox-window-controls.spec.ts": 82,
