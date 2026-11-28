@@ -67,8 +67,12 @@ import {
   inboxBlockedField,
   type InboxBlockedKind,
   INBOX_OFF_LINE,
+  INBOX_OFF_POLL_FIELD,
+  INBOX_OFF_TOOL_TEXT,
+  inboxOffRefuses,
 } from "./connection";
 import { isInboxTurnedOn } from "./turned-on";
+import { isInboxSessionOff } from "./session-off";
 import { directFetchInit } from "../loopback-proxy";
 
 /** The longest a host's start waits for a running Inbox's `tools/list` (the mod's bound). */
@@ -247,6 +251,7 @@ export class InboxAgentConnection {
 
   /** A `plannotator_inbox` call from `sessionId`, working in `cwd`; `wakes` when this session's wake runs (replies arrive as turns). */
   async callTool(input: unknown, at: { sessionId: string; cwd: string; wakes?: boolean }): Promise<{ text: string; isError: boolean }> {
+    if (isInboxSessionOff(this.dataDir, at.sessionId) && inboxOffRefuses(input)) return { text: INBOX_OFF_TOOL_TEXT, isError: true };
     const call = inboxToolCall(input, this.tools, {
       project_path: at.cwd,
       agent_session: at.sessionId,
@@ -597,6 +602,7 @@ export class InboxWake {
   private blocked: InboxBlockedKind | null = null;
   /** When `blocked` last changed (INBOX_BLOCKED_AT_FIELD): this link's start until the first change. */
   private blockedAt = Date.now();
+  private off = false;
 
   constructor(
     private readonly connection: InboxAgentConnection,
@@ -681,6 +687,7 @@ export class InboxWake {
       this.noteBusy(busy, asked);
     }
     this.noteBlocked();
+    this.noteOff();
     this.idleTicks = this.pending.size === 0 || busy !== false ? 0 : this.idleTicks + 1;
     for (const id of [...this.unacked]) await this.acknowledge(id);
     const now = Date.now();
@@ -694,7 +701,7 @@ export class InboxWake {
     const urgent =
       [...this.pending.values()].some((command) => command.now === true && !this.noSteer.has(command.id)) &&
       (this.steerable || busy === false);
-    if (!this.delivering && this.pending.size > 0 && (this.idleTicks >= 2 || urgent)) {
+    if (!this.delivering && !this.off && this.pending.size > 0 && (this.idleTicks >= 2 || urgent)) {
       this.delivering = true;
       // Not awaited: a steer resolves only when the message enters the run, which a long tool call can hold for
       // minutes, and the tick has to go on polling meanwhile, or the session reads as ended (the Claude Code mod's way).
@@ -757,6 +764,22 @@ export class InboxWake {
       .catch(() => null);
   }
 
+  private noteOff(): void {
+    const off = isInboxSessionOff(this.connection.dataDir, this.sessionId);
+    if (off === this.off) return;
+    this.off = off;
+    if (!this.leader || this.disposed) return;
+    void this.connection
+      .bridge(INBOX_BRIDGE_EVENT_PATH, this.sessionId, {
+        type: "state",
+        ...(this.busy === null ? {} : { busy: this.busy, idle_since: this.idleSince }),
+        [INBOX_SEND_NOW_POLL_FIELD]: this.steerable,
+        [INBOX_OFF_POLL_FIELD]: off,
+        ...inboxBlockedField(this.blocked, this.blockedAt),
+      })
+      .catch(() => null);
+  }
+
   /**
    * The replies and messages waiting for this session (waitMs 0: now). The
    * poll says where the session works and whether a turn runs
@@ -814,6 +837,7 @@ export class InboxWake {
         [INBOX_STEER_POLLS_POLL_FIELD]: true,
         // Tags (approval "inbox-tag-agents"): this connection words a reply it was tagged in truthfully.
         [INBOX_TAGS_POLL_FIELD]: true,
+        [INBOX_OFF_POLL_FIELD]: this.off,
         // What this process loaded (additive): the Inbox says when the session runs an older one.
         ...(plugin?.version ? { plugin } : {}),
       },

@@ -101,6 +101,7 @@ export function farAgentRows(raw: unknown): InboxTaggableSession[] {
       idle_since: time(s.idle_since),
       taggable: s.taggable === true,
       ...(s.send_now === true ? { send_now: true } : {}),
+      ...(s.inbox_off === true ? { inbox_off: true } : {}),
       owner: false,
       wrote_thread: false,
     });
@@ -337,10 +338,10 @@ export function createInboxFarTags(deps: FarTagsDeps) {
   const lists = (session: string): boolean => [...agents.values()].some((entry) => entry.rows.some((row) => row.session === session));
 
   /** A far session's connection as its computer last said (busy, and whether it takes Send now), for Send now here. */
-  const connectionOf = (session: string): { busy: boolean | null; send_now: boolean } | null => {
+  const connectionOf = (session: string): { busy: boolean | null; send_now: boolean; inbox_off?: true } | null => {
     for (const entry of agents.values()) {
       const row = entry.rows.find((r) => r.session === session);
-      if (row) return { busy: row.busy, send_now: row.send_now === true };
+      if (row) return { busy: row.busy, send_now: row.send_now === true, ...(row.inbox_off === true ? { inbox_off: true as const } : {}) };
     }
     return null;
   };

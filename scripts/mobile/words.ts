@@ -14,7 +14,7 @@
  * are not constants yet: add a constant to the product first, then a row here.
  */
 import { INBOX_ACTION_LABEL } from '../../packages/core/inbox-actions';
-import { INBOX_STOPPED_REPLY_TEXT, TURN_ENDED_TEXT, autoAfterText, reaskRowLine, sentRowLine } from '../../packages/core/inbox-delivery-line';
+import { INBOX_OFF_LABEL, INBOX_OFF_REPLY_TEXT, INBOX_STOPPED_REPLY_TEXT, TURN_ENDED_TEXT, autoAfterText, reaskRowLine, sentRowLine } from '../../packages/core/inbox-delivery-line';
 import { INBOX_TURN_FAILED_WORDS } from '../../packages/core/inbox-run-line';
 import { INBOX_SNOOZED_BAND } from '../../packages/core/inbox-snooze';
 import { INBOX_ACK_LABEL, INBOX_AGENT_LABELS, INBOX_HOST_NAMES, INBOX_PRIORITY_GROUP, INBOX_SECTIONS, INBOX_UPLOAD_MAX_BYTES } from '../../packages/core/inbox-types';
@@ -51,6 +51,8 @@ export function buildWords(): Record<string, Word> {
   words['label.ack'] = fixed(INBOX_ACK_LABEL, 'packages/core/inbox-types.ts INBOX_ACK_LABEL');
   words['label.action_item'] = fixed(INBOX_ACTION_LABEL, 'packages/core/inbox-actions.ts INBOX_ACTION_LABEL');
   words['delivery.stopped_reply'] = fixed(INBOX_STOPPED_REPLY_TEXT, `${DELIVERY} INBOX_STOPPED_REPLY_TEXT`);
+  words['delivery.inbox_off_reply'] = fixed(INBOX_OFF_REPLY_TEXT, `${DELIVERY} INBOX_OFF_REPLY_TEXT`);
+  words['label.inbox_off'] = fixed(INBOX_OFF_LABEL, `${DELIVERY} INBOX_OFF_LABEL`);
   words['delivery.turn_ended'] = fixed(TURN_ENDED_TEXT, `${DELIVERY} TURN_ENDED_TEXT`);
   words['delivery.auto_after'] = template(`${DELIVERY} autoAfterText(minutes)`, ['minutes'], (m) => autoAfterText(m as unknown as number));
   words['delivery.sent_queued'] = template(`${DELIVERY} sentRowLine(name, true)`, ['name'], (n) => sentRowLine(n!, true));

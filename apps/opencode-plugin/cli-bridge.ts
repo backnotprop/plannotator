@@ -12,7 +12,9 @@ import {
 import { runPullSessionBridgeClient } from "@plannotator/ai/session-bridge-pull-client";
 import { isSshDetectedRemote } from "@plannotator/server/remote";
 import { inboxOpenedText, openInboxInBrowser } from "@plannotator/shared/inbox/agent-link";
-import { INBOX_COMMAND_BRIEFING } from "@plannotator/shared/inbox/connection";
+import { INBOX_COMMAND_BRIEFING, INBOX_OFF_AGENT_TEXT, INBOX_OFF_NOTICE, INBOX_ON_AGENT_TEXT, INBOX_ON_NOTICE, inboxOffArgument } from "@plannotator/shared/inbox/connection";
+import { setInboxSessionOff } from "@plannotator/shared/inbox/session-off";
+import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { annotateTargetWords, parseAnnotateArgs, type ParsedAnnotateArgs } from "@plannotator/shared/annotate-args";
 import {
   annotateInputNamesExistingTarget,
@@ -79,6 +81,7 @@ interface OpenCodeClient {
   notifyFailure?: (input: { command: string; message: string }) => unknown;
   /** OpenCode 2's slash commands: `/plannotator-inbox`'s transcript notice. */
   notifyInbox?: (input: { url: string; detail?: string }) => unknown;
+  notifyLine?: (line: string) => unknown;
   /** OpenCode 2's slash commands: the Inbox opened, so the session's requests carry the Inbox briefing from now on. */
   briefInbox?: () => unknown;
   session?: {
@@ -1074,6 +1077,21 @@ export async function handleCliCommand(input: {
   };
 
   try {
+    if (input.command === INBOX_COMMAND && inboxOffArgument(input.rawArgs)) {
+      const off = inboxOffArgument(input.rawArgs) === "off";
+      if (input.sessionId) setInboxSessionOff(getPlannotatorDataDir(), input.sessionId, off);
+      const notice = off ? INBOX_OFF_NOTICE : INBOX_ON_NOTICE;
+      log(input.client, "info", `[Plannotator] ${notice}`);
+      try {
+        if (typeof input.client.notifyLine === "function") await input.client.notifyLine(notice);
+        else await input.client.tui?.showToast?.({ body: { title: "Plannotator", message: notice, variant: "info" } });
+      } catch {
+        log(input.client, "info", `[Plannotator] Could not show: ${notice}`);
+      }
+      if (input.commandTurn) await injectSessionPrompt(input.client, input.sessionId, off ? INBOX_OFF_AGENT_TEXT : INBOX_ON_AGENT_TEXT);
+      return;
+    }
+
     if (input.command === INBOX_COMMAND) {
       // Not a review: open the person's Inbox (`plannotator inbox --open`,
       // which starts a stopped one detached) and say where it is.

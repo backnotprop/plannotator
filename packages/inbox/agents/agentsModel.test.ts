@@ -13,7 +13,7 @@ import { expect, test } from 'bun:test';
 import type { InboxAgent, InboxAgentsGroup, InboxListRow } from '@plannotator/core/inbox-types';
 import type { MachineView } from '../api';
 import { machinesModel } from '../machines';
-import { agentFacts, agentListFilter, agentRowName, agentsGroups, agentThread, filterAgentRows, sortAgentEntries } from './model';
+import { INBOX_OFF_TOO_OLD, agentFacts, agentListFilter, agentRowName, agentsGroups, agentThread, filterAgentRows, sortAgentEntries } from './model';
 import { holdAgentOrder } from './heldOrder';
 
 const SELF = 'ibx_01K0000000000000000000000S';
@@ -129,6 +129,14 @@ test("an unnamed agent's row keeps its first thread's name while another thread 
   expect(entry.name).toBe('Invoice retries');
   // The row still opens the thread that waits.
   expect(entry.thread?.id).toBe('t_waits');
+});
+
+test("the hover card says a session's Inbox is off, or that its Plannotator is too old to turn it off", () => {
+  const now = new Date('2026-11-09T12:00:00.000Z');
+  const facts = (extra: Record<string, unknown>) => agentFacts({ agent: agent('ses_f', { started_at: null, last_seen_at: null, ...extra }), machine: null, name: 'Claude Code', thread: null }, null, now);
+  expect(facts({ state: 'idle', inbox_off: true }).state).toBe('Idle · Inbox off');
+  expect(facts({ inbox_off_unknown: true }).rows).toEqual([['/plannotator-inbox off', INBOX_OFF_TOO_OLD]]);
+  expect(facts({ inbox_off_unknown: true, live: false, state: 'ended' }).rows).toEqual([]);
 });
 
 test('the hover card says where and when from what the window has, and leaves out what it does not', () => {

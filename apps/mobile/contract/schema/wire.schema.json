@@ -1865,6 +1865,14 @@
           ],
           "x-open": true
         },
+        "inbox_off": {
+          "type": "boolean",
+          "const": true
+        },
+        "inbox_off_unknown": {
+          "type": "boolean",
+          "const": true
+        },
         "waiting": {
           "type": "number"
         },
@@ -2698,6 +2706,10 @@
         },
         "place": {
           "$ref": "#/$defs/InboxAgentPlace"
+        },
+        "inbox_off": {
+          "type": "boolean",
+          "const": true
         }
       },
       "required": [
@@ -2760,6 +2772,7 @@
         "ended",
         "handed",
         "idle",
+        "inbox_off",
         "next_turn",
         "reads",
         "sending_now",

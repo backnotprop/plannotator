@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { createTestEnvironment } from "../../tests/helpers/environment";
 import PlannotatorPlugin from "./index";
-import { INBOX_COMMAND_BRIEFING } from "@plannotator/shared/inbox/connection";
+import { INBOX_COMMAND_BRIEFING, INBOX_OFF_AGENT_TEXT, INBOX_OFF_NOTICE, INBOX_ON_AGENT_TEXT } from "@plannotator/shared/inbox/connection";
+import { isInboxSessionOff } from "@plannotator/shared/inbox/session-off";
+import { handleCliCommand } from "./cli-bridge";
 
 /**
  * OpenCode 1 slash-command interception.
@@ -115,6 +117,36 @@ describe("OpenCode 1 command interception", () => {
     expect(turn).toContain(INBOX_COMMAND_BRIEFING);
     expect(turn).toContain("This command starts no new work and resumes none");
     expect(JSON.stringify(toasts)).toContain("http://localhost:61234/");
+  });
+
+  test.skipIf(process.platform === "win32")("/plannotator-inbox off and on: the argument reaches the plugin, the session flips, the turn tells the model, nothing is opened", async () => {
+    environment.reset();
+    const root = environment.makeTempDir();
+    process.env.PLANNOTATOR_DATA_DIR = root;
+    const calls = path.join(root, "calls");
+    const binary = path.join(root, "fake-plannotator");
+    writeFileSync(binary, `#!/bin/sh\necho "$*" >> '${calls}'\n`, { mode: 0o755 });
+    process.env.PLANNOTATOR_BIN = binary;
+    const plugin = await PlannotatorPlugin({ client: makeClient(), directory: root } as never, { runtime: "embedded" } as never) as Record<string, any>;
+
+    const offParts: any[] = [{ type: "text", text: "stub body" }];
+    await plugin["command.execute.before"]({ command: "plannotator-inbox", sessionID: "ses_1", arguments: " OFF " }, { parts: offParts });
+    expect(isInboxSessionOff(root, "ses_1")).toBe(true);
+    expect(isInboxSessionOff(root, "ses_2")).toBe(false);
+    expect(offParts.map((part) => part.text).join("\n")).toContain(INBOX_OFF_AGENT_TEXT);
+
+    const onParts: any[] = [{ type: "text", text: "stub body" }];
+    await plugin["command.execute.before"]({ command: "plannotator-inbox", sessionID: "ses_1", arguments: "on" }, { parts: onParts });
+    expect(isInboxSessionOff(root, "ses_1")).toBe(false);
+    expect(onParts.map((part) => part.text).join("\n")).toContain(INBOX_ON_AGENT_TEXT);
+    expect(existsSync(calls)).toBe(false);
+
+    const lines: string[] = [];
+    const client: any = { ...makeClient(), notifyLine: async (text: string) => void lines.push(text) };
+    await handleCliCommand({ command: "plannotator-inbox", client, sessionId: "ses_3", rawArgs: "off" });
+    expect(isInboxSessionOff(root, "ses_3")).toBe(true);
+    expect(lines).toEqual([INBOX_OFF_NOTICE]);
+    expect(existsSync(calls)).toBe(false);
   });
 
   // OpenCode runs a model turn for the command's own message whatever the hook

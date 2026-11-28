@@ -3939,6 +3939,7 @@ export interface InboxComposeSession {
   runtime?: InboxAgentRuntime;
   /** Where it lives, as Rex confirmed it for this answer (`InboxAgentPlace`, never with `show`). Additive. */
   place?: InboxAgentPlace;
+  inbox_off?: true;
 }
 
 /**
@@ -4018,6 +4019,8 @@ export interface InboxAgent {
    * else `working` (a turn runs, or a launch is starting), `idle` (live, or a launch that is stopped), `ended`.
    */
   state: "waiting" | "working" | "idle" | "ended";
+  inbox_off?: true;
+  inbox_off_unknown?: true;
   /** How many of its threads wait on the person (0 when none). */
   waiting: number;
   /** Its session is live now (polls, or a launch that a reply starts again); false for an ended one. */

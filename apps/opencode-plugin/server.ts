@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { loadConfig, resolveAgentTool, resolveInboxReminder, resolveInboxReminderText, resolveSharingEnabled, type PlannotatorConfig } from "@plannotator/shared/config";
-import { INBOX_COMMAND_BRIEFING, INBOX_REMINDER_TEXT, INBOX_REMINDER_TEXT_NO_WAKE, INBOX_TOOL_NAME } from "@plannotator/shared/inbox/connection";
+import { INBOX_COMMAND_BRIEFING, INBOX_OFF_AGENT_TEXT, INBOX_REMINDER_TEXT, INBOX_REMINDER_TEXT_NO_WAKE, INBOX_TOOL_NAME } from "@plannotator/shared/inbox/connection";
 import { readImprovementHook } from "@plannotator/shared/improvement-hooks";
 import { composeImproveContext } from "@plannotator/shared/pfm-reminder";
 import { isAskAiChild } from "@plannotator/shared/child-env";
@@ -47,6 +47,7 @@ import { createOpenCodeSessionBridge, markPlanReviewPending } from "./opencode-s
 import type { PlanEdit } from "./plan-edits";
 import { getPlanningPrompt } from "./planning-prompt";
 import { openCodeLaunchWatch } from "@plannotator/shared/inbox/opencode-launch";
+import { openCodeInboxOff } from "./inbox-off";
 import { dropInboxDuplicates, findInboxConnection, inboxReminderAlreadyAdded, registerInboxOpenCode2, type InboxToolDomainLike } from "./inbox";
 
 const DEFAULT_PLAN_TIMEOUT_SECONDS = 345_600;
@@ -160,7 +161,8 @@ const serverPlugin = {
           // Read before the notices go: /plannotator-inbox's notice marks a session for the briefing.
           // Never in the filter's way: the notices are for the person whatever happens here.
           try {
-            await addInboxBriefing(event, inboxBriefings, getAgents);
+            if (openCodeInboxOff(event.sessionID)) addInboxOffLine(event);
+            else await addInboxBriefing(event, inboxBriefings, getAgents);
           } catch (error) {
             console.error(`[Plannotator] Could not add the Inbox briefing: ${error instanceof Error ? error.message : String(error)}`);
           }
@@ -247,7 +249,7 @@ const serverPlugin = {
           // The person's own line (config.json prompts.inbox) replaces either.
           const reminder = openCode2InboxReminder(v2, inboxConfig);
           await ctx.session.hook("context", async (event) => {
-            await addInboxReminder(event, getAgents, reminder);
+            if (!openCodeInboxOff(event.sessionID)) await addInboxReminder(event, getAgents, reminder);
           });
         } catch (error) {
           console.error(`[Plannotator] Could not register the Inbox reminder: ${error instanceof Error ? error.message : String(error)}`);
@@ -747,6 +749,12 @@ export async function addInboxBriefing(
   const agent = (await getAgents()).find((candidate) => candidate.name === event.agent);
   if (agent?.mode === "subagent") return;
   pushComposedSystemReminder(event.system, INBOX_COMMAND_BRIEFING);
+}
+
+export function addInboxOffLine(event: { system: SystemPart[]; tools?: Record<string, unknown> }): void {
+  if (!event.tools?.[INBOX_TOOL_NAME]) return;
+  if (event.system.some((part) => part.text.includes(INBOX_OFF_AGENT_TEXT))) return;
+  pushComposedSystemReminder(event.system, INBOX_OFF_AGENT_TEXT);
 }
 
 function getGenericPlanReminder(): string {

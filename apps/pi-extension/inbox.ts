@@ -48,7 +48,8 @@ import {
 	inboxRegistryFileOf,
 	InboxWake,
 } from "./generated/inbox/agent-link.ts";
-import { inboxAgentTool, type InboxReplyCommand } from "./generated/inbox/connection.ts";
+import { inboxAgentTool, inboxOffCarriesAcrossClear, INBOX_OFF_AGENT_TEXT, INBOX_ON_AGENT_TEXT, type InboxReplyCommand } from "./generated/inbox/connection.ts";
+import { isInboxSessionOff, setInboxSessionOff } from "./generated/inbox/session-off.ts";
 import { isInboxTurnedOn } from "./generated/inbox/turned-on.ts";
 import { releasePiSessionClaim, writePiSessionClaim } from "./generated/inbox/pi-session-claim.ts";
 import { isCtxAlive, resolveIdleDeliveryOptions } from "./current-pi-session.ts";
@@ -66,7 +67,7 @@ function readOnDiskVersion(): string | null {
 	onDiskCache = { at: Date.now(), value };
 	return value;
 }
-import { PI_INBOX_REMINDER_CUSTOM_TYPE } from "./pi-session-bridge.ts";
+import { PI_INBOX_BRIEFING_CUSTOM_TYPE, PI_INBOX_REMINDER_CUSTOM_TYPE } from "./pi-session-bridge.ts";
 
 /**
  * The Inbox reminder's custom message (INBOX_REMINDER_TEXT, `display: false`),
@@ -401,6 +402,15 @@ export function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, o
 	let toolActive = false;
 	/** The reminder is already in the session's current path; set from the branch at session start and /tree. */
 	let reminderDelivered = false;
+	let toldOff = false;
+	let lastSessionId: string | null = null;
+	const offNow = (current: ExtensionContext | null): boolean => {
+		try {
+			return !!current && isInboxSessionOff(connection.dataDir, current.sessionManager.getSessionId());
+		} catch {
+			return false;
+		}
+	};
 	/** Pi emits `agent_settled` (0.80.4+): a run counts as over only when it settled. */
 	let settleEvents = false;
 	let runOpen = false;
@@ -532,6 +542,10 @@ export function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, o
 		}
 		reminderDelivered = branchHasReminder(startCtx);
 		const sessionId = startCtx.sessionManager.getSessionId();
+		toldOff = false;
+		const before = lastSessionId;
+		lastSessionId = sessionId;
+		if (before && before !== sessionId && !isInboxSessionOff(connection.dataDir, sessionId) && inboxOffCarriesAcrossClear(isInboxSessionOff(connection.dataDir, before))) setInboxSessionOff(connection.dataDir, sessionId, true);
 		if (wake && wake.sessionId !== sessionId) {
 			wake.dispose();
 			wake = null;
@@ -557,10 +571,23 @@ export function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, o
 	// thread ids come from the Inbox, not from the summary: the Claude Code
 	// mod's compact hook, here.
 	const reminderText = options.reminder;
+	const offMessage = (agentCtx: ExtensionContext | null) => {
+		if (!toolActive) return undefined;
+		const off = offNow(agentCtx ?? ctx);
+		if (off === toldOff) return undefined;
+		toldOff = off;
+		return { message: { customType: PI_INBOX_BRIEFING_CUSTOM_TYPE, content: off ? INBOX_OFF_AGENT_TEXT : INBOX_ON_AGENT_TEXT, display: false } };
+	};
+	pi.on("session_compact", () => {
+		toldOff = false;
+	});
+	if (!reminderText) pi.on("before_agent_start", async (_event, agentCtx: ExtensionContext) => offMessage(agentCtx));
 	if (reminderText) {
 		/** A compaction summarized the reminder away: the next one carries the thread list too. */
 		let afterCompaction = false;
 		pi.on("before_agent_start", async (_event, agentCtx: ExtensionContext) => {
+			const told = offMessage(agentCtx);
+			if (told || offNow(agentCtx ?? ctx)) return told;
 			if (!toolActive || reminderDelivered) return undefined;
 			reminderDelivered = true;
 			let content = reminderText;

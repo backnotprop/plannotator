@@ -61,6 +61,10 @@ public enum Words {
   public static let labelActionItem = "Action item"
   /// delivery.stopped_reply: packages/core/inbox-delivery-line.ts INBOX_STOPPED_REPLY_TEXT
   public static let deliveryStoppedReply = "Stopped: goes in when you type in that session"
+  /// delivery.inbox_off_reply: packages/core/inbox-delivery-line.ts INBOX_OFF_REPLY_TEXT
+  public static let deliveryInboxOffReply = "Inbox off in that session: goes in when it's turned back on"
+  /// label.inbox_off: packages/core/inbox-delivery-line.ts INBOX_OFF_LABEL
+  public static let labelInboxOff = "Inbox off"
   /// delivery.turn_ended: packages/core/inbox-delivery-line.ts TURN_ENDED_TEXT
   public static let deliveryTurnEnded = "went in when its turn ended"
   /// delivery.auto_after: packages/core/inbox-delivery-line.ts autoAfterText(minutes)

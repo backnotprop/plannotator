@@ -137,6 +137,7 @@ export interface V2BridgeClient {
    * is, as a transcript notice that starts no model turn.
    */
   notifyInbox?: (input: { url: string; detail?: string }) => Promise<unknown>;
+  notifyLine?: (line: string) => Promise<unknown>;
   /** Present with `onInboxOpened`: `/plannotator-inbox` opened the Inbox (the session's briefing, `createInboxBriefings`). */
   briefInbox?: () => void;
   app: {
@@ -829,6 +830,12 @@ export function createInboxNotifier(
   };
 }
 
+export function createLineNotifier(ctx: V2ContextLike, sessionID: string | undefined): ((line: string) => Promise<unknown>) | undefined {
+  const synthetic = ctx.session?.synthetic;
+  if (typeof synthetic !== "function" || !sessionID) return undefined;
+  return async (line) => await synthetic({ sessionID, text: `${line}${COMMAND_FAILURE_NOTICE_MARKER}`, description: line, resume: false, delivery: CO_PROMOTED_DELIVERY });
+}
+
 /**
  * Build the V1-shaped client `handleCliCommand` and `resolveValidatedTargetAgent`
  * expect, backed by the V2 context. Delivering feedback goes through
@@ -898,7 +905,9 @@ export function createV2BridgeClient(input: {
     : postNotice;
   const notifyFailure = input.failureNotices ? createCommandFailureNotifier(input.ctx, input.sessionID) : undefined;
   const notifyInbox = input.failureNotices ? createInboxNotifier(input.ctx, input.sessionID) : undefined;
+  const notifyLine = input.failureNotices ? createLineNotifier(input.ctx, input.sessionID) : undefined;
   return {
+    ...(notifyLine && { notifyLine }),
     ...(notifyUrl && { notifyUrl }),
     ...(notifyFailure && { notifyFailure }),
     ...(notifyInbox && { notifyInbox }),

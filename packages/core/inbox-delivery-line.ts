@@ -36,6 +36,7 @@ export interface RecipientConnection {
   outdated?: InboxSessionOutdated | null;
   /** Claude Code holds this session's replies until the person types there (absent: no). The line says "Stopped". */
   held?: boolean;
+  inbox_off?: boolean;
   /** Claude Code's version as its poll said (absent or null: unknown). */
   engine?: string | null;
   /** `cd <folder> && claude --resume <id>`, when the Inbox knows the folder. Absent from an older Inbox. */
@@ -176,6 +177,7 @@ export interface DeliveryLine {
   stuck?: boolean;
   /** Offer Send now: the session works and its connection can take the reply mid-turn. */
   sendNow?: boolean;
+  inboxOff?: boolean;
   /**
    * It waits on a busy session (approval "inbox-busy-agent-reply"): since
    * when, whether it can go in now (`steerable`), and when it goes in by
@@ -315,6 +317,7 @@ export function deliveryLine(input: DeliveryLineInput): DeliveryLine {
     text,
     ...(decision.reason === 'ended' ? { ended: true } : {}),
     ...(decision.reason === 'stuck' ? { stuck: true } : {}),
+    ...(decision.reason === 'inbox_off' ? { inboxOff: true } : {}),
     ...(decision.reason === 'working' ? { sendNow: decision.sendNow } : {}),
     ...(decision.wait ? { wait: decision.wait } : {}),
     ...(decision.autoAfterMin !== undefined && decision.reason === 'delivered' ? { autoAfterMin: decision.autoAfterMin } : {}),
@@ -376,6 +379,8 @@ export function deliveryText(
       return `Goes to ${name} in a few seconds`;
     case 'stopped':
       return INBOX_STOPPED_REPLY_TEXT;
+    case 'inbox_off':
+      return INBOX_OFF_REPLY_TEXT;
     case 'handed':
       return `Handed to ${name}; it takes this at its next step.`;
   }
@@ -401,6 +406,10 @@ export function reaskRowLine(name: string, checkedAt: string | null, wakes: bool
  * exact words).
  */
 export const INBOX_STOPPED_REPLY_TEXT = 'Stopped: goes in when you type in that session';
+
+export const INBOX_OFF_REPLY_TEXT = "Inbox off in that session: goes in when it's turned back on";
+
+export const INBOX_OFF_LABEL = 'Inbox off';
 
 /** An item the Inbox marked to go in by itself that waited for the turn to end (its own Ask question held it). */
 export const TURN_ENDED_TEXT = 'went in when its turn ended';

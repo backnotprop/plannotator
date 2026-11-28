@@ -136,6 +136,7 @@ export function inboxFolderProject(root: string): { id: null; name: string } {
   return { id: null, name: basename(root) || root };
 }
 
+const INBOX_OFF_HOSTS: ReadonlySet<string> = new Set(["claude-code", "pi", "opencode", "dsh"]);
 const STATES: ReadonlySet<string> = new Set<InboxAgent["state"]>(["waiting", "working", "idle", "ended"]);
 const ms = (at: string | null | undefined) => {
   const t = at ? Date.parse(at) : Number.NaN;
@@ -167,6 +168,8 @@ export function inboxAgentsGroup(evidence: InboxAgentsEvidence, cap = INBOX_AGEN
       ...(evidence.labels && entry.title ? { title: entry.title } : {}),
       project: evidence.projectOf(entry.root, entry.session),
       state: !entry.live ? "ended" : entry.busy === true ? "working" : "idle",
+      ...(entry.inboxOff ? { inbox_off: true as const } : {}),
+      ...(entry.offUnknown && INBOX_OFF_HOSTS.has(entry.host) ? { inbox_off_unknown: true as const } : {}),
       waiting: 0,
       live: entry.live,
       started_at: iso(entry.startedAt),

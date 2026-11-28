@@ -80,6 +80,9 @@ import {
   inboxToolResultText,
   inboxToolsWithoutBro,
   INBOX_HELD_POLL_FIELD,
+  INBOX_OFF_POLL_FIELD,
+  INBOX_OFF_TOOL_TEXT,
+  inboxOffRefuses,
   inboxBlockedField,
   type InboxBlockedKind,
   INBOX_SEND_NOW_POLL_FIELD,
@@ -1265,6 +1268,8 @@ export class InboxLink {
    * person's own prompt or a turn start says input moves again.
    */
   private heldForInput = false
+  private inboxOff = false
+  private lastOff = false
   /** When this link started (the session, near enough), and the turn state last told the Inbox (step 8). */
   private startedAt = 0
   /** The session's first start (`InboxLinkOptions.firstStart`), asked once; 0 until known. */
@@ -1326,6 +1331,14 @@ export class InboxLink {
 
   get isDisposed(): boolean {
     return this.disposed
+  }
+
+  get isInboxOff(): boolean {
+    return this.inboxOff
+  }
+
+  setInboxOff(off: boolean): void {
+    this.inboxOff = off
   }
 
   /** The reminder a launched session's first wake carries (`launchReminder`), or null; a failure is none. */
@@ -1451,6 +1464,7 @@ export class InboxLink {
    * `projectFolder()`'s unless the agent named one.
    */
   async callTool(input: unknown, cwd: string): Promise<{ text: string } | { deny: string }> {
+    if (this.inboxOff && inboxOffRefuses(input)) return { deny: INBOX_OFF_TOOL_TEXT }
     await this.touch()
     // A thread's first send can come before its own signal does: asked a little longer, so the poll starts
     // before the message lands. The send says the reply arrives either way, as a confirmed one does.
@@ -1600,21 +1614,23 @@ export class InboxLink {
     // Whether a Send now reply could go in right now: never while this session's own Ask question holds it.
     const sendNow = await this.sendNowNow()
     const held = this.heldForInput
+    const off = this.inboxOff
     const blocked = this.options.blocked?.(now) ?? null
     if (this.blockedAt === null) this.blockedAt = now
     else if (blocked !== this.lastBlocked) this.blockedAt = Math.max(now, this.blockedAt + 1)
-    if (busy !== this.busy || sendNow !== this.lastSendNow || held !== this.lastHeld || blocked !== this.lastBlocked) {
+    if (busy !== this.busy || sendNow !== this.lastSendNow || held !== this.lastHeld || off !== this.lastOff || blocked !== this.lastBlocked) {
       const known = this.busy !== null
       if (busy !== this.busy && !busy) this.idleSince = now
       this.busy = busy
       this.lastSendNow = sendNow
       this.lastHeld = held
+      this.lastOff = off
       this.lastBlocked = blocked
       // A turn started or ended: the Inbox's live sessions say so (step 8), whether Send now can go in,
       // whether Claude Code holds this session's replies until the person types (the window's "Stopped"), and
       // what it waits on in its terminal (the Agents list's mark; the kind only).
       if (known && this.leader)
-        void this.bridge(INBOX_BRIDGE_EVENT_PATH, { type: 'state', busy, idle_since: this.idleSince, [INBOX_SEND_NOW_POLL_FIELD]: sendNow, [INBOX_HELD_POLL_FIELD]: held, ...inboxBlockedField(blocked, this.blockedAt) })
+        void this.bridge(INBOX_BRIDGE_EVENT_PATH, { type: 'state', busy, idle_since: this.idleSince, [INBOX_SEND_NOW_POLL_FIELD]: sendNow, [INBOX_HELD_POLL_FIELD]: held, [INBOX_OFF_POLL_FIELD]: off, ...inboxBlockedField(blocked, this.blockedAt) })
     }
     if (now - this.leaseCheckedAt >= LEASE_EVERY_MS) {
       await this.holdLease(now)
@@ -1637,7 +1653,7 @@ export class InboxLink {
       this.idleTicks < 2 &&
       [...this.pending.values()].some((command) => command.now === true && !this.noSteer.has(command.id)) &&
       (this.steerableTurn() !== null || !this.options.isBusy())
-    if (!this.delivering && !this.heldForInput && this.pending.size > 0 && (this.idleTicks >= 2 || urgent)) {
+    if (!this.delivering && !this.heldForInput && !this.inboxOff && this.pending.size > 0 && (this.idleTicks >= 2 || urgent)) {
       this.delivering = true
       void this.deliverNext(urgent).finally(() => {
         this.delivering = false
@@ -1801,6 +1817,7 @@ export class InboxLink {
       ...((await this.sendNowNow()) ? { [INBOX_SEND_NOW_POLL_FIELD]: true } : {}),
       // Claude Code refused a reply and holds them all until the person types there: the window says "Stopped".
       ...(this.heldForInput ? { [INBOX_HELD_POLL_FIELD]: true } : {}),
+      [INBOX_OFF_POLL_FIELD]: this.inboxOff,
       // A prompt up in its terminal (the kind only): said again on every poll while it lasts.
       ...inboxBlockedField(this.lastBlocked, this.blockedAt ?? undefined),
       [INBOX_STEER_POLLS_POLL_FIELD]: true,

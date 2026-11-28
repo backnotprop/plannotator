@@ -3,7 +3,7 @@
 // this folder (bunfig.toml pathIgnorePatterns). The logic is covered by the
 // bun tests beside the sources in hooks/mod/.
 import { describe, expect, mock, test, tier } from 'claude-code/testing'
-import { inboxReminderText } from '../hooks/mod/inbox-contract'
+import { INBOX_OFF_AGENT_TEXT, INBOX_OFF_NOTICE, INBOX_OFF_POLL_FIELD, INBOX_OFF_TOOL_TEXT, INBOX_ON_AGENT_TEXT, inboxReminderText } from '../hooks/mod/inbox-contract'
 import { CLAUDE_CODE_VERSION } from './engine-under-test'
 
 tier('user')
@@ -806,6 +806,46 @@ describe('register', () => {
     expect(w.store.has('inboxReminderContextWorks')).toBe(false)
     // The record a resume reads: this session's first prompt had the reminder.
     expect(Object.keys(w.store.get('inboxReminderSessions') as object)).toEqual(['session-1'])
+  })
+
+  test('/plannotator-inbox off, then a compaction: the compact hook prints the off sentence, sends are refused, polls say off; on lifts it', async ($: any, on: any) => {
+    const calls: { url: string; body: any }[] = []
+    const w = world(on, { files: withRegistry(), fetch: inbox(TOOLS, calls) })
+    on('session.compact', () => ({ messages: SUMMARY_ROWS }))
+    await $.session.start(SESSION)
+    await $.prompt.submit({ text: 'Refactor the handler.' })
+
+    const off = await $.command.run({ command: 'plannotator-inbox', args: 'off', origin: { kind: 'composer' } })
+    expect(off.text).toBe(INBOX_OFF_NOTICE)
+    expect(off.context).toEqual([INBOX_OFF_AGENT_TEXT])
+    await $.session.compact({ trigger: 'auto', messages: SUMMARY_ROWS })
+    expect(w.env.get('PLANNOTATOR_INBOX_REMINDER')).toBe(INBOX_OFF_AGENT_TEXT)
+    await $.prompt.submit({ text: 'Go on.' })
+    expect((await $.tool.call({ tool: INBOX_TOOL, action: 'send_message', body: 'Ship it?' })).deny).toBe(INBOX_OFF_TOOL_TEXT)
+    await w.clock.advance(3_000)
+    expect(calls.filter((c) => c.url.endsWith('/api/inbox/bridge/poll')).at(-1)?.body[INBOX_OFF_POLL_FIELD]).toBe(true)
+
+    const back = await $.command.run({ command: 'plannotator-inbox', args: 'on', origin: { kind: 'composer' } })
+    expect(back.context).toEqual([INBOX_ON_AGENT_TEXT])
+    expect(w.env.get('PLANNOTATOR_INBOX_REMINDER')).toBe(REMINDER)
+    expect((await $.tool.call({ tool: INBOX_TOOL, action: 'send_message', body: 'Ship it?' })).result).toContain('Sent to the Plannotator Inbox')
+  })
+
+  test('a session turned off, resumed in a new process: its first prompt carries the off sentence and no reminder, sends are refused, polls say off', async ($: any, on: any) => {
+    const calls: { url: string; body: any }[] = []
+    const w = world(on, { files: withRegistry(), fetch: inbox(TOOLS, calls), store: { inboxReminderSessions: { 'session-1': 1 }, inboxOffSessions: { 'session-1': 1 } } })
+    on('session.messages', () => ({ value: [{ role: 'user', text: 'Ship the ledger fix.' }, { role: 'assistant', text: 'Shipped.' }] }))
+    await $.session.start(SESSION)
+
+    await $.prompt.submit({ text: 'Where were we?' })
+    await $.prompt.submit({ text: 'Go on.' })
+    expect(w.contexts).toEqual([[INBOX_OFF_AGENT_TEXT], null])
+    expect(w.env.get('PLANNOTATOR_INBOX_REMINDER')).toBe(INBOX_OFF_AGENT_TEXT)
+    expect((await $.tool.call({ tool: INBOX_TOOL, action: 'send_message', body: 'Ship it?' })).deny).toBe(INBOX_OFF_TOOL_TEXT)
+    await w.clock.advance(3_000)
+    const polls = calls.filter((c) => c.url.endsWith('/api/inbox/bridge/poll'))
+    expect(polls.length).toBeGreaterThan(0)
+    expect(polls.every((c) => c.body[INBOX_OFF_POLL_FIELD] === true)).toBe(true)
   })
 
   test('a guarded machine: the same, the reminder once per conversation, again after /clear, and the plain reminder for the compact hook', { plugins: [GUARD] }, async ($: any, on: any) => {

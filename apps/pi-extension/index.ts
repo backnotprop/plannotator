@@ -1673,11 +1673,17 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 	});
 	pi.registerCommand("plannotator-inbox", {
 		description: "Open the Plannotator Inbox in the browser, show its address, and brief the agent on it",
-		handler: async (_args, ctx) => {
+		handler: async (args, ctx) => {
 			try {
-				const [{ inboxOpenedText, openInboxInBrowser }, { getPlannotatorDataDir }, { inboxCommandBriefing }] = await importFresh(() =>
-					Promise.all([import("./generated/inbox/agent-link.ts"), import("./generated/data-dir.ts"), import("./generated/inbox/connection.ts")]),
+				const [{ inboxOpenedText, openInboxInBrowser }, { getPlannotatorDataDir }, { inboxCommandBriefing, inboxOffArgument, INBOX_OFF_NOTICE, INBOX_ON_NOTICE }, { setInboxSessionOff }] = await importFresh(() =>
+					Promise.all([import("./generated/inbox/agent-link.ts"), import("./generated/data-dir.ts"), import("./generated/inbox/connection.ts"), import("./generated/inbox/session-off.ts")]),
 				);
+				const word = inboxOffArgument(args);
+				if (word) {
+					setInboxSessionOff(getPlannotatorDataDir(), ctx.sessionManager.getSessionId(), word === "off");
+					ctx.ui.notify(word === "off" ? INBOX_OFF_NOTICE : INBOX_ON_NOTICE, "info");
+					return;
+				}
 				const opened = await openInboxInBrowser({ dataDir: getPlannotatorDataDir() });
 				if ("url" in opened) {
 					ctx.ui.notify(inboxOpenedText(opened.url), "info");
