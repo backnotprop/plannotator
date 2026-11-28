@@ -12,15 +12,21 @@ export interface InboxAnsweredView {
 }
 
 const isPersonWords = (message: InboxMessage): boolean =>
-  message.author.kind === "person" && !isInboxNote(message) && (message.reask?.length ?? 0) === 0;
+  message.author.kind === "person" && !isInboxNote(message) && (message.reask?.length ?? 0) === 0 && !message.taken_back_at;
 
-function replyFor(view: InboxAnsweredView, members: readonly InboxMessage[], asked: InboxMessage, named: string | undefined): InboxMessage | string {
+function replyFor(view: InboxAnsweredView, members: readonly InboxMessage[], asked: InboxMessage, questionId: string, named: string | undefined, replyTo: string | null): InboxMessage | string {
   const after = members.slice(members.findIndex((m) => m.id === asked.id) + 1);
-  if (named === undefined) return after.filter(isPersonWords).at(-1) ?? "the person has not replied after it";
+  const reopenedAt = after.reduce((last, m, i) => (m.reopened?.includes(questionId) ? i : last), -1);
+  const since = after.slice(reopenedAt + 1).filter(isPersonWords);
+  if (named === undefined) {
+    const answering = since.find((m) => m.id === replyTo) ?? since.at(-1);
+    return answering ?? (reopenedAt >= 0 ? "the person reopened it and has not replied since" : "the person has not replied after it");
+  }
   const reply = view.message(named);
   if (!reply || reply.thread_id !== asked.thread_id) return `reply ${named} is not a message of this thread`;
   if (!isPersonWords(reply)) return `reply ${named} is not the person's own reply`;
   if (!after.some((m) => m.id === reply.id)) return `reply ${named} came before the question`;
+  if (!since.some((m) => m.id === reply.id)) return `the person reopened it after reply ${named}`;
   return reply;
 }
 
@@ -32,6 +38,7 @@ export function planInboxAnsweredInReply(
   superseding: ReadonlySet<string>,
   messageId: string,
   at: string,
+  replyTo: string | null,
 ): Map<string, InboxAnsweredInReply> {
   const plan = new Map<string, InboxAnsweredInReply>();
   if (requests.length === 0) return plan;
@@ -71,7 +78,7 @@ export function planInboxAnsweredInReply(
       problems.push(`${ref} is also in supersedes; name it in one of them.`);
       continue;
     }
-    const reply = replyFor(view, members, asked, request.reply);
+    const reply = replyFor(view, members, asked, record.id, request.reply, replyTo);
     if (typeof reply === "string") {
       problems.push(`${ref}: ${reply}.`);
       continue;

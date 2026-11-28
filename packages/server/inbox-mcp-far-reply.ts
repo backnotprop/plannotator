@@ -42,6 +42,7 @@ export interface FarReplyDeps {
   nameOf: (machine: string) => string | null;
   /** Whether that computer's list says it takes an agent's answer (mark `tag-across`); null while this Inbox holds no list of it. */
   takes: (machine: string) => boolean | null;
+  answersInReply?: (machine: string) => boolean;
   holdWrite: (machine: string, route: string, body: Record<string, unknown>, thread: string | null, waitMs: number, own?: { notify?: boolean; files?: readonly OutboxFile[] }) => Promise<OutboxEntry | null> | null;
   /** A held write of this Inbox's own, by its key (null: never held). */
   heldWrite: (key: string) => OutboxEntry | null;
@@ -86,6 +87,7 @@ export function farReplyDeps(machines: FarReplyMachines, wakes: { placeOf: (id: 
       if (!link) return false;
       return link.list ? link.list.marks.includes(TAG_ACROSS_MARK) : null;
     },
+    answersInReply: (machine) => peer(machine)?.list?.marks.includes(ANSWERED_IN_REPLY_MARK) ?? false,
     holdWrite: machines.holdWrite,
     heldWrite: machines.heldWrite,
     dismissHeld: machines.dismissHeld,
@@ -99,7 +101,10 @@ export function farReplyDeps(machines: FarReplyMachines, wakes: { placeOf: (id: 
  */
 export const FAR_REPLY_WORDS = {
   held: (thread: string, machine: string) => `Waiting for ${machine}: your message goes into thread ${thread} when ${machine} is back.`,
+  notMarked: (machine: string) => `No question was marked answered: ${machine}, which holds this thread, runs an older Plannotator, so the card stays open there.`,
 };
+
+export const ANSWERED_IN_REPLY_MARK = "answered-in-reply";
 
 /** A branch report's head and remote, read from this computer's git where the agent works, when it did not name them. */
 function branchHere(value: unknown, folder: string | undefined): unknown {
@@ -143,6 +148,11 @@ export async function farAgentReply(
   const place = await deps.placeOf(replyTo);
   if (!place) return null;
   const name = deps.nameOf(place.machine) ?? "the other computer";
+  const unmarked = Array.isArray(input.answered_in_reply) && input.answered_in_reply.length > 0 && !deps.answersInReply?.(place.machine);
+  if (unmarked) {
+    const { answered_in_reply: _answered, ...without } = input;
+    input = without as typeof input;
+  }
   // An older Plannotator there takes no answer: refused as before, never held to be refused later.
   if (deps.takes(place.machine) === false) throw new InboxError("thread_on_other_machine", farReplyRefusal(replyTo, name));
   const here = workingFolder && isAbsolute(workingFolder) ? workingFolder : input.project_path && isAbsolute(input.project_path) ? input.project_path : undefined;
@@ -190,7 +200,8 @@ export async function farAgentReply(
     // That computer's own send_message answer: its words and its fields, as a local send's.
     const answer = (entry.answer ?? {}) as { text?: unknown; structured?: unknown };
     const structured = answer.structured && typeof answer.structured === "object" ? (answer.structured as Record<string, unknown>) : {};
-    return { text: typeof answer.text === "string" ? answer.text : `${await nextStep()}`, structured: { ...structured, machine } };
+    const text = typeof answer.text === "string" ? answer.text : `${await nextStep()}`;
+    return { text: unmarked ? `${FAR_REPLY_WORDS.notMarked(name)}\n${text}` : text, structured: { ...structured, machine, ...(unmarked ? { answered_in_reply_not_marked: true } : {}) } };
   }
   if (entry && (entry.state === "refused" || entry.state === "dropped" || entry.state === "cancelled")) {
     // The agent is told now: the window has nothing to add.
@@ -198,5 +209,5 @@ export async function farAgentReply(
     const answer = (entry.answer ?? {}) as { code?: unknown; error?: unknown };
     throw new InboxError(typeof answer.code === "string" ? answer.code : "machine_refused", typeof answer.error === "string" ? answer.error : `${name} did not take the message.`);
   }
-  return { text: `${FAR_REPLY_WORDS.held(place.thread_id, name)} ${await nextStep()}`, structured: { thread_id: place.thread_id, held: true, machine } };
+  return { text: `${unmarked ? `${FAR_REPLY_WORDS.notMarked(name)}\n` : ""}${FAR_REPLY_WORDS.held(place.thread_id, name)} ${await nextStep()}`, structured: { thread_id: place.thread_id, held: true, machine, ...(unmarked ? { answered_in_reply_not_marked: true } : {}) } };
 }

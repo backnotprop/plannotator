@@ -4703,7 +4703,7 @@ export class InboxStore {
     if (twins) throw new InboxError("validation_error", twins.message, { field: twins.field });
     const { plan: superseding, skipped } = this.planSupersede(threadId, id, supersedes, [...parsed, ...fileQuestions.map((f) => ({ key: f.key, replaces: f.question.replaces }))], actions);
     const doneIds = this.planDone(threadId, done, superseding, input.author);
-    const answering = planInboxAnsweredInReply(this.answeredView(), threadId, answered, input.author, new Set(superseding.keys()), id, at);
+    const answering = planInboxAnsweredInReply(this.answeredView(), threadId, answered, input.author, new Set(superseding.keys()), id, at, replyTo);
     const agentSubject = subjectCheck.subject;
     const message: InboxStoredMessage = {
       id,
@@ -7835,6 +7835,9 @@ export class InboxStore {
     const at = this.stamp();
     const taken: InboxMessage = { ...message, taken_back_at: at, deliver_now_at: null, ...(message.tags ? { tags: message.tags.map((t) => ({ ...t, deliver_now_at: null })) } : {}) };
     this.appendMessage(taken, at);
+    for (const member of this.threadMessages(message.thread_id)) {
+      for (const record of this.questionRecords(member.id)) if (record.answered_in_reply?.reply_id === message.id) this.appendQuestion({ ...record, answered_in_reply: null }, at);
+    }
     return taken;
   }
 

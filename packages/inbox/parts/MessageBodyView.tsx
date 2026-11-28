@@ -6,7 +6,7 @@ import { ActionChecklist } from '../components/ActionChecklist';
 import { hasRunBlocks, runBlockFor } from './RunBlocks/RunBlock';
 import { ReplacedQuestionCard, ReplacesLine, type Replacement } from '../components/ReplacedQuestion';
 import { AnsweredInReplyCard } from '../components/AnsweredInReplyCard';
-import { reopenAnswered } from '../data/answeredApi';
+import { reopenAnswered, reopensAnswered } from '../data/answeredApi';
 import type { ActionRow } from '../components/ReplyAnswers';
 import type { SentAnswerGroup } from '../sentReply';
 import { MessageBody } from './MessageBody/MessageBody';
@@ -84,7 +84,7 @@ export function drawMessageBody(d: MessageBodyData) {
           const q = questions[i];
           const shown = d.replaced[i];
           if (q?.state === 'answered_in_reply' && q.answered_in_reply) {
-            return <AnsweredInReplyCard question={q} number={number} total={questions.length} by={message.author} readOnly={!d.live} onJump={(target) => acts.current.jumpTo(target)} onReopen={() => reopenAnswered(id, q.key)} refRepo={d.refRepo} />;
+            return <AnsweredInReplyCard question={q} number={number} total={questions.length} by={message.author} readOnly={!d.live || !reopensAnswered(id)} onJump={(target) => acts.current.jumpTo(target)} onReopen={() => reopenAnswered(id, q.key)} refRepo={d.refRepo} />;
           }
           if (!q || !shown?.[0]) return undefined;
           return <ReplacedQuestionCard question={q} number={number} total={questions.length} replacement={shown[0]} answer={shown[1] === undefined ? q.answer : shown[1]} onJump={(target) => acts.current.jumpTo(target)} refRepo={d.refRepo} />;

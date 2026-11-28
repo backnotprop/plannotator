@@ -119,4 +119,23 @@ describe("answered_in_reply", () => {
     store.reopenAnswered(asked.id, jenkins.key);
     expect(pick()[1]!.state).toBe("picked");
   });
+
+  test("the reply the agent answers is the one quoted, not a newer one; a reopened question takes only a newer reply; Take back undoes it", () => {
+    const { store, asked, jenkins, ref } = setup();
+    const mark = (replyTo: string, reply?: string) => () => store.sendMessage({ project_id: asked.project_id, author: AGENT, reply_to: replyTo, body: "Ok.", answered_in_reply: [{ question: ref, ...(reply ? { reply } : {}) }] });
+    const quoteNow = () => store.questionsOf(asked.id).find((x) => x.key === jenkins.key)!.answered_in_reply?.quote ?? null;
+    const first = store.sendReply(asked.id, { idempotency_key: "r1", words: "Keep Jenkins for a week.", questions: [] }).reply;
+    store.sendReply(asked.id, { idempotency_key: "r2", words: "Also: the region can wait for Charlie Dunn.", questions: [] });
+    mark(first.id)();
+    expect(quoteNow()).toBe("Keep Jenkins for a week.");
+    store.reopenAnswered(asked.id, jenkins.key);
+    expect(refused(mark(first.id, first.id)).message).toContain(`the person reopened it after reply ${first.id}`);
+    expect(refused(mark(first.id)).message).toContain("the person reopened it and has not replied since");
+    const third = store.sendReply(asked.id, { idempotency_key: "r3", words: "No, switch it off.", questions: [] }).reply;
+    mark(third.id)();
+    expect(quoteNow()).toBe("No, switch it off.");
+    store.takeBack(third.id);
+    expect(quoteNow()).toBeNull();
+    expect(store.questionsOf(asked.id).find((x) => x.key === jenkins.key)!.state).toBe("open");
+  });
 });
