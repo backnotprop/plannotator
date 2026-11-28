@@ -71,9 +71,6 @@ async function finger(page: Page, engine: Engine): Promise<Finger> {
   if (engine === 'chromium') {
     const cdp = await page.context().newCDPSession(page);
     let at = { x: 0, y: 0 };
-    // Each event carries its own time (from now, 16 ms or the wait apart): the page reads a flick's speed from
-    // event.timeStamp, and the protocol delivers a move about every 35-50 ms, slower than any real flick. A start
-    // dated before now can fall before a young page's time origin, and that flick reads as no speed at all.
     let clock = 0;
     const tick = (ms: number, sync = false) => (clock = sync ? Math.max(clock + ms / 1000, Date.now() / 1000) : clock + ms / 1000);
     return {
