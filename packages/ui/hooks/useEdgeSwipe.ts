@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { SWIPE_FLICK_MIN_PX, SWIPE_FLICK_SPEED, sidewaysOwner } from './useSwipeStep';
 
+const SWIPE_RETURN_PX = 4;
+
 interface EdgeDrag {
   onMove: (distance: number) => void;
   onEnd: (distance: number | null, velocity?: number) => void;
@@ -95,7 +97,7 @@ export function useEdgeSwipe(options: EdgeSwipeOptions): void {
       const sample = current.samples.find(s => s.time >= event.timeStamp - 100);
       const elapsed = sample ? event.timeStamp - sample.time : 0;
       const [before, last] = current.samples.slice(-2);
-      const returning = !!before && !!last && (last.x - before.x) * current.direction < 0;
+      const returning = !!before && !!last && (last.x - before.x) * current.direction < -SWIPE_RETURN_PX;
       const velocity = sample && elapsed > 0 && !returning ? (touch.clientX - sample.x) * current.direction / elapsed : 0;
       if (dx <= Math.abs(touch.clientY - current.y) * 1.5) {
         current.drag?.onEnd(null);
