@@ -25,7 +25,7 @@ import { HostMark, Icon } from '../icons';
 import { canAddRecipient, type RecipientRow } from '../replyRecipients';
 import type { SessionLabels } from '../sessionLabels';
 import { namesList } from '../tags';
-import { skillMenuHost } from './ComposerField';
+import { skillMenuHost } from './ComposerFieldBase';
 import { leadMaxWidth } from './FieldLead';
 import { skillListRoom } from '../caretMenu';
 import { recipientNames } from '../thread/recipientNames';

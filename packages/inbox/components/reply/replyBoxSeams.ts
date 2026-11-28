@@ -5,8 +5,8 @@
  * own wiring is in Thread.tsx.
  */
 import type { SkillCatalogEntry } from '@plannotator/ui/utils/skillReferences';
-import type { ComposerCommand } from '../ComposerField';
-import type { VoiceMicButton, VoiceNote, VoiceStatusLine } from '../VoiceMic';
+import type { ComposerCommand, FieldVoiceParts } from '../ComposerFieldBase';
+import type { VoiceMicButton, VoiceStatusLine } from '../VoiceMic';
 import type { RecipientRow } from '../../replyRecipients';
 import type { SessionLabels } from '../../sessionLabels';
 import type { VoiceHandle } from '../../voice';
@@ -60,9 +60,8 @@ export interface ReplyBoxVoice {
   parts: ReplyVoiceParts;
 }
 
-/** The voice entry's parts: the row's microphone and status line, and the note in the field. */
-export interface ReplyVoiceParts {
+/** The voice entry's parts: the row's microphone and status line, and the field's (its note, its painted caret). */
+export interface ReplyVoiceParts extends FieldVoiceParts {
   MicButton: typeof VoiceMicButton;
   StatusLine: typeof VoiceStatusLine;
-  Note: typeof VoiceNote;
 }

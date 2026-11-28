@@ -127,6 +127,7 @@ import { reaskedIn, reaskNoteAgent, reaskOffered, reaskTargets, reaskTooltip } f
 import { ChangedNotice, StaleGuard, replacedBy, replacementOf, type JumpTarget } from './ReplacedQuestion';
 import type { ComposerCommand } from './ComposerField';
 import { ReplyBox } from './reply/ReplyBox';
+import { replyVoiceParts } from './reply/replyVoice';
 import { SEND_MAY_NOT_HAVE_GONE, sendFailure } from '../sendFailure';
 import type { ReplyBoxRecipients } from './reply/replyBoxSeams';
 import { aimable, headFolder, knownRecipients, latestBy, RECIPIENTS_MAX, sessionFolder, toggleRecipient, type RecipientRow } from '../replyRecipients';
@@ -5376,7 +5377,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             replyText={replyText}
             sendingWords={wordsAway === thread.thread_id}
             textRef={textRef}
-            voice={voice}
+            voice={{ handle: voice, parts: replyVoiceParts }}
             replyToNames={replyToNames}
             placeholder="Write a reply. Type / for a skill"
             askerNoteId={showAskerNote ? noteId : null}

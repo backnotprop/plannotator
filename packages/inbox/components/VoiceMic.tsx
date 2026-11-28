@@ -9,6 +9,7 @@
  */
 import { useEffect, useLayoutEffect, useReducer, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import type { ComposerMirrorPaint } from '@plannotator/ui/components/ComposerTokenTextarea';
+import type { FieldVoiceParts } from './ComposerFieldBase';
 import { Icon } from '../icons';
 import { useVoiceBlock, useVoiceSettings, useVoiceShown, voiceWhere, type VoiceBlock, type VoiceHandle } from '../voice';
 import { voiceLine } from '../voiceLine';
@@ -387,3 +388,6 @@ export function voicePaint(view: VoiceView, session: VoiceSession, value: string
 export function voiceHidesCaret(view: VoiceView): boolean {
   return view.phase === 'listening' || view.phase === 'sending';
 }
+
+/** What draws voice in a composer field (ComposerFieldBase's `voiceParts`). */
+export const fieldVoiceParts: FieldVoiceParts = { Note: VoiceNote, paint: voicePaint, hidesCaret: voiceHidesCaret };

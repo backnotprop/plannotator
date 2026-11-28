@@ -19,16 +19,14 @@ import { REPLY_FILES_SUMMARY_FROM, focusReplyFromBox } from '../../thread/replyB
 import { caretToEndOnFirstFocus } from '../../thread/replyCaret';
 import type { useReplyQuote } from '../../useReplyQuote';
 import { DraftHead, DraftOffer, type DraftConflict } from '../DraftLabel';
-import type { OtherFieldVoice } from '../FieldVoice';
 import type { JumpTarget } from '../ReplacedQuestion';
 import { ReplyActions, ReplyAnswers, type ActionRow, type DraftAnswer } from '../ReplyAnswers';
 import { ReplyQuoteLine } from '../ReplyQuote';
 import { ReplyRow } from '../ReplyRow';
 import { ReplySummary, type FootComments } from '../ReplySummary';
 import { Tip } from '../Tip';
-import { VoiceMicButton, VoiceStatusLine } from '../VoiceMic';
 import { ReplyBoxRecipientControl } from './ReplyBoxRecipients';
-import type { ReplyBoxRecipients, ReplyBoxSkills } from './replyBoxSeams';
+import type { ReplyBoxRecipients, ReplyBoxSkills, ReplyBoxVoice } from './replyBoxSeams';
 
 type FieldProps = ComponentProps<typeof ReplyTextField>;
 type ReplyQuote = ReturnType<typeof useReplyQuote>;
@@ -66,8 +64,8 @@ export interface ReplyBoxProps {
   /** A Send carries the words now: the field shows none. */
   sendingWords: boolean;
   textRef: RefObject<HTMLTextAreaElement | null>;
-  /** The thread's voice; `others`: an Other answer's take on a question card, which Send waits for. */
-  voice: ComponentProps<typeof VoiceMicButton>['voice'] & { others: Pick<OtherFieldVoice, 'busy'> };
+  /** The reply's voice and what draws it (reply/replyVoice.ts). Absent: no microphone, no voice line, no voice code. */
+  voice?: ReplyBoxVoice;
   replyToNames: string;
   /** The field's placeholder (the Inbox's "Write a reply. Type / for a skill"). */
   placeholder: string;
@@ -219,7 +217,8 @@ export function ReplyBox({
             mentionThread={threadId}
             sendingWords={sendingWords}
             textareaRef={textRef}
-            voice={voice}
+            voice={voice?.handle}
+            voiceParts={voice?.parts}
             voiceNoteGlide
             ariaLabel={`Reply to ${replyToNames}`}
             ariaDescribedBy={[askerNoteId, conflict !== null ? conflict.id : null].filter(Boolean).join(' ') || undefined}
@@ -272,7 +271,7 @@ export function ReplyBox({
             routeChoiceOpen ? null : (
               // No tooltip: a button that says Send needs none, and ⌘↵ is named only to assistive technology
               // (approval "inbox-send-no-shortcut-hint").
-              <button type="button" className="ib-btn ib-pri ib-rsend" ref={sendRef} data-reply-send="" onClick={pressSend} disabled={sending || voice.busy || voice.others.busy} aria-keyshortcuts={sendAria}>
+              <button type="button" className="ib-btn ib-pri ib-rsend" ref={sendRef} data-reply-send="" onClick={pressSend} disabled={sending || !!voice?.handle.busy || !!voice?.handle.others.busy} aria-keyshortcuts={sendAria}>
                 {/* While it sends the spinner takes the word's place and Send keeps its width, so nothing beside it moves. */}
                 {sending && <span className="ib-spin" aria-hidden="true" />}
                 {/* A phone: the round arrow; the word stays as the button's name. */}
@@ -291,8 +290,8 @@ export function ReplyBox({
               </Tip>
             ) : null
           }
-          mic={<VoiceMicButton voice={voice} phone={phone} />}
-          status={<VoiceStatusLine voice={voice} phone={phone} />}
+          mic={voice ? <voice.parts.MicButton voice={voice.handle} phone={phone} /> : null}
+          status={voice ? <voice.parts.StatusLine voice={voice.handle} phone={phone} /> : null}
           files={
             files.length >= REPLY_FILES_SUMMARY_FROM ? (
               <button type="button" className="ib-rchip ib-rfilesn" data-reply-files-count="" aria-label={`${files.length} files attached. Show them`} onClick={onShowFiles}>
