@@ -44,7 +44,8 @@ export function createShownReads({ reads, latest, filesSignals, split, open }: S
   const owe = (which: (threadId: string) => boolean) => {
     if (split()) for (const threadId of reads.parkedThreads()) if (which(threadId)) reads.owe(threadId);
   };
-  const isLaunched = (id: string) => reads.readOf(id).loaded?.thread_id === id && !!reads.readOf(id).loaded?.messages[0]?.launch;
+  // A launched thread's run line, and a swarm's members' states (swarm/), come from the live sessions with the read.
+  const isLaunched = (id: string) => reads.readOf(id).loaded?.thread_id === id && (!!reads.readOf(id).loaded?.messages[0]?.launch || !!reads.readOf(id).loaded?.swarm);
   const onMachine = (machines: ReadonlySet<string>) => (id: string) => {
     const owner = machineOf(id);
     return owner !== null && machines.has(owner);
@@ -128,7 +129,7 @@ export function createShownReads({ reads, latest, filesSignals, split, open }: S
       owe(onMachine(machines));
       return readAll(shown().filter(onMachine(machines)));
     },
-    /** The live sessions moved: a launched thread on screen reads its run line again. */
+    /** The live sessions moved: a launched thread on screen reads its run line again, a swarm's thread its members' states. */
     launched: () => {
       owe(isLaunched);
       return readAll(shown().filter(isLaunched));

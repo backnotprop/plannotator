@@ -128,6 +128,25 @@ describe("the @ list on the thread's computer", () => {
     clock.at += 10_000;
     expect(await far.rows(asked.thread_id, null, new Set())).toEqual([]);
   });
+
+  test("the live signature (what the delivery watch tells the windows by) moves when a far agent goes or starts working, not on the same list read again", async () => {
+    let sessions: Record<string, unknown>[] = [laptopAgent, { ...laptopAgent, session: "ses_far_pi", host: "pi" }];
+    const laptop = peer(LAPTOP, () => Response.json({ sessions }));
+    const { far, asked } = studio([laptop.link]);
+    const readAgain = async () => {
+      clock.at += 10_000;
+      await far.rows(asked.thread_id, null, new Set());
+      return far.liveSignature();
+    };
+    const first = await readAgain();
+    expect(await readAgain()).toBe(first);
+    // Laptop restarted without its Pi: a swarm member there is no longer idle.
+    sessions = [laptopAgent];
+    const gone = await readAgain();
+    expect(gone).not.toBe(first);
+    sessions = [{ ...laptopAgent, busy: true }];
+    expect(await readAgain()).not.toBe(gone);
+  });
 });
 
 describe("the tag, recorded on the thread's computer", () => {

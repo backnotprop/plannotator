@@ -153,6 +153,13 @@ describe.skipIf(!hasDom)('reads that follow every thread on screen', () => {
     expect(w.asked).toEqual(['thr_b']);
   });
 
+  test("the live sessions moving read the swarm's thread on screen (its members' states), not the other", async () => {
+    const swarm: InboxThread = { ...threadOf('thr_a'), swarm: { on: true, ghost_id: null, members: [{ session: 'ses_far', host: 'pi', name: 'Pi', machine_name: 'Laptop', joined: true, state: 'idle' }] } };
+    const w = await mountTwo('thr_a', 'thr_b', listOf('thr_a', 'thr_b'), { thr_a: swarm });
+    await settle(() => w.shown().launched());
+    expect(w.asked).toEqual(['thr_a']);
+  });
+
   test('a stale copy of either thread on screen is read after the wait; one no pane shows is not', async () => {
     const w = await mountTwo('thr_a', 'thr_b', listOf('thr_a', 'thr_b'));
     putThread(w.client, 'thr_z', { serverSession: 's', cursor: 1, thread: threadOf('thr_z') });

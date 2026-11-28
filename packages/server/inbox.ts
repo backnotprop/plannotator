@@ -5410,7 +5410,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // every few seconds; its news moves `rexVersion` below.
     rexWatch();
     const launched = launch.signature();
-    const signature = live.deliverySignature() + launched;
+    // Swarm: a linked computer's agents as last read here are its members' states there (inbox-swarm-context.ts).
+    const signature = live.deliverySignature() + launched + (swarmOn() ? `#${farTags.liveSignature()}` : "");
     const presence = live.presenceSignature();
     const sessions = presence !== lastPresenceSignature;
     const moved = sessions || signature !== lastDeliverySignature;

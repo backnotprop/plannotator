@@ -598,6 +598,8 @@ test('a phone: the Swarm badge on, its stars lie on none of the row\'s other con
   const badge = dialog.locator('[data-compose-swarm-line] [data-swarm-badge]');
   await badge.click();
   await expect(badge).toHaveAttribute('aria-pressed', 'true');
+  // The press writes `/swarm` into the words: the draft's check leaves the row until the pause saves them again.
+  await expect(dialog.locator('[data-compose-saved]')).toBeVisible({ timeout: 20_000 });
   const hits = await page.evaluate(() => {
     const d = document.querySelector('dialog[data-compose]')!;
     const layer = d.querySelector('.ib-sw-stars')!;

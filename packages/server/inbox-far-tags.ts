@@ -346,7 +346,18 @@ export function createInboxFarTags(deps: FarTagsDeps) {
     return null;
   };
 
-  return { rows, prepare, targets, onPersonMessage, agentReply, delivered, self, lists, connectionOf };
+  /**
+   * The linked computers' agents as last read, as a window shows them (who is live there and whether each works: a
+   * swarm member's state, inbox-swarm-context.ts): it moves only when one of those does, so the delivery watch in
+   * inbox.ts tells the windows, which then read their swarm's thread again.
+   */
+  const liveSignature = (): string =>
+    [...agents.entries()]
+      .map(([machine, entry]) => `${machine}:${entry.rows.map((row) => `${row.session}=${row.busy}`).sort().join(",")}`)
+      .sort()
+      .join(";");
+
+  return { rows, prepare, targets, onPersonMessage, agentReply, delivered, self, lists, connectionOf, liveSignature };
 }
 
 export type InboxFarTags = ReturnType<typeof createInboxFarTags>;
