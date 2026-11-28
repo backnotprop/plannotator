@@ -314,3 +314,11 @@ test("questions Mark read closed leave a folded line with no open count, as the 
   expect(openCount(oneLeft)).toBe(1);
   expect(threadOpenQuestions([oneLeft]).questions).toHaveLength(1);
 });
+
+test("a question the agent took as answered in the person's reply leaves the folded line's open count, as it leaves the foot", () => {
+  const ask = (key: string, state: 'open' | 'answered_in_reply') => ({ key, prompt: key, kind: 'single', state, orphaned: false, answer: null }) as never;
+  const openCount = (message: InboxMessageWire) => holdingsOf(message, { delivered: false }).find((h) => h.kind === 'open')?.count ?? 0;
+  const message = msg('m1', AGENT, 2, { questions: [ask('q-1', 'answered_in_reply'), ask('q-2', 'open')] });
+  expect(openCount(message)).toBe(1);
+  expect(threadOpenQuestions([message]).questions).toHaveLength(1);
+});
