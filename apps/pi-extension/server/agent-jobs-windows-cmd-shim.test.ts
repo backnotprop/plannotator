@@ -16,7 +16,7 @@ import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NO_BROWSER } from "../../../tests/helpers/no-browser.ts";
-import { fakePiCmdPath, HOSTILE_MODEL, HOSTILE_PROMPT, writeFakePiCmd, type FakePiCmd } from "../../../tests/helpers/fake-pi-cmd.ts";
+import { fakePiCmdPath, HOSTILE_MODEL, HOSTILE_PROMPT, writeFakeCmdShim, writeFakePiCmd, type FakePiCmd } from "../../../tests/helpers/fake-pi-cmd.ts";
 import { buildMarkerCommand, MARKER_ENGINES } from "../generated/marker-review.ts";
 import { createAgentJobHandler } from "./agent-jobs.ts";
 import { requestUrl } from "./helpers.ts";
@@ -129,6 +129,53 @@ describe.skipIf(process.platform !== "win32")("Pi server: a Pi installed as pi.c
 			await until(() => (isAlive(pid) ? undefined : true), "the stub to end", 10_000);
 		} finally {
 			await pi.close();
+		}
+	}, 40_000);
+});
+
+describe.skipIf(process.platform !== "win32")("Pi server: Copilot CLI installed as copilot.cmd (#3798)", () => {
+	test("a large hostile prompt (>32k chars) arrives intact on stdin and permission flags survive cmd.exe", async () => {
+		const copilotStub = writeFakeCmdShim(root, "copilot");
+		const largeHostilePrompt = `${HOSTILE_PROMPT}\n${"+line of diff\n".repeat(3_000)}`;
+		expect(largeHostilePrompt.length).toBeGreaterThan(32_767);
+		const { command, stdinPrompt } = buildMarkerCommand(MARKER_ENGINES.copilot, largeHostilePrompt, HOSTILE_MODEL, join(root, "cwd"));
+		const handler = createAgentJobHandler({
+			mode: "review",
+			getServerUrl: () => "http://localhost:1234",
+			getCwd: () => join(root, "cwd"),
+			buildCommand: async () => ({ command, stdinPrompt, cwd: join(root, "cwd"), captureStdout: true, prompt: largeHostilePrompt }),
+		});
+		const server: Server = createServer(async (req, res) => {
+			if (!(await handler.handle(req, res, requestUrl(req)))) {
+				res.writeHead(404);
+				res.end();
+			}
+		});
+		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+		const address = server.address();
+		if (!address || typeof address === "string") throw new Error("no port");
+		const base = `http://127.0.0.1:${address.port}/api/agents/jobs`;
+		try {
+			const res = await fetch(base, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ provider: "copilot" }),
+			});
+			expect(res.status).toBe(201);
+			const record = await until(
+				() => (existsSync(copilotStub.record) ? (JSON.parse(readFileSync(copilotStub.record, "utf8")) as { argv: string[]; stdin: string }) : undefined),
+				"the copilot stub's record",
+			);
+			expect(record.stdin).toBe(largeHostilePrompt);
+			expect(record.argv).toEqual(command.slice(1));
+			expect(record.argv).not.toContain("-p");
+			expect(record.argv).toContain("--deny-tool=shell(git push)");
+			expect(record.argv).toContain("--allow-tool=shell(git:*)");
+			expect(record.argv).toContain(HOSTILE_MODEL);
+			expect(existsSync(join(root, "cwd", "broke"))).toBe(false);
+		} finally {
+			handler.killAll();
+			await new Promise<void>((resolve) => server.close(() => resolve()));
 		}
 	}, 40_000);
 });

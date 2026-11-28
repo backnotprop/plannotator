@@ -236,8 +236,14 @@ export interface MarkerEngine {
   binarySignature?: ProgramSignature;
   /** Author string stamped on every annotation this engine produces. */
   author: string;
-  /** Build the full argv (binary + flags + trailing prompt) for a review run. */
+  /** Build the full argv (binary + flags, plus trailing prompt unless `promptViaStdin`) for a review run. */
   buildArgv: (prompt: string, model?: string, cwd?: string, opts?: MarkerBuildOptions) => string[];
+  /**
+   * When true, `buildMarkerCommand` delivers the prompt via `stdinPrompt` rather
+   * than argv (and `buildArgv` omits it). Matches Claude Code's stdin path:
+   * avoids Windows `.cmd` shim refusal and OS command-line length limits (#3798).
+   */
+  promptViaStdin?: boolean;
   /** Pull readable text out of one parsed stream event, or null if none. */
   extractText: (event: MarkerStreamEvent) => string | null;
   /** Update the stream's provider failure: undefined = unrelated event,
@@ -901,11 +907,17 @@ function copilotFormatLogEvent(event: MarkerStreamEvent): string | null {
  * github-mcp-server handshake at startup (PR reads go through the allowlisted
  * `gh` CLI instead); `--no-auto-update` keeps a background job from pausing to
  * download a CLI update. The `=` form is used for the variadic permission
- * flags so they can never greedily consume a following argument. The prompt is
- * the value of `-p`, passed last. `--model` is omitted when empty or `auto`
- * so Copilot picks its own default.
+ * flags so they can never greedily consume a following argument. `--model` is
+ * omitted when empty or `auto` so Copilot picks its own default.
+ *
+ * The prompt is piped on stdin (no `-p` flag) via `COPILOT_ENGINE.promptViaStdin`
+ * (#3798): Copilot CLI reads piped stdin as the non-interactive prompt when
+ * `-p` is omitted (a bare `-p` without `<text>` is a parse error), which keeps
+ * multiline prompts out of `cmd.exe` on Windows `.cmd` shims and avoids the
+ * ~32k CreateProcess / `ARG_MAX` command-line limit on large reviews.
  */
 function copilotBuildArgv(prompt: string, model?: string, cwd?: string): string[] {
+  void prompt; // delivered on stdin via COPILOT_ENGINE.promptViaStdin (#3798)
   const useModel = !!model && model.trim().length > 0 && model.toLowerCase() !== "auto";
   return [
     "copilot",
@@ -950,9 +962,6 @@ function copilotBuildArgv(prompt: string, model?: string, cwd?: string): string[
     "--allow-tool=shell(jj:*)",
     "--allow-tool=shell(wc)",
     ...(useModel ? ["--model", model] : []),
-    // Prompt is the value of -p (copilot reads it from argv, not stdin).
-    "-p",
-    prompt,
   ];
 }
 
@@ -1006,6 +1015,7 @@ const COPILOT_ENGINE: MarkerEngine = {
   binary: "copilot",
   author: "Copilot",
   buildArgv: copilotBuildArgv,
+  promptViaStdin: true,
   extractText: copilotExtractText,
   modelsArgv: ["help", "config"],
   parseModels: copilotParseModels,
@@ -1312,6 +1322,8 @@ export function composeMarkerReviewPrompt(
 
 export interface MarkerCommandResult {
   command: string[];
+  /** Prompt text to pipe on stdin, when the engine has `promptViaStdin: true`. */
+  stdinPrompt?: string;
 }
 
 /**
@@ -1342,7 +1354,7 @@ export function withMarkerBinary(command: string[], engine: MarkerEngine, resolv
   return [resolved?.name ?? engine.binary, ...command.slice(1)];
 }
 
-/** Build the full argv for a review run with the given engine. */
+/** Build the full argv (and optional stdinPrompt) for a review run with the given engine. */
 export function buildMarkerCommand(
   engine: MarkerEngine,
   prompt: string,
@@ -1350,7 +1362,8 @@ export function buildMarkerCommand(
   cwd?: string,
   opts?: MarkerBuildOptions,
 ): MarkerCommandResult {
-  return { command: engine.buildArgv(prompt, model, cwd, opts) };
+  const command = engine.buildArgv(prompt, model, cwd, opts);
+  return engine.promptViaStdin ? { command, stdinPrompt: prompt } : { command };
 }
 
 // ---------------------------------------------------------------------------

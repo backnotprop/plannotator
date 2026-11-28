@@ -181,8 +181,11 @@ is resolved as Ask AI resolves it (`resolveWindowsCommandShim`). It is then
 started as `cmd.exe /d /s /c ""<script>" "<arg>" …"` with
 `windowsVerbatimArguments`. Node cannot spawn it by its bare name: that failed
 with `spawn pi ENOENT`. A prompt cannot cross cmd.exe (line breaks, quotes,
-`%`), so the engine's `promptOnStdin` (Pi only: `pi … -p` reads the prompt from
-piped stdin) moves it to stdin. When an argument still holds a character that
+`%`), so the engine's `promptOnStdin` (Pi: `pi … -p` reads the prompt from
+piped stdin) moves it to stdin; Copilot CLI (`COPILOT_ENGINE.promptViaStdin`,
+#3798) always pipes its prompt on stdin without `-p` (matching Claude Code),
+avoiding both Windows `.cmd` refusal and OS command-line length limits. When an
+argument still holds a character that
 cmd.exe reads (`"`, `%`, `!`, `^`, control characters), both servers fail the
 job and name the script; nothing is started. Stop (and the model listing's 5 s
 limit) ends such a job's whole tree with `taskkill /t /f`
