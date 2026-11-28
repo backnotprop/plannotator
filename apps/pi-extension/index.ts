@@ -192,7 +192,18 @@ async function loadAnnotateCommandModules() {
 type SavedPhaseState = {
 	model?: { provider: string; id: string };
 	thinkingLevel: ThinkingLevel;
+	// Set only when the host reported the user's model pick (Pi's model_select);
+	// `model` is then that pick. Never inferred by comparing models.
+	userSelectedModel?: boolean;
 };
+
+/**
+ * A model the user picked while planning beats `phases.executing.model` at
+ * approval (owner decision pending). `false` lets the configured executing
+ * model apply at approval instead; a pick made after approval still survives
+ * resume and plan completion.
+ */
+const USER_PICK_BEATS_EXECUTING_CONFIG_AT_APPROVAL = true;
 
 type PersistedPlannotatorState = {
 	phase: Phase;
@@ -488,6 +499,7 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 	let approvedPlanContent: string | null = null;
 	let checklistItems: ChecklistItem[] = [];
 	let savedState: SavedPhaseState | null = null;
+	let settingPhaseModel: { provider: string; id: string } | null = null;
 	let phaseAddedTools: string[] = [];
 	let plannotatorConfig = {};
 	let justApprovedPlan = false;
@@ -713,6 +725,18 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 		});
 	}
 
+	// Pi reports a model switch with model_select (oh-my-pi has no such event).
+	// One made during plan mode, other than Plannotator's own, is the user's pick
+	// and replaces the pre-plan model. Pi gives an extension's pi.setModel the
+	// same source as the user's /model, so another extension's switch counts too.
+	// A new object, never a mutation: savedState may be a persisted entry's data.
+	pi.on("model_select", (event) => {
+		if (!savedState || event.source === "restore") return;
+		if (settingPhaseModel?.provider === event.model.provider && settingPhaseModel.id === event.model.id) return;
+		savedState = { ...savedState, model: { provider: event.model.provider, id: event.model.id }, userSelectedModel: true };
+		persistState();
+	});
+
 	async function applyModelRef(
 		ref: { provider: string; id: string },
 		ctx: ExtensionContext,
@@ -724,7 +748,14 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 			return;
 		}
 
-		const success = await pi.setModel(model);
+		let success: boolean;
+		// The model the registry returned is the one the host reports back.
+		settingPhaseModel = { provider: model.provider, id: model.id };
+		try {
+			success = await pi.setModel(model);
+		} finally {
+			settingPhaseModel = null;
+		}
 		if (!success) {
 			ctx.ui.notify(`Plannotator: no API key for ${ref.provider}/${ref.id}.`, "warning");
 		}
@@ -750,14 +781,18 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 	 * Apply the current phase's tools, model and thinking level. With
 	 * `applyModelSettings: false` only the tools are re-applied: the model and
 	 * thinking level stay as they are and the saved pre-phase state is not
-	 * restored (the same-phase /tree resync, #1722).
+	 * restored (the same-phase /tree resync, #1722). A model the user picked
+	 * stays instead of the phase's configured model; `atApproval` marks the
+	 * planning-to-execution switch, where USER_PICK_BEATS_EXECUTING_CONFIG_AT_APPROVAL
+	 * decides between the two.
 	 */
 	async function applyPhaseConfig(
 		ctx: ExtensionContext,
-		opts: { restoreSavedState?: boolean; applyModelSettings?: boolean } = {},
+		opts: { restoreSavedState?: boolean; applyModelSettings?: boolean; atApproval?: boolean } = {},
 	): Promise<void> {
 		const profile = getPhaseProfile();
 		const applyModelSettings = opts.applyModelSettings !== false;
+		const configWinsOverPick = opts.atApproval === true && !USER_PICK_BEATS_EXECUTING_CONFIG_AT_APPROVAL;
 		if (applyModelSettings && opts.restoreSavedState !== false && savedState) {
 			await restoreSavedState(ctx);
 		}
@@ -790,7 +825,7 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 			}
 		}
 
-		if (applyModelSettings && profile?.model) {
+		if (applyModelSettings && (configWinsOverPick || !savedState?.userSelectedModel) && profile?.model) {
 			await applyModelRef(profile.model, ctx, phase);
 		}
 
@@ -829,9 +864,9 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 
 	/**
 	 * The single exit sequence every idle transition shares: drop phase state,
-	 * hand back the tools the phase added, restore the pre-phase model/thinking
-	 * level, then refresh the UI and persist. Callers add their own messaging,
-	 * session entries, and events around it.
+	 * hand back the tools the phase added, restore the pre-phase model (or the
+	 * one the user picked) and thinking level, then refresh the UI and persist.
+	 * Callers add their own messaging, session entries, and events around it.
 	 */
 	/**
 	 * Close the open plan review, if any, without delivering anything. Its
@@ -1994,7 +2029,7 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 				approvedPlanContent = null;
 				phase = "executing";
 				framingDelivered = false;
-				await applyPhaseConfig(ctx, { restoreSavedState: true });
+				await applyPhaseConfig(ctx, { restoreSavedState: true, atApproval: true });
 				pi.appendEntry("plannotator-execute", { lastSubmittedPath });
 				persistState();
 				justApprovedPlan = true;
@@ -2226,7 +2261,7 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 			}
 			phase = "executing";
 			framingDelivered = false;
-			await applyPhaseConfig(ctx, { restoreSavedState: true });
+			await applyPhaseConfig(ctx, { restoreSavedState: true, atApproval: true });
 			pi.appendEntry("plannotator-execute", { lastSubmittedPath, approvedPlan: planContent });
 			persistState();
 
