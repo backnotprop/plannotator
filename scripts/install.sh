@@ -2328,8 +2328,9 @@ omp_extension_state="none"
 # The command the closing section prints when the step could not finish.
 omp_extension_manual="omp plugin install ${OMP_EXTENSION_PACKAGE}"
 
-# OMP's plugin folder: the XDG one once $XDG_DATA_HOME/omp exists, as OMP picks.
-omp_plugin_dirs() {
+# OMP's plugin folder, the one it installs into: the XDG one once
+# $XDG_DATA_HOME/omp exists, as OMP picks.
+omp_plugin_dir() {
     if [ -n "${XDG_DATA_HOME:-}" ] && [ -d "$XDG_DATA_HOME/omp" ]; then
         printf '%s\n' "$XDG_DATA_HOME/omp/plugins"
     else
@@ -2337,34 +2338,66 @@ omp_plugin_dirs() {
     fi
 }
 
-# The manifest's spec for the extension ("^0.29.1", "0.28.60"), the target of
-# a linked local build (a path), or "" when OMP has neither.
-omp_extension_spec() {
-    omp_plugin_dirs | while IFS= read -r _omp_dir; do
-        _omp_entry="$_omp_dir/node_modules/@plannotator/pi-extension"
-        if [ -L "$_omp_entry" ]; then
-            _omp_s=$(readlink "$_omp_entry" 2>/dev/null)
-            printf '%s\n' "${_omp_s:-$_omp_entry}"
-            break
-        fi
-        if [ -f "$_omp_dir/package.json" ] && grep -q '"@plannotator/pi-extension"[[:space:]]*:' "$_omp_dir/package.json" 2>/dev/null; then
-            _omp_s=$(tr -d '\n' < "$_omp_dir/package.json" 2>/dev/null | grep -o '"@plannotator/pi-extension"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n 1 | sed 's/.*"\([^"]*\)"$/\1/')
-            printf '%s\n' "${_omp_s:-listed}"
-            break
-        fi
-    done
+# OMP's plugin folders: that one, then, with XDG, ~/.omp/plugins too, where OMP
+# keeps its plugins instead when another agent dir (PI_CODING_AGENT_DIR) or a
+# profile is in use (dirs.ts `isDefault`). ompPluginDirs in
+# packages/server/inbox-agents.ts reads the same folders.
+omp_plugin_dirs() {
+    omp_plugin_dir
+    if [ -n "${XDG_DATA_HOME:-}" ] && [ -d "$XDG_DATA_HOME/omp" ]; then
+        printf '%s\n' "$HOME/.omp/plugins"
+    fi
 }
 
-# The extension's version as OMP installed it: "" when OMP's manifest does not
-# list it, "unknown" when it does but the package can't be read.
+# The extension's spec in one plugin folder: the manifest's ("^0.29.1",
+# "0.28.60"), the target of a linked local build (a path), or "".
+omp_extension_spec_in() {
+    _omp_entry="$1/node_modules/@plannotator/pi-extension"
+    if [ -L "$_omp_entry" ]; then
+        _omp_s=$(readlink "$_omp_entry" 2>/dev/null)
+        printf '%s\n' "${_omp_s:-$_omp_entry}"
+        return 0
+    fi
+    if [ -f "$1/package.json" ] && grep -q '"@plannotator/pi-extension"[[:space:]]*:' "$1/package.json" 2>/dev/null; then
+        _omp_s=$(tr -d '\n' < "$1/package.json" 2>/dev/null | grep -o '"@plannotator/pi-extension"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n 1 | sed 's/.*"\([^"]*\)"$/\1/')
+        printf '%s\n' "${_omp_s:-listed}"
+    fi
+}
+
+# The extension's spec as OMP has it, or "" when OMP has none: a pin (an exact
+# version) or a local build (a link's target, a git spec) in any of
+# omp_plugin_dirs; any other spec only in the folder OMP installs into.
+omp_extension_spec() {
+    omp_plugin_dirs | {
+        _omp_plain=""
+        _omp_kept=""
+        _omp_first=1
+        while IFS= read -r _omp_dir; do
+            _omp_s=$(omp_extension_spec_in "$_omp_dir")
+            if [ -z "$_omp_kept" ] && [ -n "$_omp_s" ]; then
+                case "$_omp_s" in
+                    *:*|*/*|*\\*|.*) _omp_kept="$_omp_s" ;;
+                    *) if printf '%s' "$_omp_s" | grep -Eq '^v?[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$'; then _omp_kept="$_omp_s"; fi ;;
+                esac
+            fi
+            if [ "$_omp_first" -eq 1 ]; then
+                _omp_plain="$_omp_s"
+                _omp_first=0
+            fi
+        done
+        printf '%s\n' "${_omp_kept:-$_omp_plain}"
+    }
+}
+
+# The extension's version as OMP installed it in the folder it installs into:
+# "" when OMP's manifest does not list it, "unknown" when it does but the
+# package can't be read.
 omp_extension_version() {
-    omp_plugin_dirs | while IFS= read -r _omp_dir; do
-        if [ -f "$_omp_dir/package.json" ] && grep -q '"@plannotator/pi-extension"[[:space:]]*:' "$_omp_dir/package.json" 2>/dev/null; then
-            _omp_v=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$_omp_dir/node_modules/@plannotator/pi-extension/package.json" 2>/dev/null | head -n 1)
-            printf '%s\n' "${_omp_v:-unknown}"
-            break
-        fi
-    done
+    _omp_dir=$(omp_plugin_dir)
+    if [ -f "$_omp_dir/package.json" ] && grep -q '"@plannotator/pi-extension"[[:space:]]*:' "$_omp_dir/package.json" 2>/dev/null; then
+        _omp_v=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$_omp_dir/node_modules/@plannotator/pi-extension/package.json" 2>/dev/null | head -n 1)
+        printf '%s\n' "${_omp_v:-unknown}"
+    fi
 }
 
 # run_with_time_limit, with the command in its own process group, stopped as a

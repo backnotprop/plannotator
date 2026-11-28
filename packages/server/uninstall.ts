@@ -894,7 +894,7 @@ async function removeHostPlugins(
       args: ["plugin", "uninstall", OMP_EXTENSION_PACKAGE],
       optional: true,
       cwd: environment.homeDir,
-      // A local build (`link:`, `file:`, a path, git) is the person's own: left, and said.
+      // A local build (a link `omp plugin link` made, a git spec) is the person's own: left, and said.
       leave: () => {
         const ext = ompExtension(agentEnvironmentOf(environment));
         return ext?.local ? `Left as is: Oh My Pi extension ${OMP_EXTENSION_PACKAGE} is a local build (${ext.spec}). To remove it, run \`omp plugin uninstall ${OMP_EXTENSION_PACKAGE}\`.` : null;

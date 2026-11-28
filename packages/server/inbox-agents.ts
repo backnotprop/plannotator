@@ -714,12 +714,15 @@ export const OMP_EXTENSION_PACKAGE = "@plannotator/pi-extension";
 export const OMP_EXTENSION_FEATURE = "omp-inbox-tool-default";
 
 /**
- * Oh My Pi's plugin folder, as OMP picks it: `$XDG_DATA_HOME/omp/plugins` once `$XDG_DATA_HOME/omp` exists, on Linux
- * and macOS only, else `~/.omp/plugins` (can1357/oh-my-pi packages/utils/src/dirs.ts, DirResolver).
+ * Oh My Pi's plugin folders. First the one OMP installs into: `$XDG_DATA_HOME/omp/plugins` once `$XDG_DATA_HOME/omp`
+ * exists, on Linux and macOS only, else `~/.omp/plugins`; then, with XDG, `~/.omp/plugins` too, where OMP keeps its
+ * plugins instead when another agent dir (`PI_CODING_AGENT_DIR`) or a profile is in use (can1357/oh-my-pi
+ * packages/utils/src/dirs.ts, DirResolver and its `isDefault`). The installers read the same folders.
  */
 export function ompPluginDirs(e: AgentEnvironment): string[] {
   const xdg = e.platform === "linux" || e.platform === "darwin" ? envDir(e, "XDG_DATA_HOME") : null;
-  return [xdg && isDir(join(xdg, "omp")) ? join(xdg, "omp", "plugins") : join(e.homeDir, ".omp", "plugins")];
+  const home = join(e.homeDir, ".omp", "plugins");
+  return xdg && isDir(join(xdg, "omp")) ? [join(xdg, "omp", "plugins"), home] : [home];
 }
 
 /**
@@ -731,6 +734,7 @@ export function ompPluginDirs(e: AgentEnvironment): string[] {
  * on Windows), which is all `omp plugin link <path>` and `omp plugin install <path>` write besides a lock entry, with
  * nothing in the manifest (oh-my-pi plugins/manager.ts `link`, directory-link.ts); or the manifest holds a spec that is
  * not an npm range or tag (a git URL). `spec` is then the link's target. `current`: its Inbox tool is on in OMP.
+ * A pin or a local build counts in any of `ompPluginDirs`; any other install only in the first, the one OMP installs into.
  */
 export interface OmpExtension {
   version: string;
@@ -742,26 +746,29 @@ export interface OmpExtension {
 }
 
 export function ompExtension(e: AgentEnvironment): OmpExtension | null {
-  for (const dir of ompPluginDirs(e)) {
-    const entry = join(dir, "node_modules", ...OMP_EXTENSION_PACKAGE.split("/"));
-    const link = symlinkTarget(entry);
-    if (link !== null) return { ...ompPackageState(entry), spec: link, pinned: false, local: true, dir };
-    const manifest = readAgentFile(join(dir, "package.json"));
-    if (manifest.kind !== "file") continue;
-    let spec: unknown;
-    try {
-      const deps = (JSON.parse(manifest.text) as { dependencies?: unknown }).dependencies;
-      if (!deps || typeof deps !== "object" || !(OMP_EXTENSION_PACKAGE in deps)) continue;
-      spec = (deps as Record<string, unknown>)[OMP_EXTENSION_PACKAGE];
-    } catch {
-      continue;
-    }
-    const text = typeof spec === "string" ? spec.trim() : "";
-    const pinned = /^v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(text);
-    const local = ompSpecIsLocal(text);
-    return { ...ompPackageState(entry), spec: text, pinned, local, dir };
+  const found = ompPluginDirs(e).map(ompExtensionIn);
+  return found.find((ext) => ext?.pinned || ext?.local) ?? found[0] ?? null;
+}
+
+/** Plannotator's extension in one OMP plugin folder (`ompExtension`). */
+function ompExtensionIn(dir: string): OmpExtension | null {
+  const entry = join(dir, "node_modules", ...OMP_EXTENSION_PACKAGE.split("/"));
+  const link = symlinkTarget(entry);
+  if (link !== null) return { ...ompPackageState(entry), spec: link, pinned: false, local: true, dir };
+  const manifest = readAgentFile(join(dir, "package.json"));
+  if (manifest.kind !== "file") return null;
+  let spec: unknown;
+  try {
+    const deps = (JSON.parse(manifest.text) as { dependencies?: unknown }).dependencies;
+    if (!deps || typeof deps !== "object" || !(OMP_EXTENSION_PACKAGE in deps)) return null;
+    spec = (deps as Record<string, unknown>)[OMP_EXTENSION_PACKAGE];
+  } catch {
+    return null;
   }
-  return null;
+  const text = typeof spec === "string" ? spec.trim() : "";
+  const pinned = /^v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(text);
+  const local = ompSpecIsLocal(text);
+  return { ...ompPackageState(entry), spec: text, pinned, local, dir };
 }
 
 /** The target of a symlink or junction at `path`, null when `path` is not one. */

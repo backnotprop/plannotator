@@ -229,16 +229,41 @@ describe("Oh My Pi", () => {
     expect(ompCalls()).toEqual([]);
   });
 
-  test("OMP's plugin folder: $XDG_DATA_HOME/omp/plugins once $XDG_DATA_HOME/omp exists, on Linux and macOS only", () => {
+  test("OMP's plugin folder: $XDG_DATA_HOME/omp/plugins once $XDG_DATA_HOME/omp exists, on Linux and macOS only, then ~/.omp/plugins", () => {
     const xdg = join(fake.root, "xdg");
     const home = join(fake.home, ".omp", "plugins");
     const dirsOn = (platform: NodeJS.Platform) => ompPluginDirs(createAgentEnvironmentFor({ platform, homeDir: fake.home, env: { ...fake.env, XDG_DATA_HOME: xdg } }));
     expect(dirsOn("linux")).toEqual([home]);
     // omp switches on the omp folder, before it has a plugins folder.
     mkdirSync(join(xdg, "omp"), { recursive: true });
-    expect(dirsOn("linux")).toEqual([join(xdg, "omp", "plugins")]);
-    expect(dirsOn("darwin")).toEqual([join(xdg, "omp", "plugins")]);
+    expect(dirsOn("linux")).toEqual([join(xdg, "omp", "plugins"), home]);
+    expect(dirsOn("darwin")).toEqual([join(xdg, "omp", "plugins"), home]);
     expect(dirsOn("win32")).toEqual([home]);
+  });
+
+  test("with the XDG omp folder there, a local build linked in ~/.omp/plugins (another agent dir or a profile) is still left as is", async () => {
+    fake.install("omp");
+    const xdg = join(fake.root, "xdg");
+    const xdgPlugins = join(xdg, "omp", "plugins");
+    for (const xdgHas of [false, true]) {
+      mkdirSync(join(xdg, "omp"), { recursive: true });
+      // An older ordinary install in the XDG folder, which would otherwise be upgraded.
+      if (xdgHas) {
+        mkdirSync(join(xdgPlugins, "node_modules", "@plannotator", "pi-extension"), { recursive: true });
+        writeFileSync(join(xdgPlugins, "package.json"), JSON.stringify({ name: "omp-plugins", private: true, dependencies: { [PKG]: "^0.28.60" } }));
+        writeFileSync(join(xdgPlugins, "node_modules", "@plannotator", "pi-extension", "package.json"), JSON.stringify({ name: PKG, version: "0.28.60" }));
+      }
+      ompLinked("0.28.60", { feature: false });
+      const withXdg = { XDG_DATA_HOME: xdg };
+      expect((await start(withXdg)).added).not.toContain("oh-my-pi");
+      const reach = await inboxAgentReach("oh-my-pi", options(withXdg));
+      expect({ state: reach.state, reason: reach.reason }).toEqual({ state: "off", reason: "A local build is installed in Oh My Pi, left as is." });
+      rmSync(xdg, { recursive: true, force: true });
+      rmSync(join(fake.root, "work"), { recursive: true, force: true });
+      rmSync(join(fake.home, ".omp"), { recursive: true, force: true });
+      rmSync(join(dataDir, "inbox"), { recursive: true, force: true });
+    }
+    expect(ompCalls()).toEqual([]);
   });
 
   test("a pin whose package can't be read is still the person's pin: not installed over, said once with why", async () => {

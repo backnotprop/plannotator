@@ -230,8 +230,6 @@ Nothing to do. The Plannotator installer installs the Pi extension in Oh My Pi w
 
 Oh My Pi reads Pi's setting: `{ "inboxTool": { "pi": false } }` in `~/.plannotator/config.json`, or `PLANNOTATOR_INBOX_TOOL=0`, turns the tool off in both. In the Inbox's Settings, Oh My Pi and Pi share this switch.
 
-While a subagent runs in the same Oh My Pi process, messages sent over MCP may be filed under the subagent, and a reply to them may not wake the main session.
-
 ### OpenCode
 
 Add the [OpenCode plugin](/docs/getting-started/installation/#opencode), then run `plannotator inbox`: it turns the inbox tool on for OpenCode when it finds the plugin in your global opencode config. The tool is off by default on OpenCode, for the same reason as Pi (about 15 KB per request, roughly 3,906 tokens). To turn it on yourself:

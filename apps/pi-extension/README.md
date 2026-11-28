@@ -108,9 +108,7 @@ The extension's `plannotator_inbox` tool, which sends to your
 [Plannotator Inbox](https://plannotator.ai/docs/reference/inbox/) and lets your
 reply there wake the session, is also **on by default in OMP** (off on Pi). It
 reads the same switch as Pi: `PLANNOTATOR_INBOX_TOOL=0` or
-`{ "inboxTool": { "pi": false } }` keeps it out. While a subagent runs in the
-same Oh My Pi process, messages sent over MCP may be filed under the subagent,
-and a reply to them may not wake the main session.
+`{ "inboxTool": { "pi": false } }` keeps it out.
 
 Start plan mode with `omp --plan` or `/plannotator-plan-mode`. With the
 extension loaded, `--plan` starts Plannotator's plan mode instead of choosing a
