@@ -60,9 +60,18 @@ export interface ReplyComposerHandle {
   /** The field and the Send button. */
   textRef: RefObject<HTMLTextAreaElement | null>;
   sendRef: RefObject<HTMLButtonElement | null>;
-  /** A wired host's own reads of the draft and files hooks (replyComposerWiring.ts). Null for a plain host. */
-  wired: { draft: ReplyDraftHook; files: ReplyFilesHook } | null;
 }
+
+/**
+ * A wired host's handle (replyComposerWiring.ts): what the Inbox's pane may call. Not `cancel` (it would release the
+ * pane's draft claim mid-Send), `open` / `close` (the box's open state is the pane's), nor the draft's choices (they
+ * would pass by the pane's own words handler); `wired` is its reads of the draft and files hooks.
+ * Inbox-only plumbing, never exported from a shared package.
+ */
+export type ReplyComposerWiredHandle = Omit<ReplyComposerHandle, 'cancel' | 'open' | 'close' | 'draft'> & {
+  draft: Omit<ReplyComposerDraft, 'keepMine' | 'takeTheirs' | 'reload'>;
+  wired: { draft: ReplyDraftHook; files: ReplyFilesHook };
+};
 
 type ReplyDraftHook = ReturnType<ReturnType<typeof createReplyDraftPage>['useReplyDraft']>;
 type ReplyFilesHook = ReturnType<typeof useComposeFiles>;
@@ -71,7 +80,9 @@ const NO_DROP = () => {};
 const NO_FILES: readonly InboxDraftFile[] = [];
 const errorText = (error: unknown) => (error instanceof Error && error.message.trim() !== '' ? error.message : SEND_NOT_SENT);
 
-export function useReplyComposer(host: ReplyComposerHost | ReplyComposerWiredHost): { box: { readonly props: ReplyBoxProps }; handle: ReplyComposerHandle } {
+export function useReplyComposer(host: ReplyComposerWiredHost): { box: { readonly props: ReplyBoxProps }; handle: ReplyComposerWiredHandle };
+export function useReplyComposer(host: ReplyComposerHost): { box: { readonly props: ReplyBoxProps }; handle: ReplyComposerHandle };
+export function useReplyComposer(host: ReplyComposerHost | ReplyComposerWiredHost): { box: { readonly props: ReplyBoxProps }; handle: ReplyComposerHandle | ReplyComposerWiredHandle } {
   const hostRef = useRef(host);
   hostRef.current = host;
   const { threadId } = host;
@@ -86,8 +97,8 @@ export function useReplyComposer(host: ReplyComposerHost | ReplyComposerWiredHos
   const plain = (): ReplyComposerHost => hostRef.current as ReplyComposerHost;
   // Per box: its mentions, its draft page and its wrappers of the host's store and uploader (nothing at module level).
   const [seams] = useState(() => (wiring ? null : hostSeams(plain)));
-  const [mentions] = useState(() => wiring?.mentions ?? createThreadMentions({ keepInBrowser: host.browserStorage, refs: host.mentionRefs ?? NO_MENTION_REFS }));
-  const [page] = useState(() => wiring?.page ?? createReplyDraftPage({ keepInBrowser: host.browserStorage, mentions }));
+  const [mentions] = useState(() => wiring?.mentions ?? createThreadMentions({ keepInBrowser: plain().browserStorage, refs: plain().mentionRefs ?? NO_MENTION_REFS }));
+  const [page] = useState(() => wiring?.page ?? createReplyDraftPage({ keepInBrowser: plain().browserStorage, mentions }));
   const replyText = useReplyTextStore();
   const draft = page.useReplyDraft(threadId, wiring ? wiring.draft : { store: seams!.store });
   const draftRef = useRef(draft);
@@ -567,7 +578,7 @@ export function useReplyComposer(host: ReplyComposerHost | ReplyComposerWiredHos
       discard,
       textRef,
       sendRef,
-      wired: wiring ? { draft, files } : null,
+      ...(wiring ? { wired: { draft, files } } : {}),
     },
   };
 }

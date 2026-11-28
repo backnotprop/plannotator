@@ -389,7 +389,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
    * page, mentions, the hooks' options, what the box shows (`replyBoxView`) and the Send (`send`) are this pane's.
    */
   const replyComposer = useReplyComposer({
-    threadId: thread.thread_id, browserStorage: true, sendClearsDraft: true, phone,
+    threadId: thread.thread_id, phone,
     send: () => send(pressOptions.current),
     wiring: {
       page: inboxReplyDraftPage,
@@ -3993,7 +3993,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     requestAnimationFrame(() => textRef.current?.focus());
     draftMoved();
   };
-  const draftStamp = <DraftStamp savedAt={stampSavedAt} tooLong={stampTooLong} failed={stampFailed} onDiscard={replyComposer.handle.discard} />;
+  const draftStamp = <DraftStamp savedAt={stampSavedAt} tooLong={stampTooLong} failed={stampFailed} onDiscard={replyComposer.handle.discard} disabled={sending} />;
   // The box's row (approval "inbox-reply-box", T6; ReplyRow.tsx). What goes with the reply: chips on a computer that
   // has room for them, else the one summary line (always on a phone, on its own line over the row).
   const replySkip = { count: keepOpen ? unanswered.length : skipIds.size, keepOpen, onToggle: toggleKeepOpen };
@@ -4547,10 +4547,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     errorLine: lineError && errorLine, draftNotSaved: stampTooLong || stampFailed, change: changeReply,
     // ⌘/Ctrl+Enter: with the choice open, the shortcut goes to it; else Send (the thread's own Send key never sees it).
     chord: () => {
-      if (route.open) {
-        setRoute((current) => ({ ...current, focus: current.focus + 1 }));
-        return true;
-      }
+      if (route.open) setRoute((current) => ({ ...current, focus: current.focus + 1 }));
+      // While this pane's Send is out a press is no press (`send` would return at once): it leaves no keyboard mark
+      // for the next Send, which may be a click.
+      if (route.open || sending || checkingEnded.current) return true;
       sentByChord.current = true;
       return false;
     },

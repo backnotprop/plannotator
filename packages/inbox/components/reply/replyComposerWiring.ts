@@ -15,6 +15,11 @@
  *
  * `view()` is read as the box is drawn (and when a key or a press needs it): what the box shows and the host's
  * handlers, as they are in that render.
+ *
+ * So only the box's shell is shared. The draft's claim, sent and release, the Send's steps, restore after load, file
+ * save, thread change, the error line, conflict handling and recipients still run in Thread.tsx for the Inbox and in
+ * the controller for a plain host: two implementations, not one, until a later change moves each across.
+ * Inbox-only plumbing, never exported from a shared package.
  */
 import type { ReactNode } from 'react';
 import type { useComposeFiles } from '../../compose/ComposeFiles';
@@ -23,10 +28,10 @@ import type { ThreadMentions } from '../../threadMentions';
 import type { ReplyBoxRecipients, ReplyBoxSkills, ReplyBoxVoice } from './replyBoxSeams';
 import type { ReplyComposerHost, ReplyComposerSlots } from './replyComposerHost';
 
-/** The files hook's options, as `useComposeFiles` takes them. */
+/** The files hook's options, as `useComposeFiles` takes them. Inbox-only plumbing, never exported from a shared package. */
 export type ReplyComposerFilesOptions = NonNullable<Parameters<typeof useComposeFiles>[1]>;
 
-/** What the box shows and does in this render, for a wired host. */
+/** What the box shows and does in this render, for a wired host. Inbox-only plumbing, never exported from a shared package. */
 export interface ReplyComposerWiringView {
   /** The box is open (closed: the host draws its own foot). */
   open: boolean;
@@ -56,6 +61,7 @@ export interface ReplyComposerWiringView {
   added: () => void;
 }
 
+/** What a wired host hands in. Inbox-only plumbing, never exported from a shared package. */
 export interface ReplyComposerWiring {
   /** The draft page the host's other parts read (the Inbox's floaters and row menus). */
   page: ReplyDraftPage;
@@ -71,7 +77,12 @@ export interface ReplyComposerWiring {
   view: () => ReplyComposerWiringView;
 }
 
-/** A wired host: the plain host's contract without the store and uploader (the wiring's hooks carry their own). */
-export interface ReplyComposerWiredHost extends Omit<ReplyComposerHost, 'uploader' | 'draftStore' | 'slots' | 'voice' | 'skills' | 'recipients'> {
+/**
+ * A wired host: the plain host's contract without the store and uploader (the wiring's hooks carry their own), and
+ * without `browserStorage` / `sendClearsDraft` (its page keeps what it keeps; its Send clears the draft itself).
+ * Inbox-only plumbing, never exported from a shared package.
+ */
+export interface ReplyComposerWiredHost
+  extends Omit<ReplyComposerHost, 'uploader' | 'draftStore' | 'slots' | 'voice' | 'skills' | 'recipients' | 'browserStorage' | 'sendClearsDraft'> {
   wiring: ReplyComposerWiring;
 }

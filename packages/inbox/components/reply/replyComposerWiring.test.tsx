@@ -15,7 +15,7 @@ import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { DraftFileUploader, ReplyDraftSaveInput, ReplyDraftStore } from '@plannotator/core/inbox-reply-draft';
 import type { InboxReplyDraft, InboxUpload } from '@plannotator/core/inbox-types';
-import type { ReplyComposerHandle } from './useReplyComposer';
+import type { ReplyComposerHandle, ReplyComposerWiredHandle } from './useReplyComposer';
 import type { ReplyComposerWiredHost, ReplyComposerWiringView } from './replyComposerWiring';
 
 const hasDom = typeof document !== 'undefined';
@@ -63,7 +63,7 @@ let setHostSending: (sending: boolean) => void = () => {};
 let setRoute: (open: boolean) => void = () => {};
 
 /** A wired host shaped as the Inbox's pane: its own words handler, keys, Discard and Send, drawn through `view()`. */
-function WiredBox({ store, uploader, seen, out }: { store: ReplyDraftStore; uploader: DraftFileUploader; seen: Seen; out: { current: ReplyComposerHandle } }) {
+function WiredBox({ store, uploader, seen, out }: { store: ReplyDraftStore; uploader: DraftFileUploader; seen: Seen; out: { current: ReplyComposerWiredHandle } }) {
   const [page] = useState(() => createReplyDraftPage({ keepInBrowser: false }));
   const [mentions] = useState(() => createThreadMentions({ keepInBrowser: false }));
   const [hostSending, setSending] = useState(false);
@@ -73,7 +73,6 @@ function WiredBox({ store, uploader, seen, out }: { store: ReplyDraftStore; uplo
   setRoute = setRouteOpen;
   const host: ReplyComposerWiredHost = {
     threadId: THREAD,
-    browserStorage: false,
     send: () =>
       new Promise<void>((resolve) => {
         seen.sends.push(pressNote.current);
@@ -140,7 +139,7 @@ function mount(saved?: string) {
   const { store, saves } = fakeStore(saved);
   const { uploader, finish } = fakeUploader();
   const seen: Seen = { sends: [], ends: [], calls: [], pasted: [] };
-  const out = { current: null as unknown as ReplyComposerHandle };
+  const out = { current: null as unknown as ReplyComposerWiredHandle };
   const el = document.createElement('div');
   document.body.appendChild(el);
   const root = createRoot(el);
@@ -234,4 +233,38 @@ test.skipIf(!hasDom)('the host restores and saves its draft itself: the controll
   expect(finish.length).toBe(1);
   expect(tiles(el)).toBe(1);
   expect(seen.calls.join('|')).toBe('attach 1');
+});
+
+/**
+ * Types only, never run: tsc over packages/inbox fails if a marked line compiles. A wired handle offers nothing that
+ * passes by its host (`cancel` would release the pane's draft claim mid-Send; `open` / `close` and the draft's choices
+ * are the pane's own), and a wired host takes no `browserStorage` / `sendClearsDraft` (the controller would ignore them).
+ */
+void ((handle: ReplyComposerWiredHandle, plain: ReplyComposerHandle, host: ReplyComposerWiredHost) => {
+  // @ts-expect-error not on a wired handle: the pane's Send holds the draft's claim until it ends
+  handle.cancel();
+  // @ts-expect-error not on a wired handle: the box's open state is the pane's
+  handle.open();
+  // @ts-expect-error not on a wired handle: the box's open state is the pane's
+  handle.close();
+  // @ts-expect-error not on a wired handle: the pane's own conflict choice
+  handle.draft.keepMine();
+  // @ts-expect-error not on a wired handle: the pane's own conflict choice
+  handle.draft.takeTheirs();
+  // @ts-expect-error not on a wired handle: the pane reads the draft again itself
+  void handle.draft.reload();
+  // @ts-expect-error a wired host's page keeps what it keeps
+  const stores: ReplyComposerWiredHost = { ...host, browserStorage: true };
+  // @ts-expect-error a wired host's Send clears the draft itself
+  const clears: ReplyComposerWiredHost = { ...host, sendClearsDraft: true };
+  // A plain host's handle keeps them all, and has no wired reads.
+  plain.cancel();
+  plain.open();
+  plain.close();
+  plain.draft.keepMine();
+  plain.draft.takeTheirs();
+  void plain.draft.reload();
+  // @ts-expect-error a plain host's handle has no wired reads
+  void plain.wired;
+  return [stores, clears];
 });
