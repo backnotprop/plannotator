@@ -76,7 +76,7 @@ import { createKeyedSignal } from './signal';
 import { newDecisionWatch } from './decisions/model';
 import { readKeptDecisions } from './decisions/keptRead';
 import { draftsReadOwed, replyDraftsDiffer, unsentThreads } from './draftsReads';
-import { machinesModel, rowSnoozes, snoozeBlockedBy, threadAwayLine } from './machines';
+import { machinesModel, outboxRead as wholeOutbox, rowSnoozes, snoozeBlockedBy, threadAwayLine } from './machines';
 import { ASK_AGENT_TO_UPDATE, ASK_AGENT_TO_UPDATE_THREAD, MachineUpdateDialog } from './components/MachineUpdate';
 import { discardPreparedInboxEvents, prepareInboxEvents } from './sharedEvents';
 import { readListView, useListView, type ListSort } from './listView';
@@ -331,11 +331,11 @@ function Inbox() {
   outboxRef.current = outbox;
   /** Read the held writes again; answers the machines whose pending writes settled meanwhile. */
   const reloadOutbox = useCallback(async (): Promise<Set<string>> => {
-    const mine = ++outboxRead.current;
+    const mine = ++outboxRead.current, asked = performance.now();
     try {
       const { waiting, notices } = await inboxApi.outbox();
       if (mine !== outboxRead.current) return new Set();
-      const next = new Map([...waiting, ...notices].map((entry) => [entry.key, entry] as const));
+      const next = wholeOutbox(new Map([...waiting, ...notices].map((entry) => [entry.key, entry] as const)), asked);
       // A frame that landed while this read was out may be newer: an entry settled here never goes back to waiting.
       const pendingState = (entry: OutboxView) => entry.state === 'queued' || entry.state === 'sending';
       for (const [key, entry] of next) {

@@ -1006,3 +1006,4 @@ packages/ui/components/diagram/diagramSourceAccept.test.tsx
 packages/inbox/decisionHeldRetry.test.tsx
 packages/inbox/decisionUndoStays.test.tsx
 packages/inbox/settingsAfterConnect.test.tsx
+packages/inbox/threadFootHeld.test.tsx

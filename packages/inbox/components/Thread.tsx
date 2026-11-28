@@ -21,6 +21,7 @@ import { createHeldPicks, heldPickLostWords } from '../heldPicks';
 import { ThreadSessions } from './ThreadSessions';
 import { snoozeBackAbove } from '../snoozeBack';
 import { HeldWrites } from './HeldWrites';
+import { FootLine, HeldLine, useFootHeld } from './FootLine';
 import { annotationOf, attachmentFeedback, attachmentImageUrl, isFileComment, OWN_MESSAGE_COMMENT_ROW, readableVersion } from '../attachments';
 import { withPictures } from '../commentPictureFiles';
 import { CommentPictures } from '../commentPictures';
@@ -224,7 +225,7 @@ export { routeSendAnnotations, sendTargetsOf, type SendTarget };
 /** What a press of Send is for: full screen's (`stayFull`), the route choice's (`routed`), the replaced pick's guard's. */
 type SendOptions = { despiteReplaced?: boolean; routed?: boolean; stayFull?: boolean; endedChecked?: ReadonlySet<string> };
 
-export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread: threadRead, threadSteps = null, codeReview = false, pullReview, machine = null, onMachineUpdate, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onSentRead, readPending = false, onPickSaves, onChanged, onTakenBack, draftChanged = 0, filesChanged = 0, draftSignal = null, filesSignal = null, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, parked = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, priority, onSnooze, onUnsnooze, snoozeBlocked, replyRequest, onReplyOpened, onSide, onSideWords, replyWords = null, onReplyWordsTaken, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, namedFile = null, onOpenNamedFile, remote = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, paired = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null, agentContext = null, agentFilter = null, onAgentFilter }: ThreadPaneProps) {
+export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread: threadRead, threadSteps = null, codeReview = false, pullReview, machine = null, onMachineUpdate, onNewMessageWith, outbox = NO_OUTBOX, outboxAll, onDismissOutbox, sent, onQuestions, onSentRead, readPending = false, onPickSaves, onChanged, onTakenBack, draftChanged = 0, filesChanged = 0, draftSignal = null, filesSignal = null, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, parked = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, priority, onSnooze, onUnsnooze, snoozeBlocked, replyRequest, onReplyOpened, onSide, onSideWords, replyWords = null, onReplyWordsTaken, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, namedFile = null, onOpenNamedFile, remote = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, paired = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null, agentContext = null, agentFilter = null, onAgentFilter }: ThreadPaneProps) {
   /**
    * The questions this pane's own saves brought back (by `<message id>/<key>`), and how many saves landed. The thread
    * drawn is the one read, its questions never older than these: a read that left before the last keys were saved
@@ -1292,7 +1293,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         setErrorUpdate({ for: line, machine: home });
         return false;
       }
-      setError(cause instanceof InboxApiError ? cause.message : 'The comment was not saved.');
+      footHeld.say(cause, 'The comment was not saved.');
       return false;
     }
   };
@@ -1509,7 +1510,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           : await inboxApi.saveAnnotation(record.attachment_id, record.version, next);
       saveRecord(result.annotation);
     } catch (cause) {
-      setError(cause instanceof InboxApiError ? cause.message : 'The comment was not saved.');
+      footHeld.say(cause, 'The comment was not saved.');
     }
   };
   const removeRecord = async (record: InboxAnnotationRecord) => {
@@ -1517,7 +1518,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       await inboxApi.removeAnnotation(record.id);
       dropRecord(record.id);
     } catch (cause) {
-      setError(cause instanceof InboxApiError ? cause.message : 'The comment was not removed.');
+      footHeld.say(cause, 'The comment was not removed.');
     }
   };
   /** The list of comments: open or not, one state for its four ways in (reply box, foot, highlights, full-screen card). */
@@ -2339,6 +2340,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const [heldPicks] = useState(() => createHeldPicks(revisions.current));
   const outboxNow = useRef(outbox);
   outboxNow.current = outbox;
+  const footHeld = useFootHeld({ entries: outboxAll, shown: outbox, machine, thread: thread.thread_id, setLine: setError }); // a comment held for that machine: a status on the foot's line
   const machineNow = useRef(machine);
   machineNow.current = machine;
   const onToastNow = useRef(onToast);
@@ -3440,7 +3442,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       await inboxApi.resolve(root.id, next);
       await onChanged();
     } catch (cause) {
-      setError(cause instanceof InboxApiError ? cause.message : 'The thread did not change.');
+      footHeld.say(cause, 'The thread did not change.');
     }
   };
 
@@ -3895,7 +3897,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             openQuestions: unanswered.length,
             openActions: openActions.length,
             conflict: replyDraft.conflict !== null,
-            error: lineError,
+            error: footHeld.isHeld(error) ? null : lineError, held: footHeld.isHeld(error) && error ? <HeldLine text={error} machine={machine} at="card" /> : null,
             errorActions: error ? undefined : lateMissActions,
             sentAt: composerSentAt,
             onOpenThread: replyInThread,
@@ -3906,27 +3908,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       : null;
   const errorMore = error !== null && errorDetails?.for === error ? errorDetails.text : null;
   const errorUpdateFor = error !== null && errorUpdate?.for === error && onMachineUpdate ? errorUpdate.machine : null;
-  const errorLine = (
-    <div className="ib-error" role="alert" data-foot-error={errorAbove ? 'above' : undefined}>
-      {lineError}
-      {errorUpdateFor !== null && (
-        <>
-          {' · '}
-          <button type="button" className="ib-errup" data-error-update={errorUpdateFor} onClick={() => onMachineUpdate?.(errorUpdateFor)}>
-            Update
-          </button>
-        </>
-      )}
-      {/* A failed Send's own words (a path, the Inbox's message), one press away (decision D3). */}
-      {errorMore && (
-        <details className="ib-errd" data-error-details="">
-          <summary>Details</summary>
-          <span className="ib-errd-t">{errorMore}</span>
-        </details>
-      )}
-      {!error && lateMissActions}
-    </div>
-  );
+  const errorLine = <FootLine line={lineError} held={footHeld.isHeld(error)} machine={machine} above={errorAbove} updateFor={errorUpdateFor} onUpdate={onMachineUpdate} details={errorMore} extra={!error && lateMissActions} />;
   // What describes Send and Edit draft in the closed foot: the draft note (drawn at the row's end on a computer, hidden
   // text on a phone) and what this Send does with the unanswered questions (hidden text; the list shows it).
   const draftNoteId = `ib-foot-draft-${thread.thread_id}`;
@@ -5304,6 +5286,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         <SendingReply sends={sendsDrawn} held={outbox} machine={machine} />
         {showNew && !phone && newPill}
         <div className="ib-sr" aria-live="polite" data-fold-live="">{announced}</div>
+        {footHeld.live(error)}
         {/* The room a step of the middle fold borrows (roomRef, shrinkRoom). */}
         <div className="ib-fold-room" ref={roomRef} aria-hidden="true" data-fold-room="" />
       </div>
