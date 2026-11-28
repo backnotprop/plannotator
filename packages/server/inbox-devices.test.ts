@@ -607,7 +607,9 @@ describe("the device door, on the binary", () => {
     const guide = await door(`messages/${guideMessage}/guide`);
     expect(guide.status).toBe(200);
     const g = (await guide.json()) as Json;
-    expect(Object.keys(g).sort()).toEqual(["guide", "message_id", "snapshot"]);
+    // `code_review`: that Inbox's switch, which a linked machine's window follows for the review.
+    expect(Object.keys(g).sort()).toEqual(["code_review", "guide", "message_id", "snapshot"]);
+    expect(typeof g.code_review).toBe("boolean");
     expect(g.guide.title).toBe("Token refresh");
     const tick = await door(`messages/${guideMessage}/guide/reviewed`, { body: { idempotency_key: keys(), reviewed: [true] } });
     expect(await tick.json()).toEqual({ message_id: guideMessage, reviewed: [true] });

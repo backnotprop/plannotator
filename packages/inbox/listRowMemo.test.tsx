@@ -183,7 +183,7 @@ test.skipIf(!hasDom)("a list read with tags (a new tags host each read, the filt
                 notice={null}
                 onShowNew={() => {}}
                 onOpen={() => {}}
-                listFilter={{ rows, scoped: false, names: new Map(), filter: { projects: [], updated: null, agents: [], pulls: [], notSeen: false, recent: false, tags: [], routines: [] }, onChange: () => {} }}
+                listFilter={{ rows, scoped: false, names: new Map(), filter: { projects: [], updated: null, agents: [], pulls: [], notSeen: false, tags: [], routines: [] }, onChange: () => {} }}
               />
             </div>
           </SidebarProvider>

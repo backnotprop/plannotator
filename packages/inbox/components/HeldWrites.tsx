@@ -15,19 +15,7 @@ export function HeldWrites({ entries, machine, onDismiss }: { entries: readonly 
       {entries.map((entry) => {
         const line = outboxLine(entry, machine);
         if (!line) return null;
-        const state = (
-          <div className="ib-delivered" data-delivery={line.tone === 'failed' ? 'undelivered' : 'queued'} data-outbox-line="">
-            <span className="ib-dl-main">
-              <Icon name={line.tone === 'failed' ? 'warn' : machine?.state === 'online' ? 'send' : 'clock'} size={14} />
-              <span className="ib-dl-text">{line.text}</span>
-            </span>
-            {line.tone === 'failed' && onDismiss && (
-              <button type="button" className="ib-sendnow" data-outbox-dismiss="" onClick={() => onDismiss(entry.key)}>
-                Dismiss
-              </button>
-            )}
-          </div>
-        );
+        const state = <OutboxStateLine line={line} machine={machine} onDismiss={onDismiss ? () => onDismiss(entry.key) : undefined} />;
         if (!entry.words) return <div key={entry.key} data-outbox={entry.key} data-outbox-state={entry.state}>{state}</div>;
         return (
           <article key={entry.key} className="ib-message" data-author="person" data-outbox={entry.key} data-outbox-state={entry.state}>
@@ -47,5 +35,26 @@ export function HeldWrites({ entries, machine, onDismiss }: { entries: readonly 
         );
       })}
     </>
+  );
+}
+
+/**
+ * A held write's state line, as the thread draws it under a held reply: "Sending to Laptop…" while that machine is
+ * online, "Will send when Laptop is back" while it is away (outboxLine). Also what a review shows for a Viewed tick
+ * held for its machine, so the tick reads as on its way rather than landed.
+ */
+export function OutboxStateLine({ line, machine, onDismiss }: { line: NonNullable<ReturnType<typeof outboxLine>>; machine: Pick<MachineView, 'state'> | null; onDismiss?: () => void }) {
+  return (
+    <div className="ib-delivered" data-delivery={line.tone === 'failed' ? 'undelivered' : 'queued'} data-outbox-line="">
+      <span className="ib-dl-main">
+        <Icon name={line.tone === 'failed' ? 'warn' : machine?.state === 'online' ? 'send' : 'clock'} size={14} />
+        <span className="ib-dl-text">{line.text}</span>
+      </span>
+      {line.tone === 'failed' && onDismiss && (
+        <button type="button" className="ib-sendnow" data-outbox-dismiss="" onClick={onDismiss}>
+          Dismiss
+        </button>
+      )}
+    </div>
   );
 }

@@ -1,8 +1,9 @@
 import { diagramSourceLine, sameTarget, type DiagramTarget } from '@plannotator/core/diagram-anchor';
 import { diagramFamilyOf, MERMAID_FINDER, splitEdgeStem, type DiagramFinder } from './diagram-anchor';
+import { rowsJoinWithoutSpace } from './peleRowSpaces';
 
 /**
- * The Pele finder: Pele 1.3.0's svg grammar behind the same seam as the
+ * The Pele finder: Pele's svg grammar (1.3.0 through 1.13.0) behind the same seam as the
  * Mermaid finder (`diagram-anchor.ts`). Pele does not write Mermaid's element
  * ids; it puts a stable `data-id` on the parts of every type this finder
  * addresses. For each type the target it builds is the one the Mermaid
@@ -45,6 +46,9 @@ function cleanText(value: string | null | undefined): string {
 /** Where the label step (`pele-labels.ts`, `PELE_TEX_ATTR`) keeps a formula's TeX: the line or gap it was drawn in. */
 const TEX_ATTR = 'data-pele-tex';
 
+/** Where `peleLabelText` met a row of its own, until the join is chosen. */
+const ROW_BREAK = '\u0001';
+
 /**
  * The words an element draws, as the source has them: a formula as
  * `$$tex$$` (its MathML box is skipped), a line (a positioned `tspan`)
@@ -64,7 +68,7 @@ export function peleLabelText(el: Element | null | undefined, lineJoin: string):
     const element = node as Element;
     if (element.localName.toLowerCase() === 'foreignobject' && element.hasAttribute(TEX_ATTR)) return;
     if (element.localName === 'text' && element.getAttribute('fill') === 'none' && element.hasAttribute('stroke')) return;
-    if (element.localName === 'tspan' && element.hasAttribute('y') && out !== '') out += lineJoin;
+    if (element.localName === 'tspan' && element.hasAttribute('y') && out !== '') out += ROW_BREAK;
     const tex = element.getAttribute(TEX_ATTR);
     if (tex !== null) {
       out += ` $$${tex}$$ `;
@@ -73,7 +77,11 @@ export function peleLabelText(el: Element | null | undefined, lineJoin: string):
     for (const child of Array.from(element.childNodes)) walk(child);
   };
   walk(el);
-  return cleanText(out.replace(/\u200b/gu, ''));
+  // A row break joins with `lineJoin`, except inside Chinese or Japanese text, which Pele wraps between characters.
+  const joined = out.replace(/\u200b/gu, '').replace(/\u0001[\s\u0001]*/gu, (run, at: number, all: string) =>
+    rowsJoinWithoutSpace(all.slice(0, at).trimEnd(), all.slice(at + run.length)) ? '' : `${lineJoin}${run.replace(/\u0001/gu, '')}`,
+  );
+  return cleanText(joined);
 }
 
 /** A text's words: its lines joined by a space, never run together. Pele
@@ -505,7 +513,7 @@ function peleFindTarget(svg: Element, target: DiagramTarget): Element | null {
   return oneLabelled(nodes, (el) => rawTarget(svg, el)?.label ?? '', target.label);
 }
 
-/** Pele 1.3.0's codec for flowchart, sequence, state, class, ER and
+/** Pele's codec for flowchart, sequence, state, class, ER and
  * requirement diagrams; every other Pele type is a whole-diagram comment. */
 export const PELE_FINDER: DiagramFinder = {
   targetSelector: PELE_TARGET_SELECTOR,

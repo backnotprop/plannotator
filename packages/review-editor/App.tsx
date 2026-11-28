@@ -41,6 +41,7 @@ import { registerRefCardProvider } from '@plannotator/ui/utils/refCardProviders'
 import { linearLinkCardProvider } from '@plannotator/ui/utils/linearLinkCards';
 import { CompletionOverlay } from '@plannotator/ui/components/CompletionOverlay';
 import { useStarAskDoneScreen } from '@plannotator/ui/components/StarAskDoneScreen';
+import { useLaunchAnnouncement } from '@plannotator/ui/components/LaunchAnnouncement';
 import {
   closePendingTab,
   openPendingTab,
@@ -59,8 +60,9 @@ import { monoFontStack, normalizeCssFontSize } from '@plannotator/ui/utils/cssFo
 import { getAgentSwitchSettings, getEffectiveAgentName } from '@plannotator/ui/utils/agentSwitch';
 import { adoptServerSession, currentServerSession, noteServerSessionMismatch, withServerSession, withServerSessionQuery } from '@plannotator/ui/utils/serverSession';
 import { aiChatStorageKey } from '@plannotator/ui/utils/aiChatPersistence';
-import { assertSendOk, throwUnreachable } from '@plannotator/ui/utils/sendFailure';
+import { assertSendOk, sendErrorAfterAgentGone, throwUnreachable } from '@plannotator/ui/utils/sendFailure';
 import { dismissSendFailureToast, sendSettled, sendStarted, showSendFailureToast } from '@plannotator/ui/components/SendFailureToast';
+import { agentGoneReasonFor, dismissAgentGoneNotice, noteSendFailureForAgentGone, showAgentGoneNotice } from './components/AgentGoneNotice';
 import { ServerSessionReplacedBanner } from '@plannotator/ui/components/ServerSessionReplacedBanner';
 import { useAIProviderConfig } from '@plannotator/ui/hooks/useAIProviderConfig';
 import { useAIProviderActivation } from '@plannotator/ui/hooks/useAIProviderActivation';
@@ -783,11 +785,19 @@ const ReviewApp: React.FC = () => {
   const [submitted, setSubmitted] = useState<'approved' | 'feedback' | 'exited' | false>(false);
   // A decided review has nothing left to retry: take any send failure down.
   useEffect(() => {
-    if (submitted) dismissSendFailureToast();
+    if (!submitted) return;
+    dismissSendFailureToast();
+    dismissAgentGoneNotice();
   }, [submitted]);
   // The agent that opened this review closed it (POST /api/host/close); the
   // reviewer's unsent comments stay in the draft for a reopen.
   const [agentClosed, setAgentClosed] = useState<{ unsentAnnotations: number } | null>(null);
+  // The agent that asked for this local review is gone (`agent-gone`,
+  // packages/shared/review-agent-gone.ts): the review stays as it is, every
+  // comment on screen and in its draft, and a notice says nobody can receive
+  // a decision, with Copy feedback. The server refuses Send meanwhile; a send
+  // that fails while it holds says the agent is gone, whatever it ran into.
+  const agentGoneRef = useRef(false);
   const [showExitWarning, setShowExitWarning] = useState(false);
   // A committed review-level note waiting for its one-render deferred submit
   // (the payload builders close over `allAnnotations`, so the send has to wait
@@ -1106,6 +1116,18 @@ const ReviewApp: React.FC = () => {
     onSessionClosed: (event) => {
       setAgentClosed(event);
       setSubmitted((current) => current || 'exited');
+    },
+    onAgentGone: (gone) => {
+      const wasGone = agentGoneRef.current;
+      agentGoneRef.current = gone;
+      // Heard again on a reconnect: a notice the person closed stays closed.
+      if (gone) {
+        if (!wasGone) showAgentGoneNotice({ copyText: () => retryDecisionRef.current.feedbackMarkdown });
+        return;
+      }
+      dismissAgentGoneNotice();
+      // Back: a refused Send's "not sent" no longer says what Send would do.
+      if (wasGone) dismissSendFailureToast('agent-gone');
     },
   });
   const agentJobs = useAgentJobs({ enabled: !!origin && aiUIEnabled });
@@ -3511,11 +3533,18 @@ const ReviewApp: React.FC = () => {
     fileKey: isAllFilesActive ? 'all' : activeFileIndex,
   });
   const handleAutoView = autoViewedNotice.show;
+  // The launch dialog (the launch switch; LaunchAnnouncement.tsx): as the page opens, before the reader starts
+  // working; the star ask yields on that load. Never without a live session; the VS Code panel shows it too.
+  const launch = useLaunchAnnouncement({
+    ready: !isLoading,
+    eligible: !!origin,
+    firstRunWindow: true,
+  });
   // The update toast waits behind the guide takeover and every first-run
   // dialog of this load (useUpdateToast).
   useUpdateToast({
     advert: updateAdvert,
-    blocked: isLoading || guideOpen,
+    blocked: isLoading || guideOpen || launch.open,
     autoUpdateActive,
     position: 'top-right',
   });
@@ -4936,9 +4965,12 @@ const ReviewApp: React.FC = () => {
     } catch (err) {
       console.error('Failed to send feedback:', err);
       setIsSendingFeedback(false);
+      const sendError = sendErrorAfterAgentGone(err, agentGoneRef.current);
+      noteSendFailureForAgentGone(sendError);
       showSendFailureToast({
         what: 'feedback',
-        error: err,
+        error: sendError,
+        reason: agentGoneReasonFor(sendError),
         onRetry: () => { void retryDecisionRef.current.sendFeedback(); },
         // What the Copy feedback button copies, read when clicked: what
         // Retry would send now.
@@ -5003,9 +5035,12 @@ const ReviewApp: React.FC = () => {
     } catch (err) {
       console.error('Failed to approve:', err);
       setIsApproving(false);
+      const sendError = sendErrorAfterAgentGone(err, agentGoneRef.current);
+      noteSendFailureForAgentGone(sendError);
       showSendFailureToast({
         what: 'approval',
-        error: err,
+        error: sendError,
+        reason: agentGoneReasonFor(sendError),
         onRetry: () => { void retryDecisionRef.current.approve(options); },
         // The approval's text as Retry would send it now; a bare approval
         // has none to copy.
@@ -5504,11 +5539,12 @@ const ReviewApp: React.FC = () => {
 
   // The "Star the repo" ask (approval "star-ask"): claimed once the page loads (the server stops on the decision),
   // shown on the done screen only, once a decision was sent (approved or feedback; never a closed session), never in
-  // the VS Code webview or without a live session. The server decides the rest.
+  // the VS Code webview or without a live session, and never on a load that showed the launch dialog. The server
+  // decides the rest.
   const starAskFooter = useStarAskDoneScreen({
     ready: !isLoading,
     decided: submitted === 'approved' || submitted === 'feedback',
-    eligible: !!origin && !isVSCodeWebview(),
+    eligible: !!origin && !isVSCodeWebview() && !launch.shownThisLoad,
   });
   // Explorer keys (the `review-explorer` scope): never over a dialog, the
   // guide, or while the review is settling; only Go to File works from a text
@@ -6785,6 +6821,9 @@ const ReviewApp: React.FC = () => {
             }))
             : undefined}
         />
+
+        {/* The launch dialog: as the page opens, once per computer. */}
+        {launch.dialog}
 
         {/* GitHub general comment dialog */}
         <ReviewSubmissionDialog

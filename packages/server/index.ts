@@ -61,7 +61,8 @@ import { appendFeedbackRecord, type FeedbackDecision } from "@plannotator/shared
 import { isFaviconStyle, type FaviconStyle } from "@plannotator/shared/favicon";
 import { readImprovementHook, getImprovementHookExpectedPath } from "@plannotator/shared/improvement-hooks";
 import { composeImproveContext } from "@plannotator/shared/pfm-reminder";
-import { handleAnnotateMedia, handleImage, handleStarAsk, handleUpload, handleAgents, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, missingDraftResponse, handleApiNotFound, handleFavicon, handleCustomThemesScript, customThemesPage, handleReferenceSkills, handleReferenceSkillContent, handleSaveNotes, readDraftGenerationFromBody, type OpencodeClient } from "./shared-handlers";
+import { handleAnnotateMedia, handleImage, handleStarAsk, handleLaunchSwitch, handleUpload, handleAgents, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, missingDraftResponse, handleApiNotFound, handleFavicon, handleCustomThemesScript, customThemesPage, handleReferenceSkills, handleReferenceSkillContent, handleSaveNotes, readDraftGenerationFromBody, type OpencodeClient } from "./shared-handlers";
+import { launchSwitchService } from "@plannotator/shared/launch-switch";
 import { contentHash, deleteDraft, loadDraft } from "./draft";
 import { handleDoc, handleDocExists, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc, handleFileBrowserFiles } from "./reference-handlers";
 import { closeAllFileBrowserWatchers, handleFileBrowserFilesStream } from "./reference-watch";
@@ -447,6 +448,8 @@ export async function startPlannotatorServer(
     }, { status: 409 });
 
   const requestHostGuard = createRequestHostGuard();
+  // The launch switch's reader (packages/shared/launch-switch.ts): in the background, never awaited.
+  launchSwitchService().start();
   const server = await startBunServerOnAvailablePort((port) =>
     Bun.serve(withPlannotatorServerHeader({
         hostname: getServerHostname(),
@@ -652,6 +655,11 @@ export async function startPlannotatorServer(
           // The "Star the repo" ask on the done screen (packages/shared/star-ask.ts).
           if (url.pathname.startsWith("/api/star-ask/")) {
             return (await handleStarAsk(req, url, "plan", { remote: isRemote })) ?? handleApiNotFound(url.pathname);
+          }
+
+          // The launch switch's one-time dialog (packages/shared/launch-switch.ts).
+          if (url.pathname.startsWith("/api/launch-switch/")) {
+            return (await handleLaunchSwitch(req, url)) ?? handleApiNotFound(url.pathname);
           }
 
           // API: Serve images (local paths or temp uploads)

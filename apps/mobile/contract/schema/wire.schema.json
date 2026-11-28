@@ -3770,6 +3770,7 @@
         "sent",
         "snoozed",
         "stopped",
+        "tagged",
         "waiting"
       ],
       "x-open": true,
@@ -7024,6 +7025,7 @@
         "quiet",
         "sent",
         "stopped",
+        "tagged",
         "waiting"
       ],
       "x-open": true,
@@ -8180,6 +8182,9 @@
         "waiting": {
           "type": "number"
         },
+        "drafts_held": {
+          "type": "number"
+        },
         "list_cursor": {
           "anyOf": [
             {
@@ -8352,6 +8357,29 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "viewed": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "viewed": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "path",
+                "viewed"
+              ],
+              "additionalProperties": true
             },
             {
               "type": "null"

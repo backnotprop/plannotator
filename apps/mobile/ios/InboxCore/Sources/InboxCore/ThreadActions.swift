@@ -279,10 +279,10 @@ public enum RowOffers {
     case archive, unarchive
   }
 
-  /// `inboxRowWaitsOnPerson`.
+  /// `inboxRowWaitsOnPerson` (`inboxSectionWaitsOnPerson`: Tagged you counts like Waiting on you).
   public static func waitsOnPerson(_ row: InboxListRow) -> Bool {
     switch row.section {
-    case .stopped, .holding, .waiting: return true
+    case .stopped, .holding, .waiting, .tagged: return true
     case .new: return row.unseen > 0 || row.answeredNotSent
     default: return false
     }

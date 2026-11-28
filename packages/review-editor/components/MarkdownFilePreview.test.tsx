@@ -473,6 +473,43 @@ describe.if(hasDom)('commenting in a Markdown preview', () => {
     expect(host.querySelector('[data-stub-diagram]')?.textContent).toBe('flowchart LR\n  A --> B');
     expect(host.querySelector('[data-review-diagram]')).toBeNull();
   });
+
+  test("a fence the host's source check refuses stays code and never imports the engine; an accepted one beside it does", async () => {
+    const { ReviewDiagramFence } = await import('./ReviewDiagramFence');
+    const { DiagramSourceAcceptContext } = await import('@plannotator/ui/components/diagramSourceAccept');
+    const urls = { engine: '/assets/diagram-engine/engine-source-check.js', mermaid: '/m.js', graphviz: '/g.js' };
+    const imported: string[] = [];
+    const importer = async (url: string) => {
+      imported.push(url);
+      return {
+        apiVersion: 1,
+        DiagramFence: ({ block }: { block: { content: string } }) => <div data-stub-diagram="">{block.content}</div>,
+      };
+    };
+    const refused = { id: 'r1', type: 'code', language: 'mermaid', content: 'flowchart LR\n  X --> Y', order: 0, startLine: 1 } as const;
+    const accepted = { id: 'a1', type: 'code', language: 'mermaid', content: 'flowchart LR\n  A --> B', order: 0, startLine: 1 } as const;
+    const check = (_kind: string, source: string) => source !== refused.content;
+    const fence = (block: typeof refused | typeof accepted) => (
+      <ReviewDiagramFence block={block as never} kind="mermaid" urls={urls} importer={importer} fallback={<pre><code>{block.content}</code></pre>} />
+    );
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await act(async () => {
+      root!.render(<DiagramSourceAcceptContext.Provider value={check}>{fence(refused)}</DiagramSourceAcceptContext.Provider>);
+    });
+    await settle(60);
+    expect(imported).toEqual([]);
+    expect(Array.from(host.querySelectorAll('pre > code')).map((c) => c.textContent)).toEqual([refused.content]);
+    expect(host.querySelector('[data-review-diagram]')).toBeNull();
+    await act(async () => {
+      root!.render(<DiagramSourceAcceptContext.Provider value={check}>{fence(refused)}{fence(accepted)}</DiagramSourceAcceptContext.Provider>);
+    });
+    await settle(60);
+    expect(imported).toEqual([urls.engine]);
+    expect(Array.from(host.querySelectorAll('[data-stub-diagram]')).map((n) => n.textContent)).toEqual([accepted.content]);
+    expect(Array.from(host.querySelectorAll('pre > code')).map((c) => c.textContent)).toEqual([refused.content]);
+  });
 });
 
 // Picture choices in a question block (approval "inbox-decision-mode"): a PR

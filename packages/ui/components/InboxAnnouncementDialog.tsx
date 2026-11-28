@@ -38,12 +38,21 @@ export const INBOX_FILM = {
 const FILM_ASPECT = 16 / 9;
 
 /**
- * The panel's width also follows the viewport height, so on a short window the
- * film shrinks until film and footer fit instead of scrolling the film away.
- * 2rem is the overlay's padding, 10rem the footer on a wide panel.
+ * The shell's size: the widest the panel gets, and the height its words and
+ * buttons take on a wide panel. The panel's width also follows the viewport
+ * height, so on a short window the media band shrinks until band and footer
+ * fit instead of scrolling the band away (2rem is the overlay's padding).
  */
-const PANEL_WIDTH =
-  `min(1200px, 100%, calc((var(--pn-viewport-height, 100dvh) - 2rem - 10rem) * ${FILM_ASPECT}))`;
+export interface AnnouncementSize {
+  readonly width: number;
+  readonly footerRem: number;
+}
+
+/** The Inbox announcement's size, and the shell's default. */
+export const ANNOUNCEMENT_FILM_SIZE: AnnouncementSize = { width: 1200, footerRem: 10 };
+
+const panelWidth = ({ width, footerRem }: AnnouncementSize) =>
+  `min(${width}px, 100%, calc((var(--pn-viewport-height, 100dvh) - 2rem - ${footerRem}rem) * ${FILM_ASPECT}))`;
 
 interface InboxAnnouncementDialogProps {
   readonly isOpen: boolean;
@@ -67,7 +76,7 @@ function Film() {
   };
 
   return (
-    <div className="relative w-full shrink-0 overflow-hidden border-b border-border bg-muted" style={{ aspectRatio: String(FILM_ASPECT) }}>
+    <>
       <video
         ref={videoRef}
         data-inbox-film
@@ -104,7 +113,96 @@ function Film() {
           </span>
         </button>
       ) : null}
-    </div>
+    </>
+  );
+}
+
+interface AnnouncementShellProps {
+  /** Escape, the backdrop (and whatever the host wires to its own buttons). */
+  readonly onClose: () => void;
+  /**
+   * Where focus starts. 'panel': the panel itself (no ring on it; the dialog's name is read, the first Tab reaches its
+   * first control, and a plain Enter while the panel holds focus does nothing), so no control opens with a ring.
+   */
+  readonly initialFocus: React.RefObject<HTMLElement | null> | 'panel';
+  /** Default: the Inbox announcement's (ANNOUNCEMENT_FILM_SIZE). */
+  readonly size?: AnnouncementSize;
+  /** The 16:9 band on top, edge to edge under the rounded corners, a hairline below it. None: no band. */
+  readonly media?: React.ReactNode;
+  readonly children: React.ReactNode;
+  /** `data-*` attributes for the panel. */
+  readonly [data: `data-${string}`]: string | boolean | undefined;
+}
+
+/**
+ * The announcements' shell: the shared dialog (Base UI), modal, focus trapped
+ * and restored on close, no close button; Escape is taken on the capture phase
+ * (so no App handler behind it sees it) and Mod+Enter is swallowed there, so a
+ * keystroke aimed at it cannot approve a plan or post a review behind it.
+ * The Inbox announcement and the launch dialog (LaunchDialog.tsx) draw in it.
+ */
+export function AnnouncementShell({ onClose, initialFocus, size = ANNOUNCEMENT_FILM_SIZE, media, children, ...data }: AnnouncementShellProps) {
+  const onCloseRef = useRef(onClose);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const onPanel = initialFocus === 'panel';
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      // Escape is handled here rather than by the dialog so that no window
+      // handler of the App behind it (close a panel, leave a mode) sees it.
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        onCloseRef.current();
+        return;
+      }
+      // Both apps submit their decision on Mod+Enter from a window-level
+      // handler; swallow it on the capture phase.
+      if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      // Focus on the panel itself (opening): a plain Enter there is nobody's, not the page's behind it.
+      if (onPanel && event.key === 'Enter' && event.target === panelRef.current) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown, true);
+    return () => document.removeEventListener('keydown', handleKeyDown, true);
+  }, [onPanel]);
+
+  return (
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onCloseRef.current();
+      }}
+    >
+      <DialogContent
+        hideClose
+        ref={panelRef}
+        initialFocus={onPanel ? panelRef : initialFocus}
+        tabIndex={onPanel ? -1 : undefined}
+        {...data}
+        backdropClassName="bg-background/90 backdrop-blur-sm"
+        // The panel holding focus draws no ring (inline: the global :focus-visible outline in theme.css outranks a utility).
+        style={onPanel ? { width: panelWidth(size), outline: 'none' } : { width: panelWidth(size) }}
+        className="max-h-full max-w-none rounded-xl bg-card text-card-foreground shadow-2xl motion-reduce:transition-none"
+      >
+        {media !== undefined && (
+          <div className="relative w-full shrink-0 overflow-hidden border-b border-border bg-muted" style={{ aspectRatio: String(FILM_ASPECT) }}>
+            {media}
+          </div>
+        )}
+        {children}
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -116,87 +214,49 @@ export function InboxAnnouncementDialog({ isOpen, onDismiss }: InboxAnnouncement
     onDismissRef.current = onDismiss;
   }, [onDismiss]);
 
-  useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (event: KeyboardEvent) => {
-      // Escape is handled here rather than by the dialog so that no window
-      // handler of the App behind it (close a panel, leave a mode) sees it.
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        event.stopPropagation();
-        onDismissRef.current();
-        return;
-      }
-      // Both apps submit their decision on Mod+Enter from a window-level
-      // handler; swallow it on the capture phase.
-      if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
-        event.preventDefault();
-        event.stopPropagation();
-      }
-    };
-    document.addEventListener('keydown', handleKeyDown, true);
-    return () => document.removeEventListener('keydown', handleKeyDown, true);
-  }, [isOpen]);
-
   if (!isOpen) return null;
 
   return (
-    <Dialog
-      open
-      onOpenChange={(open) => {
-        if (!open) onDismissRef.current();
-      }}
-    >
-      <DialogContent
-        hideClose
-        initialFocus={closeRef}
-        data-inbox-announcement-dialog
-        backdropClassName="bg-background/90 backdrop-blur-sm"
-        style={{ width: PANEL_WIDTH }}
-        className="max-h-full max-w-none rounded-xl bg-card text-card-foreground shadow-2xl motion-reduce:transition-none"
-      >
-        <Film />
-
-        <div className="flex min-h-0 flex-col gap-5 overflow-y-auto px-5 py-5 sm:flex-row sm:items-end sm:justify-between sm:gap-8 sm:px-7 sm:py-6">
-          <div className="min-w-0">
-            <DialogTitle className="text-balance text-xl font-semibold tracking-tight sm:text-2xl">
-              The Plannotator Inbox
-            </DialogTitle>
-            <DialogDescription className="mt-1.5 max-w-xl text-pretty leading-relaxed">
-              Questions, blockers and reviews from your agents arrive in one inbox while they work,
-              and your answers go back to them.
-            </DialogDescription>
-          </div>
-
-          <div className="flex shrink-0 flex-col-reverse gap-2 sm:flex-row sm:items-center">
-            <button
-              ref={closeRef}
-              type="button"
-              data-inbox-announcement-close
-              onClick={() => onDismissRef.current()}
-              className="min-h-10 rounded-lg border border-border px-4 text-sm font-medium text-foreground outline-none transition-colors motion-reduce:transition-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-card"
-            >
-              Close
-            </button>
-            <a
-              href={INBOX_PAGE_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              data-inbox-announcement-learn-more
-              // Following the link counts as seeing the announcement. Closed on
-              // the next task: a link removed from the page during its own click
-              // is not followed.
-              onClick={() => {
-                setTimeout(() => onDismissRef.current(), 0);
-              }}
-              className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg bg-primary px-5 text-sm font-medium text-primary-foreground outline-none transition-opacity motion-reduce:transition-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-card"
-            >
-              Learn about the Inbox
-              <ArrowUpRight className="size-4" aria-hidden="true" />
-            </a>
-          </div>
+    <AnnouncementShell onClose={() => onDismissRef.current()} initialFocus={closeRef} media={<Film />} data-inbox-announcement-dialog>
+      <div className="flex min-h-0 flex-col gap-5 overflow-y-auto px-5 py-5 sm:flex-row sm:items-end sm:justify-between sm:gap-8 sm:px-7 sm:py-6">
+        <div className="min-w-0">
+          <DialogTitle className="text-balance text-xl font-semibold tracking-tight sm:text-2xl">
+            The Plannotator Inbox
+          </DialogTitle>
+          <DialogDescription className="mt-1.5 max-w-xl text-pretty leading-relaxed">
+            Questions, blockers and reviews from your agents arrive in one inbox while they work,
+            and your answers go back to them.
+          </DialogDescription>
         </div>
-      </DialogContent>
-    </Dialog>
+
+        <div className="flex shrink-0 flex-col-reverse gap-2 sm:flex-row sm:items-center">
+          <button
+            ref={closeRef}
+            type="button"
+            data-inbox-announcement-close
+            onClick={() => onDismissRef.current()}
+            className="min-h-10 rounded-lg border border-border px-4 text-sm font-medium text-foreground outline-none transition-colors motion-reduce:transition-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-card"
+          >
+            Close
+          </button>
+          <a
+            href={INBOX_PAGE_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            data-inbox-announcement-learn-more
+            // Following the link counts as seeing the announcement. Closed on
+            // the next task: a link removed from the page during its own click
+            // is not followed.
+            onClick={() => {
+              setTimeout(() => onDismissRef.current(), 0);
+            }}
+            className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg bg-primary px-5 text-sm font-medium text-primary-foreground outline-none transition-opacity motion-reduce:transition-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-card"
+          >
+            Learn about the Inbox
+            <ArrowUpRight className="size-4" aria-hidden="true" />
+          </a>
+        </div>
+      </div>
+    </AnnouncementShell>
   );
 }

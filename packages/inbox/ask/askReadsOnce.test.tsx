@@ -10,6 +10,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { emitAskChange } from './askEvents';
+import { rememberMachine } from '../inboxUrl';
 
 const hasDom = typeof document !== 'undefined';
 const { useInboxAsk } = (hasDom ? await import('./useInboxAsk') : {}) as typeof import('./useInboxAsk');
@@ -82,4 +83,30 @@ test.skipIf(!hasDom)("the Ask window and the review's Ask on selected lines read
   act(() => emitAskChange(OTHER));
   await settle();
   expect(reads.length - counted).toBe(2);
+});
+
+test.skipIf(!hasDom)("a linked machine's review never reads Ask on this Inbox (it has no such thread here: a 404)", async () => {
+  const FAR = 'msg_01M8AJQCZ1AGWDGQV42A4Y2DR4';
+  rememberMachine([FAR], 'ibx_01JZ5Q7M9K2N4P6R8T0V1W3X5Y');
+  const asked: string[] = [];
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    asked.push(String(input).split('?')[0]!);
+    return Response.json({ can_ask: true });
+  }) as typeof fetch;
+  let far = true;
+  function FarReview() {
+    far = useCanAsk(FAR, true);
+    return null;
+  }
+  el = document.createElement('div');
+  document.body.appendChild(el);
+  act(() => {
+    root = createRoot(el!);
+    root.render(<FarReview />);
+  });
+  await settle();
+  act(() => emitAskChange(null));
+  await settle();
+  expect(asked.filter((path) => path.endsWith('/ask'))).toEqual([]);
+  expect(far).toBe(false);
 });

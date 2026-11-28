@@ -18,6 +18,7 @@ import type { CloudflareAccessSettings, TailscaleSettings } from './data/reach';
 import { isActionRecord, questionsOnly, splitThreadActions } from './actions';
 import { createListReader, listGridAsked, type ListReadAnswer } from './listRead';
 import { inboxUrl, isContested, localRoute, machineOf, rememberArtifactMachines, rememberLocal, rememberMachine, rememberSearchMachines, selfMachineId, setSelfMachine } from './inboxUrl';
+import { farRead, readsServedFor } from './linkedReads';
 import { threadPullsOf } from './threadPulls/model';
 import { learnPullMachines, pullMachine, pullUrl } from './pulls/pullMachines';
 import { learnProjects } from './projectPictures';
@@ -68,7 +69,7 @@ import { inboxCommentPicture } from '@plannotator/core/inbox-types';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
 import { inboxPickBody } from '@plannotator/core/inbox-answers';
 import { inboxSectionsAsOf } from '@plannotator/core/inbox-snooze';
-import { NO_FILE_OPS, type ReplyDraftFileOps } from '@plannotator/core/inbox-reply-draft';
+import { NO_FILE_OPS, type ReplyDraftFileOps, type ReplyDraftNotLanded } from '@plannotator/core/inbox-reply-draft';
 import { FEEDBACK_UNAVAILABLE } from '@plannotator/core/product-feedback';
 import type { ForgeRefCardResult } from '@plannotator/core/forge-ref-card';
 import { learnDebugLog, resumeDebugLog } from './debugLog';
@@ -120,7 +121,7 @@ export type InboxRevealId = 'theme_chooser' | 'code_review' | 'sound' | 'list_in
 /** What the line claims (`POST /api/inbox/reveal`): every offer, and the tab icon, the one update-day dialog claimed through the line. */
 export type InboxRevealOfferId = Exclude<InboxRevealId, 'sound' | 'list_intro' | 'voice'>;
 /** What a page claims through `POST /api/inbox/reveal`: Snooze, an offer, the agent note, the Launch tip or the Sidebar tip (both outside the line). */
-export type InboxRevealClaimId = InboxRevealOfferId | 'agent_note' | 'launch_tip' | 'sidebar_tip' | 'band_tip';
+export type InboxRevealClaimId = InboxRevealOfferId | 'agent_note' | 'launch_tip' | 'sidebar_tip' | 'band_tip' | 'search_tip';
 
 /**
  * This page load's id, sent with every read and write (`X-Plannotator-Load`): the Inbox keeps it with a one-time
@@ -343,7 +344,7 @@ export interface SettingsModel {
   list_intro?: { due: boolean };
   /** The one-time Snooze announcement waits to be claimed by this page (POST /api/inbox/snooze-intro). Absent from an older Inbox. */
   snooze_intro?: { due: boolean };
-  reveal?: { next: InboxRevealId | null; ahead?: InboxRevealId[]; setup?: boolean; line?: boolean; aside?: InboxRevealId[]; launch_tip?: boolean; sidebar_tip?: boolean; band_tip?: boolean; /** ms until a date can change the line, or null (reveals.ts `revealAgainAt`). */ again_in?: number | null };
+  reveal?: { next: InboxRevealId | null; ahead?: InboxRevealId[]; setup?: boolean; line?: boolean; aside?: InboxRevealId[]; launch_tip?: boolean; sidebar_tip?: boolean; band_tip?: boolean; search_tip?: boolean; /** The launch dialog is due here (launchDialog.tsx). */ launch?: boolean; /** ms until a date can change the line, or null (reveals.ts `revealAgainAt`). */ again_in?: number | null };
   /** Voice dictation (config.json inboxVoice). Absent from an Inbox that predates it. */
   voice?: InboxVoiceSettings;
   /** Settings → About: update notices and automatic updates (`env`: the env var decides). Absent from an older Inbox. */
@@ -1315,14 +1316,13 @@ export const inboxApi = {
   systemSetup: () => get<SystemSetupAnswer>(inboxUrl('/system/setup')),
   saveSystemSetup: (input: SystemSetupInput) => post<{ setup: SystemSetup }>(inboxUrl('/system/setup'), { ...input }),
   /**
-   * A thread's steps, each session's list with its presence now (approval "inbox-thread-steps"). A linked
-   * machine's thread has none here (its read is not forwarded), and an Inbox older than steps answers 404: both
-   * read as off.
+   * A thread's steps, each session's list with its presence now (approval "inbox-thread-steps"), read on the thread's
+   * own machine. A linked machine without `linked-reads` is not asked, and an Inbox older than steps answers 404: off.
    */
   threadSteps: async (threadId: string): Promise<{ on: boolean; steps: InboxStepsWire[] }> => {
-    if (machineOf(threadId)) return { on: false, steps: [] };
+    if (!readsServedFor(threadId)) return { on: false, steps: [] };
     try {
-      const answer = await get<{ on?: unknown; steps?: unknown }>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/steps`));
+      const answer = await farRead(threadId, () => get<{ on?: unknown; steps?: unknown }>(threadUrl(threadId, '/steps')));
       return { on: answer.on === true, steps: Array.isArray(answer.steps) ? (answer.steps as InboxStepsWire[]) : [] };
     } catch (cause) {
       if (cause instanceof InboxApiError && cause.status === 404) return { on: false, steps: [] };
@@ -1469,7 +1469,7 @@ export const inboxApi = {
        */
       quote?: { of: string; words?: string; time?: string };
       /** The answer carries the thread as a read of it would (`thread_read`): the Send's last reply asks, and reads nothing after. */
-      with_thread?: boolean; /** New thread from this message: no #tag read, no still-open line, no length noted. */ author_only?: boolean; /** A skill emoji pressed: drawn as one line (thread/skillReaction.ts). */ skill_reaction?: { emoji: string; skill: string };
+      with_thread?: boolean; /** New thread from this message: no #tag read, no still-open line, no length noted. */ author_only?: boolean; /** A skill emoji pressed: drawn as a reply whose words are "🦃 /bro" (thread/skillReaction.ts). */ skill_reaction?: { emoji: string; skill: string };
     },
   ) =>
     // To another machine: the newest seq the person saw there rides along (rule 11), and a reply its Inbox has not
@@ -1501,18 +1501,18 @@ export const inboxApi = {
   health: () => get<InboxHealth>(inboxUrl('/health')),
   /** The health, or InboxReadTimeout past `timeoutMs` (the stale page notice's checks and its Reload). */
   healthWithin: (timeoutMs: number) => getWithin<InboxHealth>(inboxUrl('/health'), timeoutMs),
-  /** The guided review a message carries: its record and the snapshot (validated by the server, parsed again here). */
+  /** A message's guided review: its record, the snapshot (parsed again here), and its Inbox's Code review switch. */
   guide: (messageId: string) =>
-    get<{ message_id: string; guide: InboxGuideRef; snapshot: unknown }>(messageUrl(messageId, `/guide`)),
+    get<{ message_id: string; guide: InboxGuideRef; code_review?: unknown; snapshot: unknown }>(messageUrl(messageId, `/guide`)),
   /** One changed file's whole text as the guide's patch names it, for its expand arrows. */
   guideFile: (messageId: string, path: string, signal?: AbortSignal) =>
-    get<InboxFileContents>(messageUrl(messageId, `/guide/file`, `path=${encodeURIComponent(path)}`), signal),
+    farRead(messageId, () => get<InboxFileContents>(messageUrl(messageId, `/guide/file`, `path=${encodeURIComponent(path)}`), signal)),
   /** The person's reviewed ticks on that guide, kept on the message. */
   saveGuideReviewed: (messageId: string, reviewed: boolean[]) =>
     post<{ message_id: string; reviewed: boolean[] }>(messageUrl(messageId, `/guide/reviewed`), { reviewed }),
   /** The files ticked Viewed in a review (code review in the Inbox), as the patch names them. */
-  saveGuideViewed: (messageId: string, viewed: string[]) =>
-    post<{ message_id: string; viewed: string[] }>(messageUrl(messageId, `/guide/viewed`), { viewed }),
+  saveGuideViewed: (messageId: string, path: string, viewed: boolean) =>
+    post<{ message_id: string; viewed: string[] }>(messageUrl(messageId, `/guide/viewed`), { path, viewed }),
   /** A comment on that guide's diff (the review app's line comment), new or edited; removed through `removeAnnotation`. */
   saveGuideAnnotation: (messageId: string, annotation: object) =>
     trackCommentWrite(post<{ annotation: InboxAnnotationRecord }>(messageUrl(messageId, `/guide/annotations`), { annotation }), { on: messageId, id: (annotation as { id?: unknown }).id }),
@@ -1607,15 +1607,15 @@ export const inboxApi = {
   /** "Open in": the file as it is now, in a catalog app or the default app, by the attachment's id (on this computer only). */
   openIn: (attachmentId: string, appId: string) =>
     post<{ ok: boolean; error?: string }>(inboxUrl('/open-in'), { attachment_id: attachmentId, app_id: appId }),
-  /** A referenced file in its scope: whether it is on this computer, its real path and kind. 403 through the tailnet. */
-  openInFileCheck: (scope: OpenInFileScope, path: string) =>
-    get<{ found: boolean; path?: string; kind?: string }>(inboxUrl(`/open-in/file?${new URLSearchParams({ ...scope, path })}`)),
+  /** A referenced file in its scope: whether it is on its thread's computer, its real path there and kind (none from a linked machine without `linked-reads`). */
+  openInFileCheck: async (scope: OpenInFileScope, path: string): Promise<{ found: boolean; path?: string; kind?: string }> =>
+    'thread' in scope && !readsServedFor(scope.thread) ? { found: false } : farRead('thread' in scope ? scope.thread : null, () => get<{ found: boolean; path?: string; kind?: string }>(inboxUrl('/open-in/file', new URLSearchParams({ ...scope, path }).toString(), 'thread' in scope ? machineOf(scope.thread) : null))),
   /** A file an agent's message names, for the pane: read only, wherever it is on that computer (never a secret). */
   referencedFile: (scope: ReferencedFileScope, path: string) => get<ReferencedFileView>(referencedFileUrl('view', scope, path)),
   /** The person commented on a file a message names: it becomes one of that message's attachments (once), on its thread's machine. */
   attachReferencedFile: (scope: ReferencedFileScope, path: string) =>
     post<{ attachment: InboxAttachmentState }>(inboxUrl('/open-in/file/attach', undefined, machineOf(scope.thread)), { thread: scope.thread, message: scope.message, path, idempotency_key: crypto.randomUUID() }),
-  openInFileCode: (scope: OpenInFileScope, path: string) => get<OpenInFileCode>(inboxUrl(`/open-in/file/code?${new URLSearchParams({ ...scope, path })}`)),
+  openInFileCode: async (scope: OpenInFileScope, path: string, signal?: AbortSignal): Promise<OpenInFileCode> => 'thread' in scope && !readsServedFor(scope.thread) ? { found: false } : farRead('thread' in scope ? scope.thread : null, () => get<OpenInFileCode>(inboxUrl('/open-in/file/code', new URLSearchParams({ ...scope, path }).toString(), 'thread' in scope ? machineOf(scope.thread) : null), signal)),
   openInFile: (scope: OpenInFileScope, path: string, appId: string, line?: number) =>
     post<{ ok: boolean; error?: string }>(inboxUrl('/open-in/file'), { ...scope, path, app_id: appId, ...(line ? { line } : {}) }),
   /** Keep a marked-up image (a comment drawn on an image attachment): its path rides the comment's `images`. */
@@ -1683,7 +1683,7 @@ export const inboxApi = {
   /** `replies` (additive): open threads holding unsent work; an older Inbox sends none. */
   drafts: () => get<{ serverSession: string; drafts: DraftView[]; replies?: InboxReplyDraftRow[] }>(inboxUrl('/drafts')),
   // Reply drafts (approval "inbox-reply-drafts"): the reply box's words per thread.
-  replyDraft: (threadId: string) => get<{ draft: InboxReplyDraft | null }>(threadUrl(threadId, `/draft`)),
+  replyDraft: (threadId: string) => get<{ draft: InboxReplyDraft | null; not_landed?: ReplyDraftNotLanded }>(threadUrl(threadId, `/draft`)),
   commentDraft: (threadId: string, key: string) => get<{ draft: InboxCommentDraftView | null }>(threadUrl(threadId, '/comment-draft', `key=${encodeURIComponent(key)}`)),
   saveCommentDraft: (threadId: string, body: { key: string; text: string; images: readonly ImageRef[]; base: string | null; force?: boolean }, init: { keepalive?: boolean } = {}) =>
     post<{ draft: InboxCommentDraftView | null }>(threadUrl(threadId, '/comment-draft'), body, init),
@@ -1917,7 +1917,7 @@ export const inboxApi = {
   /** Snooze the thread until a time, or end its snooze (`null`). `at`: an earlier snooze's own time, for an Undo. On the thread's own machine. */
   snooze: (threadId: string, until: string | null, at?: string) =>
     post<{ snoozed: { until: string; at: string } | null }>(threadUrl(threadId, '/snooze'), { until, ...(at ? { at } : {}) }),
-  discardReplyDraft: (threadId: string) => post<{ ok: true; deleted: boolean }>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/draft/delete`), {}),
+  discardReplyDraft: (threadId: string, body: { base?: string | null; base_body?: string; not_landed?: string } = {}) => post<{ ok: true; deleted: boolean }>(threadUrl(threadId, '/draft/delete'), body),
   saveDraft: (id: string, input: { body: string; to: InboxDraft['to']; project: InboxDraft['project']; files: DraftFileInput[]; base: string | null; thread_name?: string; card?: InboxDraft['card']; pulls?: InboxDraft['pulls']; board_request?: true; start?: InboxDraft['start'] }) =>
     post<{ draft: DraftView }>(inboxUrl(`/drafts/${encodeURIComponent(id)}`), { ...input }),
   deleteDraft: (id: string) => post<{ ok: true; deleted: boolean }>(inboxUrl(`/drafts/${encodeURIComponent(id)}/delete`), {}),

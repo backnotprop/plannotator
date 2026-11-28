@@ -64,6 +64,7 @@ async function render(): Promise<void> {
     root!.render(
       <SearchPalette
         open
+        searchTip={false}
         phone={false}
         currentProject={null}
         projects={[{ ...here, root: '/src/api' }, { ...far, root: '/src/web' }]}

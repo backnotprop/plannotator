@@ -1,7 +1,7 @@
 import type { GuideOverviewDiagram } from '@plannotator/core/guide';
 import type { GuideSnapshot } from '@plannotator/core/guide-format';
 import type { InboxFileContents } from '@plannotator/core/inbox-types';
-import type { ReactNode } from 'react';
+import type { ComponentType, ReactNode, RefObject } from 'react';
 import type { CodeAnnotation } from '@plannotator/ui/types';
 
 /**
@@ -46,6 +46,11 @@ export interface GuideReaderImages {
 
 export interface GuideReaderProps {
   snapshot: GuideSnapshot;
+  /**
+   * Drawn with each line comment's field (the Inbox's mic, FieldVoice): review-editor's `LineFeedbackToolsProvider`,
+   * set inside the reader so the window never imports review-editor itself. Absent or null: none.
+   */
+  lineFeedbackTools?: ComponentType<{ textareaRef: RefObject<HTMLTextAreaElement | null>; onBusyChange: (busy: boolean) => void }> | null;
   /** The reviewed ticks as the person left them (kept with the thread by the pane). */
   reviewed: readonly boolean[];
   onReviewedChange: (reviewed: boolean[]) => void;

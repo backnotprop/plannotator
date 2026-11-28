@@ -34,6 +34,7 @@ import type {
   TokenAnnotationMeta,
 } from '@plannotator/ui/types';
 import { ReviewWorkerPoolProvider } from '@plannotator/review-editor/worker-pool';
+import { LineFeedbackToolsProvider } from '@plannotator/review-editor/components/LineFeedbackTools';
 import { useRefHoverCards } from '@plannotator/ui/components/RefHoverCard';
 import { openedLinesQuote } from '../attachments';
 import { wholeFileReader, type KeptWholeFiles } from './wholeFileReader';
@@ -53,6 +54,7 @@ import { AllFilesCodeView, type AllFilesCodeViewProps } from '@plannotator/revie
 import type { DiffSelectionActions } from '@plannotator/review-editor/components/SelectionChooser';
 import { extractLinesFromPatch, isLineRangeInPatch } from '@plannotator/review-editor/utils/patchParser';
 import { useConfigValue } from '@plannotator/ui/config';
+import { useDiffFontFamily } from './useDiffFont';
 import { getIdentity } from '@plannotator/ui/utils/identity';
 import { DiffStyleSwitch } from '../components/DiffStyleSwitch';
 import { reviewSourceLine } from './sourceLine';
@@ -167,7 +169,7 @@ export const GuideDiff: FC<
   const showLineNumbers = useConfigValue('diffShowLineNumbers');
   const showBackground = useConfigValue('diffShowBackground');
   const expandUnchanged = useConfigValue('diffExpandUnchanged');
-  const fontFamily = useConfigValue('diffFontFamily');
+  const fontFamily = useDiffFontFamily();
   const fontSize = useConfigValue('diffFontSize');
   // Code review's reason for a folded generated file (its "Generated file collapsed" strip and the header's badge): the
   // files the guide folds as generated (GuideFileCard, the host's set or the built-in names, as code review's PR mode).
@@ -337,14 +339,16 @@ function usePackageChangeCards(images: GuideReaderImages | undefined): AllFilesC
  * Highlighting runs off the page's thread, or a long file freezes it. The pool's three workers start with the first
  * reader on screen and end with the last, so a page with no diff does not hold them.
  */
-export default function GuideReader(props: GuideReaderProps) {
+export default function GuideReader({ lineFeedbackTools = null, ...props }: GuideReaderProps) {
   // A reader that throws while it draws says so in its place; the review's bar and comments stay (ui's RegionBoundary,
   // inside the lazy part: a chunk that cannot arrive is still PanePart's "Couldn't load this view").
   return (
     <ReviewWorkerPoolProvider>
-      <RegionBoundary name="Guide reader">
-        <Reader {...props} />
-      </RegionBoundary>
+      <LineFeedbackToolsProvider value={lineFeedbackTools}>
+        <RegionBoundary name="Guide reader">
+          <Reader {...props} />
+        </RegionBoundary>
+      </LineFeedbackToolsProvider>
     </ReviewWorkerPoolProvider>
   );
 }

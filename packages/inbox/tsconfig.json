@@ -44,6 +44,8 @@
     // guide/pullChangesTreeRisk.test.tsx renders guide/PullChangesTree.tsx, excluded for the same reason (it reaches
     // review-editor's ReviewStateContext and AllFilesCodeView); tsconfig.guide.json checks both.
     "guide/pullChangesTreeRisk.test.tsx",
+    // Renders guide/GuideReader.tsx's GuideDiff (excluded above) to prove a diff loads the picked code font.
+    "guide/diffFontLoad.test.tsx",
     "guide/useSemDiffClient.ts",
     "guide/renderedFiles.tsx",
     "guide/useSemDiffClient.test.tsx",
