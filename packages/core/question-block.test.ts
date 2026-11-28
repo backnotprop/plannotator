@@ -28,6 +28,42 @@ Last-write-wins silently drops the loser unless we keep it somewhere.
 Recommended: Local only, purged after 30 days`;
 
 describe("parseQuestionBlock", () => {
+  test("a recommendation identifies numbered choices without turning a glossary into choices", () => {
+    const q = parseQuestionBlock("question", [
+      "Which queue should receive retries?",
+      "",
+      "Background:",
+      "- *Jobs queue*: used today.",
+      "- *Retry queue*: handles retries.",
+      "",
+      "1. **Jobs queue**: no new infrastructure.",
+      "2. **Retry queue**: isolates slow retries.",
+      "",
+      "Recommended: Retry queue",
+    ].join("\n"))!;
+    expect(q.choices.map(({ label, description, recommended }) => ({ label, description, recommended }))).toEqual([
+      { label: "Jobs queue", description: "no new infrastructure.", recommended: false },
+      { label: "Retry queue", description: "isolates slow retries.", recommended: true },
+    ]);
+    expect(q.context).toContain("used today");
+    expect(q.context).not.toContain("isolates slow retries");
+  });
+
+  test("a numbered example stays in context when no recommendation names it", () => {
+    const q = parseQuestionBlock("question", [
+      "Can we ship?",
+      "",
+      "1. **Build**: runs first.",
+      "2. **Push**: requires a review.",
+      "",
+      "- Ship",
+      "- Wait",
+      "Recommended: Wait",
+    ].join("\n"))!;
+    expect(q.choices.map(({ label }) => label)).toEqual(["Ship", "Wait"]);
+    expect(q.context).toContain("runs first.");
+  });
+
   test("parses the spaced (GitHub-friendly) form", () => {
     const q = parseQuestionBlock("question", SPEC_BODY)!;
     expect(q.kind).toBe("single");
