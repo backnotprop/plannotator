@@ -403,7 +403,7 @@ function buildRepo(root: string): string {
   git(repo, ['branch', '-M', 'main']);
   git(repo, ['config', 'user.email', 'test@example.com']);
   git(repo, ['config', 'user.name', 'Test']);
-  write(repo, 'README.md', '# Orchard\n');
+  write(repo, 'ORCHARD.md', '# Orchard\n');
   for (let i = 0; i < 30; i++) write(repo, `docs/guides/guide-${String(i).padStart(2, '0')}.md`, `# Guide ${i}\n`);
   for (let i = 0; i < 12; i++) write(repo, `lib/util-${i}/index.ts`, `export const util${i} = ${i};\n`);
   for (let i = 0; i < 40; i++) write(repo, `src/mod-${String(i).padStart(2, '0')}/index.ts`, `export const mod${i} = ${i};\n`);
