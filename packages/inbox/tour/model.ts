@@ -28,7 +28,7 @@ import type {
   InboxQuestion,
   InboxSectionId,
 } from '@plannotator/core/inbox-types';
-import { INBOX_SECTIONS, readInboxAttachmentKind } from '@plannotator/core/inbox-types';
+import { INBOX_LOCAL_SECTIONS, readInboxAttachmentKind } from '@plannotator/core/inbox-types';
 import { derivePersonThreadSubject, suggestPersonThreadName } from '@plannotator/core/inbox-questions';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
 import { tourAssetLoaded, tourAssetUrl } from './assets';
@@ -1197,7 +1197,8 @@ export function tourSections(fixture: TourFixture, state: TourState, now: Date =
     const section: InboxSectionId = state.sent ? (state.arrived > 0 ? 'new' : 'sent') : state.warmSent && !state.warmArrived ? 'sent' : 'waiting';
     add(section, row(fixture, a, state, section, now));
   }
-  return INBOX_SECTIONS.map((s) => ({ id: s.id, label: s.label, threads: placed[s.id] ?? [] }));
+  // The tour's list is this Inbox's: no Tagged you.
+  return INBOX_LOCAL_SECTIONS.map((s) => ({ id: s.id, label: s.label, threads: placed[s.id] ?? [] }));
 }
 
 /** The sidebar's count for the tour project: threads waiting on the person. */

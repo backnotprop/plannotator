@@ -662,6 +662,61 @@ describe("CallFlowService", () => {
     }
   });
 
+  function echoingRuntime(): CallFlowRuntime {
+    // Inside the repository (so afterEach removes it) but ignored, so the snapshot leaves it out.
+    writeFileSync(join(repo, ".git", "info", "exclude"), "echo-runtime/\n");
+    const runtimeDir = join(repo, "echo-runtime");
+    mkdirSync(runtimeDir);
+    const packageEntry = join(runtimeDir, "call-diff.mjs");
+    writeFileSync(join(runtimeDir, "package.json"), JSON.stringify({ version: CALLDIFF_VERSION }));
+    for (const [name, version] of [["tree-sitter", "0.25.1"], ["tree-sitter-javascript", "0.25.0"], ["tree-sitter-typescript", "0.23.2"]]) {
+      const grammarRoot = join(runtimeDir, "node_modules", name);
+      mkdirSync(grammarRoot, { recursive: true });
+      writeFileSync(join(grammarRoot, "package.json"), JSON.stringify({ version }));
+    }
+    writeFileSync(packageEntry, `
+      export function runDiff({ paths }) {
+        return { from: "before", to: "after", trees: [], message: "Read " + paths.join(","), ascii: "" };
+      }
+    `);
+    return { ...runtime, nodePath: process.execPath, packageEntry, runtimeDir, managed: false };
+  }
+
+  test("a repository above the file budget is analysed at its changed files and says so", async () => {
+    writeFileSync(join(repo, "caller.ts"), "import { main } from './main';\nexport const value = main();\n");
+    run(["add", "caller.ts"]);
+    run(["commit", "-qm", "add caller"]);
+    writeFileSync(join(repo, "main.ts"), "export function main() { return 2; }\n");
+    const rawPatch = run(["diff", "--binary", "--full-index"]);
+    const fakeRuntime = echoingRuntime();
+    const analyze = (fullRepositoryPathBudget?: number) => new CallFlowService({
+      resolveRuntime: async () => ({ ok: true, runtime: fakeRuntime }),
+      ...(fullRepositoryPathBudget !== undefined && { fullRepositoryPathBudget }),
+    }).analyze({ ...input(), rawPatch });
+
+    const whole = await analyze();
+    expect(whole).toMatchObject({ status: "ok", message: "Read caller.ts,main.ts" });
+    if (whole.status === "ok") expect(whole.notice).toBeUndefined();
+
+    const scoped = await analyze(1);
+    expect(scoped).toMatchObject({ status: "ok", message: "Read main.ts", notice: expect.any(String) });
+    if (scoped.status === "ok") {
+      expect(scoped.diagnostics).toEqual([]);
+      expect(scoped.summary.warnings).toBe(0);
+    }
+  });
+
+  test("a scoped analysis with no changed snapshot files skips the worker", async () => {
+    writeFileSync(join(repo, "main.ts"), "export function main() { return 2; }\n");
+    const fakeRuntime = echoingRuntime();
+    writeFileSync(fakeRuntime.packageEntry, "export function runDiff() { throw new Error('must not run'); }\n");
+    const result = await new CallFlowService({
+      resolveRuntime: async () => ({ ok: true, runtime: fakeRuntime }),
+      fullRepositoryPathBudget: 0,
+    }).analyze({ ...input(), rawPatch: "diff --git a/elsewhere.ts b/elsewhere.ts\n--- a/elsewhere.ts\n+++ b/elsewhere.ts\n" });
+    expect(result).toMatchObject({ status: "ok", trees: [], notice: expect.any(String) });
+  });
+
   test("a worker-side grammar race becomes a missing-grammar state", async () => {
     writeFileSync(join(repo, "tool.py"), "def before():\n    pass\n");
     run(["add", "tool.py"]);

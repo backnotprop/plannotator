@@ -11,6 +11,7 @@ import {
   classifyMatchDetailed,
   rankLocations,
   parseRgJsonOutput,
+  normalizeRgPath,
   resolveCodeNavHover,
   resetRgCache,
   scanDocComment,
@@ -347,6 +348,20 @@ describe("buildRgArgs", () => {
   test("no --type filter when language is undefined", () => {
     const args = buildRgArgs("x");
     expect(args).not.toContain("--type");
+  });
+});
+
+describe("normalizeRgPath", () => {
+  test("converts Windows rg paths to forward slashes without the leading .\\", () => {
+    expect(normalizeRgPath(".\\src\\definition.ts", "win32")).toBe("src/definition.ts");
+  });
+
+  test("leaves backslashes alone on other platforms", () => {
+    expect(normalizeRgPath("./src/a\\b.ts", "linux")).toBe("src/a\\b.ts");
+  });
+
+  test("still strips a leading ./", () => {
+    expect(normalizeRgPath("./src/a.ts", "win32")).toBe("src/a.ts");
   });
 });
 

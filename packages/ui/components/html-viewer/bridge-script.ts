@@ -642,9 +642,18 @@ ${SANDBOX_SHIM_SCRIPT}
   // navigation reach the page untouched. Text drag-selection commenting stays
   // LIVE in both modes (a real drag opens the comment toolbar even in
   // Interact), committed overlay artifacts stay visible in both modes, and
-  // marker buttons keep their own clicks. BOTH surface kinds start ARMED —
-  // Esc (or the header pen) drops to Interact.
-  var annotateModeActive = true;
+  // marker buttons keep their own clicks. The page STARTS in the mode its
+  // host passed in with the bridge (live: the config prelude's startInteract;
+  // srcdoc: data-plannotator-start on this script's tag), so it is already
+  // armed, or already passive, before the parent's first set-annotate-mode.
+  // Armed unless told otherwise, on every load and navigation.
+  var startInteract = false;
+  if (LIVE) {
+    startInteract = LIVE.startInteract === true;
+  } else {
+    try { startInteract = !!document.currentScript && document.currentScript.getAttribute('data-plannotator-start') === 'interact'; } catch (ex) {}
+  }
+  var annotateModeActive = !startInteract;
   // A native host decides link navigations itself (HtmlViewer hostNavigates).
   var hostNavigates = false;
   // Forms and in-page links work as in a tab (the host's opt-in, \`pageNavigation\`).
@@ -2091,6 +2100,10 @@ ${SANDBOX_SHIM_SCRIPT}
       if (!s || !e) return false;
       if (typeof s.isConnected === 'boolean' && !s.isConnected) return false;
       if (typeof e.isConnected === 'boolean' && !e.isConnected) return false;
+      // A page that detaches and re-attaches the node (virtualized lists, e.g. Feishu docs) collapses the
+      // live Range onto the still-connected parent: connected but empty, so treat it as dead
+      // (refreshRecordTargets decides whether it comes back).
+      if (range.collapsed) return false;
       return true;
     } catch (ex) {
       return false;
@@ -2305,14 +2318,111 @@ ${SANDBOX_SHIM_SCRIPT}
     }
   }
 
+  // A text highlight that was in place and is then lost (the page removed its
+  // text node, which collapses the live Range onto the parent, or rewrote the
+  // node's data, which collapses it inside the node) comes back ONLY by
+  // identity: the very same text nodes, connected again and holding exactly
+  // the text they held while it was in place, get the very same offsets back.
+  // That covers pages that detach and re-attach the same nodes (keyed
+  // reordering, a moved subtree, show/hide by removal). Its words found
+  // anywhere else never re-anchor it: two rows can share them, and a
+  // highlight on the other row would point at words the person did not
+  // comment on. It stays unanchored and is reported so until a reload
+  // restores it from its stored text. While in place each pass notes where
+  // it is (notePlace); while lost each pass costs two isConnected reads and
+  // two string compares (rangeAtPlace). After LOST_PLACE_KEEP_MS lost, the
+  // node references are dropped so nodes the page threw away are not kept
+  // alive, and the target stays unanchored.
+  var LOST_PLACE_KEEP_MS = 300000;
+
+  // anchored: the record has an anchor; its place only marks that the
+  // highlight was in place (refreshRecordTargets then searches only inside
+  // the anchor element), so no nodes are kept for it.
+  function notePlace(target, anchored) {
+    var place = target.place || (target.place = {
+      startNode: null, startOffset: 0, startText: '', endNode: null, endOffset: 0, endText: '', lostSince: -1
+    });
+    place.lostSince = -1;
+    place.startNode = null;
+    place.endNode = null;
+    if (anchored) return;
+    try {
+      var range = target.range;
+      var s = range.startContainer;
+      var e = range.endContainer;
+      // A boundary outside a text node has no text to confirm it by: once
+      // lost, such a highlight stays unanchored.
+      if (s.nodeType !== 3 || e.nodeType !== 3) return;
+      place.startOffset = range.startOffset;
+      place.endOffset = range.endOffset;
+      place.startText = s.data;
+      place.endText = e.data;
+      place.startNode = s;
+      place.endNode = e;
+    } catch (ex) {}
+  }
+
+  function rangeAtPlace(place, quote) {
+    var now = monotonicNow();
+    if (place.lostSince < 0) place.lostSince = now;
+    if (now - place.lostSince > LOST_PLACE_KEEP_MS) {
+      place.startNode = null;
+      place.endNode = null;
+      place.startText = '';
+      place.endText = '';
+    }
+    var s = place.startNode;
+    var e = place.endNode;
+    if (!s || !e) return null;
+    try {
+      if (!s.isConnected || !e.isConnected || s.data !== place.startText || e.data !== place.endText) return null;
+      var range = document.createRange();
+      range.setStart(s, place.startOffset);
+      range.setEnd(e, place.endOffset);
+      // Nodes back in another order give an empty Range: not restored (and
+      // the lost timer keeps running, so the bound still drops them).
+      if (range.collapsed) return null;
+      // Two nodes can come back apart with other content between them: the
+      // Range must still cover exactly the quoted words.
+      if (s !== e && !sameWords(range.toString(), quote)) return null;
+      place.lostSince = -1;
+      return range;
+    } catch (ex) {
+      return null;
+    }
+  }
+
+  // A selection's text and its Range's text differ in whitespace (block
+  // breaks, trimming), so both drop it. A quote capped at MAX_SELECTION_TEXT
+  // (capSelectionText) only has to start the Range's text.
+  function sameWords(rangeText, quote) {
+    var words = String(rangeText).replace(/\\s+/g, '');
+    var quoted = String(quote || '').replace(/\\s+/g, '');
+    if (!quoted) return false;
+    // A quote at the cap was cut short, so it cannot confirm where the highlight ends: refuse.
+    if (String(quote).length >= MAX_SELECTION_TEXT - 1) return false;
+    return words === quoted;
+  }
+
+  function rangeCollapsed(range) {
+    try {
+      return range.collapsed === true;
+    } catch (ex) {
+      return false;
+    }
+  }
+
   // Re-resolve stale live targets from durable data. Element targets
   // re-acquire through their anchor; range targets re-run the text search
-  // (anchor-scoped first). Unresolvable targets stay hidden — never guessed
+  // (anchor-scoped first), except a highlight that was in place and got
+  // lost: without an anchor it comes back only by identity (rangeAtPlace),
+  // with one only from inside the anchor element. Unresolvable targets stay hidden — never guessed
   // — and each failed search is gated by the generation of its last attempt
   // PLUS the wall-clock backoff and per-pass budget above, so they retry
   // only after the document could actually have changed, and never per
   // frame.
   function refreshRecordTargets(record) {
+    var anchored = !!(record.params && record.params.anchor);
     for (var i = 0; i < record.targets.length; i++) {
       var target = record.targets[i];
       if (target.kind === 'element') {
@@ -2322,16 +2432,26 @@ ${SANDBOX_SHIM_SCRIPT}
           noteDeadSearchResult(target, !!target.element);
         }
       } else if (!rangeAlive(target.range)) {
+        // Only a collapse is the loss rangeAtPlace handles. A Range whose nodes
+        // left the document without collapsing (text in a shadow root whose
+        // host was removed) keeps the search below, as before.
+        if (target.place && target.range && !rangeCollapsed(target.range)) target.place = null;
         target.range = null;
-        if (target.text) {
+        if (target.place && !anchored) {
+          target.range = rangeAtPlace(target.place, target.text);
+        } else if (target.text) {
           if (!deadSearchAllowed(target)) continue;
           var scopeEl = record.params && record.params.anchor
             ? resolveAnchorElement(record.params.anchor)
             : null;
+          // An anchored highlight that was in place searches only inside its
+          // anchor element: never the whole document.
           target.range = (scopeEl && findTextRange(target.text, scopeEl))
-            || findTextRange(target.text, null);
+            || (target.place ? null : findTextRange(target.text, null));
           noteDeadSearchResult(target, !!target.range);
         }
+      } else {
+        notePlace(target, anchored);
       }
     }
   }
@@ -6602,9 +6722,8 @@ ${SANDBOX_SHIM_SCRIPT}
       resizeObserver.observe(document.documentElement);
     }
     watchPageMutations();
-    // Armed is the default on both surfaces, and live sessions default to
-    // pinpoint: show the cursor affordance immediately instead of waiting for
-    // the parent's first set-input-method/set-annotate-mode round trip.
+    // Show the start mode's cursor affordance now (live sessions default to
+    // pinpoint) instead of waiting for the parent's first round trip.
     updatePinpointCursor();
     var readyMsg = { type: PREFIX + 'ready', protocolVersion: ${BRIDGE_PROTOCOL_VERSION} };
     if (LIVE) readyMsg.pageUrl = currentPageUrl();

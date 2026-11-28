@@ -3,6 +3,9 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { SemanticDiffsTab } from './SemanticDiffsTab';
 
+// Power Up's form through the public SemanticDiffsTab export (the same parts
+// Settings → Reviews draws; ReviewSettingsPage.test.tsx covers the page).
+
 const hasDom = typeof document !== 'undefined';
 const KEY = 'tsk-never-shown-again';
 let host: HTMLDivElement | null = null;
@@ -47,15 +50,16 @@ async function mount() {
 }
 
 async function type(label: string, value: string) {
-  const input = host!.querySelector<HTMLInputElement>(`[aria-label="${label}"]`)!;
+  const input = host!.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[aria-label="${label}"]`)!;
   await act(async () => {
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+    const proto = input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    const setter = Object.getOwnPropertyDescriptor(proto, 'value')!.set!;
     setter.call(input, value);
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
 }
 
-describe('Settings › Semantic diffs › Power Up', () => {
+describe('Settings › Reviews › Power Up', () => {
   test.skipIf(!hasDom)('off until a key works; a refused key says why; a kept key is never shown again', async () => {
     server();
     await mount();
@@ -97,7 +101,8 @@ describe('Settings › Semantic diffs › Power Up', () => {
     await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
     const token = host!.querySelector<HTMLInputElement>('input[aria-label="Workers AI token"]')!;
     expect(document.getElementById(token.getAttribute('aria-describedby')!)?.textContent).toBe('No credit left on this Clef account');
-    expect(host!.querySelector('form')!.className).toContain('w-[340px]');
+    const form = host!.querySelector('form')!;
+    expect(form.contains(token) && form.contains(host!.querySelector('input[aria-label="Cloudflare account ID"]'))).toBe(true);
   });
 
   test.skipIf(!hasDom)('env-configured systemone endpoint enables Power Up and hides key input and Remove', async () => {
@@ -117,7 +122,7 @@ describe('Settings › Semantic diffs › Power Up', () => {
     expect(host!.textContent).toContain('inference.baseten.co · decision-models/baseten-mammoth-27b-latest');
     expect(host!.textContent).toContain('PLANNOTATOR_OPINION_API_KEY');
     expect(host!.textContent).toContain('code is sent to inference.baseten.co');
-    expect(host!.querySelector('input')).toBeNull();
+    expect(host!.querySelector('[data-power-up-settings] input')).toBeNull();
     expect(host!.querySelector('[data-power-up-key-remove]')).toBeNull();
   });
 
@@ -176,7 +181,7 @@ describe('Settings › Semantic diffs › Power Up', () => {
     await act(async () => host!.querySelector<HTMLButtonElement>('button[type="submit"]')!.click());
     await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
     expect(host!.textContent).toContain('Enter an http or https endpoint URL');
-    expect(host!.querySelector('input[aria-label="Custom endpoint URL"]')!.getAttribute('aria-invalid')).toBe('true');
+    expect(host!.querySelector('textarea[aria-label="Custom endpoint URL"]')!.getAttribute('aria-invalid')).toBe('true');
 
     await type('Custom endpoint URL', 'https://inference.baseten.co/v1/systemone');
     await type('Custom model', 'decision-models/baseten-mammoth-27b-latest');
@@ -206,7 +211,7 @@ describe('Settings › Semantic diffs › Power Up', () => {
     host?.remove();
     host = null;
     await mount();
-    expect(host!.querySelector<HTMLInputElement>('input[aria-label="Custom endpoint URL"]')!.value).toBe('https://inference.baseten.co/v1/systemone');
+    expect(host!.querySelector<HTMLTextAreaElement>('textarea[aria-label="Custom endpoint URL"]')!.value).toBe('https://inference.baseten.co/v1/systemone');
     expect(host!.querySelector<HTMLInputElement>('input[aria-label="Custom model"]')!.value).toBe('decision-models/baseten-mammoth-27b-latest');
     expect(host!.querySelector<HTMLInputElement>('input[aria-label="Custom API key"]')!.value).toBe('');
     expect(host!.querySelector('[data-power-up-key-save]')!.textContent).toBe('Saved');
@@ -251,9 +256,36 @@ describe('Settings › Semantic diffs › Power Up', () => {
     expect(host!.querySelector<HTMLInputElement>('input[aria-label="OpenAI API key"]')!.value).toBe('');
     expect(host!.textContent).toContain('decisions.example.com keeps powering up until an OpenAI API key works.');
     await act(async () => radio('Custom').click());
-    expect(host!.querySelector<HTMLInputElement>('input[aria-label="Custom endpoint URL"]')!.value).toBe('https://decisions.example.com/v1/systemone');
+    expect(host!.querySelector<HTMLTextAreaElement>('textarea[aria-label="Custom endpoint URL"]')!.value).toBe('https://decisions.example.com/v1/systemone');
     expect(host!.querySelector<HTMLInputElement>('input[aria-label="Custom model"]')!.value).toBe('house-model');
     expect(host!.querySelector<HTMLInputElement>('input[aria-label="Custom API key"]')!.value).toBe('');
     expect(host!.querySelector('[data-power-up-key-save]')!.textContent).toBe('Saved');
+  });
+
+  // A narrow window cut the URL off inside a one-line field: it wraps now, and stays one value.
+  test.skipIf(!hasDom)('the Custom endpoint URL wraps to stay readable, drops a pasted line break, and Enter still checks and saves', async () => {
+    const posts: Array<Record<string, unknown>> = [];
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        posts.push(JSON.parse(String(init.body)));
+        return Response.json({ ok: false, failure: 'refused', reason: 'The key was refused.' });
+      }
+      return Response.json({ configured: false, provider: null });
+    }) as typeof fetch;
+    await mount();
+    const customRadio = [...host!.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find((b) => b.textContent === 'Custom')!;
+    await act(async () => customRadio.click());
+    const url = host!.querySelector<HTMLTextAreaElement>('textarea[aria-label="Custom endpoint URL"]');
+    expect(url).not.toBeNull();
+    await type('Custom endpoint URL', 'https://decisions.example.invalid/v1/\nsystemone');
+    expect(url!.value).toBe('https://decisions.example.invalid/v1/systemone');
+    await type('Custom API key', KEY);
+
+    const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    await act(async () => { url!.dispatchEvent(enter); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+    expect(enter.defaultPrevented).toBe(true);
+    expect(posts).toHaveLength(1);
+    expect(posts[0]?.url).toBe('https://decisions.example.invalid/v1/systemone');
   });
 });

@@ -20,8 +20,8 @@
  * Tags (approval "inbox-thread-tags", step 2): several, kept by id (listFilterTags.ts reads them against the live
  * tags, across linked machines); on a tag's own list they step aside, as Project picks do on a project's page.
  *
- * Recent activity (one row, on or off; approval "inbox-recent-activity-filter"): only the threads the person did
- * something in during the last 30 days, newest first by when they last did (listFilterRecent.ts).
+ * Recent activity is not here: the menu's row turns on a view of the list (listRecentView.ts), never a pick. An older
+ * cookie's `recent: true` (when it was a pick) is read as nothing, so no one opens the Inbox stuck in it.
  *
  * Routines (the owner: "I should be able to filter routines in the main inbox list"): Routine threads, Other threads,
  * either or both, as Has a PR and No PR are. A row is a routine's when it is the thread of one of this computer's
@@ -34,7 +34,6 @@ import { useSyncExternalStore } from 'react';
 import type { InboxListRow, InboxListSection, InboxThreadPullState } from '@plannotator/core/inbox-types';
 import { storage } from '@plannotator/ui/utils/storage';
 import { agentName } from './tags';
-import { rowRecentlyActed } from './listFilterRecent';
 
 /** A row's tags as the window reads them (threadTags.ts `rowTagsHere`): the filter's Tag group tests these. */
 export type RowTagsOf = (row: InboxListRow) => readonly string[];
@@ -112,15 +111,13 @@ export interface ListFilter {
   pulls: readonly PullPick[];
   /** Only the rows drawn bold. */
   notSeen: boolean;
-  /** Only the threads the person did something in lately, newest first by that (listFilterRecent.ts). */
-  recent: boolean;
   /** Tag ids; empty: every thread. */
   tags: readonly string[];
   /** Routine picks; empty: every thread. Apply only while Routines are on (`appliedFilter`'s `routinesOn`). */
   routines: readonly RoutinePick[];
 }
 
-export const NO_LIST_FILTER: ListFilter = { projects: [], updated: null, agents: [], pulls: [], notSeen: false, recent: false, tags: [], routines: [] };
+export const NO_LIST_FILTER: ListFilter = { projects: [], updated: null, agents: [], pulls: [], notSeen: false, tags: [], routines: [] };
 
 /** The menu's words for the preset spans, in order; "Custom range…" follows them. */
 export const UPDATED_OPTIONS: ReadonlyArray<{ value: UpdatedPreset; label: string }> = [
@@ -144,7 +141,7 @@ export function appliedFilter(filter: ListFilter, scoped: boolean, tagScoped = f
 }
 
 export function pickCount(filter: ListFilter): number {
-  return filter.projects.length + filter.agents.length + (filter.updated ? 1 : 0) + filter.pulls.length + (filter.notSeen ? 1 : 0) + (filter.recent ? 1 : 0) + filter.tags.length + filter.routines.length;
+  return filter.projects.length + filter.agents.length + (filter.updated ? 1 : 0) + filter.pulls.length + (filter.notSeen ? 1 : 0) + filter.tags.length + filter.routines.length;
 }
 
 /** Midnight of `day` (local), as ms. */
@@ -193,7 +190,7 @@ export function agentHost(row: Pick<InboxListRow, 'participants' | 'author' | 'a
   return hosts.find((host) => !!host && agentName(host) === name) ?? null;
 }
 
-type Group = 'projects' | 'updated' | 'agents' | 'pulls' | 'notSeen' | 'recent' | 'tags' | 'routines';
+type Group = 'projects' | 'updated' | 'agents' | 'pulls' | 'notSeen' | 'tags' | 'routines';
 
 /** The row is shown under `filter`; `skip` leaves one group out (a menu row's count: the other groups' picks). */
 export function rowMatches(row: InboxListRow, filter: ListFilter, now: number, skip?: Group, tagsOf: RowTagsOf = ownTags, isRoutine: RowIsRoutine = noRoutine): boolean {
@@ -206,7 +203,6 @@ export function rowMatches(row: InboxListRow, filter: ListFilter, now: number, s
   if (skip !== 'agents' && filter.agents.length > 0 && !rowAgentNames(row).some((name) => filter.agents.includes(name))) return false;
   if (skip !== 'pulls' && filter.pulls.length > 0 && !filter.pulls.some((pick) => rowPullMatches(row, pick))) return false;
   if (skip !== 'notSeen' && filter.notSeen && !rowNotSeen(row)) return false;
-  if (skip !== 'recent' && filter.recent && !rowRecentlyActed(row, now)) return false;
   if (skip !== 'tags' && filter.tags.length > 0 && !tagsOf(row).some((id) => filter.tags.includes(id))) return false;
   if (skip !== 'routines' && filter.routines.length > 0 && !filter.routines.includes(isRoutine(row) ? 'routine' : 'other')) return false;
   return true;
@@ -253,7 +249,7 @@ export function parseListFilter(raw: string | null): ListFilter {
       u === 'today' || u === '3d' || u === '7d' || u === '30d' ? u : u && typeof u === 'object' && isDay((u as { from?: unknown }).from) && isDay((u as { to?: unknown }).to) ? { from: (u as { from: string }).from, to: (u as { to: string }).to } : null;
     const pulls = strings(value.pulls).filter((p): p is PullPick => (PULL_PICKS as readonly string[]).includes(p));
     const routines = strings(value.routines).filter((p): p is RoutinePick => (ROUTINE_PICKS as readonly string[]).includes(p));
-    return { projects: strings(value.projects), updated, agents: strings(value.agents), pulls, notSeen: value.notSeen === true, recent: value.recent === true, tags: strings(value.tags), routines };
+    return { projects: strings(value.projects), updated, agents: strings(value.agents), pulls, notSeen: value.notSeen === true, tags: strings(value.tags), routines };
   } catch {
     return NO_LIST_FILTER;
   }
@@ -276,7 +272,7 @@ function safeGet(): string | null {
 export function writeListFilter(next: ListFilter): void {
   try {
     if (pickCount(next) === 0) storage.removeItem(LIST_FILTER_COOKIE);
-    else storage.setItem(LIST_FILTER_COOKIE, JSON.stringify({ projects: next.projects, updated: next.updated, agents: next.agents, pulls: next.pulls, notSeen: next.notSeen, recent: next.recent, tags: next.tags, routines: next.routines }));
+    else storage.setItem(LIST_FILTER_COOKIE, JSON.stringify({ projects: next.projects, updated: next.updated, agents: next.agents, pulls: next.pulls, notSeen: next.notSeen, tags: next.tags, routines: next.routines }));
   } catch {
     // A page with no cookies: the filter holds until it reloads.
   }

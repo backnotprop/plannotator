@@ -26,7 +26,7 @@
 
 import { INBOX_LINKED_MARKS, inboxPullUrlOfKey, inboxRowArchived, isInboxId, type InboxAgentsGroup, type InboxCardWire, type InboxInitiative, type InboxListRow, type InboxMachineAccountsRead, type InboxSentFrom, type InboxTagColours } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
-import { InboxError } from "@plannotator/shared/inbox/schema";
+import { InboxError, inboxDir } from "@plannotator/shared/inbox/schema";
 import { inboxSnoozeRefusal, inboxSnoozeRunning } from "@plannotator/core/inbox-snooze";
 import { refuseInboxSnoozeUntil } from "@plannotator/shared/inbox/snoozes";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
@@ -36,7 +36,7 @@ import { INBOX_MACHINE_PULL_WINDOW_ONLY_BODY, INBOX_MACHINE_WINDOW_ONLY_BODY, is
 import { INBOX_MACHINE_ACCOUNTS_MAX_BYTES, INBOX_MACHINE_ACCOUNTS_WAIT_MS, parsePeerAccounts } from "./inbox-accounts";
 import { buildLinkOffer, InboxLinks, parseLinkOffer, type InboxLinkRecord } from "./inbox-links";
 import { createMachinePulls } from "./inbox-machine-pulls";
-import { MACHINE_IMAGE_CSP, MACHINE_LINKED_PAGE_ROUTE, MACHINE_MARKDOWN_IMAGE_ROUTE, machineLinkedPageAnswer, machineMarkdownImageAnswer } from "./inbox-machine-files";
+import { MACHINE_GUIDE_IMAGE_ROUTE, MACHINE_GUIDE_JSON_ROUTE, MACHINE_IMAGE_CSP, MACHINE_LINKED_PAGE_ROUTE, MACHINE_MARKDOWN_IMAGE_ROUTE, machineGuideJsonAnswer, machineLinkedPageAnswer, machineMarkdownImageAnswer } from "./inbox-machine-files";
 import { farCsp, MACHINE_ASSET_ROUTE, MACHINE_PAGE_ROUTE, MACHINE_VIEW_ROUTE, machineAssetAnswer, machineAssetCsp, machinePageAnswer, machineViewAnswer } from "./inbox-machine-page";
 import { createMachineLaunchReads, MACHINE_SESSIONS_ROUTE } from "./inbox-machine-launch-reads";
 import { createMachineAgentRead, FAR_READ_REFUSALS } from "./inbox-machine-agent-read";
@@ -47,6 +47,7 @@ import { doorWriteKind, forwardsNow, InboxOutbox, MACHINE_WINDOW_HEADER, type Ou
 import type { OutboxFile } from "./inbox-outbox-files";
 import { inboxForwardedPlace } from "./inbox-sent-from";
 import { createMachineBranches } from "./inbox-machine-branches";
+import { createMachineDrafts, heldReplyState, lostDraftParts, MACHINE_DRAFT_ROUTE, type LostDraft } from "./inbox-machine-drafts";
 import { createMachineShips } from "./inbox-machine-ships";
 import { farVersion, MACHINE_LINKS_PROTOCOL, parseFarUpdate, PEER_LINK_TIMINGS, PeerLink, readCapped, type PeerCards, type PeerLinkTimings, type PeerRecord, type PeerRereadEvent } from "./inbox-peer-link";
 import { installCommandFor, isNewerStableVersion, normalizeStableVersion } from "@plannotator/shared/update-check";
@@ -147,6 +148,8 @@ const safeDecode = (segment: string): string => {
 export interface InboxMachinesContext {
   dataDir: string;
   serverSession: string;
+  /** The earlier runs of this Inbox's data folder (the health's `follows`): a far reply draft save from a page one served is taken. */
+  follows?: readonly string[];
   computerName: () => string;
   door: InboxMachineDoor;
   readBody: (req: Request) => Promise<Record<string, unknown>>;
@@ -179,7 +182,7 @@ export interface InboxMachinesContext {
 export type MachineLinkTimings = Partial<PeerLinkTimings> & { updatedShownMs?: number; restartBackMs?: number; accountsMs?: number };
 
 /** A frame for the window's event stream: other machines' records and states never share the local seq (design review, change 2). */
-export type MachineFrame = { event: "machine"; data: PeerRecord } | { event: "machines"; data: { machines: MachineView[] } } | { event: "outbox"; data: OutboxView } | { event: PeerRereadEvent | "cards"; data: Record<string, never> } | { event: "deliveries"; data: { sessions?: boolean; agents?: boolean } };
+export type MachineFrame = { event: "machine"; data: PeerRecord } | { event: "machines"; data: { machines: MachineView[] } } | { event: "outbox"; data: OutboxView } | { event: PeerRereadEvent | "cards"; data: Record<string, never> } | { event: "deliveries"; data: { sessions?: boolean; agents?: boolean } } | { event: "drafts"; data: { thread_id: string } };
 
 /** How the window draws a machine's version (approval "inbox-machine-update"). */
 export interface MachineUpdateView {
@@ -303,6 +306,8 @@ export interface MachineView {
   both_ways: boolean;
   /** Writes held for it (rule 12: "Will send when … is back"). */
   waiting: number;
+  /** Its threads' reply drafts held here, not landed there yet (never "waiting"): Unlink says they would be lost too. */
+  drafts_held: number;
   /**
    * The cursor of its list this Inbox holds (null: none yet). It moves when
    * that list is read again, so the window's `machines` frame tells it to
@@ -367,7 +372,13 @@ export interface OutboxView {
   thread: string | null;
   /** The machine's name once its link is gone (null while linked: the window knows it). */
   machine_name: string | null;
+  /** A held Viewed tick in a review there: its file and whether it is ticked (null for any other write). */
+  viewed: { path: string; viewed: boolean } | null;
 }
+
+const VIEWED_ROUTE = /^messages\/[^/]+\/guide\/viewed$/;
+const viewedOf = (entry: OutboxEntry): OutboxView["viewed"] =>
+  VIEWED_ROUTE.test(entry.route) && typeof entry.body.path === "string" && typeof entry.body.viewed === "boolean" ? { path: entry.body.path, viewed: entry.body.viewed } : null;
 
 /** At most this much of a held write's words rides its view. */
 const OUTBOX_WORDS_SHOWN = 2_000;
@@ -378,6 +389,8 @@ const wordsOf = (entry: OutboxEntry): string | null => {
   const args = entry.route === FAR_AGENT_REPLY_ROUTE && body.args && typeof body.args === "object" ? (body.args as Record<string, unknown>) : null;
   const words = args ? (typeof args.body === "string" ? args.body : null) : typeof body.words === "string" ? body.words : typeof body.body === "string" ? body.body : null;
   if (words === null) return null;
+  // A reply draft lost with its link is there to be copied whole ("Not sent"): its card shows the start of it.
+  if (MACHINE_DRAFT_ROUTE.test(entry.route)) return words;
   return words.length > OUTBOX_WORDS_SHOWN ? `${words.slice(0, OUTBOX_WORDS_SHOWN)}…` : words;
 };
 
@@ -395,6 +408,7 @@ export const outboxView = (entry: OutboxEntry): OutboxView => ({
   words: wordsOf(entry),
   thread: entry.thread ?? null,
   machine_name: entry.machine_name ?? null,
+  viewed: viewedOf(entry),
 });
 
 const FORWARD = /^\/api\/inbox\/m\/(ibx_[0-9A-HJKMNP-TV-Z]{26})\/(.+)$/;
@@ -404,8 +418,13 @@ const REPLY_ROUTE = /^messages\/[^/]+\/reply$/;
 const FOLDERS_ROUTES = new Set(["launch/folders", "launch/clone", "launch/clone-check"]);
 /** A file a message names, read on another machine (approval "inbox-file-refs-open-viewer"): its view, its bytes. */
 const FILE_READ_ROUTE = /^open-in\//;
-/** The reads of a far file only this Inbox's window makes: a file a message names, a Markdown file's pictures, a document next to a file. */
-const WINDOW_FILE_READ = /^(?:open-in\/|attachments\/[^/]+\/(?:markdown-image|linked-page)$)/;
+/**
+ * The reads of a far file only this Inbox's window makes: a file a message names, a Markdown file's pictures, a
+ * document next to a file, a guided review's pictures, whole files and package changes.
+ */
+const WINDOW_FILE_READS: readonly RegExp[] = [FILE_READ_ROUTE, MACHINE_MARKDOWN_IMAGE_ROUTE, MACHINE_LINKED_PAGE_ROUTE, MACHINE_GUIDE_IMAGE_ROUTE, MACHINE_GUIDE_JSON_ROUTE];
+/** The reads a linked machine's window makes of this mark (`linked-reads`): steps, a review's files, a hover, a file check. */
+const LINKED_READ_ROUTES: readonly RegExp[] = [/^threads\/[^/]+\/steps$/, MACHINE_GUIDE_IMAGE_ROUTE, MACHINE_GUIDE_JSON_ROUTE, /^open-in\/file(?:\/code)?$/];
 /** A forwarded file read that is not a press in this Inbox's window. */
 export const INBOX_MACHINE_FILE_WINDOW_ONLY_BODY = { error: "A file on another machine opens from the Inbox window only.", code: "window_only" } as const;
 
@@ -417,7 +436,7 @@ export const INBOX_MACHINE_FILE_WINDOW_ONLY_BODY = { error: "A file on another m
  * machine's files through this one (the remote launch rule; a tightening, not a secret).
  */
 export function forwardedFileReadRefusal(route: string, req: Request): { status: 403; body: Record<string, string> } | null {
-  if (!WINDOW_FILE_READ.test(route)) return null;
+  if (!WINDOW_FILE_READS.some((read) => read.test(route))) return null;
   const site = req.headers.get("sec-fetch-site")?.trim().toLowerCase();
   const origin = req.headers.get("origin");
   let originHost: string | null = null;
@@ -495,8 +514,36 @@ export function createInboxMachines(context: InboxMachinesContext) {
   const outbox = InboxOutbox.open(context.dataDir, context.now);
   const peers = new Map<string, PeerLink>();
   const machinePulls = createMachinePulls({ peers: () => peers.values() });
-  // Branch reviews: each linked machine's reported branches, read when Reviews is (inbox-machine-branches.ts).
-  const machineBranches = createMachineBranches({ peers: () => peers.values() });
+  // A linked machine's thread's reply draft (mark `reply-drafts`): kept there, held here while it is away. Every window
+  // hears a change as it hears this Inbox's own (`event: drafts`).
+  // The machines block says how many are held for each (`drafts_held`, for Unlink); it is sent only when that moved.
+  /** A reply draft's words for a machine whose link went, put in "Not sent" in parts; false when a part could not be. */
+  const notSent = (machine: string, name: string | null, lost: LostDraft): boolean => {
+    let all = true;
+    for (const part of lostDraftParts(lost)) {
+      try {
+        outbox.recordLostDraft(machine, lost.thread, part, name);
+      } catch (error) {
+        all = false;
+        console.error(`Plannotator Inbox: a reply draft held for an unlinked computer could not be put in "Not sent" (${error instanceof Error ? error.message : String(error)}); it stays on disk.`);
+      }
+    }
+    return all;
+  };
+  const drafts = createMachineDrafts({
+    dataDir: context.dataDir,
+    peer: (id) => peers.get(id),
+    // Words saved as that machine's link went (a save on its way as Unlink ran): to "Not sent", never held for it.
+    lost: (peer, lost) => void notSent(peer.id, peer.name ?? null, lost),
+    // A reply that carried a held draft: the draft settles once it is delivered there; refused or cancelled, it comes back.
+    replyState: (key) => heldReplyState(outbox.get(key)?.state),
+    onChange: (_machine, threadId) => {
+      emit({ event: "drafts", data: { thread_id: threadId } });
+      machinesChanged();
+    },
+  });
+  // Branch reviews: each linked machine's reported branches, read when Reviews is, kept past a restart (inbox-machine-branches.ts).
+  const machineBranches = createMachineBranches({ peers: () => peers.values(), dir: inboxDir(context.dataDir), linked: () => links.list().map((link) => link.id) });
   // Ship: each linked machine's merged ships, read when Reviews is (inbox-machine-ships.ts).
   const machineShips = createMachineShips({ peers: () => peers.values() });
   /** Each linked machine's last good launch read, so a window opened while it sleeps still lists its projects. */
@@ -580,6 +627,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
       address: context.door.tailnetAddress(),
       both_ways: true,
       waiting: 0,
+      drafts_held: 0,
       list_cursor: null,
       snoozes: true,
       marks: [...INBOX_LINKED_MARKS],
@@ -600,6 +648,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
         address: openTransport(link.transport).describe(),
         both_ways: link.device_id !== null,
         waiting: outbox.list(link.id, "pending").filter((e) => !e.auto).length,
+        drafts_held: drafts.heldCount(link.id),
         list_cursor: peer?.list?.cursor ?? null,
         snoozes: peer?.list?.snoozes ?? false,
         snooze_old: peer?.list ? !peer.list.snoozes : false,
@@ -646,6 +695,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
   };
 
   outbox.onChange(({ entry }) => {
+    if (REPLY_ROUTE.test(entry.route)) drafts.replySettled(entry.machine, entry.key);
     // A link-through ask is drawn on its own row (how it stands, a refusal's words): the rows hear it, not the outbox.
     if (entry.auto && entry.route === LINK_THROUGH_ASK_ROUTE) return machinesChanged();
     // What this Inbox writes itself (a Combine's archive there) is not the person's: the window never draws it,
@@ -676,11 +726,18 @@ export function createInboxMachines(context: InboxMachinesContext) {
         if (peer.list?.reactions) context.reactionsSaid?.(peer.list.reactions);
         // An older Plannotator there says no mark: its switches stay its own, and none of its are taken here.
         if (peer.list?.capability_set && peer.list.marks.includes(CAPABILITY_SET_MARK)) context.capabilitySetSaid?.(peer.list.capability_set);
+        // Back online: a reply draft held here for it lands (inbox-machine-drafts.ts).
+        if (peer.state === "online") void drafts.drain(link.id);
         machinesChanged();
       },
       // A snooze or a star moves no cursor, so nothing in the machines block changes: the windows are told in a frame of its own.
       onReread: (event) => emit({ event, data: {} }),
       onCards: () => emit({ event: "cards", data: {} }),
+      // A reply draft there changed (its window, a phone, a Send, this Inbox's own write): read again on the next read.
+      onDrafts: (threadId, refreshed) => {
+        drafts.farChanged(link.id, threadId, refreshed);
+        emit({ event: "drafts", data: { thread_id: threadId } });
+      },
       onDeliveries: ({ sessions, agents, labels }) => emit({ event: "deliveries", data: { ...(sessions ? { sessions: true } : {}), ...(agents ? { agents: true } : {}), ...(labels ? { labels: true } : {}) } }),
       onRevoked: () => forget(link.id),
       gridOn: context.gridOn,
@@ -709,6 +766,13 @@ export function createInboxMachines(context: InboxMachinesContext) {
     // What it introduced and is not complete yet goes with it: its open codes here, the devices they made, the introductions it sent.
     context.door.dropIntroductions(id);
     linkThrough.forgetBroker(id);
+    // A reply draft held for it is lost with the link, as a write waiting for it is: its words join the "Not sent"
+    // list, never gone silently. Never queued or sent (`recordLostDraft` writes it already dropped).
+    // Every word goes (its files and quote named after them): a draft longer than one line fits is said in parts.
+    // Written to "Not sent" first: the held files go only once every part is there.
+    let handedOver = true;
+    for (const lost of drafts.forget(id, true)) if (!notSent(id, link?.name ?? null, lost)) handedOver = false;
+    if (handedOver) drafts.forget(id);
     outbox.dropMachine(id, link?.name ?? null);
     // The last link gone: with Phones off the tailnet door has nothing left to serve (but a refusal owed).
     if (closeDoor === "after_answer") closeDoorAfterAnswer();
@@ -997,8 +1061,16 @@ export function createInboxMachines(context: InboxMachinesContext) {
       json({ error: `${links.get(machine)?.name ?? "That machine"} cannot be reached now.`, code: "machine_offline", machine: machinesView().find((m) => m.id === machine) }, 503);
     const fileRead = forwardedFileReadRefusal(route, req);
     if (fileRead) return json(fileRead.body, fileRead.status);
+    // A linked-reads read of a machine known to be away answers at once: never a wait to the request's limit.
+    if (req.method === "GET" && peer.state === "offline" && LINKED_READ_ROUTES.some((read) => read.test(route))) return offline();
     // HEAD as a local page and its folder answer it: the far GET's headers, no body.
-    const head = req.method === "HEAD" && (MACHINE_PAGE_ROUTE.test(route) || MACHINE_ASSET_ROUTE.test(route) || MACHINE_MARKDOWN_IMAGE_ROUTE.test(route));
+    const head = req.method === "HEAD" && (MACHINE_PAGE_ROUTE.test(route) || MACHINE_ASSET_ROUTE.test(route) || MACHINE_MARKDOWN_IMAGE_ROUTE.test(route) || MACHINE_GUIDE_IMAGE_ROUTE.test(route));
+    // A thread's reply draft (inbox-machine-drafts.ts): one waiting to land there, or (away) the last one heard, is answered here.
+    const draftRoute = MACHINE_DRAFT_ROUTE.exec(route);
+    if (draftRoute && !draftRoute[2] && req.method === "GET") {
+      const here = drafts.read(peer, draftRoute[1]!);
+      if (here) return json(here);
+    }
     if (req.method === "GET" || head) {
       const search = url.search;
       const headers = pick(req.headers, PASS_REQUEST);
@@ -1017,6 +1089,12 @@ export function createInboxMachines(context: InboxMachinesContext) {
       try {
         const answer = await peer.request(page ? `attachments/${page[1]}/view` : route, search, { method: "GET", headers, signal: req.signal });
         if (sessionsRead !== null && answer.ok) void launchReads.keep(machine, sessionsRead, answer.clone(), () => peers.has(machine));
+        if (draftRoute && !draftRoute[2]) {
+          drafts.noteRead(machine, draftRoute[1]!, answer.clone());
+          // Words of the person's the draft there does not hold (a conflict a held save met): offered with it.
+          const offered = answer.ok ? drafts.notLanded(machine, draftRoute[1]!) : null;
+          if (offered) return json({ ...((await answer.json().catch(() => ({}))) as Record<string, unknown>), not_landed: offered });
+        }
         if (page) {
           const made = await machinePageAnswer(answer, machine, search, (far) => passAnswer(far));
           if (!head) return made;
@@ -1025,8 +1103,9 @@ export function createInboxMachines(context: InboxMachinesContext) {
         }
         if (MACHINE_VIEW_ROUTE.test(route)) return passAnswer(await machineViewAnswer(answer, machine));
         // A Markdown file's pictures and a document next to a file (inbox-machine-files.ts): as a local file's.
-        if (MACHINE_MARKDOWN_IMAGE_ROUTE.test(route)) return passAnswer(machineMarkdownImageAnswer(answer), { csp: MACHINE_IMAGE_CSP, head });
+        if (MACHINE_MARKDOWN_IMAGE_ROUTE.test(route) || MACHINE_GUIDE_IMAGE_ROUTE.test(route)) return passAnswer(machineMarkdownImageAnswer(answer), { csp: MACHINE_IMAGE_CSP, head });
         if (MACHINE_LINKED_PAGE_ROUTE.test(route)) return passAnswer(await machineLinkedPageAnswer(answer, machine));
+        if (MACHINE_GUIDE_JSON_ROUTE.test(route)) return passAnswer(await machineGuideJsonAnswer(answer));
         // Its folder, read from an opaque origin as a local page's is: CORS reads (fonts, module scripts) as here,
         // under a local folder's CSP, never the far one.
         if (MACHINE_ASSET_ROUTE.test(route)) {
@@ -1057,19 +1136,34 @@ export function createInboxMachines(context: InboxMachinesContext) {
         }
         query.delete("serverSession");
         const search = query.size > 0 ? `?${query}` : "";
-        return passAnswer(await peer.request(route, search, { method: "POST", headers, body: req.body, signal: req.signal, timeoutMs: UPLOAD_MS }));
+        const far = await peer.request(route, search, { method: "POST", headers, body: req.body, signal: req.signal, timeoutMs: UPLOAD_MS });
+        // A reply draft held while that machine is away shows this file's tile by it.
+        if (route === "uploads" && far.ok) drafts.noteUpload(far.clone());
+        return passAnswer(far);
       } catch {
         return offline();
       }
     }
-    // Every other write is a JSON body, whatever its Content-Type says, and goes through the outbox.
+    // Every other write is a JSON body, whatever its Content-Type says, and goes through the outbox, but draft text.
     const body = await context.readBody(req);
-    if (checkServerSession(body, context.serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+    // Draft text (rule 8's `draft`): the reply-draft module's, never the outbox's (`submit` refuses it).
+    const draftWrite = kind === "draft" ? MACHINE_DRAFT_ROUTE.exec(route) : null;
+    // A reply draft SAVE from a page an earlier run of this same Inbox served is taken, as this Inbox's own drafts take
+    // it (inbox-reply-drafts.ts `follows`): it is a compare-and-set, so it never writes over newer words.
+    const earlierRun = !!draftWrite && !draftWrite[2] && typeof body.serverSession === "string" && (context.follows ?? []).includes(body.serverSession);
+    if (!earlierRun && checkServerSession(body, context.serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
     // A press in this Inbox's window (its own Origin and this run's page session), said to the other machine with the
     // write: it answers a permission prompt, or starts, stops or trusts an agent there, only for one (remote launch).
     // An agent's or a script's bare call is still the owner's for every other write, as before.
     const window = isWindowRequest(req, body, context.serverSession);
     if (!window && startsAgentThere(route, body)) return json(INBOX_MACHINE_WINDOW_ONLY_BODY, 403);
+    // A reply draft's save or Discard: straight there while it can take it, else held here (inbox-machine-drafts.ts).
+    if (kind === "draft") {
+      if (!draftWrite) return json({ error: "Not a forwarded route.", code: "not_found" }, 404);
+      delete body.serverSession;
+      const answer = await drafts.write(peer, draftWrite[1]!, !!draftWrite[2], body, req.signal);
+      return "far" in answer ? passAnswer(answer.far) : json(answer.body, answer.status);
+    }
     // Sent now or not at all, from a press in this window (rule 8, `now`): a file a message names, attached there as the
     // person comments on it (the window needs the attachment now); a Combine, or a Tidy with the person's words, which
     // held for days would act on threads nobody is looking at. A Tidy without words stays held like any append.
@@ -1130,6 +1224,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
     // Where the person was, when not at this window, said on so that machine's agent reads where they wrote it.
     const place = inboxForwardedPlace(context.sentFrom?.(req, via) ?? null);
     const { entry, fresh } = outbox.submit(machine, route, body, THREAD_HINT.test(named) ? named : null, window, place);
+    // A reply that carries a draft still waiting to land there: the draft shown here settles with it.
+    if (fresh && REPLY_ROUTE.test(route) && THREAD_HINT.test(named)) drafts.afterReply(peer, named, body, entry.key);
     if (peer.state === "online") peer.flush();
     else peer.poke();
     const settled = (await outbox.waitSettled(entry.key, peer.state === "online" ? MACHINE_WRITE_WAIT_MS : 0)) ?? entry;
@@ -1421,7 +1517,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
 
   // ── The merged view (only with machines=1) ──
 
-  const rows = (): (InboxListRow & { machine: string })[] => [...peers.values()].flatMap((peer) => peer.list?.rows ?? []);
+  // A draft waiting to land on its machine draws the row's Draft mark here (inbox-machine-drafts.ts).
+  const rows = (): (InboxListRow & { machine: string })[] => drafts.overlay([...peers.values()].flatMap((peer) => peer.list?.rows ?? []));
   const projects = (): Record<string, unknown>[] => [...peers.values()].flatMap((peer) => peer.list?.projects ?? []);
   /** Each linked machine's agents, as its list last said (kept in memory while it is away, like its rows); none from an older Inbox. */
   const agents = (): InboxAgentsGroup[] => [...peers.values()].flatMap((peer) => (peer.list?.agents ? [peer.list.agents] : []));
@@ -1528,6 +1625,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
     /** This Inbox's door changed by itself (published again once Tailscale ran): the windows hear the machines block. */
     machinesChanged,
     rows,
+    /** The Drafts page's rows of linked machines' threads holding unsent work (mark `reply-drafts`), each with its first words. */
+    replyDraftRows: () => drafts.rowsFor([...peers.values()], rows()),
     projects,
     agents,
     sessionNames,

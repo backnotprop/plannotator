@@ -16,6 +16,8 @@ export interface FileRef {
   path: string;
   line?: number;
   lineEnd?: number;
+  /** `path` is a skill's name: its SKILL.md opens read only (SkillFilePane), from a sent message's skill chip or skills line. */
+  skill?: true;
 }
 
 /** Names the pane can show, or offer, besides code: documents, pages, pictures, films and plain data. */

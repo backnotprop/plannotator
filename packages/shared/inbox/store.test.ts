@@ -23,7 +23,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { questionKey, type QuestionAnswer } from "@plannotator/core/question-block";
 import { parseInboxQuestionBlocks } from "@plannotator/core/inbox-questions";
-import { INBOX_SECTIONS, inboxHasUnsent, inboxRowOffersMarkRead, inboxThreadNameKey, type InboxListRow, type InboxListSection, type InboxSectionId } from "@plannotator/core/inbox-types";
+import { INBOX_LOCAL_SECTIONS, inboxHasUnsent, inboxRowOffersMarkRead, inboxThreadNameKey, type InboxListRow, type InboxListSection, type InboxSectionId } from "@plannotator/core/inbox-types";
 // The sidebar's counts, from the code that computes them.
 import { waitingCount } from "../../inbox/held";
 import { inboxArchivedRows, inboxListSections, inboxRowArchived } from "./list";
@@ -1678,7 +1678,7 @@ function checkThreadState(world: StateWorld): void {
   const views = listViews(rows);
   const all = [...model.threads.keys()].sort();
   expect(rows.map((r) => r.thread_id).sort()).toEqual(all);
-  const order = INBOX_SECTIONS.map((s) => s.id);
+  const order = INBOX_LOCAL_SECTIONS.map((s) => s.id);
   for (const sections of [views.include, views.exclude]) {
     // Sections in the fixed order; each thread in exactly one; newest first, ties on the thread id.
     expect(sections.map((s) => s.id)).toEqual(order);

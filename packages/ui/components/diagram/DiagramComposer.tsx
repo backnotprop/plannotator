@@ -112,6 +112,9 @@ export function DiagramComposer({
     setHeight(rootRef.current?.offsetHeight ?? 0);
   });
   const top = Math.max(0, hostHeight > 0 && height > 0 ? Math.min(anchorRect.top, hostHeight - height) : anchorRect.top);
+  // Lifted to the canvas's bottom edge, the card comes in from above: its usual entry rises 4 px from below, which would
+  // start it under that edge, cut off. (The in-canvas card is at most the canvas less 16 px, so from above stays inside.)
+  const lifted = top < anchorRect.top;
 
   const canAskAI = onAskAI !== undefined && !asking && !submitting && text.trim() !== '';
   const askAI = async () => {
@@ -176,6 +179,7 @@ export function DiagramComposer({
         data-diagram-composer=""
         data-comment-card=""
         data-in-canvas=""
+        data-above={lifted ? '' : undefined}
         role="dialog"
         aria-label={`Comment on ${on}`}
         className="pn-cbox"

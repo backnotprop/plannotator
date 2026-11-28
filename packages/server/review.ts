@@ -129,7 +129,8 @@ import { createCommitAvatarResolver } from "@plannotator/shared/commit-avatars";
 import { detectGeneratedFiles, detectGeneratedFilesByName } from "@plannotator/shared/generated-files";
 import { getRepoInfo } from "./repo";
 import { createRefCardsWithLinear, refCardRouteResponse, refCardsTailnetAllowed, type RefRunner } from "./ref-cards";
-import { handleImage, handleStarAsk, handleUpload, handleAgents, handleServerReady, handleApiNotFound, handleFavicon, handleCustomThemesScript, customThemesPage, readDraftGenerationFromBody, readDraftGenerationFromUrl, missingDraftResponse, type OpencodeClient } from "./shared-handlers";
+import { handleImage, handleStarAsk, handleLaunchSwitch, handleUpload, handleAgents, handleServerReady, handleApiNotFound, handleFavicon, handleCustomThemesScript, customThemesPage, readDraftGenerationFromBody, readDraftGenerationFromUrl, missingDraftResponse, type OpencodeClient } from "./shared-handlers";
+import { launchSwitchService } from "@plannotator/shared/launch-switch";
 import { contentHash } from "./draft";
 import { createReviewDraftSession, localGitDraftTargetKey, localReviewDraftKeys, prDraftTargetKey, type ReviewDraftKeys } from "@plannotator/shared/review-draft";
 import { captureReviewProgress, handleReviewProgress } from "@plannotator/shared/review-progress";
@@ -200,6 +201,7 @@ import { createReviewLiveRoute } from "./review-live-route";
 import type { ReviewLiveTarget } from "@plannotator/shared/review-live";
 import { refuseTailnetPeer, sessionTailnetAudience, sessionTailnetGate } from "./session-tailnet";
 import { countUnsentDraftComments, hostSessionClosedEvent } from "@plannotator/shared/host-control";
+import { agentRefusal, type AgentPresence } from "@plannotator/shared/review-agent-gone";
 import { checkServerSession, createServerSessionNonce, serverSessionMismatchBody } from "@plannotator/shared/server-session";
 import { isAIEndpointPath, isLongLivedAIEndpointPath, type AIEndpoints, type SessionBridge } from "@plannotator/ai";
 import { isWSL } from "./browser";
@@ -365,6 +367,13 @@ export interface ReviewServerOptions {
   liveReviewAgent?: ReviewLiveTarget | null;
   liveReviewDataDir?: string;
   liveReviewKey?: { key: string; title: string } | null;
+  /**
+   * Whether the agent that asked for this review can still receive its
+   * decision (packages/shared/review-agent-gone.ts). Asked on every Send and
+   * Approve: "gone" answers `410 agent_gone` and keeps the draft, unarchived.
+   * Absent: the host cannot tell, and every decision is taken as before.
+   */
+  agentPresence?: () => AgentPresence;
 }
 
 export interface ReviewServerResult {
@@ -400,6 +409,16 @@ export interface ReviewServerResult {
   stop: () => void;
   /** Host-only status and close, called in-process by a host that runs this server itself. */
   hostControl: HostControl;
+  /**
+   * Whether the agent that asked for this review is gone: tells the open
+   * tabs, and every tab opened later, `agent-gone` (the page says nobody can
+   * receive a decision, and keeps every comment). Settles nothing: the server
+   * stays up and the draft keeps saving. False when the review was decided
+   * already: the host must then leave it to deliver that decision.
+   */
+  setAgentGone: (gone: boolean) => boolean;
+  /** How many tabs have the review open now (their event stream). */
+  openTabs: () => number;
 }
 
 // --- Server Implementation ---
@@ -1277,7 +1296,7 @@ export async function startReviewServer(
       return { status: "stale", reason: "snapshot-mismatch", message: "The review changed before call flow could start. Refresh and try again." };
     }
     if (!callFlowEnabled()) {
-      return { status: "disabled", reason: "disabled", message: "Call flow is disabled in Settings → Analysis." };
+      return { status: "disabled", reason: "disabled", message: "Call flow is disabled in Settings → Reviews." };
     }
     if (workspace) {
       return { status: "unsupported", reason: "workspace-unsupported", message: "Call flow does not yet support multi-repository workspace reviews." };
@@ -2241,6 +2260,8 @@ export async function startReviewServer(
   });
 
   const requestHostGuard = createRequestHostGuard();
+  // The launch switch's reader (packages/shared/launch-switch.ts): in the background, never awaited.
+  launchSwitchService().start();
   const server = await startBunServerOnAvailablePort((port) =>
     Bun.serve(withPlannotatorServerHeader({
         hostname: getServerHostname(),
@@ -2468,7 +2489,8 @@ export async function startReviewServer(
           }
 
           if (savedGuideDeleteMatch && req.method === "PATCH") {
-            const savedId = decodeURIComponent(savedGuideDeleteMatch[1]);
+            const savedId = decodePathSegment(savedGuideDeleteMatch[1]);
+            if (savedId === null) return Response.json({ error: MALFORMED_PATH_ERROR }, { status: 400 });
             let body: { title?: unknown };
             try {
               body = (await req.json()) as { title?: unknown };
@@ -4100,6 +4122,11 @@ export async function startReviewServer(
             return (await handleStarAsk(req, url, "review", { remote: isRemote })) ?? handleApiNotFound(url.pathname);
           }
 
+          // The launch switch's one-time dialog (packages/shared/launch-switch.ts).
+          if (url.pathname.startsWith("/api/launch-switch/")) {
+            return (await handleLaunchSwitch(req, url)) ?? handleApiNotFound(url.pathname);
+          }
+
           // API: Serve images (local paths or temp uploads)
           if (url.pathname === "/api/image") {
             return handleImage(req);
@@ -4367,6 +4394,9 @@ export async function startReviewServer(
               // it streams. A decided session must not archive, delete the
               // draft, or answer ok for feedback nobody will receive.
               if (reviewDecided) return reviewAlreadyDecided();
+              // Nobody left to receive it: keep the draft, archive nothing.
+              const refusal = agentRefusal(body, options.agentPresence);
+              if (refusal) return Response.json(refusal.body, { status: refusal.status });
 
               // Archive BEFORE the draft delete: a failed write keeps the
               // draft as the reviewer's recovery copy (#678 ordering).
@@ -4640,5 +4670,11 @@ export async function startReviewServer(
     waitForDecision: () => decisionPromise,
     stop,
     hostControl,
+    setAgentGone: (gone) => {
+      if (reviewDecided) return false;
+      externalAnnotations.setAgentGone(gone);
+      return true;
+    },
+    openTabs: () => externalAnnotations.openStreams(),
   };
 }

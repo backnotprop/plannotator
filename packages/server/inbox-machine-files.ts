@@ -31,11 +31,48 @@
  */
 import { MAX_REVIEW_IMAGE_PREVIEW_BYTES } from "@plannotator/shared/diff-paths";
 import { MAX_HTML_ASSET_DOCUMENT_BYTES } from "@plannotator/shared/html-assets";
+import { MAX_REVIEW_FILE_CONTENT_BYTES } from "@plannotator/shared/review-core";
 import { INBOX_MESSAGE_IMAGE_CSP } from "@plannotator/shared/inbox/message-images";
 import { MACHINE_VIEW_MAX_BYTES, readCappedBytes, rebaseMachineHtmlAssets, refusal } from "./inbox-machine-page";
 
 /** The pictures a far Markdown file shows. */
 export const MACHINE_MARKDOWN_IMAGE_ROUTE = /^attachments\/[^/]+\/markdown-image$/;
+/**
+ * A far guided review's pictures (mark `linked-reads`): an image's side and a changed Markdown file's picture. Passed
+ * on as a far Markdown file's pictures are (`machineMarkdownImageAnswer`: an image only, the same cap) and asked only
+ * from this Inbox's window (`forwardedFileReadRefusal`).
+ */
+export const MACHINE_GUIDE_IMAGE_ROUTE = /^messages\/[^/]+\/guide\/review-(?:markdown-)?image$/;
+/** A far guided review's JSON reads (mark `linked-reads`): a changed file's whole text, the package changes card. */
+export const MACHINE_GUIDE_JSON_ROUTE = /^messages\/[^/]+\/guide\/(?:file|package-changes)$/;
+/**
+ * The most of one far guide JSON answer read: a whole file is at most 5 MB there (`MAX_REVIEW_FILE_CONTENT_BYTES`), and
+ * JSON's escapes grow it, so four times that; a package changes card's answer is far smaller.
+ */
+export const MACHINE_GUIDE_JSON_MAX_BYTES = 4 * MAX_REVIEW_FILE_CONTENT_BYTES;
+
+/**
+ * A far guide JSON answer as this Inbox's own: a refusal passes on as any far answer; a 200 must be JSON, read up to
+ * the cap (refused past it, never read whole), and goes out under this Inbox's JSON headers.
+ */
+export async function machineGuideJsonAnswer(answer: Response): Promise<Response> {
+  if (answer.status !== 200) return answer;
+  if (!(answer.headers.get("content-type") ?? "").trim().toLowerCase().startsWith("application/json")) {
+    void answer.body?.cancel().catch(() => {});
+    return refusal(502, "machine_answer_unreadable", "That machine's answer could not be read.");
+  }
+  const bytes = await readCappedBytes(answer, MACHINE_GUIDE_JSON_MAX_BYTES);
+  if (!bytes) {
+    void answer.body?.cancel().catch(() => {});
+    return refusal(413, "machine_answer_too_large", "That machine's answer is too large to read from here.");
+  }
+  try {
+    JSON.parse(new TextDecoder().decode(bytes));
+  } catch {
+    return refusal(502, "machine_answer_unreadable", "That machine's answer could not be read.");
+  }
+  return new Response(bytes, { status: 200, headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" } });
+}
 /** A document next to a far attached file. */
 export const MACHINE_LINKED_PAGE_ROUTE = /^attachments\/[^/]+\/linked-page$/;
 /** The most of one far picture passed on: the local route's own cap. */

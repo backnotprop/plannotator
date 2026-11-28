@@ -43,6 +43,39 @@ export function threadDecisions(decisions: readonly InboxDecision[], threadId: s
   return decisions.filter((decision) => decision.thread.id === threadId);
 }
 
+/**
+ * The threads the window draws decisions for (`threads`: a pane's "Decide these N", the sitting's) and, from the last
+ * read, how many each thread in the store has (`counts`) and which threads it kept the decisions of (`readFor`).
+ * `on`: decision mode is on.
+ */
+export interface DecisionWatch {
+  on: boolean;
+  threads: Set<string>;
+  counts: ReadonlyMap<string, number>;
+  readFor: ReadonlySet<string>;
+}
+
+export function newDecisionWatch(): DecisionWatch {
+  return { on: false, threads: new Set(), counts: new Map(), readFor: new Set() };
+}
+
+/**
+ * What the window keeps of a decisions read: the decisions of the watched threads (returned), and a count for every
+ * thread (`watch.counts` and `watch.readFor`, replaced). The read lists every open decision in the store (a large
+ * store: thousands, megabytes); held whole, it was memory every window paid all day, decision mode opened or not.
+ */
+export function keepWatched(all: readonly InboxDecision[], watch: DecisionWatch): InboxDecision[] {
+  const kept: InboxDecision[] = [];
+  const counts = new Map<string, number>();
+  for (const decision of all) {
+    counts.set(decision.thread.id, (counts.get(decision.thread.id) ?? 0) + 1);
+    if (watch.threads.has(decision.thread.id)) kept.push(decision);
+  }
+  watch.counts = counts;
+  watch.readFor = new Set(watch.threads);
+  return kept;
+}
+
 /** The send group: one reply per agent session per thread (server's `inboxDecisionGroupKey`). */
 export function groupKeyOf(decision: Pick<InboxDecision, 'session' | 'thread'>): string {
   return `${decision.session.key}\u0001${decision.thread.id}`;

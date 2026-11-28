@@ -4,16 +4,20 @@
  * them the same.
  */
 import { createContext, useContext, useState, type ReactNode } from 'react';
-import { HueDot, LetterMark, showsThreads, useRowMarks } from '../letterMarks';
+import { HueDot, LetterMark, ListRowMarks, showsThreads, useGivenRowMarks, useRowMarks, type MarksChoice } from '../letterMarks';
 import { withShortcut } from '../shortcuts/hint';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
 import type { InboxListGroupId, InboxListRow } from '@plannotator/core/inbox-types';
 import { inboxSnoozeWhen } from '@plannotator/core/inbox-snooze';
-import { agentName, fullTime, shortTime, whenTime } from '../format';
+import { fullTime, shortTime, whenTime } from '../format';
+import { rowRecipientName, rowWho } from '../scriptAuthor';
 import { reaskRowLine, sentRowLine, undeliveredLabel } from '../deliveryLine';
 import { sentRecipientsWords } from '../tags';
 import { TagStack } from './TagPicker';
 import { LazyRowTips, opensTips, RowTip } from './RowTip';
+import { RowSlotNames } from './RowSlot';
+import { ListRexMarksScope } from '../agents/rexMark';
+import { ListAgentFacesScope } from '../agents/listFaces';
 import { AuthorMark, Icon } from '../icons';
 import { canMarkUnread, offersRowMarkRead } from '../markRead';
 import { inboxHasUnsent, inboxRowArchived } from '@plannotator/core/inbox-types';
@@ -36,6 +40,14 @@ export function rowAgent(row: InboxListRow): InboxListRow['author'] {
   return row.addressee ? { kind: 'agent', host: row.addressee.host, session: row.addressee.session, name: null } : row.author;
 }
 
+/**
+ * The row's words for whom a reply goes to or who writes next (scriptAuthor.ts `rowRecipientName`): in a thread a
+ * script started and a session took over, that session, never "Script" or the script's "An agent".
+ */
+export function rowRecipient(row: InboxListRow): string {
+  return rowRecipientName(row, rowAgent(row));
+}
+
 export function slotSession(row: InboxListRow): string | null {
   const agent = rowAgent(row);
   return agent.kind === 'agent' ? (agent.session ?? null) : null;
@@ -51,13 +63,13 @@ export function RowMark({ row }: { row: InboxListRow }) {
   const { hideAgents } = useRowMarks();
   if (hideAgents) return null;
   if ((row.participants?.length ?? 0) > 1) return <TagStack participants={row.participants!} />;
-  return <AuthorMark author={rowAgent(row)} />;
+  return <AuthorMark author={rowWho(row, rowAgent(row))} />;
 }
 
 /** A blocked row's hover card (wide and three-line rows), or undefined: its filled marks' tooltip. */
 export function cardOf(row: InboxListRow): ReactNode | undefined {
   if (!rowHasBadge(row)) return undefined;
-  return <WaitCard row={row} agent={agentName(rowAgent(row))} mark={<RowMark row={row} />} time={shortTime(rowTimeIso(row))} />;
+  return <WaitCard row={row} agent={rowRecipient(row)} mark={<RowMark row={row} />} time={shortTime(rowTimeIso(row))} />;
 }
 
 /** A snoozed row's return time, with the clock: where the row's words go (approval "inbox-snooze"). */
@@ -79,30 +91,35 @@ export function SnoozedUntil({ row }: { row: InboxListRow }) {
  */
 export const RowTimeBy = createContext<((row: InboxListRow) => string) | null>(null);
 
-/** Around a list's rows: their tooltips mounted on first use (`LazyRowTips`, RowTip.tsx), and the time they show (`RowTimeBy`). */
+/**
+ * Around a list's rows: their tooltips mounted on first use (`LazyRowTips`, RowTip.tsx), the time they show
+ * (`RowTimeBy`), and what every row reads from a store, read once for the list: the session names their slots and
+ * agent tiles show (`RowSlotNames`, RowSlot.tsx), their letter marks (`ListRowMarks`, letterMarks.tsx) and the
+ * agents' Rex marks and faces on their icons (`ListRexMarksScope`, agents/rexMark.tsx; `ListAgentFacesScope`,
+ * agents/listFaces.tsx).
+ */
 export function ListRows({ timeBy, children }: { timeBy?: ((row: InboxListRow) => string) | null; children: ReactNode }) {
   return (
     <LazyRowTips.Provider value={true}>
-      <RowTimeBy.Provider value={timeBy ?? null}>{children}</RowTimeBy.Provider>
+      <RowTimeBy.Provider value={timeBy ?? null}>
+        <RowSlotNames>
+          <ListRowMarks>
+            <ListRexMarksScope>
+              <ListAgentFacesScope>{children}</ListAgentFacesScope>
+            </ListRexMarksScope>
+          </ListRowMarks>
+        </RowSlotNames>
+      </RowTimeBy.Provider>
     </LazyRowTips.Provider>
   );
 }
 
 /** The row's time. A thread back from a snooze shows a small clock before it until the person reads it. */
 export function RowTime({ row, relative = false }: { row: InboxListRow; relative?: boolean }) {
-  // A relative time moves on by itself: the shared minute clock renders it again (only while it is on).
-  const now = useRelativeClock(relative);
   const timeBy = useContext(RowTimeBy);
   const iso = timeBy?.(row) || rowTimeIso(row);
-  // Relative: a screen reader hears "4 minutes ago" (never "4m"), and the pointer's tooltip gives the clock time.
-  const time = relative ? (
-    <span className="ib-trel" data-relative-time="" title={whenTime(iso)}>
-      <span aria-hidden="true">{relativeTime(iso, now)}</span>
-      <span className="ib-sr">{relativeWords(iso, now)}</span>
-    </span>
-  ) : (
-    shortTime(iso)
-  );
+  // Relative time off (the default): no clock at all in the row, on any of the ~2,200 rows a large Inbox mounts.
+  const time = relative ? <RelativeTime iso={iso} /> : shortTime(iso);
   return (
     <>
       {row.snooze_back && (
@@ -112,6 +129,18 @@ export function RowTime({ row, relative = false }: { row: InboxListRow; relative
       )}
       <TimeWithTick delivery={row.delivery} time={time} />
     </>
+  );
+}
+
+/** A relative time: it moves on by itself, the shared minute clock renders it again. */
+function RelativeTime({ iso }: { iso: string }) {
+  const now = useRelativeClock(true);
+  // A screen reader hears "4 minutes ago" (never "4m"), and the pointer's tooltip gives the clock time.
+  return (
+    <span className="ib-trel" data-relative-time="" title={whenTime(iso)}>
+      <span aria-hidden="true">{relativeTime(iso, now)}</span>
+      <span className="ib-sr">{relativeWords(iso, now)}</span>
+    </span>
   );
 }
 
@@ -141,8 +170,8 @@ export function sentWordsOf(row: InboxListRow): string | null {
   // A reply that tags agents (approval "inbox-tag-agents", Lines): how many have it, and who waits.
   if (!row.addressee && row.sent?.recipients?.length) return sentRecipientsWords(row.sent.recipients);
   // A Re-ask note waits on the agent to ask again (approval "inbox-reask"): its own words, beside the delivery tick.
-  if (row.reask_pending) return reaskRowLine(agentName(rowAgent(row)), row.sent?.checked_at ?? null, row.sent?.wakes);
-  if (!row.addressee && !row.delivery) return sentRowLine(agentName(rowAgent(row)), row.sent?.wakes);
+  if (row.reask_pending) return reaskRowLine(rowRecipient(row), row.sent?.checked_at ?? null, row.sent?.wakes);
+  if (!row.addressee && !row.delivery) return sentRowLine(rowRecipient(row), row.sent?.wakes);
   return null;
 }
 
@@ -175,8 +204,17 @@ export function RowTitle({ row, className, pill, tip = false }: { row: InboxList
 }
 
 /** Letter marks (letterMarks.tsx), style "Inline": a 20 px tile before the title; style "Dot": the thread's hue alone. */
-export function TitleMark({ row, children }: { row: InboxListRow; children: ReactNode }) {
-  const { marks } = useRowMarks();
+export function TitleMark(props: { row: InboxListRow; children: ReactNode }) {
+  // In a list's rows, the list's marks (letterMarks.tsx `ListRowMarks`); anywhere else the row reads them itself.
+  const given = useGivenRowMarks();
+  return given ? drawTitleMark(props, given.marks) : <OwnTitleMark {...props} />;
+}
+
+function OwnTitleMark(props: { row: InboxListRow; children: ReactNode }) {
+  return drawTitleMark(props, useRowMarks().marks);
+}
+
+function drawTitleMark({ row, children }: { row: InboxListRow; children: ReactNode }, marks: MarksChoice) {
   if (marks.style === 'avatar' || !showsThreads(marks.what)) return <>{children}</>;
   return (
     <span className="ib-lm-tt" data-take={marks.style}>
@@ -212,7 +250,7 @@ export function countWords(row: InboxListRow, now: number, tickAlone = false): {
   // An agent the person started from New message (launch): one muted word while it starts or works.
   if (row.run) return same(row.run === 'starting' ? 'Starting' : row.run === 'cloning' ? 'Cloning' : 'Working');
   if (row.combining) return { short: <span className="ib-combining">Combining…</span>, long: <span className="ib-combining">Combining…</span>, full: 'Combining…' };
-  if (row.section === 'sent' && row.addressee) return same(`To ${agentName(rowAgent(row))}`);
+  if (row.section === 'sent' && row.addressee) return same(`To ${rowRecipient(row)}`);
   return null;
 }
 
@@ -228,9 +266,21 @@ export function liveCount(rows: readonly InboxListRow[]): number {
  * the short form, its full words for a screen reader and, with `tip`, in the tooltip. A wide row (`wide`) draws the
  * full words in its words column; cut there, they are the tooltip too.
  */
-export function CountWords({ row, tip = false, wide = false, status = false }: { row: InboxListRow; tip?: boolean; wide?: boolean; status?: boolean }) {
-  const now = useMinuteClock(rowWait(row.delivery) !== null);
-  const words = useContext(InArchivedGroup) && inboxRowArchived(row) ? null : countWords(row, now, status);
+type CountWordsProps = { row: InboxListRow; tip?: boolean; wide?: boolean; status?: boolean };
+
+export function CountWords(props: CountWordsProps) {
+  const archivedGroup = useContext(InArchivedGroup);
+  // Only a reply waiting on a busy agent counts minutes: the other rows (nearly all of the ~2,200 a large Inbox
+  // mounts) keep no clock. `countWords` reads the time for that wait alone.
+  return rowWait(props.row.delivery) !== null ? <TimedCountWords {...props} archivedGroup={archivedGroup} /> : drawCountWords(props, archivedGroup, 0);
+}
+
+function TimedCountWords({ archivedGroup, ...props }: CountWordsProps & { archivedGroup: boolean }) {
+  return drawCountWords(props, archivedGroup, useMinuteClock(true));
+}
+
+function drawCountWords({ row, tip = false, wide = false, status = false }: CountWordsProps, archivedGroup: boolean, now: number) {
+  const words = archivedGroup && inboxRowArchived(row) ? null : countWords(row, now, status);
   if (!words) return null;
   const quiet = row.section === 'quiet' ? ' ib-qlabel' : '';
   if (wide) {
@@ -345,7 +395,7 @@ export function ClipText({ className, text }: { className: string; text: string 
 }
 
 /**
- * A row and its quiet hover action: Mark read on a row that waits on the
+ * A row and its quiet hover action: Mark read on a bold row that waits on the
  * person, Mark unread on a read row (markRead.ts `canMarkUnread`), shown on
  * hover or keyboard focus where the count and time are. It
  * never opens the thread. The action is the row's sibling (a button cannot
@@ -374,7 +424,7 @@ export function RowWithAction({
   // The action toggles (owner, 2026-10-31): on a read row (the row menu's rule, `canMarkUnread`) it is Mark unread.
   // That includes a row the person read that the list still holds in New (the thread open, or the one just left;
   // markRead.ts `seenHeldInNew`): the owner, 2026-11-02, "I opened it. I still want the ability to mark it unread."
-  // Its Mark read (move it to Quiet now) stays in the row menu and the header.
+  // And an opened row whose questions still wait (the owner, 2026-11-25). Mark read stays in the row menu and the header.
   const unread = !onUnarchive && onMarkUnread && canMarkUnread(row);
   const offer = !onUnarchive && !unread && onMarkRead && offersRowMarkRead(row, drawn);
   // A reply waiting on a busy agent that can take it now: Send now, on hover and keyboard focus as Mark read.
@@ -415,7 +465,7 @@ export function RowWithAction({
       {children}
       {onUnarchive && <UnarchiveAction row={row} label={`Unarchive: ${rowLabel(row, titleOf(row))}`} onUnarchive={onUnarchive} />}
       {sendNow && (
-        <RowTip armed={actionTip} content={`Send now: put your reply into ${agentName(rowAgent(row))}'s running turn without waiting for it to end`}>
+        <RowTip armed={actionTip} content={`Send now: put your reply into ${rowRecipient(row)}'s running turn without waiting for it to end`}>
           <button
             type="button"
             className="ib-ract"
@@ -432,7 +482,7 @@ export function RowWithAction({
         </RowTip>
       )}
       {offer && (
-        <RowTip armed={actionTip} content={withShortcut(`Mark read / quiet: out of the top until ${agentName(rowAgent(row))} writes again`, { scope: inboxThreadShortcuts, action: 'markRead' })}>
+        <RowTip armed={actionTip} content={withShortcut(`Mark read / quiet: out of the top until ${rowRecipient(row)} writes again`, { scope: inboxThreadShortcuts, action: 'markRead' })}>
           <button
             type="button"
             className="ib-ract"

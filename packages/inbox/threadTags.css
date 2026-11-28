@@ -7,6 +7,12 @@
 .pn-inbox .ib-tags .ib-proj:not(.ib-on):hover,
 .pn-inbox .ib-tags .ib-proj[data-menu]:not(.ib-on) { background: var(--ib-side-hover); }
 .pn-inbox .ib-tags .ib-tag-name { margin: 1px 0; }
+/* The order of Tags (tagSort.ts): Projects' toggle, left of New tag. Most recent keeps the rows out of scroll anchoring, as Projects'. */
+.pn-inbox .ib-proj-sort.ib-tags-sort { right: 48px; }
+.ib-tags[data-recent] { overflow-anchor: none; }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .pn-inbox .ib-proj-sort.ib-tags-sort { right: 88px; }
+}
 
 /* ---------- Add tag: the menu's look (`.ib-pm`), swapped in place as Snooze's times are. ---------- */
 .ib-tagm-find { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 6px 0 8px; color: var(--muted-foreground); cursor: text; }

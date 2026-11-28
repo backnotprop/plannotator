@@ -110,6 +110,30 @@ describe.if(hasDom)('Settings → Display → Document font', () => {
     expect(document.documentElement.hasAttribute(DOCUMENT_FONT_ATTRIBUTE)).toBe(false);
   });
 
+  // Settings → Reviews draws the same font field in its own controls; plan
+  // review and annotate keep this row's look. These are the row's classes from
+  // before Settings → Reviews existed.
+  test("the row keeps Settings → Display's own look, not Settings → Reviews' controls", async () => {
+    const classes = (el: Element | null | undefined) => (el?.getAttribute('class') ?? '').split(/\s+/).filter(Boolean).sort();
+    const expected = (s: string) => s.split(/\s+/).filter(Boolean).sort();
+    configStore.set('documentFontFamily', 'serif');
+    await mount('plan');
+    await choose('__custom__');
+    const select = row()!.querySelector('select');
+    const input = row()!.querySelector('input[aria-label="Custom document font name"]');
+    const status = row()!.querySelector('[aria-live="polite"]');
+    const preview = Array.from(row()!.querySelectorAll('div')).find((d) => d.textContent === 'Preview: The quick brown fox jumps over the lazy dog.');
+
+    expect(classes(select)).toEqual(expected('w-full px-3 py-1.5 text-sm rounded-md bg-muted/50 border border-border text-foreground'));
+    expect(input?.getAttribute('type')).toBe('text');
+    expect(classes(input)).toEqual(expected('w-full px-3 py-1.5 text-sm rounded-md bg-muted/50 border border-border text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-ring'));
+    expect(classes(status)).toEqual(['text-[11px]']);
+    expect(status?.children.length).toBe(1);
+    expect(status?.firstElementChild?.tagName).toBe('SPAN');
+    expect(classes(status?.firstElementChild)).toEqual(['text-muted-foreground']);
+    expect(classes(preview)).toEqual(expected('text-xs text-muted-foreground px-1 py-1 rounded bg-muted/30'));
+  });
+
   test('a host that does not opt in shows no row', async () => {
     await mount('plan', false);
     expect(row()).toBeNull();

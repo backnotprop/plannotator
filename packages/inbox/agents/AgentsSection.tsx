@@ -15,6 +15,8 @@ import { agentFacts, agentHostName, agentRowName, agentsGroups, type AgentEntry 
 import { showInRex, useRexShowNote } from '../data/actions/rexShow';
 import { rexMarkWords, shownMarkOf } from './rexMark';
 import { useAgentStatusOn } from './agentStatus';
+import { useAgentOrderHold, useHeldAgentOrder } from './heldOrder';
+import { AGENT_NEW_MESSAGE_LABEL, agentTakesNewMessage } from './agentNewMessage';
 
 /**
  * The sidebar's Agents section (approval "inbox-agents-section", and the owner's rulings of 2026-11-09), in place
@@ -35,7 +37,8 @@ import { useAgentStatusOn } from './agentStatus';
  * Its hover card says where and when it started, and its project.
  *
  * Its menu is a project row's (ProjectRow.tsx): ⋯ on hover, keyboard focus and while open (always on a phone, where
- * the menu is a sheet), and the same menu on a right-click. Rename… turns the row into the project rename field; an
+ * the menu is a sheet), and the same menu on a right-click. New message… first, for an agent To takes
+ * (agentNewMessage.ts): New message with the agent in To. Rename… turns the row into the project rename field; an
  * empty name, like Reset name, goes back to the agent's own name (agents/agentNames.ts).
  *
  * Its data is the list's `agents` (agentsList.ts): drawing the section is what makes the window read the list again
@@ -55,13 +58,18 @@ export interface AgentsSectionProps {
   labelId: string;
   bodyId: string;
   /** The section header (shared with Pinned and Projects), drawn with the goggles. */
-  header: (icon: ReactNode) => ReactNode;
+  header: (icon: ReactNode, waitingCount: number) => ReactNode;
   onMachine?: (machineId: string) => void;
   onMachineUpdate?: (machineId: string) => void;
   /** Show one agent's threads (`#agent=<id>`); null: everything again. */
   onAgentFilter: (agentId: string | null) => void;
-  /** A live agent with no thread in the window: New message to it. */
+  /** A live agent with no thread in the window, and the menu's New message…: New message to it. */
   onMessageAgent: (session: string, opener: HTMLElement) => void;
+  /**
+   * The menu's New message… (`onMessageAgent`), on an agent To takes (agentNewMessage.ts). `linked`: To lists linked
+   * machines' agents (launch is on here). Absent: not offered.
+   */
+  newMessage?: { linked: boolean };
   /** Add agent: New message with a new session chosen. */
   onAddAgent: (opener: HTMLElement) => void;
   /** Add machine: Settings → Machines, where a machine is linked. Absent on an Inbox that cannot link. */
@@ -151,6 +159,7 @@ const AgentRow = memo(
     opens: AgentOpens;
     onOpen: (entry: AgentEntry, opener: HTMLElement) => void;
     phone: boolean;
+    onNewMessage?: (entry: AgentEntry, opener: HTMLElement) => void;
     onRename?: (entry: AgentEntry, name: string | null) => Promise<boolean>;
     onStop?: (entry: AgentEntry) => void;
     onDelete?: (entry: AgentEntry) => void;
@@ -167,6 +176,8 @@ const AgentRow = memo(
     const more = useRef<HTMLButtonElement>(null);
     // Rename… picked: the closing menu leaves focus to the field. The field closed: ⋯ takes it.
     const toField = useRef(false);
+    // New message… picked: the closing menu leaves focus to the message box.
+    const toCompose = useRef(false);
     const backToMore = useRef(false);
     const [portal, setPortal] = useState<HTMLElement | null>(null);
     useLayoutEffect(() => setPortal(more.current?.closest<HTMLElement>('.pn-inbox') ?? null), [renaming]);
@@ -183,8 +194,9 @@ const AgentRow = memo(
     const onDelete = launch ? props.onDelete : undefined;
     // Show in Rex only where it works now (the list said so for this window): never a dead item.
     const onShowInRex = entry.agent.place?.show === true && !props.phone ? props.onShowInRex : undefined;
-    const hasMenu = !!(onRename || onStop || onDelete || onShowInRex);
-    const launchName = agentHostName(entry.agent.host);
+    const onNewMessage = props.onNewMessage;
+    const hasMenu = !!(onNewMessage || onRename || onStop || onDelete || onShowInRex);
+    const launchName = agentHostName(entry.agent.host, entry.agent.runtime);
     const row = (children: ReactNode) => (
       <div
         className="ib-sbagent"
@@ -221,9 +233,14 @@ const AgentRow = memo(
         />,
       );
     }
-    const act = (action: 'rename' | 'reset' | 'stop' | 'delete' | 'rex') => {
+    const act = (action: 'message' | 'rename' | 'reset' | 'stop' | 'delete' | 'rex') => {
       setMenuOpen(false);
       setContextOpen(false);
+      if (action === 'message') {
+        toCompose.current = true;
+        // Compose closed: focus back to the row's ⋯, where the menu would have left it.
+        return onNewMessage?.(entry, more.current ?? document.body);
+      }
       if (action === 'rename') {
         toField.current = true;
         setRenaming(true);
@@ -240,6 +257,12 @@ const AgentRow = memo(
         <div className="ib-pm-title" dir="auto" aria-hidden="true">
           {entry.name}
         </div>
+        {onNewMessage && (
+          <Menu.Item className="ib-pmi" label={AGENT_NEW_MESSAGE_LABEL} onClick={() => act('message')} data-agent-action="message">
+            <Icon name="compose" size={15} />
+            {AGENT_NEW_MESSAGE_LABEL}
+          </Menu.Item>
+        )}
         {onRename && (
           <Menu.Item className="ib-pmi" label="Rename…" onClick={() => act('rename')} data-agent-action="rename">
             <Icon name="pen" size={15} />
@@ -258,7 +281,7 @@ const AgentRow = memo(
             Show in Rex
           </Menu.Item>
         )}
-        {(onRename || onShowInRex) && (onStop || onDelete) && <Menu.Separator className="ib-pm-sep" />}
+        {(onNewMessage || onRename || onShowInRex) && (onStop || onDelete) && <Menu.Separator className="ib-pm-sep" />}
         {onStop && (
           <Menu.Item className="ib-pmi" label={`Stop ${launchName}`} onClick={() => act('stop')} data-agent-action="stop">
             <Icon name="xCircle" size={15} />
@@ -273,6 +296,10 @@ const AgentRow = memo(
         )}
       </>
     );
+    // A menu opening again starts with focus going back to ⋯ (or the field) as before.
+    const opened = (open: boolean) => {
+      if (open) toCompose.current = false;
+    };
     const content = (
       <>
         <Tip content={<AgentTip entry={entry} machine={machine} />} side="right" align="start">
@@ -291,7 +318,7 @@ const AgentRow = memo(
               {entry.name}
             </span>
             <span className="ib-sr">
-              , {agentHostName(entry.agent.host)}
+              , {agentHostName(entry.agent.host, entry.agent.runtime)}
               {entry.agent.place ? `, in ${entry.agent.place.line.replace(' · ', ', ').replace(' / ', ', ')}` : ''}
               {mark ? `, ${rexMarkWords(mark)}` : ''}
             </span>
@@ -299,14 +326,21 @@ const AgentRow = memo(
         </Tip>
         <AgentMark id={entry.agent.id} host={entry.agent.host} name={entry.name} agent={entry.agent} picks={props.picks} statusMarks />
         {hasMenu && (
-          <Menu.Root open={menuOpen} onOpenChange={setMenuOpen} modal={false}>
+          <Menu.Root
+            open={menuOpen}
+            onOpenChange={(open) => {
+              opened(open);
+              setMenuOpen(open);
+            }}
+            modal={false}
+          >
             <Menu.Trigger ref={more} className="ib-pmore" aria-label={`${entry.name} options`} data-agent-more={entry.agent.id}>
               <Icon name="dots" size={16} />
             </Menu.Trigger>
             <Menu.Portal container={portal ?? undefined}>
               {props.phone && <Menu.Backdrop className="ib-pm-scrim" />}
               <Menu.Positioner className="ib-pm-pos" side="bottom" align="start" sideOffset={4} data-phone={props.phone ? '' : undefined}>
-                <Menu.Popup className="ib-pm" aria-label={entry.name} data-agent-menu={entry.agent.id} finalFocus={() => !toField.current}>
+                <Menu.Popup className="ib-pm" aria-label={entry.name} data-agent-menu={entry.agent.id} finalFocus={() => !toField.current && !toCompose.current}>
                   {items}
                 </Menu.Popup>
               </Menu.Positioner>
@@ -317,12 +351,17 @@ const AgentRow = memo(
     );
     if (props.phone || !hasMenu) return row(content);
     return (
-      <ContextMenu.Root onOpenChange={setContextOpen}>
+      <ContextMenu.Root
+        onOpenChange={(open) => {
+          opened(open);
+          setContextOpen(open);
+        }}
+      >
         <ContextMenu.Trigger render={row(content)} />
         <ContextMenu.Portal container={portal ?? undefined}>
           <ContextMenu.Positioner className="ib-pm-pos">
             {/* Focus goes back to the row's ⋯, never the page (the field takes it after Rename…). */}
-            <ContextMenu.Popup className="ib-pm" aria-label={entry.name} data-agent-menu={entry.agent.id} finalFocus={() => (toField.current ? false : more.current)}>
+            <ContextMenu.Popup className="ib-pm" aria-label={entry.name} data-agent-menu={entry.agent.id} finalFocus={() => (toField.current || toCompose.current ? false : more.current)}>
               {items}
             </ContextMenu.Popup>
           </ContextMenu.Positioner>
@@ -342,6 +381,7 @@ const AgentRow = memo(
     a.opens === b.opens &&
     a.onOpen === b.onOpen &&
     a.phone === b.phone &&
+    a.onNewMessage === b.onNewMessage &&
     a.onRename === b.onRename &&
     a.onStop === b.onStop &&
     a.onDelete === b.onDelete &&
@@ -362,10 +402,15 @@ function RexShowNote({ session }: { session: string }) {
 
 export function AgentsSection(props: AgentsSectionProps) {
   const groupsRead = useInboxAgents();
-  const groups = useMemo(() => agentsGroups(groupsRead, props.machines, props.rows), [groupsRead, props.machines, props.rows]);
+  const statusOn = useAgentStatusOn();
+  // The pointer on the list holds its order (heldOrder.ts): no row moves under a click.
+  const { hold, ...holdHandlers } = useAgentOrderHold();
+  const sorted = useMemo(() => agentsGroups(groupsRead, props.machines, props.rows, statusOn), [groupsRead, props.machines, props.rows, statusOn]);
+  const groups = useHeldAgentOrder(sorted, hold);
   // A machine with no agent shows nothing, and a machine's name shows only while agents show from more than one
   // machine (the owner, 2026-11-09): with one, the agents alone.
   const filled = groups.filter((group) => group.agents.length > 0);
+  const waitingCount = statusOn ? filled.reduce((count, group) => count + group.agents.filter((entry) => entry.agent.status_mark?.state === 'blocked').length, 0) : 0;
   const captions = filled.filter((group) => group.machine !== null).length > 1;
   const empty = filled.length === 0;
   const machineOn = (id: string) => props.page === 'inbox' && props.machineId === id;
@@ -383,6 +428,10 @@ export function AgentsSection(props: AgentsSectionProps) {
   const openNow = useRef(open);
   openNow.current = open;
   const onOpen = useCallback((entry: AgentEntry, opener: HTMLElement) => openNow.current(entry, opener), []);
+  // New message… on the menu: the click's New message, for any agent To takes (on a phone the sheet closes first).
+  const messageNow = useRef({ message: props.onMessageAgent, pick: props.pick });
+  messageNow.current = { message: props.onMessageAgent, pick: props.pick };
+  const onNewMessage = useCallback((entry: AgentEntry, opener: HTMLElement) => messageNow.current.pick(() => messageNow.current.message(entry.agent.session, opener))(), []);
   // One callback for every row, as `onOpen`. `own`: the row's name without the given one.
   const renameNow = useRef(props.onRename);
   renameNow.current = props.onRename;
@@ -416,9 +465,9 @@ export function AgentsSection(props: AgentsSectionProps) {
   return (
     // A section like Projects, straight on the sidebar's ground (the owner, 2026-11-09: "I like it without
     // background"). Its heading carries Add machine, then Add agent (under Tags' New tag); closed, nothing under it.
-    <div className="ib-agentsec" data-agents-surface="" data-closed={props.closed ? '' : undefined}>
+    <div className="ib-agentsec" data-agents-surface="" data-closed={props.closed ? '' : undefined} {...holdHandlers}>
       <div className="ib-secrow" data-agents-head="" data-one-add={props.onAddMachine ? undefined : ""}>
-        {props.header(<GogglesMark />)}
+        {props.header(<GogglesMark />, waitingCount)}
         {props.onAddMachine && (
           <Tip content="Add machine">
             <button type="button" className="ib-proj-sort ib-agents-add" aria-label="Add machine" data-agents-add="machine" onClick={props.pick(() => props.onAddMachine?.())}>
@@ -478,6 +527,7 @@ export function AgentsSection(props: AgentsSectionProps) {
                   opens={entry.thread ? 'filter' : canMessage(entry) ? 'message' : 'none'}
                   onOpen={onOpen}
                   phone={props.phone === true}
+                  onNewMessage={props.newMessage && agentTakesNewMessage(entry.agent, machine, props.newMessage.linked) ? onNewMessage : undefined}
                   onRename={names ? onRename : undefined}
                   onStop={onStop}
                   onDelete={onDelete}

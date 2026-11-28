@@ -533,8 +533,9 @@ describe.if(hasDom)('live bridge gate (composed body in the eval harness)', () =
   }
 
   test('live sessions start ARMED: pinpoint capture and the cursor affordance are live before any parent message', () => {
-    // No set-annotate-mode or set-input-method has arrived yet — the default
-    // must already be pinpoint-armed on the live surface.
+    // "Start in Annotate mode" on (the default, no startInteract in the
+    // config): no set-annotate-mode or set-input-method has arrived yet, and
+    // the page must already be pinpoint-armed, with no Interact gap.
     expect(bridgeDocument.body.hasAttribute('data-plannotator-pinpoint-cursor')).toBe(true);
     const probe = clickProbe(probeButton());
     expect(probe.prevented).toBe(true);
@@ -544,6 +545,7 @@ describe.if(hasDom)('live bridge gate (composed body in the eval harness)', () =
   });
 
   test('forged disarm attempts (no token / wrong origin) are ignored', () => {
+    postToBridge({ type: 'plannotator-bridge-set-annotate-mode', active: true, token: bridgeToken });
     postToBridge({ type: 'plannotator-bridge-set-annotate-mode', active: false });
     postToBridge({ type: 'plannotator-bridge-set-input-method', method: 'drag' });
     postToBridge(
@@ -1121,5 +1123,57 @@ describe.if(hasDom)('live bridge gate (composed body in the eval harness)', () =
     expect(reportOrigins).toContain(editorOrigin);
     expect(reportOrigins).toContain('http://127.0.0.1:4100');
     expect(reportOrigins).not.toContain('*');
+  });
+});
+
+describe.if(hasDom)('live bridge start mode ("Start in Annotate mode" off)', () => {
+  // Its own bridge in its own frame: the suite above shares one bridge that
+  // starts armed. Here the config prelude carries startInteract, as
+  // composeLiveBridgeJs writes it when the setting is off.
+  test('every load starts in Interact until the editor arms it: clicks reach the page, no cursor', () => {
+    const posts: Array<Record<string, unknown>> = [];
+    const fakeParent = {
+      postMessage(data: unknown) {
+        if (data && typeof data === 'object') posts.push(data as Record<string, unknown>);
+      },
+    };
+    const editorOrigin = 'http://localhost:4200';
+    const token = 'start-interact-token';
+    const frame = document.createElement('iframe');
+    document.documentElement.appendChild(frame);
+    try {
+      const win = frame.contentWindow as Window & { __plannotatorLiveConfig?: unknown };
+      const doc = frame.contentDocument!;
+      win.__plannotatorLiveConfig = { live: true, token, editorOrigins: [editorOrigin], css: '', startInteract: true };
+      new Function('window', 'document', 'location', 'history', 'parent', 'top',
+        bridgeModule!.LIVE_BRIDGE_BOOTSTRAP + '\n' + bridgeModule!.BRIDGE_SCRIPT,
+      )(win, doc, win.location, win.history, fakeParent, fakeParent);
+      if (!posts.some((p) => p.type === 'plannotator-bridge-ready')) doc.dispatchEvent(new Event('DOMContentLoaded'));
+      const post = (data: Record<string, unknown>) => win.dispatchEvent(new MessageEvent('message', {
+        data: { ...data, token }, origin: editorOrigin, source: fakeParent as unknown as Window,
+      }));
+      const button = doc.createElement('button');
+      button.textContent = 'A page button';
+      doc.body.appendChild(button);
+      const click = () => {
+        const before = posts.filter((p) => p.type === 'plannotator-bridge-selection').length;
+        const event = new MouseEvent('click', { bubbles: true, cancelable: true });
+        button.dispatchEvent(event);
+        return { prevented: event.defaultPrevented, selections: posts.filter((p) => p.type === 'plannotator-bridge-selection').length - before };
+      };
+
+      expect(doc.body.hasAttribute('data-plannotator-pinpoint-cursor')).toBe(false);
+      expect(click()).toEqual({ prevented: false, selections: 0 });
+      // The editor's first message (input method) does not arm it either.
+      post({ type: 'plannotator-bridge-set-input-method', method: 'pinpoint' });
+      expect(doc.body.hasAttribute('data-plannotator-pinpoint-cursor')).toBe(false);
+      expect(click()).toEqual({ prevented: false, selections: 0 });
+      // The person arms it: the page captures clicks from then on.
+      post({ type: 'plannotator-bridge-set-annotate-mode', active: true });
+      expect(doc.body.hasAttribute('data-plannotator-pinpoint-cursor')).toBe(true);
+      expect(click()).toEqual({ prevented: true, selections: 1 });
+    } finally {
+      frame.remove();
+    }
   });
 });

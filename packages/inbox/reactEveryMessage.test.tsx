@@ -4,19 +4,21 @@
  * - the pointer on the face opens it into 👍, the saved emoji and the face, and an emoji reacts on THAT message;
  * - a right-click anywhere in a message's body opens the one menu, emoji first; on a link or selected text it does not;
  * - a skill emoji carries the "/" mark and, pressed, sends a reply with exactly a typed `/bro` reply's words and its
- *   `skill_reaction`, never an ack; that reply draws as one line.
+ *   `skill_reaction`, never an ack; that reply draws as a reply typed, its words "😵‍💫 /bro".
  * DOM (happy-dom): `DOM_TESTS=1 bun test packages/inbox/reactEveryMessage.test.tsx --isolate`.
  */
 import { afterEach, beforeEach, expect, jest, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { parseInboxQuestionBlocks } from '@plannotator/core/inbox-questions';
+import { inboxReplyQuoteLead } from '@plannotator/core/inbox-reply-quote';
 import type { InboxAuthor, InboxMessageWire, InboxProject, InboxQuestion, InboxReaction, InboxThread } from '@plannotator/core/inbox-types';
 import { resetSkillCatalogCache, resetSkillCatalogTransport, setSkillCatalogTransport } from '@plannotator/ui/utils/skillCatalog';
 import { resetSavedReactionsForTests } from './reactions';
 import { rememberLocal, rememberMachine } from './inboxUrl';
 import { FACE_CLOSE_MS, FACE_OPEN_MS } from './thread/messageReact';
 import { skillPreviewText } from './data/skillPreview';
+import { skillReactionWords } from './thread/skillReaction';
 
 const hasDom = typeof document !== 'undefined';
 const { ThreadPane } = (hasDom ? await import('./components/Thread') : {}) as typeof import('./components/Thread');
@@ -25,6 +27,7 @@ const { PHONE_HOLD } = (hasDom ? await import('./thread/MessageReactHost') : { P
 const PROJECT: InboxProject = { id: 'prj_1', key: 'fern-api-abcdef', name: 'fern-api', root: '/work/fern-api', created_at: '2026-11-24T09:00:00.000Z' };
 const CLAUDE: Extract<InboxAuthor, { kind: 'agent' }> = { kind: 'agent', host: 'claude-code', session: 'ses_a', name: null };
 const [M1, M2, M3, M4] = ['msg_01M8A00000000000000000001', 'msg_01M8A00000000000000000002', 'msg_01M8A00000000000000000003', 'msg_01M8A00000000000000000004'] as const;
+const M6 = 'msg_01M8A00000000000000000006';
 const SAVED: InboxReaction[] = [{ emoji: '🎉', label: 'Ship it' }, { emoji: '😵‍💫', skill: 'bro' }];
 
 const message = (id: string, author: InboxAuthor, body: string, minute: number, extra: Partial<InboxMessageWire> = {}): InboxMessageWire =>
@@ -52,10 +55,13 @@ let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
 let acks: { id: string; on: boolean; reaction: InboxReaction | null | undefined }[] = [];
 let posts: { path: string; body: Record<string, unknown> }[] = [];
+/** The agent each 👍 or emoji names (the toast's "Goes to <agent>"). */
+let ackAgents: string[] = [];
 
 beforeEach(() => {
   if (!hasDom) return;
   acks = [];
+  ackAgents = [];
   posts = [];
   resetSavedReactionsForTests(SAVED);
   resetSkillCatalogCache();
@@ -115,7 +121,10 @@ async function render(t: InboxThread, extra: { phone?: boolean } = {}) {
         file={null}
         onOpenFile={() => {}}
         onOpenGuide={() => {}}
-        onAck={(id, on, _agent, reaction) => acks.push({ id, on, reaction })}
+        onAck={(id, on, agent, reaction) => {
+          acks.push({ id, on, reaction });
+          ackAgents.push(agent);
+        }}
         phone={extra.phone ?? false}
       />,
     );
@@ -267,17 +276,33 @@ test.skipIf(!hasDom)('on a linked machine’s thread, a skill this computer lack
   }
 });
 
-test.skipIf(!hasDom)('a skill reaction’s reply draws as one line: You, the emoji and /bro, with no words under it', async () => {
-  const reply = message('msg_01M8A00000000000000000005', { kind: 'person' }, '/bro\n\n**Skills referenced** (the person is asking you to invoke these skills when acting on this reply):\n- `bro`', 5, {
-    reply_to: M4,
-    skill_reaction: { emoji: '😵‍💫', skill: 'bro' },
-  } as Partial<InboxMessageWire>);
-  await render(sample([reply]));
-  const row = article(reply.id);
-  expect(row.querySelector('[data-skill-reaction="bro"]')?.textContent).toBe('😵‍💫/bro');
-  expect(row.textContent).not.toContain('Skills referenced');
-  expect(face(reply.id)).toBeNull();
-});
+// The owner's pick (2026-11-26, "As a normal reply with text"): the reply's own row, as a reply typed: its head says
+// where and to whom, and its words read "😵‍💫 /bro". On a message the agent wrote after, it quotes it, as ↩ does.
+for (const phone of [false, true]) {
+  test.skipIf(!hasDom)(`a skill reaction’s reply draws as a reply typed: its head, and the words “😵‍💫 /bro” under it${phone ? ' (phone)' : ''}`, async () => {
+    const lead = inboxReplyQuoteLead({ whose: { kind: 'yours' }, id: M3, time: '2:03 PM', text: 'Done. The run: fern-api CI #482.', selected: false });
+    // The body the store writes for the press: the lead, the words, then the skills block the window composed.
+    const { words: sentWords, feedback } = await skillReactionWords('bro');
+    const reply = message(M6, { kind: 'person' }, `${lead}\n\n${sentWords}\n\n${feedback.trim()}`, 5, {
+      reply_to: M3,
+      to: { host: 'claude-code', session: 'ses_a' },
+      quote: { of: M3 },
+      skill_reaction: { emoji: '😵‍💫', skill: 'bro' },
+    } as Partial<InboxMessageWire>);
+    await render(sample([reply]), { phone });
+    const row = article(reply.id);
+    expect(row.querySelector('.ib-fl-in bdi')?.textContent).toBe('fern-api');
+    expect(row.querySelector('.ib-fl-to .ib-to')?.textContent).toStartWith('to Claude Code');
+    const words = row.querySelector<HTMLElement>('.ib-msg')!;
+    expect(words.textContent).toContain('😵‍💫 /bro');
+    // The agent's parts are not the person's words: the lead (the quote line says it) and the skills block.
+    expect(words.textContent).not.toContain('Replying to your message');
+    expect(words.textContent).not.toContain('Skills referenced');
+    // Drawn by the reply path itself: the skills line a typed `/bro` reply has, and no reaction face of its own.
+    expect(row.querySelector('[data-skills-line]')).not.toBeNull();
+    expect(face(reply.id)).toBeNull();
+  });
+}
 
 const strip = (id: string) => document.querySelector<HTMLElement>(`[data-react-strip="${id}"]`);
 const M5 = 'msg_01M8A00000000000000000005';
@@ -395,6 +420,20 @@ test.skipIf(!hasDom)('a phone, as it ships (`PHONE_HOLD.opensSheet` false): a ho
   expect(press.defaultPrevented).toBe(false);
 });
 
+test.skipIf(!hasDom)('a phone (no face): “All reactions” in an earlier message’s ⋯ opens the tray, and its emoji reacts on that message', async () => {
+  await render(sample(), { phone: true });
+  expect(face(M3)).toBeNull();
+  const more = () => document.querySelector<HTMLButtonElement>(`[data-message-more="${M3}"]`);
+  await act(async () => more()!.click());
+  await until(() => !!document.querySelector(`[data-message-menu="${M3}"] [data-menu-reaction="all"]`), 'the message’s sheet');
+  await act(async () => document.querySelector<HTMLElement>(`[data-message-menu="${M3}"] [data-menu-reaction="all"]`)!.click());
+  await until(() => !!document.querySelector('[data-reaction-tray]'), 'the full tray');
+  // Opened from that message's ⋯, in its place.
+  expect(document.querySelector('[data-reaction-tray]')!.closest('.ib-react-pos') !== null).toBe(true);
+  await act(async () => document.querySelector<HTMLElement>('[data-reaction-tray] [data-reaction="saved-0"]')!.click());
+  expect(acks).toEqual([{ id: M3, on: true, reaction: { emoji: '🎉', label: 'Ship it' } }]);
+});
+
 test.skipIf(!hasDom)('a phone with `PHONE_HOLD.opensSheet` on: a still hold opens the message’s sheet', async () => {
   PHONE_HOLD.opensSheet = true;
   try {
@@ -440,4 +479,20 @@ test.skipIf(!hasDom)('a skill emoji’s card on a linked machine’s thread read
   expect(read).toMatchObject({ description: 'Run it and show me', missing: false });
   expect(read.excerpt).toContain('Run the change for real');
   expect((await skillPreviewText('test-it-nowhere', far)).missing).toBe(true);
+});
+
+test.skipIf(!hasDom)("a script's message (no session, host or name): its face, its 👍 and its skill emoji name Script, as its head does", async () => {
+  const script: InboxAuthor = { kind: 'agent', host: null, session: null, name: null };
+  await render({ ...sample(), messages: [message(M1, script, 'Disk at 91% on node 3.', 1), message(M2, script, 'Disk at 93% on node 3.', 2)] });
+  await hoverFace(M1);
+  await until(() => !!strip(M1), 'the face opened');
+  expect(strip(M1)!.getAttribute('aria-label')).toBe("React to Script's message");
+  await act(async () => strip(M1)!.querySelector<HTMLButtonElement>('button')!.click());
+  expect(acks).toEqual([{ id: M1, on: true, reaction: null }]);
+  expect(ackAgents).toEqual(['Script']);
+  // The menu's skill emoji: said sent to Script.
+  await rightClick(article(M2).querySelector('.ib-msg')!);
+  await until(() => !!menu(), 'the message menu');
+  await act(async () => (menu()!.querySelector('[data-menu-reaction="😵‍💫"]') as HTMLElement).click());
+  await until(() => document.querySelector('[data-fold-live]')?.textContent === 'Sent /bro to Script.', 'the skill said sent to Script');
 });

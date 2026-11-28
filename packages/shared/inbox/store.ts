@@ -109,6 +109,7 @@ import {
   type InboxTag,
   inboxAskingMessage,
   inboxDefaultSkip,
+  inboxScriptAuthor,
   inboxSessionlessSend,
   inboxWordsDefault,
   inboxRemovedNow,
@@ -123,7 +124,7 @@ import {
   type InboxQuestionState,
   type InboxRowDelivery,
 } from "@plannotator/core/inbox-types";
-import { INBOX_COMMENT_PICTURES_MAX, inboxCommentPicture, inboxCommentPictureUploads } from "@plannotator/core/inbox-types";
+import { INBOX_COMMENT_PICTURES_MAX, inboxCommentPicture, inboxCommentPictureUploads, inboxRuntimeNamed } from "@plannotator/core/inbox-types";
 import { inboxListSections, inboxRowDraftOnly, inboxRowUnread, inboxSectionOf } from "./list";
 import { inboxProjectLabels } from "./project-name";
 import { sameInboxSend } from "./send-same";
@@ -168,8 +169,7 @@ import {
   type InboxInlineImage,
   type InboxLiveSiteRef,
 } from "@plannotator/core/inbox-types";
-import { applyReplyDraftFileOps, replyDraftFileIdsSeenBy, replyDraftFilesAfterSave, settleReplyDraftAfterSend } from "@plannotator/core/inbox-reply-draft";
-import { remapReplyMentions } from "@plannotator/core/inbox-thread-mention";
+import { checkReplyDraftConflict, projectReplyDraft, replyDraftFilesAfter, settleReplyDraftAfterSend } from "@plannotator/core/inbox-reply-draft";
 import type { InboxReplyMention } from "@plannotator/core/inbox-types";
 import { isLineRangeInPatch, parseDiffToFiles, type DiffFile } from "@plannotator/core/diff-files";
 import { inboxBlobPath, inboxBlobSizes, removeUnusedInboxBlobs } from "./attachments";
@@ -179,7 +179,7 @@ import { DECISION_LINES_FILE, decisionLinesOf, type DecisionDataInput } from "./
 import type { DecisionExportInput } from "./decision-export";
 import { inboxDraftsBytes } from "./drafts";
 import { pruneInboxAsks } from "./ask";
-import { checkInboxReplyDraftInput, type InboxReplyDraftInput, inboxReplyDraftFileIds, readInboxReplyDrafts, removeInboxReplyDraft, sameInboxUploadIds, writeInboxReplyDraft } from "./reply-drafts";
+import { checkInboxReplyDraftInput, type InboxReplyDraftInput, inboxReplyDraftFileIds, inboxReplyDraftKey, readInboxReplyDrafts, removeInboxReplyDraft, writeInboxReplyDraft } from "./reply-drafts";
 import { checkInboxPinOrder, checkInboxPinRestore, readInboxPins, writeInboxPins } from "./pins";
 import { isInboxArtifactKey, readInboxArtifactPins, writeInboxArtifactPins } from "./artifact-pins";
 import { inboxThreadArtifactRefs, type InboxArtifactPin, type InboxArtifactRef } from "@plannotator/core/inbox-artifact-pins";
@@ -463,7 +463,7 @@ export interface InboxReplyInput {
   author_only?: boolean;
   /**
    * A skill emoji pressed in the reaction tray (approval "inbox-reactions-every-message"): `{ emoji, skill }`, kept on
-   * the reply (`InboxMessage.skill_reaction`) so the window draws it as one line. The words are the window's, exactly
+   * the reply (`InboxMessage.skill_reaction`) so the window reads its words as "🦃 /bro". The words are the window's, exactly
    * a typed `/<skill>` reply's; nothing here changes them. Anything but one emoji and a skill name is a `422`.
    */
   skill_reaction?: unknown;
@@ -969,6 +969,12 @@ export class InboxStore {
    */
   private readonly replyDraftRemovals = new Map<string, Map<string, string>>();
   /**
+   * Per thread, the idempotency key of the save that made its reply draft (a linked machine's, through the door; the
+   * draft file's `last_key`). One key, written over by every save, gone with the draft: a replay of that save (its
+   * answer lost) is answered with the draft as it is, nothing written again (`saveReplyDraft`).
+   */
+  private readonly replyDraftKeys = new Map<string, string>();
+  /**
    * The threads pinned to the window's sidebar, in pin order (pins.ts,
    * approval "inbox-pinned-threads"): a file outside the event log, read at
    * load. Read by nothing that routes, lists or answers an agent.
@@ -1118,7 +1124,11 @@ export class InboxStore {
     this.seq = Math.max(this.seq, contents.seqFloor);
     this.replyDrafts.clear();
     this.replyDraftRemovals.clear();
-    for (const [threadId, draft] of readInboxReplyDrafts(this.dir)) this.replyDrafts.set(threadId, draft);
+    this.replyDraftKeys.clear();
+    for (const [threadId, { draft, lastKey }] of readInboxReplyDrafts(this.dir)) {
+      this.replyDrafts.set(threadId, draft);
+      if (lastKey) this.replyDraftKeys.set(threadId, lastKey);
+    }
     const lines = contents.lines;
     lines.sort((a, b) => a.seq - b.seq);
     for (const line of lines) this.apply(line);
@@ -2679,8 +2689,11 @@ export class InboxStore {
       ...(messages.filter((m) => m.guide != null).at(-1)?.guide?.walkthrough ? { guide_walkthrough: true } : {}),
       last_agent_at: lastAgentAt,
       ...(root.started_by_person && root.to ? { addressee: { host: root.to.host, session: root.to.session } } : {}),
-      ...(participants.length > 1 ? { participants } : {}),
-      ...(participants.length > 1 && lastAgent?.author.kind === "agent" ? { last_agent: { host: lastAgent.author.host, ...(lastAgent.author.name ? { name: lastAgent.author.name } : {}) } } : {}),
+      // One session too when a script's post started the thread (`inboxScriptAuthor`; it has no session of its own):
+      // the window draws that session, not the script, once it took the thread over (packages/inbox/scriptAuthor.ts).
+      ...(participants.length > 1 || (participants.length === 1 && inboxScriptAuthor(root.author)) ? { participants } : {}),
+      // With one agent too when its name is not its host's ("Oh My Pi" on a `pi` session): the held line names it so.
+      ...(lastAgent?.author.kind === "agent" && (participants.length > 1 || inboxRuntimeNamed(lastAgent.author.host, lastAgent.author.name)) ? { last_agent: { host: lastAgent.author.host, ...(lastAgent.author.name ? { name: lastAgent.author.name } : {}) } } : {}),
       // What the Stopped / Holds up badge holds (approval "inbox-row-badges"): the window's hover card.
       ...(waits.length > 0 ? { waits } : {}),
     };
@@ -2906,6 +2919,8 @@ export class InboxStore {
         at: deliveredAt,
         host: author?.host ?? null,
         name: author?.name ?? null,
+        // A script's post (no session, host or name): the window names it "Script" (packages/inbox/scriptAuthor.ts).
+        ...(inboxScriptAuthor(author) ? { script: true as const } : {}),
         ...(decision.state === "delivered" && sent?.read_by ? { read_by: sent.read_by } : {}),
         ...(decision.reason === "ended" && askingAuthor ? { asking: { host: askingAuthor.host ?? null, name: askingAuthor.name ?? null } } : {}),
         ...waitWire(decision),
@@ -2917,7 +2932,7 @@ export class InboxStore {
     const target = lastReal;
     const ack = target.ack;
     if (target.author.kind !== "agent" || !ack || ack.not_sent) return null;
-    const base = { kind: "ack" as const, message_id: target.id, host: target.author.host ?? null, name: target.author.name ?? null, send_now: false };
+    const base = { kind: "ack" as const, message_id: target.id, host: target.author.host ?? null, name: target.author.name ?? null, send_now: false, ...(inboxScriptAuthor(target.author) ? { script: true as const } : {}) };
     const deliveredAt = this.ackDeliveredAt(ack);
     const note = ack.note_id ? this.messages.get(ack.note_id) : undefined;
     if (deliveredAt) {
@@ -6030,20 +6045,31 @@ export class InboxStore {
 
   /**
    * The files the person ticked Viewed in a review (code review in the Inbox):
-   * each a file of the review's patch, once, in the order given. No write
-   * when nothing changed. Only on a message whose guide is a review.
+   * each a file of the review's patch, once. Either one file's tick (`path`
+   * and `viewed` true or false), laid over what is kept, so a tick held for a
+   * while never undoes another one made since; or the whole list (`viewed`, a
+   * list, in its order; an older window's). No write when nothing changed.
+   * Only on a message whose guide is a review.
    */
-  saveGuideViewed(messageId: string, viewed: unknown, files: readonly string[]): string[] {
+  saveGuideViewed(messageId: string, viewed: unknown, files: readonly string[], path?: unknown): string[] {
     const message = this.messages.get(messageId);
     if (!message) throw new InboxError("message_not_found", `No message ${messageId}.`);
     if (!message.guide?.review) throw new InboxError("guide_not_found", "This message carries no review.");
-    if (!Array.isArray(viewed) || viewed.some((value) => typeof value !== "string")) {
-      throw new InboxError("validation_error", "viewed: a list of the review's file paths.", { field: "viewed" });
-    }
     const known = new Set(files);
-    const unknown = (viewed as string[]).find((path) => !known.has(path));
-    if (unknown !== undefined) throw new InboxError("validation_error", `viewed: ${JSON.stringify(unknown)} is not a file of this review.`, { field: "viewed" });
-    const next = [...new Set(viewed as string[])];
+    let next: string[];
+    if (path !== undefined) {
+      if (typeof path !== "string" || !known.has(path)) throw new InboxError("validation_error", `path: ${JSON.stringify(path)} is not a file of this review.`, { field: "path" });
+      if (typeof viewed !== "boolean") throw new InboxError("validation_error", "viewed: true or false for that file.", { field: "viewed" });
+      const kept = (message.guide_viewed ?? []).filter((one) => one !== path);
+      next = viewed ? [...kept, path] : kept;
+    } else {
+      if (!Array.isArray(viewed) || viewed.some((value) => typeof value !== "string")) {
+        throw new InboxError("validation_error", "viewed: a list of the review's file paths.", { field: "viewed" });
+      }
+      const unknown = (viewed as string[]).find((one) => !known.has(one));
+      if (unknown !== undefined) throw new InboxError("validation_error", `viewed: ${JSON.stringify(unknown)} is not a file of this review.`, { field: "viewed" });
+      next = [...new Set(viewed as string[])];
+    }
     if (JSON.stringify(next) !== JSON.stringify(message.guide_viewed ?? [])) {
       const at = this.stamp();
       this.appendMessage({ ...message, guide_viewed: next }, at);
@@ -6858,6 +6884,13 @@ export class InboxStore {
     return this.replyDrafts.get(threadId) ?? null;
   }
 
+  /** The draft the save under `input`'s key made, while it is still the draft (null: not that save's, or no key). */
+  replyDraftSavedBy(threadId: string, input: { idempotency_key?: unknown }): InboxReplyDraft | null {
+    const key = inboxReplyDraftKey(input);
+    const draft = this.replyDrafts.get(threadId);
+    return key !== null && draft && this.replyDraftKeys.get(threadId) === key ? draft : null;
+  }
+
   /**
    * Save the reply box's words for a thread (a compare-and-set on
    * `updated_at`: `base` is the `updated_at` the writer last read, null to
@@ -6871,63 +6904,34 @@ export class InboxStore {
   ): InboxReplyDraft | null {
     const root = this.messages.get(threadId);
     if (!root || root.thread_id !== threadId) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
+    // The same save again (its answer was lost): the draft it made, as it is. Nothing is written, nothing is told.
+    const replayed = this.replyDraftSavedBy(threadId, input);
+    if (replayed) return replayed;
     const { body, base, baseBody, files: incoming, baseFiles, allFiles, ops, recipients: given, quote, mentions } = checkInboxReplyDraftInput(this.dir, input);
     const existing = this.replyDrafts.get(threadId) ?? null;
-    if (ops) {
-      // This Inbox's page: the box's file changes, applied to the files as they are now (another window's stay).
-      // Only the words are compared: a file change elsewhere never refuses this save.
-      const ownWords = baseBody !== null && existing !== null && existing.body === baseBody;
-      if ((existing?.updated_at ?? null) !== base && !ownWords) {
-        throw new InboxError(
-          "draft_conflict",
-          existing ? "This reply changed in another window since you opened it." : "This reply's draft was discarded or sent in another window.",
-          { draft: existing },
-        );
-      }
-      // A save a step behind (its own words, `base_body`) adds no file the draft lost since the version it names:
-      // another window took it out after this page's earlier save of it landed (its answer lost), so the add is
-      // that save's, sent again, not a new one.
-      const removals = existing && existing.updated_at !== base ? this.replyDraftRemovals.get(threadId) : undefined;
-      const add = removals ? ops.add.filter((file) => !((removals.get(file.upload_id) ?? "") > (base ?? ""))) : ops.add;
-      // Words changed: another window's long paste this save does not place moves with them.
-      const after = applyReplyDraftFileOps(existing?.files ?? [], { ...ops, add }, existing ? { from: existing.body, to: body } : undefined);
-      if (body.trim() === "" && after.length === 0) {
-        this.deleteReplyDraft(threadId);
-        return null;
-      }
-      return this.writeReplyDraft(threadId, existing, body, after, given, quote, mentions);
-    }
-    // An older page (no `all_files`) names long pastes only: the draft's other files stay (a file it does not know
-    // is never dropped by it).
-    const files = replyDraftFilesAfterSave(existing?.files ?? [], incoming, allFiles);
-    // `base_body`: the words this window wrote last. A save sent as the page goes may carry a base read
-    // before that write's answer came back; the draft still holding those words is the window's own.
-    // With `base_files` (the files it wrote last), the draft must hold those too: the compare covers both.
-    // A file a Send carried since is no upload any more and left every draft (`dropSentUploadsFromReplyDrafts`):
-    // the window that still names it is not told apart by it.
-    const existingIds = replyDraftFileIdsSeenBy(existing?.files ?? [], allFiles);
-    const ownWords =
-      baseBody !== null &&
-      existing !== null &&
-      existing.body === baseBody &&
-      (baseFiles === null ||
-        sameInboxUploadIds(
-          existingIds,
-          baseFiles.filter((id) => existingIds.includes(id) || readInboxUpload(this.dir, id) !== null),
-        ));
-    if ((existing?.updated_at ?? null) !== base && !ownWords) {
-      throw new InboxError(
-        "draft_conflict",
-        existing ? "This reply changed in another window since you opened it." : "This reply's draft was discarded or sent in another window.",
-        { draft: existing },
-      );
-    }
+    // The compare-and-set (@plannotator/core/inbox-reply-draft, one set of rules with a linked machine's held draft).
+    // A page's file changes: only the words are compared, a file change elsewhere never refuses this save. A whole
+    // list (`base_files`): the draft must hold those files too; a file a Send carried since is no upload any more and
+    // left every draft (`dropSentUploadsFromReplyDrafts`), so the window that still names it is not told apart by it.
+    const conflict = checkReplyDraftConflict(existing, { base, baseBody, baseFiles, allFiles, ops: ops !== null }, (id) => readInboxUpload(this.dir, id) !== null);
+    if (conflict) throw new InboxError("draft_conflict", conflict, { draft: existing });
+    // A save a step behind (its own words, `base_body`) adds no file the draft lost since the version it names:
+    // another window took it out after this page's earlier save of it landed (its answer lost), so the add is
+    // that save's, sent again, not a new one. An older page (no `all_files`) names long pastes only: the draft's
+    // other files stay (a file it does not know is never dropped by it).
+    const removals = ops && existing && existing.updated_at !== base ? this.replyDraftRemovals.get(threadId) : undefined;
+    const files = replyDraftFilesAfter(
+      existing,
+      existing?.files ?? [],
+      body,
+      ops ? { ops: { ...ops, add: removals ? ops.add.filter((file) => !((removals.get(file.upload_id) ?? "") > (base ?? ""))) : ops.add } } : { files: incoming, allFiles },
+    );
     // Nothing left: no words and no file kept beside them.
     if (body.trim() === "" && files.length === 0) {
       this.deleteReplyDraft(threadId);
       return null;
     }
-    return this.writeReplyDraft(threadId, existing, body, files, given, quote, mentions);
+    return this.writeReplyDraft(threadId, existing, body, files, given, quote, mentions, inboxReplyDraftKey(input));
   }
 
   /**
@@ -6935,6 +6939,7 @@ export class InboxStore {
    * goes to as the save names it (the recipient pill; empty: none chosen); null keeps the draft's own. `quote`: the
    * message the reply quotes; null takes it away, undefined keeps the draft's own. `mentions`: the threads mentioned
    * in the words; undefined keeps the draft's own that still stand once its words become these (remapped, never matched).
+   * `key`: the save's idempotency key, kept on the draft (`last_key`); null (a save with none, a Send's change) clears it.
    */
   private writeReplyDraft(
     threadId: string,
@@ -6944,28 +6949,15 @@ export class InboxStore {
     recipients: readonly string[] | null = null,
     quote: InboxReplyQuote | null | undefined = undefined,
     mentions: readonly InboxReplyMention[] | undefined = undefined,
+    key: string | null = null,
   ): InboxReplyDraft {
-    const at = this.stamp();
-    // Strictly later than the last save, so a compare-and-set within one millisecond still tells the two apart.
-    const updatedAt = existing && at <= existing.updated_at ? new Date(Date.parse(existing.updated_at) + 1).toISOString() : at;
-    const draft: InboxReplyDraft = {
-      v: 1,
-      thread_id: threadId,
-      body,
-      created_at: existing?.created_at ?? at,
-      updated_at: updatedAt,
-      ...(files.length > 0 ? { files: [...files] } : {}),
-    };
-    const aimed = recipients ?? existing?.recipients ?? [];
-    if (aimed.length > 0) draft.recipients = [...aimed];
-    // The quote (approval "inbox-reply-quote"): a save that names one sets it, `null` takes it away, absent keeps it.
-    const quoted = quote === undefined ? (existing?.quote ?? null) : quote;
-    if (quoted) draft.quote = { ...quoted };
-    // The mentions (approval "inbox-drag-threads"): a save that names them sets them; absent, the draft's own move with its words.
-    const mentioned = mentions ?? remapReplyMentions(existing?.mentions ?? [], existing?.body ?? "", body);
-    if (mentioned.length > 0) draft.mentions = mentioned.map((m) => ({ ...m }));
-    writeInboxReplyDraft(this.dir, draft);
+    // Strictly later than the last save, so a compare-and-set within one millisecond still tells the two apart. The
+    // quote (approval "inbox-reply-quote") and the mentions (approval "inbox-drag-threads") as `projectReplyDraft` says.
+    const draft = projectReplyDraft(threadId, existing, { body, files, recipients, quote, mentions }, this.stamp());
+    writeInboxReplyDraft(this.dir, draft, key);
     this.replyDrafts.set(threadId, draft);
+    if (key) this.replyDraftKeys.set(threadId, key);
+    else this.replyDraftKeys.delete(threadId);
     this.changes += 1;
     this.noteReplyDraftRemovals(threadId, existing, draft);
     this.replyDraftChanged(threadId);
@@ -7036,8 +7028,10 @@ export class InboxStore {
 
   /** Drop a thread's reply draft (Discard); true when there was one. */
   deleteReplyDraft(threadId: string): boolean {
-    // Gone whole: a draft made again later starts with no removals (a save against no draft adds every file it names).
+    // Gone whole: a draft made again later starts with no removals (a save against no draft adds every file it names),
+    // and with no key: a replay of a save before the Discard is the compare-and-set again.
     this.replyDraftRemovals.delete(threadId);
+    this.replyDraftKeys.delete(threadId);
     const had = this.replyDrafts.delete(threadId);
     this.changes += 1;
     const removed = removeInboxReplyDraft(this.dir, threadId) || had;
@@ -7271,6 +7265,7 @@ export class InboxStore {
       removeInboxReplyDraft(this.dir, threadId);
       this.replyDrafts.delete(threadId);
       this.replyDraftRemovals.delete(threadId);
+      this.replyDraftKeys.delete(threadId);
       this.changes += 1;
     }
     // So does its Ask AI conversation.

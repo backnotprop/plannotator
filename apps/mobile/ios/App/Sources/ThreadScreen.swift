@@ -187,9 +187,12 @@ struct ThreadScreen: View {
     }
   }
 
-  /// The agent the thread's lines name: the last one to write in it.
-  static func agentName(_ thread: InboxThread) -> String {
-    thread.messages.last { $0.author.kind == .agent }.map { Names.agent($0.author) } ?? PhoneWords.anAgent
+  /// The agent the thread's lines name: the last one to write in it. In a thread a script started, the one the
+  /// person's reply goes to, as the window's row names it (`ActionWords.rowRecipient`): the session that took it over,
+  /// even when the script posted again after it.
+  static func agentName(_ thread: InboxThread, row: InboxListRow?) -> String {
+    if let row, Names.isScript(row.author) { return ActionWords.rowRecipient(row) }
+    return thread.messages.last { $0.author.kind == .agent }.map { Names.agent($0.author) } ?? PhoneWords.anAgent
   }
 
   /// The cards the person can still act on, in thread order: what the thread lands on and what the jump visits.
@@ -412,7 +415,7 @@ struct ThreadScreen: View {
     .safeAreaInset(edge: .top, spacing: 0) {
       // The scroll view keeps what is on screen in place under the taller top: nothing is covered when a line
       // comes (a thread rests with its newest message's name row under the title bar, which says the same).
-      if let row { ThreadLines(row: row, agent: Self.agentName(thread), actions: actions) }
+      if let row { ThreadLines(row: row, agent: Self.agentName(thread, row: row), actions: actions) }
     }
     .safeAreaInset(edge: .bottom, spacing: 0) { foot(thread, row: row, items: items, waiting: waiting, proxy: proxy) }
     // A Send the computer refused: the person's words come back to the box, never lost.
@@ -435,7 +438,7 @@ struct ThreadScreen: View {
   /// The thread's foot: the archived line, or the reply box.
   @ViewBuilder private func foot(_ thread: InboxThread, row: InboxListRow?, items: OpenItems, waiting: [(id: String, open: Bool)], proxy: ScrollViewProxy) -> some View {
       if let row, ListRules.archived(row) {
-        ArchivedFoot(row: row, agent: Self.agentName(thread), actions: actions)
+        ArchivedFoot(row: row, agent: Self.agentName(thread, row: row), actions: actions)
           .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { foot = $0 }
       } else {
       Composer(session: session, id: id, thread: thread, words: $words, drafts: drafts, focused: $composing, items: items, inCard: keyboard && !composing, clearDraft: clearDraft, takeBack: takeBack, tell: { actions.tell(ActionWords.failed($0)) }) { card in

@@ -287,14 +287,14 @@ export function ToPicker({
             <div
               key={item.key}
               {...(asleep ? { role: 'option' as const, 'aria-selected': false, 'aria-disabled': 'true' as const } : props)}
-              aria-label={`${hostLabel(target.host)}${target.label ? `, ${target.label},` : ''} in ${target.project.name}, ${folder}${target.place ? `, ${target.place.line}` : started ? `, started ${started}` : ''}`}
+              aria-label={`${hostLabel(target.host, target.runtime)}${target.label ? `, ${target.label},` : ''} in ${target.project.name}, ${folder}${target.place ? `, ${target.place.line}` : started ? `, started ${started}` : ''}`}
               className={`ib-cp-opt${on ? ' ib-hl' : ''}`}
               data-compose-session={target.session}
               data-compose-project={target.project.name}
               data-compose-session-machine={item.machine.key}
             >
               <HostMark host={target.host} agent={target.session} />
-              <b className="ib-cp-oa">{hostLabel(target.host)}</b>
+              <b className="ib-cp-oa">{hostLabel(target.host, target.runtime)}</b>
               {target.label ? (
                 <Tip content={target.label} cut>
                   <span className="ib-cp-op" dir="auto" data-session-label="">

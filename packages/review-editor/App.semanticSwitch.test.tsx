@@ -114,7 +114,7 @@ afterEach(async () => {
 
 afterAll(() => resetStorageBackend());
 
-describe.if(hasDom)("Settings › Analysis › Semantic changes", () => {
+describe.if(hasDom)("Settings › Reviews › Semantic changes", () => {
   test("on: the Semantic diff row and the per-file sem slot show, and the engine runs", async () => {
     await mount();
     expect(document.querySelector("[data-semantic-diff-icon]")).not.toBeNull();
