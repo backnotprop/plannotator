@@ -488,6 +488,11 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 	let approvedPlanContent: string | null = null;
 	let checklistItems: ChecklistItem[] = [];
 	let savedState: SavedPhaseState | null = null;
+	// Model/thinking level Plannotator itself applied during the current phase.
+	// A restore must not overwrite a choice the user made after capture (#1722
+	// established this for /tree; plan approval and completion need it too).
+	let lastAppliedModel: { provider: string; id: string } | undefined;
+	let lastAppliedThinkingLevel: ThinkingLevel | undefined;
 	let phaseAddedTools: string[] = [];
 	let plannotatorConfig = {};
 	let justApprovedPlan = false;
@@ -700,6 +705,8 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 			model: ctx.model ? { provider: ctx.model.provider, id: ctx.model.id } : undefined,
 			thinkingLevel: pi.getThinkingLevel(),
 		};
+		lastAppliedModel = undefined;
+		lastAppliedThinkingLevel = undefined;
 	}
 
 	function persistState(): void {
@@ -727,16 +734,54 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 		const success = await pi.setModel(model);
 		if (!success) {
 			ctx.ui.notify(`Plannotator: no API key for ${ref.provider}/${ref.id}.`, "warning");
+			return;
 		}
+		lastAppliedModel = { provider: ref.provider, id: ref.id };
 	}
 
-	async function restoreSavedState(ctx: ExtensionContext): Promise<void> {
+	function sameModelRef(
+		a: { provider: string; id: string },
+		b: { provider: string; id: string },
+	): boolean {
+		return a.provider === b.provider && a.id === b.id;
+	}
+
+	/**
+	 * Restore the pre-phase model and thinking level, unless the user picked a
+	 * different model/level after the snapshot. A choice the user made during the
+	 * phase wins over the stale snapshot (#1722, extended to plan approval and
+	 * completion); Plannotator's own changes are recorded so a configured phase
+	 * model still restores normally.
+	 */
+	async function restoreSavedState(
+		ctx: ExtensionContext,
+		preserveUserModel = false,
+	): Promise<void> {
 		if (!savedState) return;
 
+		const currentModel = ctx.model
+			? { provider: ctx.model.provider, id: ctx.model.id }
+			: undefined;
 		if (savedState.model) {
-			await applyModelRef(savedState.model, ctx, "restore");
+			const modelUserChanged =
+				preserveUserModel &&
+				currentModel !== undefined &&
+				!sameModelRef(savedState.model, currentModel) &&
+				(lastAppliedModel === undefined || !sameModelRef(lastAppliedModel, currentModel));
+			if (!modelUserChanged) {
+				await applyModelRef(savedState.model, ctx, "restore");
+			}
 		}
-		pi.setThinkingLevel(savedState.thinkingLevel);
+		const currentThinking = pi.getThinkingLevel();
+		const thinkingUserChanged =
+			preserveUserModel &&
+			currentThinking !== savedState.thinkingLevel &&
+			(lastAppliedThinkingLevel === undefined ||
+				currentThinking !== lastAppliedThinkingLevel);
+		if (!thinkingUserChanged) {
+			pi.setThinkingLevel(savedState.thinkingLevel);
+			lastAppliedThinkingLevel = savedState.thinkingLevel;
+		}
 	}
 
 	function releaseAddedPhaseTools(): void {
@@ -754,12 +799,16 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 	 */
 	async function applyPhaseConfig(
 		ctx: ExtensionContext,
-		opts: { restoreSavedState?: boolean; applyModelSettings?: boolean } = {},
+		opts: {
+			restoreSavedState?: boolean;
+			applyModelSettings?: boolean;
+			preserveUserModel?: boolean;
+		} = {},
 	): Promise<void> {
 		const profile = getPhaseProfile();
 		const applyModelSettings = opts.applyModelSettings !== false;
 		if (applyModelSettings && opts.restoreSavedState !== false && savedState) {
-			await restoreSavedState(ctx);
+			await restoreSavedState(ctx, opts.preserveUserModel === true);
 		}
 
 		if (phase === "planning" || phase === "executing") {
@@ -800,6 +849,7 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 			// a level the running model does not support, so handing it one this
 			// build's types have not heard of yet is safe.
 			pi.setThinkingLevel(profile.thinking as ThinkingLevel);
+			lastAppliedThinkingLevel = profile.thinking as ThinkingLevel;
 		}
 
 		updateStatus(ctx);
@@ -877,7 +927,7 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 		todoProviderDisabled = false;
 
 		releaseAddedPhaseTools();
-		await restoreSavedState(ctx);
+		await restoreSavedState(ctx, true);
 		savedState = null;
 		updateStatus(ctx);
 		updateWidget(ctx);
@@ -1994,7 +2044,7 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 				approvedPlanContent = null;
 				phase = "executing";
 				framingDelivered = false;
-				await applyPhaseConfig(ctx, { restoreSavedState: true });
+				await applyPhaseConfig(ctx, { restoreSavedState: true, preserveUserModel: true });
 				pi.appendEntry("plannotator-execute", { lastSubmittedPath });
 				persistState();
 				justApprovedPlan = true;
@@ -2226,7 +2276,7 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 			}
 			phase = "executing";
 			framingDelivered = false;
-			await applyPhaseConfig(ctx, { restoreSavedState: true });
+			await applyPhaseConfig(ctx, { restoreSavedState: true, preserveUserModel: true });
 			pi.appendEntry("plannotator-execute", { lastSubmittedPath, approvedPlan: planContent });
 			persistState();
 
