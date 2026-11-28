@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { loadReviewFileContents } from '../utils/loadReviewFileContents';
 
 /** Both sides of one file as the server read them for the current diff. */
 export interface ReviewFileContents {
@@ -53,16 +54,10 @@ export function useFileContents({
     setStale(false);
     // Nothing to expand into: the patch is the whole content of the session.
     if (!enabled) return;
-    const params = new URLSearchParams({ path: filePath });
-    if (oldPath) params.set('oldPath', oldPath);
-    if (reviewBase) params.set('base', reviewBase);
-    if (reviewSnapshotId) params.set('snapshot', reviewSnapshotId);
-    fetch(`/api/file-content?${params}`, { signal: controller.signal })
-      .then(res => {
-        if (res.status === 409 && !controller.signal.aborted) setStale(true);
-        return res.ok ? res.json() : null;
-      })
-      .then((data: { oldContent: string | null; newContent: string | null } | null) => {
+    loadReviewFileContents(filePath, oldPath, reviewBase, reviewSnapshotId, controller.signal)
+      .then(({ status, contents: data }) => {
+        if (controller.signal.aborted) return;
+        if (status === 409) setStale(true);
         if (data && (data.oldContent != null || data.newContent != null)) {
           setFileContents({ forPath: filePath, old: data.oldContent, new: data.newContent });
         }
