@@ -95,6 +95,15 @@ describe("readPlanFile", () => {
 		expect(readPlanFile("plan.md", plan)).toBeNull();
 		expect(readPlanFile(42, plan)).toBeNull();
 	});
+
+	test("trusts a CRLF plan file against the same text with LF endings", () => {
+		const dir = realpathSync(makeTempDir("plannotator-plan-file-crlf-"));
+		const planPath = join(dir, "plan.md");
+		writeFileSync(planPath, plan.replaceAll("\n", "\r\n"));
+
+		expect(readPlanFile(planPath, plan)?.path).toBe(join(dir, "plan.md"));
+		expect(readPlanFile(planPath, plan.replace("evidence", "other"))).toBeNull();
+	});
 });
 
 describe("resolvePlanLinkedDoc", () => {
