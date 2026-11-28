@@ -11,6 +11,7 @@ import { FAN_OPTIONS, fanLayout, type FanOptions, type FanSpot } from './fanLayo
 import { focusBackTo } from './focusBack';
 import { PROJECT_FACE_LABEL, ProjectFaceMark, useAgentProjectTile } from './projectFace';
 import { useAgentTakesTiles } from './agentFaces';
+import { isImeCompositionKey } from '@plannotator/ui/utils/commentSubmitKey';
 
 /**
  * The face picker: a half-circle fan of an agent mark's faces round the mark, like a sundial's upper half laid on its
@@ -220,7 +221,7 @@ export function FaceFan({ anchor, open, openedBy, host, agent, name, face, sourc
     // Escape closes it wherever focus is (a fan opened by the pointer has none), and only it: the window's own Escape
     // (closing a thread) skips a used key.
     const onKey = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
+      if (event.key !== 'Escape' || isImeCompositionKey(event)) return;
       event.preventDefault();
       closeNow.current();
     };

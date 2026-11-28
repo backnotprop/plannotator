@@ -15,6 +15,7 @@ import { focusAfterSwap } from '@plannotator/ui/components/inbox-thread/SnoozeMe
 import { Icon } from '../icons';
 import { findTags, tagNamed, useThreadTags, type TagTarget, type ThreadTagsHost } from '../threadTags';
 import { TagIcon } from './InitiativePeek';
+import { isImeCompositionKey } from '@plannotator/ui/utils/commentSubmitKey';
 
 /** A thread's tags as a target: Add tag's list ticks, unticks and makes tags on it. */
 function threadTarget(host: ThreadTagsHost, threadId: string): TagTarget {
@@ -62,6 +63,7 @@ export function AddTagList({ threadId, target: given, onBack }: { threadId?: str
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'Escape') return;
     event.stopPropagation();
+    if (isImeCompositionKey(event)) return;
     if (event.key === 'ArrowDown') {
       event.preventDefault();
       body.current?.querySelector<HTMLElement>('[data-tag-pick], [data-tag-new]')?.focus({ preventScroll: true });

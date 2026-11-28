@@ -4,6 +4,7 @@ import { ToolbarState } from '../hooks/useAnnotationToolbar';
 import { useTabIndent } from '../hooks/useTabIndent';
 import { detectLanguage } from '../utils/detectLanguage';
 import { fileHighlightLanguage } from '../utils/highlightLanguage';
+import { holdsImeEscape } from '@plannotator/ui/utils/commentSubmitKey';
 
 interface SuggestionModalProps {
   filePath: string;
@@ -104,6 +105,7 @@ export const SuggestionModal: React.FC<SuggestionModalProps> = ({
               autoFocus
               spellCheck={false}
               onKeyDown={(e) => {
+                if (holdsImeEscape(e)) return;
                 if (e.key === 'Escape') {
                   onClose();
                 } else if (e.key === 'Tab') {

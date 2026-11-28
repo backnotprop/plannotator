@@ -1,5 +1,6 @@
 import React, { useLayoutEffect, useRef, useState } from 'react';
 import { isMac, isWindows, altKey } from '../../utils/platform';
+import { holdsImeEscape, isImeCompositionKey } from '../../utils/commentSubmitKey';
 import {
   type QuickLabel,
   DEFAULT_QUICK_LABELS,
@@ -189,6 +190,7 @@ export const QuickLabelsTab: React.FC = () => {
                   }}
                   onBlur={() => setEmojiDraft(key, null)}
                   onKeyDown={(e) => {
+                    if (holdsImeEscape(e)) return;
                     if (e.key === 'Escape' && emojiInvalid) {
                       e.preventDefault();
                       e.stopPropagation();
@@ -317,7 +319,8 @@ export const QuickLabelsTab: React.FC = () => {
                     aria-label={`AI instruction tip for ${name}`}
                     onChange={(e) => setEditingTipValue(e.target.value)}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter') saveTip(key);
+                      if (holdsImeEscape(e)) return;
+                      if (e.key === 'Enter' && !isImeCompositionKey(e)) saveTip(key);
                       if (e.key === 'Escape') {
                         e.preventDefault();
                         e.stopPropagation();

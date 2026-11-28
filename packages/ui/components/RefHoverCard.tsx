@@ -60,6 +60,7 @@ import { ProblemNotice } from './ProblemNotice';
 import { providedRefCardLabel, providedRefCardView } from '../utils/refCardProviders';
 import { RenderedMarkdown } from './RenderedMarkdown';
 import { tooltipContainerOf } from './HostTitle';
+import { isImeCompositionKey } from '../utils/commentSubmitKey';
 
 /** How long a hover or focus rests on a link before the card opens and its data is asked for. */
 export const REF_CARD_DELAY_MS = 400;
@@ -1137,7 +1138,7 @@ export function useRefHoverCards(
   useEffect(() => {
     if (!card) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
+      if (e.key !== 'Escape' || isImeCompositionKey(e)) return;
       // Used: the window's own Escape (closing a thread) skips it.
       e.preventDefault();
       e.stopPropagation();

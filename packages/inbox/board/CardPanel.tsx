@@ -30,6 +30,7 @@ import { OnceButton } from './OnceButton';
 import { RefMarkIcon } from './RefMark';
 import { CardInitiativeMenu } from './BoardFilter';
 import { cardAge, cardFoot, cardYou, columnChoices, historyWords, refState, sentTo, youThread } from './model';
+import { holdsImeEscape, isImeCompositionKey } from '@plannotator/ui/utils/commentSubmitKey';
 
 export interface CardPanelProps {
   card: InboxCardWire;
@@ -174,7 +175,7 @@ export function CardPanel(props: CardPanelProps) {
       aria-labelledby={headingId}
       data-card-panel={card.id}
       onKeyDown={(event) => {
-        if (event.key === 'Escape' && !event.defaultPrevented && !dropping) {
+        if (event.key === 'Escape' && !event.defaultPrevented && !dropping && !isImeCompositionKey(event)) {
           event.preventDefault();
           props.onClose();
         }
@@ -370,6 +371,7 @@ export function CardPanel(props: CardPanelProps) {
             // eslint-disable-next-line jsx-a11y/no-autofocus
             autoFocus
             onKeyDown={(event) => {
+              if (holdsImeEscape(event)) return;
               if (event.key === 'Escape') {
                 event.preventDefault();
                 event.stopPropagation();
@@ -596,6 +598,7 @@ function Notes({ card, onSave, text: render }: { card: InboxCardWire; onSave: (n
           rows={5}
           onChange={(event) => setText(event.target.value)}
           onKeyDown={(event) => {
+            if (holdsImeEscape(event)) return;
             if (event.key === 'Escape') {
               event.preventDefault();
               event.stopPropagation();

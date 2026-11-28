@@ -27,6 +27,7 @@ import { refuseRealClaudeConfig } from '../helpers/real-data-dir';
 import { markTourDecided } from '../helpers/tour-decided';
 import { installFakeClaude, type FakeClaude } from '../helpers/fake-claude';
 import { E2E_GROUP_TIP_SEEN, inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
+import { nextPostAnswer } from './page-answer';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -220,9 +221,9 @@ test('a linked worktree with everything: the warning circle, the details, and on
   await expect(details).toHaveCount(0);
 
   expect(projects()).toEqual({});
-  const answer = sendAnswer(page);
+  const answer = await nextPostAnswer<{ thread_id: string }>(page, '/api/inbox/messages');
   await button.click();
-  const sent = (await (await answer).json()) as { thread_id: string };
+  const sent = await answer();
   await expect(d).toHaveCount(0);
   await page.goto(`${world.url}#thread=${sent.thread_id}`);
   await page.reload();

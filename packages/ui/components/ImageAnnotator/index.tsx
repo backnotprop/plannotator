@@ -15,6 +15,7 @@ import {
   undoStroke,
   type StrokeHistoryState,
 } from './strokeHistory';
+import { holdsImeEscape, isImeCompositionKey } from '../../utils/commentSubmitKey';
 
 interface ImageAnnotatorProps {
   imageSrc: string;
@@ -286,12 +287,13 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
               value={name}
               onChange={(e) => setName(e.target.value)}
               onKeyDown={(e) => {
+                if (holdsImeEscape(e)) return;
                 if (e.key === 'Escape') {
                   e.preventDefault();
                   e.currentTarget.blur();
                   return;
                 }
-                if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                if (e.key === 'Enter' && !isImeCompositionKey(e)) {
                   e.preventDefault();
                   handleAccept();
                 }

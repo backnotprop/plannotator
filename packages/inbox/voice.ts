@@ -13,6 +13,7 @@ import { debugNote } from './debugLog';
 import { useTouchScreen } from './phone';
 import { microphoneUsable, microphoneWillPrompt, openVoiceRecorder } from './voiceRecorder';
 import { createVoiceSession, type VoiceDeps, type VoiceLate, type VoiceSession, type VoiceView } from './voiceSession';
+import { isImeCompositionKey } from '@plannotator/ui/utils/commentSubmitKey';
 
 /** How soon a computer that was not ready may be asked again without a person's press. */
 const RECHECK_MS = 30_000;
@@ -155,7 +156,7 @@ export function useVoiceSession(ownsEscape = true, late?: (outcome: VoiceLate, k
   useEffect(() => {
     if (!busy || !ownsEscape) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.isComposing) return;
+      if (event.key !== 'Escape' || isImeCompositionKey(event)) return;
       event.preventDefault();
       event.stopPropagation();
       session.cancel();
