@@ -45,6 +45,7 @@ interface ReviewSidebarProps {
   isOpen: boolean;
   onClose: () => void;
   presentation?: 'panel' | 'overlay';
+  closing?: boolean;
   activeTab: ReviewSidebarTab;
   onSelectTab?: (tab: ReviewSidebarTab) => void;
   extraTabs?: readonly ReviewSidebarExtraTab[];
@@ -275,6 +276,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
   onSelectTab,
   extraTabs = NO_EXTRA_TABS,
   presentation = 'panel',
+  closing = false,
   activeTab,
   annotations,
   files,
@@ -638,6 +640,10 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
   return (
     <aside
       data-pn-review-transient-overlay={presentation === 'overlay' || undefined}
+      data-pn-panel-side={presentation === 'overlay' ? 'right' : undefined}
+      data-pn-panel-state={presentation === 'overlay' ? closing ? 'closed' : 'open' : undefined}
+      aria-hidden={presentation === 'overlay' && closing || undefined}
+      inert={presentation === 'overlay' && closing || undefined}
       role={presentation === 'overlay' ? 'dialog' : undefined}
       aria-label={presentation === 'overlay' ? 'Review sidebar' : undefined}
       className={presentation === 'overlay'
