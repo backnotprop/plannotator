@@ -99,7 +99,7 @@ function Host({ threadId, uploader, recipients, skills, out }: { threadId: strin
         onPaste={() => {}}
         onClose={() => {}}
         quote={null}
-        quotedMessage={null}
+        quotedMessage={undefined}
         onRemoveQuote={() => {}}
         scrollRef={createRef<HTMLDivElement>()}
         replyText={replyText}
@@ -151,7 +151,7 @@ beforeEach(() => {
   resetSkillCatalogCache();
   setSkillCatalogTransport(async () => {
     catalogReads += 1;
-    return [{ name: 'write-better', root: 'user', description: 'Write it better.', humanOnly: false }];
+    return [{ name: 'write-better', root: 'universal', description: 'Write it better.', humanOnly: false }];
   });
 });
 
