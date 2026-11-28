@@ -82,14 +82,13 @@ export function quoteGitPath(value: string): string {
   return JSON.stringify(value);
 }
 
-function stripUnquotedPathMetadata(token: string): string {
-  if (token.startsWith('"')) return token;
+function stripPathMetadata(token: string): string {
   const tabIndex = token.indexOf("\t");
   return tabIndex === -1 ? token : token.slice(0, tabIndex);
 }
 
 export function parsePatchPathToken(token: string, side: "a" | "b"): string | null {
-  const pathToken = stripUnquotedPathMetadata(token);
+  const pathToken = stripPathMetadata(token);
   if (pathToken === "/dev/null") return "/dev/null";
   const unquoted = unquoteGitPath(pathToken);
   const prefix = `${side}/`;
