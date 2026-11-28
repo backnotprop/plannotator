@@ -725,6 +725,26 @@ ${SANDBOX_SHIM_SCRIPT}
     return text.slice(0, cut);
   }
 
+  var displayedContextAttributes = [];
+
+  function postWithDisplayedContext(message) {
+    // The parent validates the allowlist and validates the snapshot again.
+    // Cap at the source too, so a long attribute never crosses the frame boundary.
+    if (displayedContextAttributes.length && document.documentElement) {
+      var entries = [];
+      for (var i = 0; i < displayedContextAttributes.length; i++) {
+        var pair = displayedContextAttributes[i];
+        var value = document.documentElement.getAttribute(pair.attribute);
+        if (!value) continue;
+        if (value.length > 160) return postToParent(message);
+        entries.push({ key: pair.key, value: value });
+      }
+      var snapshot = { entries: entries };
+      if (entries.length && ctxBytes(snapshot) <= 2048) message.displayedContext = snapshot;
+    }
+    postToParent(message);
+  }
+
   function handleSelection(modeOverride, extras) {
     var sel = window.getSelection();
     if (!sel || sel.isCollapsed || !sel.rangeCount) {
@@ -761,7 +781,7 @@ ${SANDBOX_SHIM_SCRIPT}
       endOffset: range.endOffset
     };
 
-    postToParent({
+    postWithDisplayedContext({
       type: PREFIX + 'selection',
       text: text,
       modeOverride: modeOverride || undefined,
@@ -830,6 +850,19 @@ ${SANDBOX_SHIM_SCRIPT}
     // keep their own print behavior; no parent DOM access or sandbox change.
     if (!LIVE && type === PREFIX + 'print') {
       window.print();
+      return;
+    }
+
+    if (type === PREFIX + 'set-displayed-context') {
+      var attributes = e.data.attributes;
+      displayedContextAttributes = Array.isArray(attributes) && attributes.length <= 8 ? attributes : [];
+      return;
+    }
+    if (type === PREFIX + 'displayed-context-request') {
+      var contextId = e.data.id;
+      if (typeof contextId === 'string' && contextId.length > 0 && contextId.length <= 64) {
+        postWithDisplayedContext({ type: PREFIX + 'displayed-context', id: contextId });
+      }
       return;
     }
 
@@ -4407,7 +4440,7 @@ ${SANDBOX_SHIM_SCRIPT}
     var box = createMultiTargetBox(el);
     pendingMultiTargets.push({ key: key, el: el, anchor: anchor, label: label, text: text, point: point, context: context, box: box });
     schedulePinpointReconcile();
-    postToParent({
+    postWithDisplayedContext({
       type: PREFIX + 'multi-target-added',
       key: key,
       label: label,
@@ -4596,7 +4629,7 @@ ${SANDBOX_SHIM_SCRIPT}
     pendingSelection = { element: true };
     pendingRange = null;
     skipNextClear = true; // don't let this click's mouseup clear the toolbar we just opened
-    postToParent({ type: PREFIX + 'selection', text: elText,
+    postWithDisplayedContext({ type: PREFIX + 'selection', text: elText,
       modeOverride: modeOverride || undefined,
       anchor: pendingPinAnchor || undefined,
       pinpoint: !!viaPinpoint || undefined,

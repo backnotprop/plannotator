@@ -61,6 +61,17 @@ export interface HtmlAnnotationTarget {
   text: string;
   anchor?: HtmlElementAnchor;
   context?: HtmlElementContext;
+  displayedContext?: HtmlDisplayedContext;
+}
+
+/** Page-declared labels captured at the start of an HTML annotation. */
+export interface HtmlDisplayedContext {
+  entries: { key: string; value: string }[];
+}
+
+export interface HtmlDisplayedContextAttribute {
+  key: string;
+  attribute: string;
 }
 
 export interface HtmlElementContext {
@@ -134,6 +145,12 @@ export const MAX_HTML_ADDITIONAL_TARGETS = 16;
 export const DEFAULT_HTML_ANCHOR_MAX_BYTES = 16 * 1024;
 /** Serialized bound for one element context (2 KiB of UTF-8 JSON). */
 export const MAX_ELEMENT_CONTEXT_BYTES = 2048;
+export const MAX_DISPLAYED_CONTEXT_ENTRIES = 8;
+export const MAX_DISPLAYED_CONTEXT_KEY_LENGTH = 40;
+export const MAX_DISPLAYED_CONTEXT_ATTRIBUTE_LENGTH = 64;
+export const MAX_DISPLAYED_CONTEXT_VALUE_LENGTH = 160;
+export const MAX_DISPLAYED_CONTEXT_BYTES = 2048;
+
 /**
  * Cap for live-app page identity strings (mirrors the bridge's own slice).
  * The single definition: `@plannotator/ui`'s parent trust boundary imports
@@ -292,6 +309,54 @@ function contextBytes(value: unknown): number {
   return new TextEncoder().encode(JSON.stringify(value)).length;
 }
 
+function hasExactContextFields(value: unknown, fields: readonly string[]): value is Record<string, unknown> {
+  return isRecord(value) && !Array.isArray(value) && Object.keys(value).length === fields.length &&
+    fields.every((field) => Object.hasOwn(value, field));
+}
+
+function isDisplayedContextKey(key: unknown): key is string {
+  return typeof key === "string" && key.length <= MAX_DISPLAYED_CONTEXT_KEY_LENGTH &&
+    /^[a-z]/i.test(key) && !/[^a-z0-9_.-]/i.test(key);
+}
+
+/** Validate the entire host allowlist; an empty list disables capture. */
+export function parseHtmlDisplayedContextAttributes(value: unknown): HtmlDisplayedContextAttribute[] | undefined {
+  if (!Array.isArray(value) || value.length > MAX_DISPLAYED_CONTEXT_ENTRIES) return undefined;
+  const attributes = new Set<string>();
+  const keys = new Set<string>();
+  const result: HtmlDisplayedContextAttribute[] = [];
+  for (const entry of value) {
+    if (!hasExactContextFields(entry, ["key", "attribute"])) return undefined;
+    const { key, attribute } = entry;
+    if (!isDisplayedContextKey(key) || keys.has(key) || typeof attribute !== "string" ||
+        !attribute.startsWith("data-") || attribute.length <= 5 ||
+        attribute.length > MAX_DISPLAYED_CONTEXT_ATTRIBUTE_LENGTH ||
+        /[^a-z0-9_.:-]/.test(attribute) || attributes.has(attribute)) return undefined;
+    keys.add(key);
+    attributes.add(attribute);
+    result.push({ key, attribute });
+  }
+  return result;
+}
+
+/** Drop the entire snapshot if any entry or the serialized size is invalid. */
+export function parseHtmlDisplayedContext(value: unknown): HtmlDisplayedContext | undefined {
+  if (!hasExactContextFields(value, ["entries"]) || !Array.isArray(value.entries) ||
+      value.entries.length === 0 || value.entries.length > MAX_DISPLAYED_CONTEXT_ENTRIES) return undefined;
+  const keys = new Set<string>();
+  const entries: HtmlDisplayedContext["entries"] = [];
+  for (const entry of value.entries) {
+    if (!hasExactContextFields(entry, ["key", "value"])) return undefined;
+    const { key, value: label } = entry;
+    if (!isDisplayedContextKey(key) || keys.has(key) || typeof label !== "string" ||
+        label.length === 0 || label.length > MAX_DISPLAYED_CONTEXT_VALUE_LENGTH) return undefined;
+    keys.add(key);
+    entries.push({ key, value: label });
+  }
+  const snapshot = { entries };
+  return contextBytes(snapshot) <= MAX_DISPLAYED_CONTEXT_BYTES ? snapshot : undefined;
+}
+
 /**
  * Fields an over-budget context sheds, first to last; mirrors `CTX_SHED_ORDER`
  * in the bridge (a test keeps the two in step). `sourceName` goes last: the
@@ -406,6 +471,7 @@ export function parseHtmlAdditionalTargets(
     if (typeof text !== "string" || text.length === 0) continue;
     const parsedAnchor = parseHtmlElementAnchor(anchor);
     const parsedContext = parseHtmlElementContext(context);
+    const displayedContext = parseHtmlDisplayedContext(entry.displayedContext);
     const validLabel =
       typeof label === "string" && label.length > 0 && label.length <= MAX_HTML_TARGET_LABEL_LENGTH
         ? label
@@ -415,6 +481,7 @@ export function parseHtmlAdditionalTargets(
       text: truncateSurrogateSafe(text, MAX_HTML_TARGET_TEXT_LENGTH),
       ...(parsedAnchor !== null ? { anchor: parsedAnchor } : {}),
       ...(parsedContext !== undefined ? { context: parsedContext } : {}),
+      ...(displayedContext ? { displayedContext } : {}),
     });
   }
   return targets;
@@ -428,6 +495,7 @@ export interface PersistedHtmlAnchor {
   htmlAnchor?: HtmlElementAnchor;
   htmlAdditionalTargets?: HtmlAnnotationTarget[];
   elementContext?: HtmlElementContext;
+  displayedContext?: HtmlDisplayedContext;
 }
 
 export interface BuildPersistedHtmlAnchorOptions {
@@ -484,6 +552,7 @@ export function buildPersistedHtmlAnchor(
     htmlAnchor?: HtmlElementAnchor | null;
     htmlAdditionalTargets?: readonly HtmlAnnotationTarget[] | null;
     elementContext?: HtmlElementContext | null;
+    displayedContext?: HtmlDisplayedContext | null;
   },
   options: BuildPersistedHtmlAnchorOptions = {},
 ): PersistedHtmlAnchorResult {
@@ -493,10 +562,10 @@ export function buildPersistedHtmlAnchor(
   // enforced on what is written, not only on what is later read back.
   const htmlAnchor = parseHtmlElementAnchor(source.htmlAnchor) ?? undefined;
   let elementContext = parseHtmlElementContext(source.elementContext);
+  let displayedContext = parseHtmlDisplayedContext(source.displayedContext);
   const drafted = source.htmlAdditionalTargets ?? [];
-  // Kept-target key order is text, label, anchor, context: the order the reference
-  // host implementation persisted, so a stored anchor's serialization (and
-  // any fingerprint over it) does not change when a host adopts this helper.
+  // Keep the host's wire order: text, label, anchor, then optional contexts.
+  // New fields go last so existing serialized anchors and fingerprints do not change.
   let kept = drafted.slice(0, Math.max(0, maxTargets)).map((target) => {
     const entry: HtmlAnnotationTarget = {
       text: truncateSurrogateSafe(target.text, MAX_HTML_TARGET_TEXT_LENGTH),
@@ -508,6 +577,8 @@ export function buildPersistedHtmlAnchor(
     if (targetAnchor !== null) entry.anchor = targetAnchor;
     const targetContext = parseHtmlElementContext(target.context);
     if (targetContext !== undefined) entry.context = targetContext;
+    const targetDisplayedContext = parseHtmlDisplayedContext(target.displayedContext);
+    if (targetDisplayedContext) entry.displayedContext = targetDisplayedContext;
     return entry;
   });
   const capDroppedTargets = drafted.length - kept.length;
@@ -518,6 +589,7 @@ export function buildPersistedHtmlAnchor(
     ...(htmlAnchor !== undefined ? { htmlAnchor } : {}),
     ...(kept.length > 0 ? { htmlAdditionalTargets: kept } : {}),
     ...(elementContext !== undefined ? { elementContext } : {}),
+    ...(displayedContext ? { displayedContext } : {}),
   });
 
   let anchor = compose();
@@ -537,11 +609,11 @@ export function buildPersistedHtmlAnchor(
     }
   };
 
-  // Byte budget, exact over the serialized JSON, in four stages:
+  // Byte budget, exact over the serialized JSON:
   // 1. Quote down to its useful floor.
   truncateQuoteWhileOver(Math.min(MIN_USEFUL_QUOTE_LENGTH, originalText.length));
 
-  // 2. Shed contexts (per-target first from the end, then primary) before dropping targets.
+  // 2. Shed element contexts (per-target from the end, then primary).
   for (let i = kept.length - 1; i >= 0 && serializedAnchorBytes(anchor) > maxBytes; i--) {
     if (kept[i]?.context !== undefined) {
       const { context: _, ...rest } = kept[i]!;
@@ -554,13 +626,26 @@ export function buildPersistedHtmlAnchor(
     anchor = compose();
   }
 
-  // 3. Targets from the end.
+  // 3. Shed displayed contexts in the same order; these labels cannot be recaptured later.
+  for (let i = kept.length - 1; i >= 0 && serializedAnchorBytes(anchor) > maxBytes; i--) {
+    if (kept[i]?.displayedContext !== undefined) {
+      const { displayedContext: _, ...rest } = kept[i]!;
+      kept[i] = rest;
+      anchor = compose();
+    }
+  }
+  if (serializedAnchorBytes(anchor) > maxBytes && displayedContext !== undefined) {
+    displayedContext = undefined;
+    anchor = compose();
+  }
+
+  // 4. Targets from the end.
   while (serializedAnchorBytes(anchor) > maxBytes && kept.length > 0) {
     kept = kept.slice(0, kept.length - 1);
     anchor = compose();
   }
 
-  // 4. Rest of the quote (only reachable if the base anchor plus a floor-length quote alone
+  // 5. Rest of the quote (only reachable if the base anchor plus a floor-length quote alone
   // overflow, which validated bounds make unreachable with the default budget).
   truncateQuoteWhileOver(0);
   const sizeDroppedTargets =
@@ -582,6 +667,7 @@ export interface HostThread {
   htmlAdditionalTargets?: readonly HtmlAnnotationTarget[] | null;
   /** Agent-facing element context for the primary target. */
   elementContext?: HtmlElementContext | null;
+  displayedContext?: HtmlDisplayedContext | null;
   /** Thread state. Absent means the host has no state concept: the row is open. */
   state?: "open" | "resolved" | string;
   /** Optional presentational fields carried verbatim onto the projection. */
@@ -635,6 +721,7 @@ export interface ProjectedHostAnnotation {
   htmlAnchor?: HtmlElementAnchor;
   htmlAdditionalTargets?: HtmlAnnotationTarget[];
   elementContext?: HtmlElementContext;
+  displayedContext?: HtmlDisplayedContext;
 }
 
 /**
@@ -673,6 +760,7 @@ export function projectHostThreads(
     const htmlAnchor = parseHtmlElementAnchor(thread.htmlAnchor);
     const htmlAdditionalTargets = parseHtmlAdditionalTargets(thread.htmlAdditionalTargets, maxTargets);
     const elementContext = parseHtmlElementContext(thread.elementContext);
+    const displayedContext = parseHtmlDisplayedContext(thread.displayedContext);
     const originalText = typeof thread.originalText === "string" ? thread.originalText : "";
     const anchorless = originalText === "" && htmlAnchor === null;
     out.push({
@@ -689,6 +777,7 @@ export function projectHostThreads(
       ...(htmlAnchor !== null ? { htmlAnchor } : {}),
       ...(htmlAdditionalTargets.length > 0 ? { htmlAdditionalTargets } : {}),
       ...(elementContext !== undefined ? { elementContext } : {}),
+      ...(displayedContext ? { displayedContext } : {}),
     });
   }
   return out;

@@ -24,6 +24,8 @@ import {
   parseHtmlAnchorStructure,
   parseHtmlElementAnchor,
   parseHtmlElementContext,
+  parseHtmlDisplayedContext,
+  parseHtmlDisplayedContextAttributes,
   projectHostThreads,
   type HostThread,
 } from "./html-anchor";
@@ -69,6 +71,8 @@ describe("buildPersistedHtmlAnchor", () => {
     expect(JSON.stringify(result.anchor)).toBe(JSON.stringify(withoutContext));
     expect(Object.keys(result.anchor)).toEqual(["originalText", "htmlAnchor", "htmlAdditionalTargets"]);
     expect("elementContext" in result.anchor).toBe(false);
+    expect("displayedContext" in result.anchor).toBe(false);
+    expect("displayedContext" in result.anchor.htmlAdditionalTargets![0]!).toBe(false);
 
     // When elementContext IS present, it serializes strictly after htmlAdditionalTargets
     const withContext = {
@@ -76,6 +80,7 @@ describe("buildPersistedHtmlAnchor", () => {
       elementContext: { tag: "p", id: "lead-para" },
     };
     const resultWithContext = buildPersistedHtmlAnchor(withContext);
+    expect(JSON.stringify(resultWithContext.anchor)).toBe(JSON.stringify(withContext));
     expect(Object.keys(resultWithContext.anchor)).toEqual([
       "originalText",
       "htmlAnchor",
@@ -534,5 +539,92 @@ describe("parseHtmlElementAnchor: structural anchors", () => {
 
   test("an anchor without one is unchanged", () => {
     expect(parseHtmlElementAnchor({ selector: "#a", tagName: "p", text: "t" })).toEqual({ selector: "#a", tagName: "p", text: "t" });
+  });
+});
+
+const displayedState = (value: string) => ({ entries: [{ key: "state", value }] });
+
+describe("displayed context host contract", () => {
+  test("the allowlist is all-or-nothing, with unique keys and lowercase data attributes", () => {
+    const state = { key: "State.1_foo-bar", attribute: "data-demo-state" };
+    expect(parseHtmlDisplayedContextAttributes([state])).toEqual([state]);
+    for (const rejected of [
+      null, { entries: [state] }, [state, { ...state, attribute: "data-other" }],
+      [state, { ...state, key: "other" }],
+      ...["value", "data-Caps", "data-", "data-invalid name", "data-x\n", "data-" + "x".repeat(60)]
+        .map((attribute) => [{ ...state, attribute }]),
+      [{ ...state, unknown: true }],
+      Array.from({ length: 9 }, (_, i) => ({ key: `state${i}`, attribute: `data-state${i}` })),
+    ]) {
+      expect(parseHtmlDisplayedContextAttributes(rejected)).toBeUndefined();
+    }
+  });
+
+  test("a valid snapshot is neither normalized nor clipped; one bad entry drops the whole snapshot", () => {
+    const valid = { entries: [{ key: "s".repeat(40), value: ` ${"a".repeat(158)} ` }] };
+    expect(parseHtmlDisplayedContext(valid)).toEqual(valid);
+    const state = { key: "state", value: "empty" };
+    for (const rejected of [
+      null, [], {}, { entries: [] }, { ...valid, extra: true },
+      { entries: [state, { ...state, value: "full" }] },
+      ...["", "0state", "bad/key", "state\n", "k".repeat(41)].map((key) => ({ entries: [{ ...state, key }] })),
+      ...[null, 42, "", "x".repeat(161)].map((value) => ({ entries: [{ ...state, value }] })),
+      { entries: [{ ...state, extra: true }] },
+      { entries: Array.from({ length: 9 }, (_, i) => ({ ...state, key: `s${i}` })) },
+      { entries: Array.from({ length: 5 }, (_, i) => ({ key: `s${i}`, value: "界".repeat(160) })) },
+    ]) {
+      expect(parseHtmlDisplayedContext(rejected)).toBeUndefined();
+    }
+  });
+
+  const anchor = { selector: "#cart", tagName: "main" };
+  const displayRow = {
+    originalText: "Cart",
+    htmlAnchor: anchor,
+    htmlAdditionalTargets: [
+      { text: "Cart title", label: "Heading", anchor, context: { tag: "main" }, displayedContext: displayedState("full") },
+      { text: "Cart total", label: "Text", anchor, context: { tag: "span" }, displayedContext: displayedState("loading") },
+    ],
+    elementContext: { tag: "main" },
+    displayedContext: displayedState("empty"),
+  };
+
+  test("persist and project both context kinds without changing the existing serialized key order", () => {
+    const { anchor: stored } = buildPersistedHtmlAnchor(displayRow);
+    expect(JSON.stringify(stored)).toBe(JSON.stringify(displayRow));
+    const [projected] = projectHostThreads([{ id: "cart", ...stored }]);
+    expect(projected).toMatchObject(displayRow);
+    expect(JSON.stringify(buildPersistedHtmlAnchor(projected!).anchor)).toBe(JSON.stringify(stored));
+    expect(projectHostThreads([{ id: "global", originalText: "", displayedContext: displayedState("empty") }])[0])
+      .toMatchObject({ type: "GLOBAL_COMMENT", displayedContext: displayedState("empty") });
+  });
+
+  test("byte budget sheds element context, then displayed context, before it sheds a target", () => {
+    const source = { ...displayRow, originalText: "q".repeat(450) };
+    const afterQuote = { ...source, originalText: "q".repeat(400) };
+    const [first, last] = afterQuote.htmlAdditionalTargets;
+    const { context: _firstElement, ...firstNoElement } = first!;
+    const { context: _lastElement, ...lastNoElement } = last!;
+    const { elementContext: _primaryElement, ...noPrimaryElement } = afterQuote;
+    const { displayedContext: _firstState, ...firstNoState } = firstNoElement;
+    const { displayedContext: _lastState, ...lastNoState } = lastNoElement;
+    const { displayedContext: _primaryState, ...noPrimaryState } = noPrimaryElement;
+    const ordered = [
+      afterQuote,
+      { ...afterQuote, htmlAdditionalTargets: [first!, lastNoElement] },
+      { ...afterQuote, htmlAdditionalTargets: [firstNoElement, lastNoElement] },
+      { ...noPrimaryElement, htmlAdditionalTargets: [firstNoElement, lastNoElement] },
+      { ...noPrimaryElement, htmlAdditionalTargets: [firstNoElement, lastNoState] },
+      { ...noPrimaryElement, htmlAdditionalTargets: [firstNoState, lastNoState] },
+      { ...noPrimaryState, htmlAdditionalTargets: [firstNoState, lastNoState] },
+      { ...noPrimaryState, htmlAdditionalTargets: [firstNoState] },
+    ];
+    for (const expected of ordered) {
+      const result = buildPersistedHtmlAnchor(source, { maxBytes: bytes(expected) });
+      expect(result.anchor).toEqual(expected);
+      expect(result.droppedTargets).toBe(2 - expected.htmlAdditionalTargets.length);
+      expect(result.sizeDroppedTargets).toBe(result.droppedTargets);
+      expect(result.capDroppedTargets).toBe(0);
+    }
   });
 });

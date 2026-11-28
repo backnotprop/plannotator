@@ -2480,3 +2480,32 @@ describe("exportAnnotations — element context (raw-HTML / live-app pinpoints)"
     expect(uiParseHtmlElementContext).toBe(coreParseHtmlElementContext);
   });
 });
+
+
+describe("displayed context in HTML feedback", () => {
+  test("primary and extra-target labels stay on escaped lines under their own targets", () => {
+    const annotation = {
+      blockId: "", startOffset: 0, endOffset: 0, originalText: "Cart", text: "Clarify this", type: "COMMENT",
+      displayedContext: { entries: [{ key: "screen", value: "cart" }, { key: "state", value: "empty`\n# Heading <img>" }] },
+      htmlAdditionalTargets: [
+        { text: "Cart total", displayedContext: { entries: [{ key: "state", value: "full" }] } },
+        { text: "Untouched" },
+      ],
+    };
+    for (const output of [exportAnnotationEntry(annotation), exportAnnotations([], [annotation])]) {
+      expect(output).toContain("\n- **Displayed context:** `screen: cart` · `state: empty' # Heading <img>`\n");
+      expect(output).toContain('- "Cart total"\n  - **Displayed context:** `state: full`\n- "Untouched"');
+      expect(output).not.toContain("\n# Heading");
+    }
+  });
+
+  test("global feedback keeps its context; missing or invalid context adds no bytes", () => {
+    const base = { blockId: "", startOffset: 0, endOffset: 0, originalText: "", text: "Cart feedback", type: "GLOBAL_COMMENT" };
+    const global = { ...base, displayedContext: { entries: [{ key: "state", value: "empty" }] } };
+    expect(exportAnnotationEntry(base)).toBe("General feedback\n> Cart feedback\n");
+    expect(exportAnnotationEntry({ ...base, displayedContext: { entries: [{ key: "state", value: 42 }] } }))
+      .toBe(exportAnnotationEntry(base));
+    expect(exportAnnotationEntry(global)).toContain("> Cart feedback\n\n- **Displayed context:** `state: empty`\n");
+    expect(exportAnnotations([], [global])).toContain("> Cart feedback\n\n- **Displayed context:** `state: empty`\n");
+  });
+});

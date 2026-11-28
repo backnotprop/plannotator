@@ -136,6 +136,25 @@ Hover cards beyond GitHub and GitLab, added for the Inbox's Linear cards (#3063)
 
 Requires `@plannotator/markdown-editor ^0.4.0` and `@plannotator/atomic-editor ^0.8.0` (which adds a `@codemirror/merge` peer — declared by this package). See HANDOFF.md § "Frozen markdown diff (0.28.0)".
 
+### Displayed context on HTML comments
+
+Pass `HtmlViewer` a `displayedContextAttributes` list to capture labels from the
+framed page's `<html>` element. For example, pass
+`[{ key: "state", attribute: "data-demo-state" }]` for a page that sets
+`<html data-demo-state="empty">`. The annotation includes
+`displayedContext: { entries: [{ key: "state", value: "empty" }] }`. The page
+updates the attribute when its state changes. Plannotator does not infer state.
+
+A selection or pin captures its labels when made, including each shift-clicked
+target. A reopened target draft keeps its original snapshot. A global comment
+captures when its composer opens, even when it restores kept words. Saving never
+waits for a snapshot. The same prop works on inline HTML, a `bridgeScriptUrl`
+asset, and a live frame. Omit the prop to keep capture off.
+
+Labels are page-controlled descriptions, not proof of state. See [Displayed
+context through the host seam](HANDOFF.md#displayed-context-through-the-host-seam)
+for the host example, validation limits, and persistence rules.
+
 ### Raw-HTML annotation viewer (`HtmlViewer`)
 
 `components/html-viewer` is supported host surface as of 0.29.0: the overlay-projection annotation viewer for raw HTML (placed comment markers, pinpoint element anchors, shift-click multi-target comments). Its contract is **props plus the validated iframe message protocol** — not `configurePlannotatorUI()`, which only governs the backend surfaces around it. Drive the `annotations` prop (marker numbering derives from its array order); `readOnly` keeps markers painted and clickable while disabling all authoring. **0.29.0 also carries a breaking migration:** highlight.js is gone and `.hljs` selectors are inert — style code via the exported `pn-code` class (`CODE_BLOCK_CLASS` in `utils/codeHighlight`). See HANDOFF.md § "Raw-HTML annotation viewer + syntax-highlighting migration (0.29.0)" before upgrading from 0.28.0.

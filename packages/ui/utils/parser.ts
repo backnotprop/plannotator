@@ -1,6 +1,7 @@
 import type { Block, Annotation, CodeAnnotation, EditorAnnotation, ImageAttachment } from '../types';
 import { attachedLines } from './attachedLines';
 import { planDenyFeedback } from '@plannotator/core/feedback-templates';
+import { parseHtmlDisplayedContext } from '@plannotator/core/html-anchor';
 import { resolveReplyParents } from '@plannotator/core/annotation-threads';
 import { diagramAnchorLocationLine, parseDiagramAnchor } from '@plannotator/core/diagram-anchor';
 import { imageRegionLocationLines, parseImageRegion, type ImageRegion } from '@plannotator/core/image-region';
@@ -1071,6 +1072,13 @@ export const elementContextExportBlock = (ann: any, opts: ElementContextExportOp
   return block;
 };
 
+const displayedContextExportLine = (value: unknown, prefix = '\n'): string => {
+  const context = parseHtmlDisplayedContext(value);
+  if (!context) return '';
+  const entries = context.entries.map(({ key, value }) => `\`${key}: ${safeInline(value)}\``);
+  return `${prefix}- **Displayed context:** ${entries.join(' · ')}\n`;
+};
+
 /** Multi-target raw-HTML comments: list every ADDITIONAL element the one
  *  comment covers (the primary target is already quoted as `originalText`),
  *  labeled with the semantic hover label plus a short excerpt so the agent
@@ -1108,6 +1116,7 @@ export const additionalTargetsExportBlock = (ann: any): string => {
       if (typeof path === 'string' && path) locators.push(`\`${safeInline(path, 512)}\``);
     }
     block += `- ${label}"${clipped}"${locators.length ? ` — ${locators.join(' · ')}` : ''}\n`;
+    block += displayedContextExportLine(target?.displayedContext, '  ');
   });
   return block;
 };
@@ -1210,6 +1219,7 @@ export const exportAnnotationEntry = (ann: any, opts: ElementContextExportOption
     ...(opts.includeOutline !== undefined ? { includeOutline: opts.includeOutline } : {}),
   };
   output += elementContextExportBlock(ann, resolvedOpts);
+  output += displayedContextExportLine(ann?.displayedContext);
   output += additionalTargetsExportBlock(ann);
   if (Array.isArray(ann?.images)) output += attachedLines(ann.images);
   return output;
@@ -1571,6 +1581,7 @@ const renderAnnotationEntries = (
     // Raw-HTML / live-app pinpoints describe their element for the agent
     // (the grouped export's `## Page:` heading already carries the route).
     output += elementContextExportBlock(ann, { includeRoute: false });
+    output += displayedContextExportLine(ann.displayedContext);
     // Multi-target raw-HTML comments list every additional covered element.
     output += additionalTargetsExportBlock(ann);
 

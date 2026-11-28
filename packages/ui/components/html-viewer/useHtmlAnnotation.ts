@@ -18,6 +18,8 @@ import {
 import {
   parseHtmlElementContext,
   parseHtmlAnchorStructure,
+  parseHtmlDisplayedContext,
+  type HtmlDisplayedContext,
   MAX_ELEMENT_CONTEXT_BYTES,
   MAX_PAGE_URL_LENGTH,
 } from "@plannotator/core/html-anchor";
@@ -99,6 +101,7 @@ interface BridgeSelectionMessage {
   targetLabel?: string;
   /** Agent-facing element description (pinpoint clicks) — validated, size-capped. */
   context?: HtmlElementContext;
+  displayedContext?: HtmlDisplayedContext;
   /** The bridge answers `rich-copy-request` for this text selection. */
   richCopy?: boolean;
   /** `text` was cut to MAX_SELECTION_TEXT_LENGTH (the page's selection is longer). */
@@ -137,6 +140,18 @@ export interface HtmlDraftTarget {
   text: string;
   anchor: HtmlElementAnchor | null;
   context?: HtmlElementContext;
+  displayedContext?: HtmlDisplayedContext;
+}
+
+function composerAdditionalTargets(targets: HtmlDraftTarget[], max: number): HtmlAnnotationTarget[] | undefined {
+  if (targets.length <= 1) return undefined;
+  return targets.slice(1, 1 + max).map((target) => ({
+    label: target.label,
+    text: target.text,
+    anchor: target.anchor ?? undefined,
+    ...(target.context ? { context: target.context } : {}),
+    ...(target.displayedContext ? { displayedContext: target.displayedContext } : {}),
+  }));
 }
 
 interface BridgeMultiTargetAddedMessage {
@@ -146,6 +161,7 @@ interface BridgeMultiTargetAddedMessage {
   text: string;
   anchor?: HtmlElementAnchor;
   context?: HtmlElementContext;
+  displayedContext?: HtmlDisplayedContext;
 }
 
 interface BridgeRect {
@@ -159,6 +175,7 @@ type BridgeMessage =
   | BridgeSelectionMessage
   | BridgeRichCopyMessage
   | BridgeMultiTargetAddedMessage
+  | { type: `${typeof PREFIX}displayed-context`; id: string; displayedContext?: HtmlDisplayedContext }
   | { type: `${typeof PREFIX}multi-target-removed`; key: string }
   | { type: `${typeof PREFIX}pointer`; x: number; y: number; shift: boolean }
   | { type: `${typeof PREFIX}selection-clear` }
@@ -218,6 +235,7 @@ export interface UseHtmlAnnotationOptions {
   iframeRef: RefObject<HTMLIFrameElement | null>;
   /** Whether selection bridge messages may open composers or create annotations. */
   enabled?: boolean;
+  canCaptureDisplayedContext?: () => boolean;
   annotations: Annotation[];
   onAddAnnotation?: (ann: Annotation) => void;
   onSelectAnnotation?: (id: string | null) => void;
@@ -433,8 +451,8 @@ export function parseHtmlElementAnchor(value: unknown): HtmlElementAnchor | null
   return { selector, tagName, text, ...more };
 }
 
-/** A `restore-draft` id (the host mints it): short, or none. */
-function parseRestoreId(value: unknown): string | null {
+/** Correlation IDs minted by the host and echoed by the bridge. */
+function parseBridgeRequestId(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 && value.length <= 64 ? value : null;
 }
 
@@ -484,6 +502,8 @@ export function parseBridgeMessage(value: unknown): BridgeMessage | null {
     case `${PREFIX}selection`: {
       const rect = parseBridgeRect(value.rect);
       if (typeof value.text !== "string" || !rect) return null;
+      const displayedContext = parseHtmlDisplayedContext(value.displayedContext);
+      const restoreId = parseBridgeRequestId(value.restoreId);
       return {
         type: value.type,
         text: capSelectionText(value.text),
@@ -496,16 +516,22 @@ export function parseBridgeMessage(value: unknown): BridgeMessage | null {
         targetKey: parseTargetKey(value.targetKey) ?? undefined,
         targetLabel: parseTargetLabel(value.targetLabel),
         context: parseHtmlElementContext(value.context),
-        ...(parseRestoreId(value.restoreId) ? { restoreId: parseRestoreId(value.restoreId)! } : {}),
+        ...(displayedContext ? { displayedContext } : {}),
+        ...(restoreId ? { restoreId } : {}),
       };
     }
+    case `${PREFIX}displayed-context`: {
+      const id = parseBridgeRequestId(value.id);
+      return id ? { type: value.type, id, displayedContext: parseHtmlDisplayedContext(value.displayedContext) } : null;
+    }
     case `${PREFIX}restore-draft-missing`: {
-      const id = parseRestoreId(value.id);
+      const id = parseBridgeRequestId(value.id);
       return id ? { type: value.type, id } : null;
     }
     case `${PREFIX}multi-target-added`: {
       const key = parseTargetKey(value.key);
       if (!key || typeof value.text !== "string") return null;
+      const displayedContext = parseHtmlDisplayedContext(value.displayedContext);
       return {
         type: value.type,
         key,
@@ -513,6 +539,7 @@ export function parseBridgeMessage(value: unknown): BridgeMessage | null {
         text: capSelectionText(value.text),
         anchor: parseHtmlElementAnchor(value.anchor) ?? undefined,
         context: parseHtmlElementContext(value.context),
+        ...(displayedContext ? { displayedContext } : {}),
       };
     }
     case `${PREFIX}multi-target-removed`: {
@@ -528,14 +555,15 @@ export function parseBridgeMessage(value: unknown): BridgeMessage | null {
       return { type: value.type };
     case `${PREFIX}rich-copy`: {
       // Oversized or malformed markup reads as none (plain text is copied).
-      if (typeof value.id !== "string" || value.id.length === 0 || value.id.length > 64) return null;
+      const id = parseBridgeRequestId(value.id);
+      if (!id) return null;
       const text = typeof value.text === "string" && value.text.length <= MAX_RICH_CLIPBOARD_HTML_LENGTH
         ? value.text : "";
       const html = typeof value.html === "string" && value.html.length <= MAX_RICH_CLIPBOARD_HTML_LENGTH
         ? value.html : "";
       return {
         type: value.type,
-        id: value.id,
+        id,
         html,
         text,
         truncated: value.truncated === true,
@@ -617,6 +645,7 @@ export function parseBridgeMessage(value: unknown): BridgeMessage | null {
 export function useHtmlAnnotation({
   iframeRef,
   enabled = true,
+  canCaptureDisplayedContext,
   onAddAnnotation,
   onSelectAnnotation,
   selectedAnnotationId,
@@ -669,6 +698,7 @@ export function useHtmlAnnotation({
   /** The host is loading a new document whose link guard carries this key
    *  (null: none): take exactly one link offer with it (linkGuard.ts). */
   armLinkOffer: (key: string | null) => void;
+  clearDisplayedContext: () => void;
 } {
   const anchorSizeRef = useRef(anchorSize);
   anchorSizeRef.current = anchorSize;
@@ -696,6 +726,7 @@ export function useHtmlAnnotation({
   // annotation so restoration can resolve the exact element again.
   const pendingAnchorRef = useRef<HtmlElementAnchor | null>(null);
   const pendingContextRef = useRef<HtmlElementContext | null>(null);
+  const pendingDisplayedContextRef = useRef<HtmlDisplayedContext | undefined>(undefined);
   const draftTargetsRef = useRef<HtmlDraftTarget[]>(draftTargets);
   draftTargetsRef.current = draftTargets;
   const onBridgePointerRef = useRef(onBridgePointer);
@@ -770,7 +801,7 @@ export function useHtmlAnnotation({
   const hostDraftIdRef = useRef<string | null>(null);
   // A host's reopenComment waiting for the bridge's answer to restore-draft:
   // the selection stamped with its id opens the composer holding its words.
-  const reopenRef = useRef<{ id: string; text: string; onMissing?: () => void } | null>(null);
+  const reopenRef = useRef<{ id: string; text: string; displayedContext?: HtmlDisplayedContext; onMissing?: () => void } | null>(null);
   // The effective cap and whether the host set one: only an explicit cap
   // rides on arm-multi-select, so an unconfigured viewer posts today's message.
   const maxTargetsRef = useRef(resolveMaxAdditionalTargets(maxAdditionalTargets));
@@ -819,6 +850,7 @@ export function useHtmlAnnotation({
         pendingTextRef.current = "";
         pendingAnchorRef.current = null;
         pendingContextRef.current = null;
+        pendingDisplayedContextRef.current = undefined;
         return;
       }
       if (index === 0) {
@@ -828,6 +860,7 @@ export function useHtmlAnnotation({
         pendingTextRef.current = next.text;
         pendingAnchorRef.current = next.anchor;
         pendingContextRef.current = next.context ?? null;
+        pendingDisplayedContextRef.current = next.displayedContext;
         setCommentPopover((prev) =>
           prev ? { ...prev, contextText: next.text, selectedText: next.text } : prev,
         );
@@ -973,6 +1006,10 @@ export function useHtmlAnnotation({
         setDraftTargets([]); // a new selection always starts a fresh draft
         const reopen = message.restoreId && reopenRef.current?.id === message.restoreId ? reopenRef.current : null;
         if (reopen) reopenRef.current = null;
+        const displayedContext = reopen
+          ? reopen.displayedContext
+          : canCaptureDisplayedContext?.() ? message.displayedContext : undefined;
+        pendingDisplayedContextRef.current = displayedContext;
         const reportDraft = onHostDraftRef.current;
         if (reportDraft) {
           // The host composes: HTML is comment-only, so every selection or
@@ -992,6 +1029,7 @@ export function useHtmlAnnotation({
               createdA: Date.now(),
               htmlAnchor: message.anchor,
               elementContext: message.context,
+              ...(displayedContext ? { displayedContext } : {}),
             },
             intent: message.pinpoint || reopen ? "compose" : "selection",
             label: message.targetLabel,
@@ -1002,6 +1040,7 @@ export function useHtmlAnnotation({
               pendingTextRef.current = "";
               pendingAnchorRef.current = null;
               pendingContextRef.current = null;
+              pendingDisplayedContextRef.current = undefined;
             },
           });
           return;
@@ -1055,6 +1094,7 @@ export function useHtmlAnnotation({
                 text: message.text,
                 anchor: message.anchor ?? null,
                 context: message.context,
+                ...(displayedContext ? { displayedContext } : {}),
               },
             ]);
             post({
@@ -1130,6 +1170,7 @@ export function useHtmlAnnotation({
           && targets.length < 1 + maxTargetsRef.current
           && !targets.some((t) => t.key === message.key)
         ) {
+          const displayedContext = canCaptureDisplayedContext?.() ? message.displayedContext : undefined;
           setDraftTargets([
             ...targets,
             {
@@ -1138,6 +1179,7 @@ export function useHtmlAnnotation({
               text: message.text,
               anchor: message.anchor ?? null,
               context: message.context,
+              ...(displayedContext ? { displayedContext } : {}),
             },
           ]);
           setComposerFocusToken((t) => t + 1);
@@ -1168,6 +1210,7 @@ export function useHtmlAnnotation({
           pendingTextRef.current = "";
           pendingAnchorRef.current = null;
           pendingContextRef.current = null;
+          pendingDisplayedContextRef.current = undefined;
           return;
         }
         // Keep the captured text alive while a comment/quick-label is open: the user
@@ -1177,6 +1220,7 @@ export function useHtmlAnnotation({
           pendingTextRef.current = "";
           pendingAnchorRef.current = null;
           pendingContextRef.current = null;
+          pendingDisplayedContextRef.current = undefined;
         }
       }
 
@@ -1257,7 +1301,7 @@ export function useHtmlAnnotation({
         anchorRef.current = null;
       }
     };
-  }, [post, iframeRef, positionAnchor, onResize, getOrCreateAnchor, applyTargetRemoval]);
+  }, [post, iframeRef, positionAnchor, onResize, getOrCreateAnchor, applyTargetRemoval, canCaptureDisplayedContext]);
 
   useEffect(() => {
     if (enabled) return;
@@ -1267,6 +1311,7 @@ export function useHtmlAnnotation({
     setDraftTargets([]);
     pendingTextRef.current = "";
     pendingAnchorRef.current = null;
+    pendingDisplayedContextRef.current = undefined;
     anchorRef.current?.remove();
     anchorRef.current = null;
     post({ type: `${PREFIX}cancel-selection` });
@@ -1302,6 +1347,7 @@ export function useHtmlAnnotation({
       const text = pendingTextRef.current;
       if (!text || type !== AnnotationType.DELETION) return;
 
+      const displayedContext = pendingDisplayedContextRef.current;
       const id = nextHtmlAnnId();
       mintedIdsRef.current.add(id);
       post({ type: `${PREFIX}create-mark`, id, annotationType: "deletion" });
@@ -1316,12 +1362,14 @@ export function useHtmlAnnotation({
         createdA: Date.now(),
         htmlAnchor: pendingAnchorRef.current ?? undefined,
         elementContext: pendingContextRef.current ?? undefined,
+        ...(displayedContext ? { displayedContext } : {}),
       });
 
       setToolbarState(null);
       pendingTextRef.current = "";
       pendingAnchorRef.current = null;
       pendingContextRef.current = null;
+      pendingDisplayedContextRef.current = undefined;
     },
     [post],
   );
@@ -1358,18 +1406,8 @@ export function useHtmlAnnotation({
       const text = commentPopoverRef.current?.selectedText || pendingTextRef.current;
       if (!text) return;
 
-      // Multi-select: everything past the primary rides on the SAME comment.
-      const targets = draftTargetsRef.current;
-      const additionalTargets: HtmlAnnotationTarget[] | undefined =
-        targets.length > 1
-          ? targets.slice(1, 1 + maxTargetsRef.current).map((t) => ({
-              label: t.label,
-              text: t.text,
-              anchor: t.anchor ?? undefined,
-              ...(t.context ? { context: t.context } : {}),
-            }))
-          : undefined;
-
+      const additionalTargets = composerAdditionalTargets(draftTargetsRef.current, maxTargetsRef.current);
+      const displayedContext = pendingDisplayedContextRef.current;
       const id = nextHtmlAnnId();
       mintedIdsRef.current.add(id);
       post({ type: `${PREFIX}create-mark`, id, annotationType: "comment" });
@@ -1385,6 +1423,7 @@ export function useHtmlAnnotation({
         ...body,
         htmlAnchor: pendingAnchorRef.current ?? undefined,
         elementContext: pendingContextRef.current ?? undefined,
+        ...(displayedContext ? { displayedContext } : {}),
         htmlAdditionalTargets: additionalTargets,
       });
 
@@ -1393,6 +1432,7 @@ export function useHtmlAnnotation({
       pendingTextRef.current = "";
       pendingAnchorRef.current = null;
       pendingContextRef.current = null;
+      pendingDisplayedContextRef.current = undefined;
     },
     [post],
   );
@@ -1431,6 +1471,7 @@ export function useHtmlAnnotation({
     pendingTextRef.current = "";
     pendingAnchorRef.current = null;
     pendingContextRef.current = null;
+    pendingDisplayedContextRef.current = undefined;
   }, [post]);
 
   const removeDraftTarget = useCallback(
@@ -1454,6 +1495,7 @@ export function useHtmlAnnotation({
     pendingTextRef.current = "";
     pendingAnchorRef.current = null;
     pendingContextRef.current = null;
+    pendingDisplayedContextRef.current = undefined;
   }, [post]);
 
   const applyQuickLabel = useCallback(
@@ -1461,6 +1503,7 @@ export function useHtmlAnnotation({
       if (!enabledRef.current) return;
       const text = pendingTextRef.current;
       if (!text) return;
+      const displayedContext = pendingDisplayedContextRef.current;
       const id = nextHtmlAnnId();
       mintedIdsRef.current.add(id);
       post({ type: `${PREFIX}create-mark`, id, annotationType: "comment" });
@@ -1478,11 +1521,13 @@ export function useHtmlAnnotation({
         createdA: Date.now(),
         htmlAnchor: pendingAnchorRef.current ?? undefined,
         elementContext: pendingContextRef.current ?? undefined,
+        ...(displayedContext ? { displayedContext } : {}),
       });
       clearState();
       pendingTextRef.current = "";
       pendingAnchorRef.current = null;
       pendingContextRef.current = null;
+      pendingDisplayedContextRef.current = undefined;
     },
     [post],
   );
@@ -1502,6 +1547,7 @@ export function useHtmlAnnotation({
     setQuickLabelPicker(null);
     pendingTextRef.current = "";
     pendingAnchorRef.current = null;
+    pendingDisplayedContextRef.current = undefined;
   }, [post]);
 
   /**
@@ -1516,7 +1562,12 @@ export function useHtmlAnnotation({
     if (!annotation.htmlAnchor && !quote) return null;
     const previous = reopenRef.current;
     const id = `reopen-${Date.now().toString(36)}-${(htmlReopenSeq++).toString(36)}`;
-    reopenRef.current = { id, text: annotation.text ?? "", onMissing };
+    reopenRef.current = {
+      id,
+      text: annotation.text ?? "",
+      displayedContext: parseHtmlDisplayedContext(annotation.displayedContext),
+      onMissing,
+    };
     previous?.onMissing?.();
     return {
       type: `${PREFIX}restore-draft`,
@@ -1526,22 +1577,23 @@ export function useHtmlAnnotation({
     };
   }, []);
 
+  const clearDisplayedContext = useCallback(() => {
+    pendingDisplayedContextRef.current = undefined;
+    if (draftTargetsRef.current.some((target) => target.displayedContext)) {
+      const targets = draftTargetsRef.current.map(({ displayedContext: _, ...target }) => target);
+      draftTargetsRef.current = targets;
+      setDraftTargets(targets);
+    }
+  }, []);
+
   /** The comment being written, as `commitComposerDraft` would add it (its words empty), touching nothing. */
   const peekComment = useCallback((): Annotation | null => {
     const open = commentPopoverRef.current;
     if (!enabledRef.current || !open) return null;
     const text = open.selectedText || pendingTextRef.current;
     if (!text) return null;
-    const targets = draftTargetsRef.current;
-    const additionalTargets: HtmlAnnotationTarget[] | undefined =
-      targets.length > 1
-        ? targets.slice(1, 1 + maxTargetsRef.current).map((t) => ({
-            label: t.label,
-            text: t.text,
-            anchor: t.anchor ?? undefined,
-            ...(t.context ? { context: t.context } : {}),
-          }))
-        : undefined;
+    const additionalTargets = composerAdditionalTargets(draftTargetsRef.current, maxTargetsRef.current);
+    const displayedContext = pendingDisplayedContextRef.current;
     return {
       id: "peek",
       blockId: "",
@@ -1554,6 +1606,7 @@ export function useHtmlAnnotation({
       createdA: Date.now(),
       htmlAnchor: pendingAnchorRef.current ?? undefined,
       elementContext: pendingContextRef.current ?? undefined,
+      ...(displayedContext ? { displayedContext } : {}),
       htmlAdditionalTargets: additionalTargets,
     };
   }, []);
@@ -1633,6 +1686,7 @@ export function useHtmlAnnotation({
     createdAnnotationIds: mintedIdsRef.current,
     prepareReopen,
     expireReopen,
+    clearDisplayedContext,
     peekComment,
     armLinkOffer,
   };

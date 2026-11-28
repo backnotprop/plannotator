@@ -1,3 +1,8 @@
+import {
+  parseHtmlDisplayedContextAttributes,
+  type HtmlDisplayedContext,
+  type HtmlDisplayedContextAttribute,
+} from "@plannotator/core/html-anchor";
 import { SERVED_FRAME_GONE } from "@plannotator/core/html-embed";
 import {
   forwardRef,
@@ -51,6 +56,7 @@ import { mergeUnanchoredIds } from "./unanchored";
 import {
   MAX_PAGE_URL_LENGTH,
   checkBridgeProtocolVersion,
+  parseBridgeMessage,
   formatBridgeProtocolWarning,
   bridgeWindowOf,
   rejectsLiveMessage,
@@ -226,6 +232,8 @@ const REOPEN_ANSWER_MS = 3000;
 
 export interface HtmlViewerProps {
   rawHtml: string;
+  /** Root data attributes to snapshot when a target is selected or a global composer opens. */
+  displayedContextAttributes?: readonly HtmlDisplayedContextAttribute[];
   /**
    * Optional: a `sandbox` for the live (`src`) frame. Absent: no sandbox, as
    * annotate's live mode has always run. A host that passes one keeps the
@@ -699,6 +707,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
   (
     {
       rawHtml,
+      displayedContextAttributes,
       liveSandbox,
       src,
       liveSession,
@@ -771,6 +780,26 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     // Increment on every bridge-ready event so srcdoc navigations re-send
     // state even though the iframe element and its WindowProxy are reused.
     const [iframeReadyVersion, setIframeReadyVersion] = useState(0);
+    const iframeReadyRef = useRef(0);
+    const displayedContextConfig = useMemo(
+      () => parseHtmlDisplayedContextAttributes(displayedContextAttributes),
+      [displayedContextAttributes],
+    );
+    const captureDisplayedContext = !!displayedContextConfig?.length;
+    const warnedDisplayedContextRef = useRef(false);
+    useEffect(() => {
+      if (displayedContextAttributes === undefined || displayedContextConfig || warnedDisplayedContextRef.current) return;
+      warnedDisplayedContextRef.current = true;
+      console.warn("HtmlViewer: invalid displayedContextAttributes; displayed context capture is off.");
+    }, [displayedContextAttributes, displayedContextConfig]);
+
+    // Only one global composer can be open; its request slot also holds the reply until submit.
+    const globalContextSequenceRef = useRef(0);
+    const globalContextRef = useRef<{
+      id: string;
+      generation: number;
+      reply?: { snapshot: HtmlDisplayedContext | undefined };
+    } | null>(null);
     const [printReady, setPrintReady] = useState(false);
     const [iframeFocused, setIframeFocused] = useState(false);
     const [vimBridgePhase, setVimBridgePhase] =
@@ -1111,7 +1140,14 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       onOpenLinkRef.current?.(href, frame);
     }, []);
 
+    const captureDisplayedContextRef = useRef(captureDisplayedContext);
+    captureDisplayedContextRef.current = captureDisplayedContext;
+    const canCaptureDisplayedContext = useCallback(
+      () => captureDisplayedContextRef.current && !awaitingReadyRef.current,
+      [],
+    );
     const hook = useHtmlAnnotation({
+      canCaptureDisplayedContext,
       iframeRef,
       enabled: !readOnly,
       annotations,
@@ -1138,6 +1174,11 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     });
     createdIdsRef.current = hook.createdAnnotationIds;
     armLinkOfferRef.current = hook.armLinkOffer;
+    const { clearDisplayedContext } = hook;
+    useLayoutEffect(() => {
+      globalContextRef.current = null;
+      clearDisplayedContext();
+    }, [rawHtml, src, clearDisplayedContext]);
 
     useEffect(() => {
       if (!bridgeReportedRef.current) return;
@@ -1273,7 +1314,9 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
                   },
             );
           }
-          setIframeReadyVersion((version) => version + 1);
+          globalContextRef.current = null;
+          clearDisplayedContext();
+          setIframeReadyVersion(++iframeReadyRef.current);
           setPrintReady(true);
           setVimBridgePhase("inactive");
           setVimHudCommand(null);
@@ -1289,6 +1332,15 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
             ) {
               onPageChangeRef.current?.(pageUrl);
             }
+          }
+          return;
+        }
+        if (isRecord(e.data) && e.data.type === `${PREFIX}displayed-context`) {
+          const request = globalContextRef.current;
+          if (!request || request.reply || request.generation !== iframeReadyRef.current || !canCaptureDisplayedContext()) return;
+          const message = parseBridgeMessage(e.data);
+          if (message?.type === `${PREFIX}displayed-context` && message.id === request.id) {
+            request.reply = { snapshot: message.displayedContext };
           }
           return;
         }
@@ -1369,7 +1421,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       }
       window.addEventListener("message", handler);
       return () => window.removeEventListener("message", handler);
-    }, [readOnly, vimHudActive, vimModeEnabled]);
+    }, [readOnly, vimHudActive, vimModeEnabled, canCaptureDisplayedContext, clearDisplayedContext]);
 
     useEffect(() => {
       if (vimHudActive) return;
@@ -1469,8 +1521,6 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
         timers.clear();
       };
     }, []);
-    const iframeReadyRef = useRef(iframeReadyVersion);
-    iframeReadyRef.current = iframeReadyVersion;
     useEffect(() => {
       if (iframeReadyVersion === 0 || !pendingReopenRef.current) return;
       const message = pendingReopenRef.current;
@@ -1534,6 +1584,13 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
         { type: `${PREFIX}set-input-method`, method: inputMethod },
       );
     }, [iframeReadyVersion, inputMethod]);
+
+    const displayedContextConfiguredRef = useRef(false);
+    useEffect(() => {
+      if (iframeReadyVersion === 0 || (!captureDisplayedContext && !displayedContextConfiguredRef.current)) return;
+      displayedContextConfiguredRef.current = captureDisplayedContext;
+      postToBridge({ type: `${PREFIX}set-displayed-context`, attributes: displayedContextConfig ?? [] });
+    }, [iframeReadyVersion, displayedContextConfig, captureDisplayedContext, postToBridge]);
 
     // Tell the bridge whether Annotate is armed. Same re-post pattern as
     // set-input-method, so the mode survives live page changes / HMR reloads
@@ -1756,9 +1813,16 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       peekComment: () => (readOnly || liveMode ? null : hook.peekComment()),
     }));
 
+    const closeGlobalComment = useCallback(() => {
+      globalContextRef.current = null;
+      setGlobalCommentPopover(null);
+    }, []);
+
     const handleGlobalCommentSubmit = useCallback(
       (text: string, images?: ImageAttachment[], mentions?: readonly string[]) => {
         if (readOnly) return;
+        const displayedContext = globalContextRef.current?.reply?.snapshot;
+        closeGlobalComment();
         onAddAnnotation({
           id: `global-${Date.now()}`,
           blockId: "",
@@ -1771,15 +1835,15 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
           createdA: Date.now(),
           images,
           ...(mentions && mentions.length > 0 ? { mentions } : {}),
+          ...(displayedContext ? { displayedContext } : {}),
         });
-        setGlobalCommentPopover(null);
       },
-      [onAddAnnotation, readOnly],
+      [closeGlobalComment, onAddAnnotation, readOnly],
     );
 
-    useEffect(() => {
-      if (readOnly) setGlobalCommentPopover(null);
-    }, [readOnly]);
+    useLayoutEffect(() => {
+      if (readOnly) closeGlobalComment();
+    }, [closeGlobalComment, readOnly]);
 
     // In the host's text (`inline`): no chrome of the viewer's own.
     const inlineFrame = !fullViewport && !liveMode && inline ? inline : null;
@@ -1821,6 +1885,12 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
               // documents never share a draft.
               const draftKey = `html:global:${src ? `src:${src}` : `doc:${hashDraftScope(rawHtml)}`}`;
               setGlobalCommentPopover({ anchorEl, contextText: "", draftKey });
+              globalContextRef.current = null;
+              if (canCaptureDisplayedContext()) {
+                const id = `global-context-${++globalContextSequenceRef.current}`;
+                globalContextRef.current = { id, generation: iframeReadyRef.current };
+                postToBridge({ type: `${PREFIX}displayed-context-request`, id });
+              }
             }}
             className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground bg-muted/50 hover:bg-muted rounded-md transition-colors cursor-pointer"
             title="Add global comment"
@@ -2061,7 +2131,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
               draftKey={globalCommentPopover.draftKey}
               onSubmit={handleGlobalCommentSubmit}
               allowImages={allowCommentImages}
-              onClose={() => setGlobalCommentPopover(null)}
+              onClose={closeGlobalComment}
               mentionSource={mentionSource}
               skillReferences
               onAskAI={onAskAI}

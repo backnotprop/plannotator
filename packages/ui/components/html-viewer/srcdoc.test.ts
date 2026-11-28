@@ -13,8 +13,9 @@
  * for non-opted-in documents must go red here.
  */
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
-import { parseHtmlElementContext } from "@plannotator/core/html-anchor";
-import { exportAnnotations } from "../../utils/parser";
+import { parseHtmlElementContext, parseHtmlDisplayedContextAttributes } from "@plannotator/core/html-anchor";
+import { exportAnnotations, exportAnnotationEntry } from "../../utils/parser";
+import { parseBridgeMessage } from "./useHtmlAnnotation";
 import { ANNOTATION_HIGHLIGHT_CSS, BRIDGE_SCRIPT } from "./bridge-script";
 import {
   DIFF_HIGHLIGHT_CSS,
@@ -512,9 +513,13 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
       bubbles: true,
       cancelable: true,
     });
+    document.documentElement.setAttribute("data-demo-state", "keyboard");
+    postBridge({ type: "plannotator-bridge-set-displayed-context", attributes: [{ key: "state", attribute: "data-demo-state" }] });
     document.body.dispatchEvent(comment);
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
     window.removeEventListener("message", capture);
+    document.documentElement.removeAttribute("data-demo-state");
+    postBridge({ type: "plannotator-bridge-set-displayed-context", attributes: [] });
     expect(comment.defaultPrevented).toBe(true);
     expect(bridgeMessages.at(-1)).toMatchObject({
       type: "plannotator-bridge-selection",
@@ -759,6 +764,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
     });
     expect(document.body.hasAttribute("tabindex")).toBe(false);
     document.body.replaceChildren();
+    expect(bridgeMessages.at(-1)?.displayedContext).toEqual({ entries: [{ key: "state", value: "keyboard" }] });
   });
 
   test("Vim HUD mode suppresses the iframe badge and emits handled command DTOs", async () => {
@@ -2162,6 +2168,31 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
     return { primaryKey, keys };
   }
 
+  test("pinpoint and shift-click take separate displayed context snapshots", async () => {
+    document.body.innerHTML = '<img id="cart-image" alt="Cart illustration">' + MULTI_MARKUP;
+    const root = document.documentElement;
+    const postConfig = (attributes: unknown) => postBridge({ type: "plannotator-bridge-set-displayed-context", attributes });
+    postConfig([{ key: "state", attribute: "data-demo-state" }]);
+    postBridge({ type: "plannotator-bridge-set-vim-mode", enabled: false });
+    postBridge({ type: "plannotator-bridge-set-input-method", method: "pinpoint" });
+    try {
+      root.setAttribute("data-demo-state", "empty");
+      const [pin] = await collectMessages(["plannotator-bridge-selection"], () =>
+        clickAt(document.querySelector("#cart-image")!, 10, 10, false));
+      expect(pin).toMatchObject({ pinpoint: true, displayedContext: { entries: [{ key: "state", value: "empty" }] } });
+      postBridge({ type: "plannotator-bridge-arm-multi-select", key: pin!.targetKey });
+      root.setAttribute("data-demo-state", "full");
+      const [extra] = await collectMessages(["plannotator-bridge-multi-target-added"], () =>
+        clickAt(document.querySelector(".beta")!, 40, 40, true));
+      expect(extra).toMatchObject({ text: "Beta text", displayedContext: { entries: [{ key: "state", value: "full" }] } });
+    } finally {
+      postConfig([]);
+      postBridge({ type: "plannotator-bridge-cancel-selection" });
+      root.removeAttribute("data-demo-state");
+      document.body.replaceChildren();
+    }
+  });
+
   test("shift-click additional targets carry their own (smaller) element context", async () => {
     document.body.innerHTML = MULTI_MARKUP;
     const { keys } = await startMultiDraft();
@@ -3140,6 +3171,68 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
     }
     postBridge({ type: "plannotator-bridge-clear-marks" });
     document.body.replaceChildren();
+  });
+
+  test("a drag selection exports the root labels from when the real bridge captured it", async () => {
+    document.body.innerHTML = '<p data-demo-missing="nested">Cart items</p>';
+    const root = document.documentElement;
+    root.setAttribute("data-demo-state", "empty");
+    root.setAttribute("data-demo-blank", "");
+    root.setAttribute("data-demo-unconfigured", "private");
+    postBridge({ type: "plannotator-bridge-set-vim-mode", enabled: false });
+    postBridge({ type: "plannotator-bridge-set-input-method", method: "drag" });
+    postBridge({
+      type: "plannotator-bridge-set-displayed-context",
+      attributes: parseHtmlDisplayedContextAttributes([
+        { key: "state", attribute: "data-demo-state" },
+        { key: "missing", attribute: "data-demo-missing" },
+        { key: "blank", attribute: "data-demo-blank" },
+      ]),
+    });
+    function drag() {
+      const p = document.querySelector("p")!;
+      const range = document.createRange();
+      range.selectNodeContents(p);
+      const selection = window.getSelection()!;
+      selection.removeAllRanges();
+      selection.addRange(range);
+      p.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true }));
+    }
+    const posted: Record<string, unknown>[] = [];
+    const collect = (event: MessageEvent) => {
+      const message = bridgeMessageData(event);
+      if (message?.type === "plannotator-bridge-selection") posted.push(message);
+    };
+    const exportSelection = (message: unknown) => {
+      const selection = parseBridgeMessage(message);
+      if (selection?.type !== "plannotator-bridge-selection") throw new Error("Selection missing");
+      return exportAnnotationEntry({ ...selection, type: "COMMENT", originalText: selection.text, text: "Clarify this" });
+    };
+    window.addEventListener("message", collect);
+    try {
+      drag();
+      const first = await waitUntil("the empty cart selection", () => posted[0]);
+      root.setAttribute("data-demo-state", "full");
+      const firstExport = exportSelection(first);
+      expect(firstExport).toContain('Feedback on: "Cart items"');
+      expect(firstExport).toContain("\n- **Displayed context:** `state: empty`\n");
+      postBridge({ type: "plannotator-bridge-cancel-selection" });
+      drag();
+      const second = await waitUntil("the full cart selection", () => posted[1]);
+      expect(exportSelection(second)).toContain("`state: full`");
+      postBridge({ type: "plannotator-bridge-cancel-selection" });
+      root.setAttribute("data-demo-state", "x".repeat(161));
+      drag();
+      const overLimit = await waitUntil("the selection with an oversized label", () => posted[2]);
+      expect(overLimit).toMatchObject({ text: "Cart items" });
+      expect(overLimit).not.toHaveProperty("displayedContext");
+    } finally {
+      window.removeEventListener("message", collect);
+      postBridge({ type: "plannotator-bridge-set-displayed-context", attributes: [] });
+      postBridge({ type: "plannotator-bridge-cancel-selection" });
+      for (const attr of ["data-demo-state", "data-demo-blank", "data-demo-unconfigured"]) root.removeAttribute(attr);
+      document.body.replaceChildren();
+    }
   });
 
   test("draft selection highlight is overlay-projected and clears on cancel", async () => {
