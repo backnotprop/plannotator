@@ -99,6 +99,7 @@ import { ReviewSettingsPage, type ReviewSettingsSectionId } from './settings/Rev
 import { CLASSIC_REVIEW_SETTINGS_CONTROLS } from './settings/reviewSettingsControls';
 import { SEM_DIFF_OPINION_SETTINGS_ROUTE } from './settings/PowerUpSettings';
 import { REVIEW_SETTINGS_TAB_LABEL } from './settings/reviewSettingsWords';
+import { isImeCompositionKey } from '../utils/commentSubmitKey';
 
 // Kept for hosts that imported them from here; Settings → Reviews owns them now.
 export { TOKEN_HOVER_TRIGGER_OPTIONS, TOKEN_HOVER_DELAY_OPTIONS, type TokenHoverDelayOption } from './settings/reviewSettingsWords';
@@ -1017,7 +1018,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
             aria-labelledby="plannotator-settings-title"
             onClick={e => e.stopPropagation()}
             onKeyDown={(event) => {
-              if (event.key !== 'Escape' || event.defaultPrevented) return;
+              if (event.key !== 'Escape' || event.defaultPrevented || isImeCompositionKey(event)) return;
               event.preventDefault();
               event.stopPropagation();
               setShowDialog(false);
@@ -1139,7 +1140,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                             defaultValue={identity}
                             onBlur={(e) => handleIdentitySave(e.target.value)}
                             onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
+                              if (e.key === 'Enter' && !isImeCompositionKey(e)) {
                                 handleIdentitySave((e.target as HTMLInputElement).value);
                                 (e.target as HTMLInputElement).blur();
                               }
@@ -2050,7 +2051,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                               value={newDirPath}
                               onChange={(e) => setNewDirPath(e.target.value)}
                               onKeyDown={(e) => {
-                                if (e.key === 'Enter') addDirectory();
+                                if (e.key === 'Enter' && !isImeCompositionKey(e)) addDirectory();
                               }}
                               placeholder="/path/to/directory"
                               className="flex-1 px-3 py-2 bg-muted rounded-lg text-xs font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50"

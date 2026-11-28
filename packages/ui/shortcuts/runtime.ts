@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { ShortcutDefinition, ShortcutScopeDefinition } from './core';
+import { isImeCompositionKey } from '../utils/commentSubmitKey';
 import {
   matchesKeyName,
   matchesShortcutBinding,
@@ -82,6 +83,7 @@ export function dispatchShortcutEvent<TScope extends ShortcutScopeDefinition<any
   event: KeyboardEvent,
   options?: { stopOnMatch?: boolean },
 ): boolean {
+  if (isImeCompositionKey(event)) return false;
   const stopOnMatch = options?.stopOnMatch ?? true;
   let handled = false;
 

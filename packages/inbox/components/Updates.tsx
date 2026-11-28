@@ -26,6 +26,8 @@ import { SidebarTrigger } from '../shell/sidebar';
 import { releasesBetween } from '../whatsNew';
 import { useBackdropClose } from '../parts/backdropClose';
 import { KnownLine, NotesMissing, ReleasesPanel, ReleasesSheet, TldrLedger, centerRow } from './WhatsNewReleases';
+import { isImeCompositionKey } from '@plannotator/ui/utils/commentSubmitKey';
+import { useImeCancelHold } from '../shortcuts/imeCancelHold';
 
 type Update = NonNullable<InboxHealth['update']>;
 
@@ -157,6 +159,7 @@ export interface ModalProps {
 export function Modal({ label, labelledBy, describedBy, onClose, children, testId, ownKeys, initialFocus, fallbackFocus, className }: ModalProps) {
   const ref = useRef<HTMLDialogElement>(null);
   const backdrop = useBackdropClose(ref, onClose);
+  const imeHold = useImeCancelHold();
   const opener = useRef<Element | null>(null);
   const fallback = useRef(fallbackFocus);
   fallback.current = fallbackFocus;
@@ -189,7 +192,7 @@ export function Modal({ label, labelledBy, describedBy, onClose, children, testI
       onKeyDown={
         ownKeys
           ? (event) => {
-              if (event.key === 'Escape') {
+              if (event.key === 'Escape' && !isImeCompositionKey(event)) {
                 event.preventDefault();
                 event.stopPropagation();
                 onClose();
@@ -216,9 +219,10 @@ export function Modal({ label, labelledBy, describedBy, onClose, children, testI
             }
           : undefined
       }
+      onKeyDownCapture={imeHold.onKeyDownCapture}
       onCancel={(event) => {
         event.preventDefault();
-        onClose();
+        if (!imeHold.held(event)) onClose();
       }}
       {...backdrop}
     >

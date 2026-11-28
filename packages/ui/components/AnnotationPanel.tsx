@@ -18,7 +18,7 @@ import type { AnnotationScope, AnnotationDocumentGroup } from '../utils/annotati
 import type { QuestionPanelRow } from '../utils/questionAnswers';
 import { QuestionsPanelSection } from './QuestionsPanelSection';
 import { HostTitle } from './HostTitle';
-import { isCommentSubmitKey } from '../utils/commentSubmitKey';
+import { holdsImeEscape, isCommentSubmitKey } from '../utils/commentSubmitKey';
 import { useConfigValue } from '../config/useConfig';
 import { imageRegionNumbers, RegionCardInfo, RegionNumber, regionOf } from './ImageRegions';
 import {
@@ -1023,7 +1023,7 @@ const AnnotationEditComposer: React.FC<{
     // The menu is offered the key FIRST: while it is open Escape closes it
     // (and only a second Escape cancels the edit), and an arrowed-to row
     // takes Enter. Mod+Enter is never consumed by the menu.
-    if (mention.onKeyDown(e)) return;
+    if (holdsImeEscape(e) || mention.onKeyDown(e)) return;
     if (isCommentSubmitKey(e, enterSavesComment)) {
       e.preventDefault();
       onSave(mention.mentionIds);
@@ -1450,6 +1450,7 @@ const CodeAnnotationCard: React.FC<{
             value={editText}
             onChange={(e) => setEditText(e.target.value)}
             onKeyDown={(e) => {
+              if (holdsImeEscape(e)) return;
               if (isCommentSubmitKey(e, enterSavesComment)) {
                 e.preventDefault();
                 handleSaveEdit();

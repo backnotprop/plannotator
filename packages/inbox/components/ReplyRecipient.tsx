@@ -26,6 +26,7 @@ import { canAddRecipient, type RecipientRow } from '../replyRecipients';
 import type { SessionLabels } from '../sessionLabels';
 import { namesList } from '../tags';
 import { skillMenuHost } from './ComposerField';
+import { isImeCompositionKey } from '@plannotator/ui/utils/commentSubmitKey';
 import { leadMaxWidth } from './FieldLead';
 import { skillListRoom } from '../caretMenu';
 import { recipientNames } from '../thread/recipientNames';
@@ -415,7 +416,7 @@ export function ReplyRecipient({
       if (!target?.closest?.('[data-recipient-list], [data-recipient]')) onOpen(false);
     };
     const key = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
+      if (event.key !== 'Escape' || isImeCompositionKey(event)) return;
       event.preventDefault();
       event.stopPropagation();
       onOpen(false);

@@ -4,7 +4,7 @@ import type { SelectedLineRange as PierreSelectedLineRange, LineEventBaseProps }
 import { normalizeBrowserPath } from '@plannotator/core/browser-paths';
 import { basenameFromPath } from '@plannotator/core/source-save';
 import { PopoutDialog } from './PopoutDialog';
-import { isCommentSubmitKey } from '../utils/commentSubmitKey';
+import { holdsImeEscape, isCommentSubmitKey } from '../utils/commentSubmitKey';
 import { useConfigValue } from '../config/useConfig';
 import { extendThemeSwitch, useTheme } from './ThemeProvider';
 import { CommentPopover, type CommentExtraAction } from './CommentPopover';
@@ -302,6 +302,7 @@ const CodeInlineAnnotation: React.FC<{
             onChange={(e) => setEditText(e.target.value)}
             onClick={(e) => e.stopPropagation()}
             onKeyDown={(e) => {
+              if (holdsImeEscape(e)) return;
               if (e.key === 'Escape') {
                 e.preventDefault();
                 setIsEditing(false);

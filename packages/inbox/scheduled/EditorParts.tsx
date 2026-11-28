@@ -14,6 +14,7 @@ import { SCRATCH_PICK } from '../compose/model';
 import { machineLaunchesKept } from '../compose/useMachineLaunches';
 import { tildePath } from '../format';
 import { HostMark, Icon } from '../icons';
+import { holdsImeEscape, isImeCompositionKey } from '@plannotator/ui/utils/commentSubmitKey';
 
 export interface LaunchBlock {
   home: string;
@@ -176,7 +177,8 @@ export function FilesRow({ files, onChange }: { files: readonly string[]; onChan
           onChange={(event) => setPath(event.target.value)}
           onBlur={add}
           onKeyDown={(event) => {
-            if (event.key === 'Enter') add();
+            if (holdsImeEscape(event)) return;
+            if (event.key === 'Enter' && !isImeCompositionKey(event)) add();
             if (event.key === 'Escape') {
               event.stopPropagation();
               setPath('');

@@ -9,7 +9,7 @@ import { FileNameChip } from './FileNameChip';
 import { commentCopyText } from '../utils/annotationDisplay';
 import { isAgentGeneratedFinding } from '../utils/explainFinding';
 import { useConfigValue } from '@plannotator/ui/config';
-import { isCommentSubmitKey } from '@plannotator/ui/utils/commentSubmitKey';
+import { holdsImeEscape, isCommentSubmitKey } from '@plannotator/ui/utils/commentSubmitKey';
 
 interface FileCommentBannerProps {
   /** File-scoped comments for ONE file (already filtered to scope === 'file'). */
@@ -135,6 +135,7 @@ export const FileCommentCard: React.FC<{
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
+              if (holdsImeEscape(e)) return;
               if (e.key === 'Escape') { e.preventDefault(); setIsEditing(false); }
               else if (isCommentSubmitKey(e, enterSavesComment)) { e.preventDefault(); saveEdit(); }
             }}

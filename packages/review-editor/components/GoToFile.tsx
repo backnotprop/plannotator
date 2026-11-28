@@ -6,6 +6,7 @@ import { altKey } from '@plannotator/ui/utils/platform';
 import type { DiffFile } from '../types';
 import type { RepoFilesState } from '../hooks/useRepoFiles';
 import { fileStatusLetter } from '@plannotator/ui/utils/fileStatusLetter';
+import { holdsImeEscape, isImeCompositionKey } from '@plannotator/ui/utils/commentSubmitKey';
 
 const RESULT_LIMIT = 50;
 const SERVER_DEBOUNCE_MS = 80;
@@ -164,7 +165,7 @@ export const GoToFile: React.FC<GoToFileProps> = ({
   };
 
   const onKeyDown = (event: React.KeyboardEvent) => {
-    if (event.nativeEvent.isComposing) return;
+    if (holdsImeEscape(event) || isImeCompositionKey(event)) return;
     if (event.key === 'ArrowDown') {
       event.preventDefault();
       setActive((index) => Math.min(rows.length - 1, index + 1));

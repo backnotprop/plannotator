@@ -74,6 +74,8 @@ import {
 } from './model';
 import { newUuid } from '../uuid';
 import { useOtherFieldVoice } from '../components/FieldVoice';
+import { isImeCompositionKey } from '@plannotator/ui/utils/commentSubmitKey';
+import { useImeCancelHold } from '../shortcuts/imeCancelHold';
 
 /** The answer lands as a stamp before the card leaves (brief §7). */
 const STAMP_MS = 350;
@@ -213,6 +215,7 @@ export function DecisionMode(props: DecisionModeProps) {
   const pendingPicks = useRef(new Set<string>());
   const fieldOpenRef = useRef<(() => boolean) | null>(null);
   const escapedAt = useRef(0);
+  const imeHold = useImeCancelHold();
   const reduced = prefersReducedMotion();
   const pickSave = usePickSave();
   const pickSaveRef = useRef(pickSave);
@@ -804,11 +807,12 @@ export function DecisionMode(props: DecisionModeProps) {
       onCancel={(event) => {
         // The browser's own cancel (Escape, a phone's back): one layer, once (the keydown below may have taken it).
         event.preventDefault();
-        if (Date.now() - escapedAt.current > 100) escape();
+        if (!imeHold.held(event) && Date.now() - escapedAt.current > 100) escape();
       }}
+      onKeyDownCapture={imeHold.onKeyDownCapture}
       onKeyDown={(event) => {
         // The prototype window and the viewer over the dialog take their own Escape.
-        if (event.key !== 'Escape' || event.defaultPrevented || proto || lightbox) return;
+        if (event.key !== 'Escape' || event.defaultPrevented || isImeCompositionKey(event) || proto || lightbox) return;
         event.preventDefault();
         event.stopPropagation();
         escapedAt.current = Date.now();
