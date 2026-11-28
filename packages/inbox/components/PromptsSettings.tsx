@@ -9,7 +9,7 @@ import {
 import { inboxApi } from '../api';
 import { tildePath } from '../format';
 import { HostMark, Icon } from '../icons';
-import { AgentRulesSection } from './AgentRules';
+import { AgentRulesSection, mcpWho } from './AgentRules';
 import { Tip } from './Tip';
 
 /**
@@ -247,6 +247,11 @@ export function PromptsSection({
             {sharedText}
           </p>
           {!sharedCustom && overShared !== null && overNote(overShared, 'shared')}
+          {sharedCustom && prompts.rules?.mcp && prompts.rules.mcp.reminder_dropped.length > 0 && (
+            <p className="pm-over" data-prompt-over="mcp">
+              Not sent to {mcpWho(prompts.rules.mcp.reminder_dropped)}: it does not fit in the room there.
+            </p>
+          )}
           {sharedCustom && (
             <>
               <button type="button" className="pm-disc" aria-expanded={showDefault} aria-controls={defaultId} onClick={() => setShowDefault((open) => !open)} data-prompt-show-default="">

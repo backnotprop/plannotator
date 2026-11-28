@@ -1,7 +1,9 @@
-import { useState, type Dispatch, type SetStateAction } from 'react';
+import { useEffect, useState, type Dispatch, type SetStateAction } from 'react';
 import { reloadSkillCatalog } from '@plannotator/ui/utils/skillCatalog';
-import { inboxApi, type AgentToolHost, type InboxStorageModel, type SettingsModel } from '../../api';
+import { inboxApi, post, type AgentToolHost, type InboxStorageModel, type SettingsModel } from '../../api';
+import { inboxUrl } from '../../inboxUrl';
 import { scheduledApi } from '../../scheduled/client';
+import { noteDeletedHere } from '../deletedHere';
 
 export interface SettingsHost {
   setSettings: Dispatch<SetStateAction<SettingsModel | null>>;
@@ -29,6 +31,7 @@ export function useSettingsSaves(
 ) {
   const saveSetting = settingsSaver(app);
   const { setSettings, setError: setSettingsError, refresh: refreshSettings, adoptStore, readStore, refreshList } = app;
+  adoptSplitView = (on) => setSettings((s) => (s ? ({ ...s, split_view: { on } } as SettingsModel) : s));
   const toggleTool = (host: AgentToolHost, next: boolean) =>
     saveSetting(
       (s) => ({ ...s, inbox_tool: { ...s.inbox_tool, hosts: { ...s.inbox_tool.hosts, [host]: next } } }),
@@ -63,15 +66,19 @@ export function useSettingsSaves(
   const toggleChapterDiagrams = (next: boolean) =>
     saveSetting((s) => ({ ...s, chapter_diagrams: { on: next } }), () => inboxApi.saveChapterDiagrams(next), (s, saved) => ({ ...s, chapter_diagrams: saved.chapter_diagrams ?? { on: next } }));
 
-  const toggleShape = (next: boolean) => saveSetting((s) => ({ ...s, shape: { on: next } }), () => inboxApi.saveShape(next), (s, saved) => ({ ...s, shape: saved.shape }), reloadSkillCatalog);
 
   const toggleScheduled = (next: boolean) =>
     saveSetting((s) => ({ ...s, scheduled_threads: { ...s.scheduled_threads, on: next } }), () => scheduledApi.saveSwitch(next), (s, saved) => ({ ...s, scheduled_threads: saved.scheduled_threads ?? { on: next } }), reloadSkillCatalog);
 
-  const toggleExperimental = (next: boolean) =>
+  /** Decision mode (Settings → Capabilities): on unless turned off; every window follows through `event: capabilities`. */
+  const toggleDecisionMode = (next: boolean) =>
+    saveSetting((s) => ({ ...s, decision_mode: { ...s.decision_mode, on: next } }), () => inboxApi.saveDecisionMode(next), (s, saved) => ({ ...s, decision_mode: { ...s.decision_mode, ...saved.decision_mode } }));
+
+  /** The one experimental switch with a row: Grid (approval "inbox-agent-grid"). */
+  const toggleExperimental = (next: boolean, _feature: 'grid' = 'grid') =>
     saveSetting(
-      (s) => ({ ...s, experimental: { decision_mode: { on: next, env: s.experimental?.decision_mode.env ?? null } } }),
-      () => inboxApi.saveExperimental({ decision_mode: next }),
+      (s) => ({ ...s, experimental: { ...s.experimental, grid: { on: next, env: s.experimental?.grid?.env ?? null } } }),
+      () => inboxApi.saveExperimental({ grid: next }),
       (s, saved) => ({ ...s, experimental: saved.experimental }),
     );
 
@@ -93,6 +100,8 @@ export function useSettingsSaves(
   const deleteThread = async (threadId: string) => {
     setSettingsError(null);
     try {
+      // A pane still holding it (off the page) lets it go on its next read, as before (data/deletedHere.ts).
+      noteDeletedHere({ thread: threadId });
       adoptStore((await inboxApi.deleteThread(threadId)).store);
     } catch (cause) {
       setSettingsError(cause instanceof Error ? cause.message : 'The thread was not deleted.');
@@ -103,6 +112,7 @@ export function useSettingsSaves(
   const deleteProject = async (projectId: string) => {
     setSettingsError(null);
     try {
+      noteDeletedHere({ project: projectId });
       adoptStore((await inboxApi.deleteProject(projectId)).store);
     } catch (cause) {
       setSettingsError(cause instanceof Error ? cause.message : 'The project was not deleted.');
@@ -110,5 +120,34 @@ export function useSettingsSaves(
     }
     await refreshList(true);
   };
-  return { toggleTool, toggleCookieHost, toggleBoard, toggleBro, toggleFloatDrafts, toggleMarkReadWarning, toggleSteps, toggleCodeReview, toggleSystem, toggleChapterDiagrams, toggleShape, toggleScheduled, toggleExperimental, tailscaleBusy, toggleTailscale, deleteThread, deleteProject };
+  return { toggleTool, toggleCookieHost, toggleBoard, toggleBro, toggleFloatDrafts, toggleMarkReadWarning, toggleSteps, toggleCodeReview, toggleSystem, toggleChapterDiagrams, toggleScheduled, toggleDecisionMode, toggleExperimental, tailscaleBusy, toggleTailscale, deleteThread, deleteProject };
+}
+
+/** App's settings take a saved thread panes switch through this (set where App runs `useSettingsSaves`). */
+let adoptSplitView: ((on: boolean) => void) | null = null;
+
+/**
+ * Settings → General → Appearance → thread panes (config.json `inboxSplitView`, off by default). The save's own answer
+ * goes into the window's settings, so the switch and the panes agree even with the event stream down; every other
+ * window takes it from `event: capabilities`, which the save sends to all of them (capabilities.ts). Until the answer
+ * lands the switch shows the person's choice. A save that fails puts the switch back and says so.
+ */
+export function useSplitViewSwitch(saved: boolean): { on: boolean; failed: boolean; toggle: () => void } {
+  const [asked, setAsked] = useState<boolean | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setAsked(null), [saved]);
+  const on = asked ?? saved;
+  const toggle = () => {
+    const next = !on;
+    setAsked(next);
+    setFailed(false);
+    post<{ split_view: { on: boolean } }>(inboxUrl('/settings'), { split_view: { on: next } }).then(
+      (saved) => adoptSplitView?.(saved.split_view.on),
+      () => {
+        setAsked(null);
+        setFailed(true);
+      },
+    );
+  };
+  return { on, failed, toggle };
 }

@@ -12,6 +12,7 @@ import type { InboxAttachmentState, InboxGuideRef, InboxMessageWire } from '@pla
 import { artifactKey, artifactOfFile, artifactsNewestFirst, threadArtifacts } from './artifacts';
 import { attachmentSequence, stepIndexOf, stepsOf } from './stepping';
 import { artifactChanged, artifactDetail, artifactLabel } from './components/ArtifactsView';
+import { inboxHtmlArtifactKey, inboxHtmlBlockHash } from '@plannotator/core/inbox-html-blocks';
 
 const M1 = 'msg_01K7M1MMMMMMMMMMMMMMMMMMMM';
 const M2 = 'msg_01K7M2MMMMMMMMMMMMMMMMMMMM';
@@ -121,4 +122,36 @@ test('a tile says everything it shows in its name, in the Inbox\'s own words', (
   expect(artifactChanged({ ...spec, captured: 'on_open' })?.short).toBe('Changed since opened');
   expect(artifactChanged({ ...spec, unavailable: { code: 'attachment_missing', message: 'gone' } })?.short).toBe('No longer on disk');
   expect(artifactChanged(sql)).toBeNull();
+});
+
+const TIDES = '<h2>Harbor · tide table</h2><table><tr><td>06:12</td></tr></table>';
+const BERTHS = '<div id="chart"></div><script src="https://cdn.example/chart.js"></script>';
+const pageBody = (first: string) => ['The berths:', '', '![Berth plan](berths.png)', '', '![Walkthrough](walkthrough.webm)', '', '```html', first, '```', '', '```html', BERTHS, '```'].join('\n');
+
+test('an agent\'s html blocks are artifacts in its text, after its picture and film: their own keys, never the viewer\'s steps', () => {
+  const picture = file('att_01K7PPPPPPPPPPPPPPPPPPPPPP', 'berths.png', 'image', M1, { ref: 'berths.png', media_type: 'image/png', width: 960, height: 600 });
+  const film = file('att_01K7QQQQQQQQQQQQQQQQQQQQQQ', 'walkthrough.webm', 'video', M1, { ref: 'walkthrough.webm', media_type: 'video/webm' });
+  const notes = file('att_01K7RRRRRRRRRRRRRRRRRRRRRR', 'notes.md', 'markdown', M1);
+  const read = (body: string) => threadArtifacts([agent(M1, '2026-10-10T09:12:00.000Z', { body })], [notes], [picture, film]);
+  const list = read(pageBody(TIDES));
+  const tides = inboxHtmlArtifactKey(M1, inboxHtmlBlockHash(TIDES));
+  const berths = inboxHtmlArtifactKey(M1, inboxHtmlBlockHash(BERTHS));
+  expect(list.map(artifactKey)).toEqual([picture.id, film.id, tides, berths, notes.id]);
+  expect(list.map((a) => a.type)).toEqual(['file', 'file', 'html', 'html', 'file']);
+  // The tile's words: the page's heading (else "HTML block"), an attached page's kind and size, in the text.
+  const pages = list.filter((a) => a.type === 'html');
+  expect(pages.map((a) => artifactLabel(a, 0))).toEqual([
+    expect.stringMatching(/^Harbor · tide table, HTML, \d+ B, from Claude Code at .+, shown in the message text$/),
+    expect.stringMatching(/^HTML block, HTML, \d+ B, from Claude Code at .+, shown in the message text$/),
+  ]);
+  // The viewer steps through the files only.
+  expect(stepsOf(list).map((s) => s.attachment.id)).toEqual([picture.id, film.id, notes.id]);
+  // A second read (new objects), and the other block edited: the berths block keeps its key, so its pin stays on it.
+  expect(read(pageBody(TIDES)).map(artifactKey)).toEqual(list.map(artifactKey));
+  const edited = read(pageBody('<h2>Harbor · tide table, revised</h2>')).map(artifactKey);
+  expect(edited).toContain(berths);
+  expect(edited).not.toContain(tides);
+  expect(edited.indexOf(berths)).toBe(3);
+  // The person's own text holds none.
+  expect(threadArtifacts([{ ...person(M2, '2026-10-10T09:40:00.000Z'), body: pageBody(TIDES) } as InboxMessageWire], [], []).length).toBe(0);
 });

@@ -17,6 +17,7 @@ import { formatCount } from '@plannotator/core/inbox-format';
 import { MentionMenuItem } from './MentionMenuItem';
 import { hideKeysWords } from '../pulls/hiddenPulls';
 import { useThreadRowDrag } from './useThreadRowDrag';
+import type { BandMenuAction } from '../markAllRead';
 import { ListDrops, RowDragHelp, THREAD_DRAG_HELP_ID, useRowsDraggable } from './listDrops';
 export { useRowDragA11y } from './listDrops';
 
@@ -63,8 +64,37 @@ export interface ThreadRowMenuProps {
    * Snooze, then the bar's ⋯ items), acting on every picked row. Absent: neither.
    */
   picks?: MenuPicks;
+  /**
+   * The group bands' menu (markAllRead.ts): a right-click, a held finger or the menu key on a band opens Mark all as
+   * read, Archive all and (on a band of open questions) Re-ask all for that band's threads, each where it has something to take. A band with neither, or none
+   * of this (absent): the browser's own menu, and its click is the band's toggle as ever.
+   */
+  bands?: BandMenu;
   children: ReactNode;
 }
+
+export interface BandMenu {
+  /** The items the band offers now, in order; none: no menu. */
+  actionsOf: (sectionId: string) => readonly BandMenuAction[];
+  /** The band's words (the sheet's title and the menu's name). */
+  labelOf: (sectionId: string) => string;
+  /** What a write changes on the band (its threads' ids): once it differs, the write has landed. */
+  stateOf: (sectionId: string) => string;
+  onAction: (sectionId: string, action: BandMenuAction) => void;
+  /** The band's menu really opened (a right-click, the key, or a hold that lasted): never a press that only took the look. */
+  onOpened?: (sectionId: string) => void;
+}
+
+const BAND_LABELS: Record<BandMenuAction, { label: string; icon: IconName }> = {
+  read: { label: 'Mark all as read', icon: 'checkCircle' },
+  archive: { label: 'Archive all', icon: 'archive' },
+  reask: { label: 'Re-ask all', icon: 'refresh' },
+};
+
+/** A band's id in the menu (a thread's is its own `msg_…` id). */
+const BAND = 'band:';
+export const bandMenuId = (sectionId: string) => `${BAND}${sectionId}`;
+const bandOf = (id: string | null): string | null => (id?.startsWith(BAND) ? id.slice(BAND.length) : null);
 
 const LABELS: Record<RowMenuAction, { label: string; icon: IconName; iconClass?: string }> = {
   pin: { label: 'Star thread', icon: 'star' },
@@ -92,6 +122,13 @@ function rowElementOf(target: EventTarget | null): HTMLElement | null {
   return target.closest<HTMLElement>('.ib-mrow[data-thread-id]');
 }
 
+/** A group's band (its header, the group's toggle) a `contextmenu` event lands on. */
+function bandElementOf(target: EventTarget | null): HTMLElement | null {
+  if (!(target instanceof Element)) return null;
+  const band = target.closest<HTMLElement>('button.ib-band');
+  return band?.parentElement?.matches('.ib-group[data-section-id]') ? band : null;
+}
+
 /**
  * The thread rows' right-click menu: one menu for the whole list (its body is
  * the trigger), aimed at the row the right-click (or the platform's
@@ -112,17 +149,31 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
   const [portal, setPortal] = useState<HTMLElement | null>(null);
   useLayoutEffect(() => setPortal(body.current?.closest<HTMLElement>('.pn-inbox') ?? null), []);
   /** A row's own button now (it may have been drawn again while the menu was open). */
-  const buttonFor = (id: string): HTMLElement | null => body.current?.querySelector<HTMLElement>(`[data-thread-id="${CSS.escape(id)}"]`) ?? null;
+  const buttonFor = (id: string): HTMLElement | null => {
+    const band = bandOf(id);
+    if (band !== null) return body.current?.querySelector<HTMLElement>(`.ib-group[data-section-id="${CSS.escape(band)}"] > button.ib-band`) ?? null;
+    return body.current?.querySelector<HTMLElement>(`[data-thread-id="${CSS.escape(id)}"]`) ?? null;
+  };
   const rowOrder = () => [...(body.current?.querySelectorAll('[data-thread-id]') ?? [])].map((el) => el.getAttribute('data-thread-id')!);
+  const bandOrder = () => [...(body.current?.querySelectorAll('.ib-group[data-section-id] > button.ib-band') ?? [])].map((el) => bandMenuId(el.parentElement!.getAttribute('data-section-id')!));
+  const firstBand = () => body.current?.querySelector<HTMLElement>('button.ib-band') ?? null;
+  const bands = props.bands;
   const menu = useContextMenuTrigger({
-    itemOf: rowElementOf,
-    idOf: (button) => button.getAttribute('data-thread-id'),
-    has: (id) => props.rowOf(id) !== null,
+    // A row, else (with `bands`) a group's band.
+    itemOf: (target) => rowElementOf(target) ?? (bands ? bandElementOf(target) : null),
+    idOf: (button) => button.getAttribute('data-thread-id') ?? (button.matches('button.ib-band') ? bandMenuId(button.parentElement!.getAttribute('data-section-id')!) : null),
+    has: (id) => {
+      const band = bandOf(id);
+      return band !== null ? (bands?.actionsOf(band).length ?? 0) > 0 : props.rowOf(id) !== null;
+    },
     buttonFor,
-    // A row that left the rows on screen: the row now in its slot, else the first band.
-    slotOf: () => ({ order: rowOrder(), fallback: () => body.current?.querySelector<HTMLElement>('button.ib-band') ?? null }),
+    // A row that left the rows on screen: the row now in its slot, else the first band. A band that left: the band now
+    // in its slot.
+    slotOf: (id) => ({ order: bandOf(id) !== null ? bandOrder() : rowOrder(), fallback: firstBand }),
     // What a write (Mark read, Mark unread, Move back, Archive, Remove from) changes on a row: once it differs, the write has landed.
     stateOf: (id) => {
+      const band = bandOf(id);
+      if (band !== null) return bands?.stateOf(band) ?? '';
       const row = props.rowOf(id);
       return row ? `${row.section}|${row.unread}|${row.read_at ?? ''}|${row.resolved_at ?? ''}|${row.snoozed?.until ?? ''}|${row.priority ? 'p' : ''}|${row.tags?.join(',') ?? ''}` : '';
     },
@@ -131,7 +182,15 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
     onTarget: props.onTarget,
     longPress: true,
   });
-  const target = menu.targetId ? props.rowOf(menu.targetId) : null;
+  // A band's menu, or a row's.
+  const bandTarget = bandOf(menu.targetId);
+  const bandOpen = menu.open && bandTarget !== null ? bandTarget : null;
+  useEffect(() => {
+    if (bandOpen !== null) bands?.onOpened?.(bandOpen);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bandOpen]);
+  const bandActions = bandTarget !== null && bands ? bands.actionsOf(bandTarget) : [];
+  const target = menu.targetId && bandTarget === null ? props.rowOf(menu.targetId) : null;
   // A row pressed with a mouse and moved is dragged (threadDrag.ts): into the reply box, a mention; to the list's top or
   // bottom edge or held on another row, the places ListDrops draws while it is carried.
   const draggable = useRowsDraggable();
@@ -231,8 +290,38 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
       <ContextMenu.Portal container={portal ?? undefined}>
         {props.phone && <ContextMenu.Backdrop className="ib-pm-scrim" />}
         <ContextMenu.Positioner className="ib-pm-pos" data-phone={props.phone ? '' : undefined}>
-          <ContextMenu.Popup className="ib-pm" aria-label={picked ? pickedTitle(picked.act.rows.length) : (target?.subject ?? 'Thread')} data-row-menu={target?.thread_id} data-picked-menu={picked ? '' : undefined} {...menu.popup}>
+          <ContextMenu.Popup
+            className="ib-pm"
+            aria-label={bandTarget !== null ? (bands?.labelOf(bandTarget) ?? 'Group') : picked ? pickedTitle(picked.act.rows.length) : (target?.subject ?? 'Thread')}
+            data-row-menu={target?.thread_id}
+            data-band-menu={bandTarget ?? undefined}
+            data-picked-menu={picked ? '' : undefined}
+            {...menu.popup}
+          >
             {/* The popup is named already (aria-label): the title is for the eye only, on a phone's sheet (the thread's ⋯ sheet's). */}
+            {bandTarget !== null && bands && (
+              <>
+                <div className="ib-pm-title" dir="auto" aria-hidden="true">
+                  {bands.labelOf(bandTarget)}
+                </div>
+                {bandActions.map((action) => (
+                  <Menu.Item
+                    key={action}
+                    className="ib-pmi"
+                    label={BAND_LABELS[action].label}
+                    data-band-action={action}
+                    onClick={() => {
+                      // The band may leave once its threads settle elsewhere: focus that fell to the page goes to the band in its slot.
+                      menu.follow(bandMenuId(bandTarget));
+                      bands.onAction(bandTarget, action);
+                    }}
+                  >
+                    <Icon name={BAND_LABELS[action].icon} size={15} />
+                    {BAND_LABELS[action].label}
+                  </Menu.Item>
+                ))}
+              </>
+            )}
             {target && (
               <div className="ib-pm-title" dir="auto" aria-hidden="true">
                 {picked ? pickedTitle(picked.act.rows.length) : (target.subject ?? '(no subject)')}

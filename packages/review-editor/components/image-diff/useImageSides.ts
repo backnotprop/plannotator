@@ -55,8 +55,8 @@ export function useNearViewport(): [React.RefObject<HTMLDivElement | null>, bool
   return [ref, visible];
 }
 
-export function useImageSides(options: { snapshotId?: string; filePath: string; status: DiffFileStatus; visible: boolean; patch?: string; knownBytes?: Partial<Record<ReviewImageSide, number>> }) {
-  const { snapshotId, filePath, status, visible } = options;
+export function useImageSides(options: { snapshotId?: string; filePath: string; status: DiffFileStatus; visible: boolean; patch?: string; knownBytes?: Partial<Record<ReviewImageSide, number>>; fetchImpl?: typeof fetch }) {
+  const { snapshotId, filePath, status, visible, fetchImpl } = options;
   const tooLarge = knownTooLarge(options.patch, options.knownBytes);
   const [states, setStates] = useState<Record<ReviewImageSide, SideState>>(() => ({
     old: initialState(snapshotId, filePath, 'old', tooLarge.old),
@@ -79,7 +79,7 @@ export function useImageSides(options: { snapshotId?: string; filePath: string; 
         continue;
       }
       setStates((prev) => ({ ...prev, [side]: { state: 'loading' } }));
-      fetchReviewImage(snapshotId, filePath, side, controller.signal)
+      fetchReviewImage(snapshotId, filePath, side, controller.signal, fetchImpl)
         .then((result) => {
           if (controller.signal.aborted) return;
           setStates((prev) => ({ ...prev, [side]: result.ok ? { state: 'ok', image: result.image } : { state: 'error', error: result.error } }));
@@ -87,7 +87,7 @@ export function useImageSides(options: { snapshotId?: string; filePath: string; 
         .catch(() => undefined);
     }
     return () => controller.abort();
-  }, [snapshotId, filePath, sidesKey, visible]);
+  }, [snapshotId, filePath, sidesKey, visible, fetchImpl]);
 
   const markDecodeError = (side: ReviewImageSide) =>
     setStates((prev) => ({ ...prev, [side]: { state: 'error', error: { status: 200, reason: 'decode' } } }));

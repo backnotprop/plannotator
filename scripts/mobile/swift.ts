@@ -18,7 +18,8 @@
  * first), so the Swift always matches the JSON beside it.
  */
 import type { DoorEntry } from './door';
-import { OUT, cli, contractVersion, jsonText, readRepoText, repoFileExists, type Output } from './lib';
+import { contractVersion } from './door';
+import { OUT, cli, jsonText, readRepoText, repoFileExists, type Output } from './lib';
 import type { Schema } from './schema';
 
 /** The two source files whose error codes the app may meet (read as text: never imported). */

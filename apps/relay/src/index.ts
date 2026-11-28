@@ -18,6 +18,12 @@
  *   POST   /v1/mailboxes/:mbx/push                      Inbox bearer: one push to one phone, through APNs or FCM
  *   GET    /v1/mailboxes/:mbx/socket                    Inbox bearer, WebSocket: hello, carriage, command; item, applied
  *
+ * Relay 1.1 (`hello` says `version: "1.1"`; every 1.0 route answers as before):
+ *   GET    /v1/mailboxes/:mbx/devices/:dev/socket          device bearer, WebSocket: `{ n }` when an item is stored for it
+ *   DELETE /v1/mailboxes/:mbx/devices/:dev/commands/:id    device bearer: take back a command no Inbox socket has had
+ *   PUT    /v1/mailboxes/:mbx/devices/:dev/liveactivity    device bearer: the Live Activity's push token
+ *   PUT    .../apns takes `topic`; POST .../push takes `kind: "live"` (counts only)
+ *
  * Owner-deployed (`wrangler deploy` from this folder, never from CI); lanes
  * run it under `wrangler dev` only.
  */
@@ -45,10 +51,12 @@ function routeOf(method: string, rest: string): { auth: boolean; max: number } |
   if (rest === "/push") return method === "POST" ? { auth: true, max: SMALL_BODY_MAX } : null;
   const signal = /^\/signals\/([^/]+)$/.exec(rest);
   if (signal) return method === "GET" && SIGNAL_TOKEN.test(signal[1]!) ? { auth: false, max: 0 } : null;
-  const device = /^\/devices\/([^/]+)(?:\/([a-z]+))?$/.exec(rest);
+  const device = /^\/devices\/([^/]+)(?:\/([a-z]+)(?:\/([^/]+))?)?$/.exec(rest);
   if (!device || !DEVICE_ID.test(device[1]!)) return null;
   const sub = device[2];
-  const wanted: Record<string, string> = { "": "PUT DELETE", carriage: "PUT", apns: "PUT", fcm: "PUT", items: "GET", ack: "POST", commands: "POST", signal: "POST" };
+  // `DELETE .../commands/:id` (1.1) is the only route with a third part.
+  if (device[3] !== undefined) return sub === "commands" && method === "DELETE" ? { auth: true, max: SMALL_BODY_MAX } : null;
+  const wanted: Record<string, string> = { "": "PUT DELETE", carriage: "PUT", apns: "PUT", fcm: "PUT", liveactivity: "PUT", items: "GET", socket: "GET", ack: "POST", commands: "POST", signal: "POST" };
   if (!(wanted[sub ?? ""] ?? "").split(" ").includes(method)) return null;
   return { auth: true, max: sub === "commands" ? COMMAND_BODY_MAX : SMALL_BODY_MAX };
 }

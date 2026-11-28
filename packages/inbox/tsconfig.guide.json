@@ -19,6 +19,6 @@
     "noEmit": true,
     "types": ["bun-types"]
   },
-  "include": ["guide/**/*.ts", "guide/**/*.tsx", "shape/ShapeBoard.tsx", "shape/types.ts", "shape/board-module.d.ts"],
+  "include": ["guide/**/*.ts", "guide/**/*.tsx"],
   "exclude": ["node_modules"]
 }

@@ -74,6 +74,8 @@ describe('which lanes a change runs', () => {
     // The iPhone app: only mobile-ios.yml builds its Swift and Xcode files.
     ['the iPhone app\'s Swift, Xcode and asset files', ['apps/mobile/ios/App/InboxApp.swift', 'apps/mobile/ios/Inbox.xcodeproj/project.pbxproj', 'apps/mobile/ios/App/Info.plist', 'apps/mobile/ios/App/Assets.xcassets/AppIcon.appiconset/Contents.json', 'apps/mobile/ios/Local.example.xcconfig', 'apps/mobile/ios/App/Inbox.entitlements'], CHEAP],
     // Semgrep scans shell; `bun test` finds *.test.ts anywhere; the package walk finds package.json; tests read the contract.
+    ['the iPhone app\'s own ignore file', ['apps/mobile/ios/.gitignore'], CHEAP],
+    ['an ignore file elsewhere', ['apps/mobile/.gitignore'], EVERYTHING],
     ['the iPhone app\'s CI script', ['apps/mobile/ios/ci.sh'], EVERYTHING],
     ['the iPhone app\'s Swift lockfile', ['apps/mobile/ios/InboxCore/Package.resolved'], EVERYTHING],
     ['a test file under apps/mobile/ios', ['apps/mobile/ios/x.test.ts'], EVERYTHING],
@@ -252,10 +254,15 @@ describe('no code reads an allowlisted file', () => {
   // Strings that name an allowlisted path without reading it from the checkout. Add one only after checking that.
   const MENTIONS: Record<string, string> = {
     'packages/core/fixtures/inbox-relay-vectors.json': 'its "about" text cites the design doc',
+    'packages/core/fixtures/inbox-relay-push-v2-vectors.json': 'its "about" text cites the design doc',
+    'packages/core/inbox-push-vectors.ts': 'it writes the push vectors\' "about" text, which cites the design doc',
     'packages/review-editor/dock/panels/artifactDocument.test.ts': 'an <img src> string in a fixture',
     'packages/shared/inbox/search.test.ts': 'an attachment path in a fixture',
     'tests/e2e/inbox-search-world.ts': 'writes its own file at that path in a temp project',
     'tests/e2e/inbox-ack.spec.ts': 'words in an agent message',
+    'scripts/ci-affected.ts': 'PUSH_LIGHT: globs of the paths a light push to main may change, matched against a diff',
+    'scripts/ci-affected-map.test.ts': 'paths a test of PUSH_LIGHT classifies',
+    'scripts/site-lane.test.ts': 'paths a test of the site lane classifies, and files of a throwaway git history',
   };
 
   test('the allowlist covers real files', () => {

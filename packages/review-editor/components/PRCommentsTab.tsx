@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { PanelEmptyState } from './PanelEmptyState';
-import type { PRContext, PRComment, PRReview, PRReviewThread } from '@plannotator/shared/pr-types';
+import { getPlatformLabel, type Platform, type PRContext, type PRComment, type PRMetadata, type PRReview, type PRReviewThread } from '@plannotator/shared/pr-types';
 import { MarkdownBody } from './MarkdownBody';
 import { CopyButton } from './CopyButton';
 import { DiffHunkPreview } from './DiffHunkPreview';
@@ -478,6 +478,8 @@ export const PRCommentsTab: React.FC<PRCommentsTabProps> = React.memo(({ context
                   onToggleCollapse={() => toggleCollapsed(id)}
                   onAnnotate={handleAnnotate}
                   authenticatedImages={authenticatedImages}
+                  platform={prMetadata?.platform}
+                  forgejoPR={prMetadata}
                 />
               );
             }
@@ -529,7 +531,7 @@ export const PRCommentsTab: React.FC<PRCommentsTabProps> = React.memo(({ context
 
                 {!isCollapsed && entry.data.body && (
                   <div className="mt-2 review-comment-markdown">
-                    <MarkdownBody prMedia authenticatedImages={authenticatedImages} markdown={entry.data.body} textClassName="text-[13px]" />
+                    <MarkdownBody prMedia authenticatedImages={authenticatedImages} forgejoPR={prMetadata} markdown={entry.data.body} textClassName="text-[13px]" />
                   </div>
                 )}
 
@@ -540,6 +542,7 @@ export const PRCommentsTab: React.FC<PRCommentsTabProps> = React.memo(({ context
                     commentId={id}
                     author={entry.data.author || 'unknown'}
                     onAnnotate={handleAnnotate}
+                    platform={prMetadata?.platform}
                   />
                 )}
               </div>
@@ -573,7 +576,7 @@ export const PRCommentsTab: React.FC<PRCommentsTabProps> = React.memo(({ context
 // Subcomponents
 // ---------------------------------------------------------------------------
 
-function ThreadCard({ thread, isSelected, isCollapsed, onSelect, onToggleCollapse, onAnnotate, authenticatedImages }: {
+function ThreadCard({ thread, isSelected, isCollapsed, onSelect, onToggleCollapse, onAnnotate, authenticatedImages, platform, forgejoPR }: {
   thread: PRReviewThread;
   isSelected: boolean;
   isCollapsed: boolean;
@@ -582,6 +585,10 @@ function ThreadCard({ thread, isSelected, isCollapsed, onSelect, onToggleCollaps
   onAnnotate: AnnotateFn;
   /** GitHub attachment images load through the proxy (`proxiesGitHubImages`). */
   authenticatedImages: boolean;
+  /** The PR's platform: it names the comment link's forge. */
+  platform?: Platform;
+  /** A Forgejo PR: its own uploads load through the proxy. */
+  forgejoPR: PRMetadata | null;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const first = thread.comments[0];
@@ -670,7 +677,7 @@ function ThreadCard({ thread, isSelected, isCollapsed, onSelect, onToggleCollaps
           {first.body && (
             <div className={`relative mt-2 ${isDimmed && !isExpanded ? 'max-h-16 overflow-hidden' : ''}`}>
               <div className={`leading-relaxed review-comment-markdown ${isDimmed && !isExpanded ? 'text-muted-foreground' : 'text-foreground/85'}`}>
-                <MarkdownBody prMedia authenticatedImages={authenticatedImages} markdown={first.body} textClassName="text-[13px]" />
+                <MarkdownBody prMedia authenticatedImages={authenticatedImages} forgejoPR={forgejoPR} markdown={first.body} textClassName="text-[13px]" />
               </div>
               {isDimmed && !isExpanded && (
                 <div className="absolute bottom-0 left-0 right-0 h-10 bg-gradient-to-t from-card to-transparent pointer-events-none" />
@@ -702,7 +709,7 @@ function ThreadCard({ thread, isSelected, isCollapsed, onSelect, onToggleCollaps
                     <span className="text-xs text-muted-foreground">{formatRelativeTime(reply.createdAt)}</span>
                   </div>
                   <div className="pl-6 leading-relaxed review-comment-markdown text-foreground/85">
-                    <MarkdownBody prMedia authenticatedImages={authenticatedImages} markdown={reply.body} textClassName="text-[13px]" />
+                    <MarkdownBody prMedia authenticatedImages={authenticatedImages} forgejoPR={forgejoPR} markdown={reply.body} textClassName="text-[13px]" />
                   </div>
                 </div>
               ))}
@@ -716,6 +723,7 @@ function ThreadCard({ thread, isSelected, isCollapsed, onSelect, onToggleCollaps
             commentId={thread.id}
             author={first.author || 'unknown'}
             onAnnotate={onAnnotate}
+            platform={platform}
           />
         </>
       )}
@@ -723,7 +731,18 @@ function ThreadCard({ thread, isSelected, isCollapsed, onSelect, onToggleCollaps
   );
 }
 
-function PRCommentLinkActions({ url, body, commentId, author, onAnnotate }: {
+/**
+ * The words of a comment's link to its forge, named by the PR's platform (a
+ * URL's text cannot tell a Forgejo host from a GitHub owner called `pulls`).
+ * With no PR loaded, the link's text guesses as it always did.
+ */
+export function commentLinkLabel(platform: Platform | undefined, url: string): string {
+  if (platform) return `View on ${getPlatformLabel({ platform })}`;
+  return url.includes('gitlab') ? 'View on GitLab' : url.includes('bitbucket.org') ? 'View on Bitbucket' : 'View on GitHub';
+}
+
+function PRCommentLinkActions({ url, body, commentId, author, onAnnotate, platform }: {
+  platform?: Platform;
   url?: string;
   body: string;
   commentId?: string;
@@ -757,7 +776,7 @@ function PRCommentLinkActions({ url, body, commentId, author, onAnnotate }: {
           <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
           </svg>
-          {url.includes('gitlab') ? 'View on GitLab' : url.includes('bitbucket.org') ? 'View on Bitbucket' : 'View on GitHub'}
+          {commentLinkLabel(platform, url)}
         </a>
       )}
       <CopyButton text={body} variant="inline" label="Copy" />

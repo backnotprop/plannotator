@@ -47,7 +47,8 @@ interface ShortcutSequenceState {
   readonly expiresAt: number;
 }
 
-const SHORTCUT_SEQUENCE_WINDOW_MS = 500;
+/** How long a sequence (`G P`) waits for its next key. */
+export const SHORTCUT_SEQUENCE_WINDOW_MS = 500;
 
 function normalizeShortcutHandler(handler: ShortcutHandler): ShortcutHandlerConfig {
   if (typeof handler === 'function') {

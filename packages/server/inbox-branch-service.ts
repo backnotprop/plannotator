@@ -1,28 +1,26 @@
 /**
  * Branch reviews in the Inbox server (docs/agent-guides/inbox-files-and-guides.md, "Branch reviews"): the agents' side
  * (send_message's `branch`, inbox-mcp-branch.ts), the rows Reviews lists, the PRs a report's thread owns, and the routes
- * `GET /api/inbox/reviews/branches`, `GET /api/inbox/reviews/branches/unreported` and
- * `POST /api/inbox/reviews/branches/rank`. Off (config.json `inboxBranchReviews`, or Code review): no field, no rows,
+ * `GET /api/inbox/reviews/branches` and `POST /api/inbox/reviews/branches/rank`. Off (config.json `inboxBranchReviews`, or Code review): no field, no rows,
  * and the routes answer `409 branch_reviews_off` before any git.
  *
  * Nothing here runs on a timer: a report is read when it arrives and judged for risk then (only with the person's
  * switch on, and only when its commit is here: a cloud agent's only when pushed to the remote it named). A judgment
  * that failed is tried once more on the next Reviews read; one lost (the Inbox restarted while it waited) or made
- * under rules since changed reads "not ranked", and the person ranks it again by hand. The list of branches nobody
- * reported is read when the person opens it.
+ * under rules since changed reads "not ranked", and the person ranks it again by hand. Branches nobody reported are
+ * Reviews' "On this computer" (inbox-local-work.ts), which asks `reported` to leave a reported one to its row.
  */
 import {
   inboxBranchReportOwners,
   inboxBranchRiskKey,
   type InboxBranchReport,
   type InboxBranchReportRow,
-  type InboxUnreportedBranchesAnswer,
 } from "@plannotator/core/inbox-branch-reports";
 import { inboxGitRemoteKey } from "@plannotator/core/inbox-git-url";
 import { inboxRowArchived, type InboxProject, type InboxPull, type InboxReviewStart } from "@plannotator/core/inbox-types";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import type { ReviewGitRuntime } from "@plannotator/shared/review-core";
-import { branchHeadHere, commitContains, createInboxBranchReports, offlineGitTooOld, pushedHere, readBranchDiff, readReportedBranch, readUnreportedBranches } from "./inbox-branch-reports";
+import { branchHeadHere, commitContains, createInboxBranchReports, offlineGitTooOld, pushedHere, readBranchDiff, readReportedBranch } from "./inbox-branch-reports";
 import type { InboxBranchMcp } from "./inbox-mcp-branch";
 import type { PullRisk } from "./inbox-pull-risk";
 
@@ -272,12 +270,9 @@ export function createInboxBranchService(options: InboxBranchServiceOptions) {
       await judge(report);
       return options.risk.branchPending(key, report.head, report.base);
     },
-    /** The safety net, for one project: read only when the person asks. `openHeads`: the branches with an open PR. */
-    async unreported(project: InboxProject, openHeads: ReadonlySet<string>): Promise<InboxUnreportedBranchesAnswer> {
-      const id = store.canonicalProjectId(project.id);
-      const reported = new Set(reports.list().filter((report) => report.project_id === id).map((report) => report.branch));
-      const read = await readUnreportedBranches(runtime, project.root, id, (branch) => reported.has(branch) || openHeads.has(branch), now());
-      return { project_id: id, ...read };
+    /** A branch an agent reported in this project (Reviews' "On this computer" leaves it to its thread's row). */
+    reported(projectId: string, branch: string): boolean {
+      return reports.get(store.canonicalProjectId(projectId), branch) !== null;
     },
   };
 }

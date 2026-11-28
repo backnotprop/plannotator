@@ -21,9 +21,20 @@ on:
 permissions:
   contents: read
 
-# The fast tier. A push to main and a manual run run every job and every
-# test (a manual run given as_if_changed plans as if a PR changed those paths). On a PR the plan job (scripts/ci-affected.ts) reads the changed files
-# and picks what they can affect: the unit and DOM test files that reach them
+# The fast tier. A manual run runs every job and every test (one given
+# as_if_changed plans as if a PR changed those paths). A push to main runs
+# every job and every test too, unless every commit since the last main
+# commit whose Test run passed (the commit deploy.yml diffs from) changes only
+# the marketing site and the docs (PUSH_LIGHT in scripts/ci-affected.ts): then
+# it plans that whole range as a PR would, so a site or docs push finishes in
+# minutes and Deploy follows. The range is never just the parent: a newer push
+# replaces a waiting run and a failed run's commits are tested again, so the
+# next run covers them. No earlier passed run, an API error, a base the pushed
+# commit does not contain, or any other path in the range runs everything:
+# main stays the backstop for what a PR's plan leaves out.
+#
+# On a PR the plan job (scripts/ci-affected.ts) reads the changed files and
+# picks what they can affect: the unit and DOM test files that reach them
 # (imports, file paths named in strings, Pi's vendored copies, and the
 # tree-scanning tests), the Checks steps and the jobs below whose inputs
 # changed. It writes what it chose and why to its log, its run summary and a
@@ -31,11 +42,14 @@ permissions:
 # (the lockfile, a manifest, a tsconfig, a bunfig, a test helper or setup, a
 # workflow, the picker itself, a deleted or renamed code file, an unknown kind
 # of file, an import it cannot resolve, its own failure) it runs everything,
-# exactly as on main. A docs-only PR (scripts/ci-docs-only.sh) runs no job
-# here but the plan. A job that does not apply is skipped, never left pending;
+# on a PR and on a light push alike. A docs-only PR or push
+# (scripts/ci-docs-only.sh) runs no job here but the plan (and guides-show,
+# whose own gate builds on every push). A job that does not apply is skipped,
+# never left pending (a skipped job keeps the run's conclusion success, so
+# Deploy still starts);
 # every gated job reads its plan output as "run unless it says false", so a
 # failed plan runs it. scripts/ci-affected-map.test.ts guards the map. The
-# repo variable CI_AFFECTED=off makes every PR run everything.
+# repo variable CI_AFFECTED=off makes every PR and every push run everything.
 #
 # The heavy suites (Windows, Release dry run, Inbox Pi / Claude Code / relay)
 # run on a PR when their own paths change; see windows.yml.
@@ -45,7 +59,8 @@ permissions:
 # the running one finishes, at most one waits, and a newer push replaces the
 # waiting one. A merge train lands several PRs in a minute, and testing each of
 # their merge commits on main would fill every runner. deploy.yml diffs from the
-# last main commit whose Test passed, so a skipped commit deploys with the next.
+# last main commit whose Test passed, so a skipped commit deploys with the next,
+# and the plan of a push starts from that same commit, so it is tested with the next.
 concurrency:
   group: test-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'push' && format('push-{0}', github.ref) || format('run-{0}', github.run_id) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -64,9 +79,15 @@ jobs:
   # What this change runs (scripts/ci-affected.ts). Never fails on a doubt: the
   # picker answers "all" instead. It stays on ubuntu-24.04 like guides-show.
   plan:
-    name: Plan (what this PR runs)
+    name: Plan (what this change runs)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    # actions: read lists main's passed Test runs, the base of a push's plan
+    # (the same list deploy.yml reads). Read-only; the token reaches only the
+    # picker's step, and only on a push.
+    permissions:
+      contents: read
+      actions: read
     outputs:
       mode: ${{ steps.plan.outputs.mode }}
       unit_lanes: ${{ steps.plan.outputs.unit_lanes }}
@@ -104,11 +125,12 @@ jobs:
         env:
           CI_AFFECTED: ${{ vars.CI_AFFECTED }}
           CI_AFFECTED_AS_IF: ${{ inputs.as_if_changed }}
+          GH_TOKEN: ${{ github.event_name == 'push' && github.token || '' }}
         run: bun run scripts/ci-affected.ts plan
 
   # Everything that is not a sharded test file: the checks that used to lead
   # the single test job, the tree-wide guards, and the two DOM steps that must
-  # run in processes of their own. Every PR but a docs-only one runs it.
+  # run in processes of their own. Every PR and push but a docs-only one runs it.
   checks:
     name: Checks (types, packages, own-process DOM tests, lane guards)
     needs: plan
@@ -244,7 +266,7 @@ jobs:
   # heavy-*: the files that drive real agent processes, one process each.
   # unit-k: Bun's own --shard=k/N over every other discovered file, so a new
   # test file always lands in some shard.
-  # On a PR the plan picks the lanes and their files (fewer lanes for a small
+  # On a PR or a light push the plan picks the lanes and their files (fewer lanes for a small
   # set, none when no test file is affected). The fallback list below is every
   # lane: a plan that failed runs them all.
   unit:

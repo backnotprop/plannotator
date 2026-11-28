@@ -42,6 +42,9 @@ const offBecause = (threadId: string | undefined, forAnother: boolean, session: 
         ? ` The /create-routine request from the person in thread ${threadId} was for another agent session, not yours, so it is off until the person turns it on in Routines in the Inbox.`
         : ` No /create-routine request from the person in thread ${threadId} that this Inbox still holds (one lasts an hour and makes one routine, and an Inbox restart forgets it), so it is off until the person turns it on in Routines in the Inbox.`;
 
+/** What a change result says when no line reached the person, so the agent tells them itself. */
+export const NO_CHANGE_LINE = " There was no thread to post a line for the person in, so none was posted. Tell the person yourself; next time pass thread_id (--thread from a shell).";
+
 const rowLine = (row: InboxScheduledRow) =>
   `${row.id} "${row.name}": ${row.state}, ${row.schedule ? row.schedule_words : "runs only when run"}${row.tz_short ? ` (${row.tz_short})` : ""}, ${row.agent} in ${row.folder_shown}${row.next_run ? `, next ${row.next_run}` : ""}${row.approved_at ? "" : ", not yet turned on by the person"}${row.thread_id ? `, thread ${row.thread_id}` : ""}.`;
 
@@ -97,7 +100,8 @@ export function registerInboxScheduledTool(server: McpServer, context: InboxSche
           const rows = scheduled.list();
           return okComplete(rows.length === 0 ? "No routines." : rows.map(rowLine).join("\n"), { scheduled: rows });
         }
-        const told = (id: string | null) => (id ? ` The person sees it in thread ${scheduled.threadOfLine(id)}.` : "");
+        // A change with nowhere to post its line (no thread_id, and no project to make the routine's own thread in) says so.
+        const told = (id: string | null, changed = true) => (id ? ` The person sees it in thread ${scheduled.threadOfLine(id)}.` : changed ? NO_CHANGE_LINE : "");
         if (input.op === "create") {
           const path = input.folder?.path ?? input.project_path;
           if (!input.folder?.scratch && !path) throw new InboxError("validation_error", "folder: { path } or { scratch: true }, or pass project_path.", { field: "folder" });
@@ -129,14 +133,14 @@ export function registerInboxScheduledTool(server: McpServer, context: InboxSche
           }
           case "update": {
             const folder = input.folder ? (input.folder.scratch ? { scratch: true } : { path: input.folder.path }) : undefined;
-            const { record, told: line } = await scheduled.update(input.id, { ...input, folder }, by);
+            const { record, changed, told: line } = await scheduled.update(input.id, { ...input, folder }, by);
             const row = scheduled.rowOf(record);
-            return okComplete(`${line ? "Changed" : "Nothing changed in"} ${rowLine(row)}${told(line)}`, { scheduled: row });
+            return okComplete(`${changed ? "Changed" : "Nothing changed in"} ${rowLine(row)}${told(line, changed)}`, { scheduled: row });
           }
           case "on":
           case "off": {
-            const { record, told: line } = await scheduled.setOn(input.id, input.op === "on", by);
-            return okComplete(`${rowLine(scheduled.rowOf(record))}${told(line)}`, { scheduled: scheduled.rowOf(record) });
+            const { record, changed, told: line } = await scheduled.setOn(input.id, input.op === "on", by);
+            return okComplete(`${rowLine(scheduled.rowOf(record))}${told(line, changed)}`, { scheduled: scheduled.rowOf(record) });
           }
           case "run": {
             const { message, told: line } = await scheduled.runNow(input.id, by);

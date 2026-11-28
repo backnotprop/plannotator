@@ -1,0 +1,239 @@
+{
+  "about": "Invented health answers and app headers. scripts/mobile/vectors.ts reads them with the product's own door-version rules (packages/core/inbox-door-version.ts) and writes vectors/skew.json.",
+  "clients": {
+    "app": {
+      "contract": 1,
+      "min_inbox_contract": 0,
+      "routes_before_door": [
+        "GET health",
+        "GET threads",
+        "GET threads/:id",
+        "POST messages/:id/reply",
+        "POST pair"
+      ],
+      "not_by_relay_before_door": [
+        "POST pair"
+      ]
+    },
+    "strict_app": {
+      "contract": 2,
+      "min_inbox_contract": 1,
+      "routes_before_door": []
+    }
+  },
+  "routes": [
+    "GET threads",
+    "POST messages/:id/reply",
+    "GET events",
+    "POST pair",
+    "GET new-thing"
+  ],
+  "health": [
+    {
+      "note": "an Inbox from before the handshake: no door",
+      "client": "app",
+      "health": {
+        "ok": true
+      }
+    },
+    {
+      "note": "door is null",
+      "client": "app",
+      "health": {
+        "ok": true,
+        "door": null
+      }
+    },
+    {
+      "note": "the same Inbox, for an app that needs contract 1 or newer",
+      "client": "strict_app",
+      "health": {
+        "ok": true
+      }
+    },
+    {
+      "note": "a normal door",
+      "client": "app",
+      "health": {
+        "door": {
+          "contract": 1,
+          "routes": [
+            "GET health",
+            "GET threads",
+            "POST messages/:id/reply",
+            "GET events",
+            "POST pair"
+          ],
+          "not_by_relay": [
+            "GET events",
+            "POST pair"
+          ],
+          "grants": [
+            "phone"
+          ],
+          "min_app_contract": 1
+        }
+      }
+    },
+    {
+      "note": "an Inbox newer than the app: a higher contract and a route the app does not know",
+      "client": "app",
+      "health": {
+        "door": {
+          "contract": 7,
+          "routes": [
+            "GET threads",
+            "GET new-thing"
+          ],
+          "not_by_relay": [],
+          "grants": [
+            "phone"
+          ],
+          "min_app_contract": 1
+        }
+      }
+    },
+    {
+      "note": "the app below the Inbox's floor",
+      "client": "app",
+      "health": {
+        "door": {
+          "contract": 3,
+          "routes": [
+            "GET threads"
+          ],
+          "not_by_relay": [],
+          "grants": [],
+          "min_app_contract": 2
+        }
+      }
+    },
+    {
+      "note": "both floors fail: the Inbox's floor wins",
+      "client": "strict_app",
+      "health": {
+        "door": {
+          "contract": 0,
+          "routes": [],
+          "not_by_relay": [],
+          "grants": [],
+          "min_app_contract": 3
+        }
+      }
+    },
+    {
+      "note": "contract 0 with a door",
+      "client": "app",
+      "health": {
+        "door": {
+          "contract": 0,
+          "routes": [
+            "GET threads"
+          ],
+          "not_by_relay": [],
+          "grants": [],
+          "min_app_contract": 0
+        }
+      }
+    },
+    {
+      "note": "contract as a string: malformed, read as no door",
+      "client": "app",
+      "health": {
+        "door": {
+          "contract": "1",
+          "routes": [
+            "GET threads"
+          ],
+          "not_by_relay": [],
+          "grants": [],
+          "min_app_contract": 1
+        }
+      }
+    },
+    {
+      "note": "a negative contract: malformed",
+      "client": "app",
+      "health": {
+        "door": {
+          "contract": -1,
+          "routes": [
+            "GET threads"
+          ],
+          "not_by_relay": [],
+          "grants": [],
+          "min_app_contract": 1
+        }
+      }
+    },
+    {
+      "note": "a fractional floor: malformed",
+      "client": "app",
+      "health": {
+        "door": {
+          "contract": 1,
+          "routes": [
+            "GET threads"
+          ],
+          "not_by_relay": [],
+          "grants": [],
+          "min_app_contract": 1.5
+        }
+      }
+    },
+    {
+      "note": "routes not all strings: malformed, read as no door",
+      "client": "app",
+      "health": {
+        "door": {
+          "contract": 1,
+          "routes": [
+            "GET threads",
+            7
+          ],
+          "not_by_relay": [],
+          "grants": [],
+          "min_app_contract": 1
+        }
+      }
+    },
+    {
+      "note": "bad grants and bad not_by_relay: kept as empty, the door still read",
+      "client": "app",
+      "health": {
+        "door": {
+          "contract": 1,
+          "routes": [
+            "GET threads",
+            "GET events"
+          ],
+          "not_by_relay": "GET events",
+          "grants": [
+            1
+          ],
+          "min_app_contract": 1
+        }
+      }
+    }
+  ],
+  "big_contract": {
+    "note": "contract above 2^53 (9007199254740993 in the answer's text): not a safe whole number, so malformed",
+    "client": "app",
+    "health_text": "{\"door\":{\"contract\":9007199254740993,\"routes\":[\"GET threads\"],\"not_by_relay\":[],\"grants\":[],\"min_app_contract\":1}}"
+  },
+  "headers": [
+    "ios 1.4.0 contract 14",
+    "ios 1.4.0 contract 0",
+    "  ios 1.4.0 contract 1  ",
+    "android 2.0.0-beta.1+7 contract 3",
+    "ios 1.4.0 contract 999999",
+    "ios 1.4.0 contract 1000000",
+    "ios 1.4.0 contract 01",
+    "ios 1.4.0 contract -1",
+    "IOS 1.4.0 contract 1",
+    "ios 1.4.0",
+    "ios  1.4.0 contract 1",
+    "ios 1.4.0 contract 1 extra",
+    ""
+  ]
+}

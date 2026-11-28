@@ -16,6 +16,11 @@
       "parts": [],
       "source": "packages/core/inbox-types.ts INBOX_SECTIONS waiting"
     },
+    "section.tagged": {
+      "text": "Tagged you",
+      "parts": [],
+      "source": "packages/core/inbox-types.ts INBOX_SECTIONS tagged"
+    },
     "section.new": {
       "text": "New since you looked",
       "parts": [],
@@ -30,6 +35,16 @@
       "text": "Quiet",
       "parts": [],
       "source": "packages/core/inbox-types.ts INBOX_SECTIONS quiet"
+    },
+    "group.priority": {
+      "text": "Priority",
+      "parts": [],
+      "source": "packages/core/inbox-types.ts INBOX_PRIORITY_GROUP"
+    },
+    "group.snoozed": {
+      "text": "Snoozed",
+      "parts": [],
+      "source": "packages/core/inbox-snooze.ts INBOX_SNOOZED_BAND"
     },
     "agent.claude-code": {
       "text": "Claude Code",
@@ -187,6 +202,151 @@
       "text": "couldn't answer",
       "parts": [],
       "source": "packages/core/inbox-run-line.ts INBOX_TURN_FAILED_WORDS"
+    },
+    "feedback.files_title": {
+      "text": "Feedback on the attached files",
+      "parts": [],
+      "source": "packages/inbox/attachments.ts ATTACHMENT_FEEDBACK_HEADING title"
+    },
+    "feedback.files_intro": {
+      "text": "The following feedback is on the files you attached, one section per file and version.",
+      "parts": [],
+      "source": "packages/inbox/attachments.ts ATTACHMENT_FEEDBACK_HEADING intro"
+    },
+    "feedback.sent_yours": {
+      "text": " (the version you sent)",
+      "parts": [],
+      "source": "packages/inbox/attachments.ts SENT_VERSION_SUFFIX yours"
+    },
+    "markup.only": {
+      "text": "See the marked-up image.",
+      "parts": [],
+      "source": "packages/inbox/markup.ts MARKUP_ONLY_TEXT"
+    },
+    "upload.too_large": {
+      "text": "Not attached: a file is at most 100 MB.",
+      "parts": [],
+      "source": "packages/shared/inbox/uploads.ts receiveInboxUpload, INBOX_UPLOAD_MAX_BYTES"
+    },
+    "upload.not_received": {
+      "text": "The file could not be received; try again.",
+      "parts": [],
+      "source": "packages/shared/inbox/uploads.ts receiveInboxUpload, upload_refused body"
+    },
+    "host.claude-code": {
+      "text": "Claude Code",
+      "parts": [],
+      "source": "packages/core/inbox-types.ts INBOX_HOST_NAMES claude-code"
+    },
+    "host.claude": {
+      "text": "Claude Code",
+      "parts": [],
+      "source": "packages/core/inbox-types.ts INBOX_HOST_NAMES claude"
+    },
+    "host.pi": {
+      "text": "Pi",
+      "parts": [],
+      "source": "packages/core/inbox-types.ts INBOX_HOST_NAMES pi"
+    },
+    "host.oh-my-pi": {
+      "text": "Oh My Pi",
+      "parts": [],
+      "source": "packages/core/inbox-types.ts INBOX_HOST_NAMES oh-my-pi"
+    },
+    "host.opencode": {
+      "text": "OpenCode",
+      "parts": [],
+      "source": "packages/core/inbox-types.ts INBOX_HOST_NAMES opencode"
+    },
+    "host.codex": {
+      "text": "Codex",
+      "parts": [],
+      "source": "packages/core/inbox-types.ts INBOX_HOST_NAMES codex"
+    },
+    "host.cursor": {
+      "text": "Cursor",
+      "parts": [],
+      "source": "packages/core/inbox-types.ts INBOX_HOST_NAMES cursor"
+    },
+    "host.grok": {
+      "text": "Grok Build",
+      "parts": [],
+      "source": "packages/core/inbox-types.ts INBOX_HOST_NAMES grok"
+    },
+    "host.qwen": {
+      "text": "Qwen Code",
+      "parts": [],
+      "source": "packages/core/inbox-types.ts INBOX_HOST_NAMES qwen"
+    },
+    "host.dsh": {
+      "text": "DeepSeek Harness",
+      "parts": [],
+      "source": "packages/core/inbox-types.ts INBOX_HOST_NAMES dsh"
+    },
+    "host.t3": {
+      "text": "T3 Code",
+      "parts": [],
+      "source": "packages/core/inbox-types.ts INBOX_HOST_NAMES t3"
+    },
+    "host.antigravity": {
+      "text": "Antigravity",
+      "parts": [],
+      "source": "packages/core/inbox-types.ts INBOX_HOST_NAMES antigravity"
+    },
+    "host.cline": {
+      "text": "Cline",
+      "parts": [],
+      "source": "packages/core/inbox-types.ts INBOX_HOST_NAMES cline"
+    },
+    "host.muse": {
+      "text": "Muse Code",
+      "parts": [],
+      "source": "packages/core/inbox-types.ts INBOX_HOST_NAMES muse"
+    },
+    "host.openclaw": {
+      "text": "OpenClaw",
+      "parts": [],
+      "source": "packages/core/inbox-types.ts INBOX_HOST_NAMES openclaw"
+    },
+    "host.hermes": {
+      "text": "Hermes Agent",
+      "parts": [],
+      "source": "packages/core/inbox-types.ts INBOX_HOST_NAMES hermes"
+    },
+    "host.orca": {
+      "text": "Orca",
+      "parts": [],
+      "source": "packages/core/inbox-types.ts INBOX_HOST_NAMES orca"
+    },
+    "host.cloud": {
+      "text": "Cloud agent",
+      "parts": [],
+      "source": "packages/core/inbox-types.ts INBOX_HOST_NAMES cloud"
+    },
+    "host.cloud-claude": {
+      "text": "Claude Code routine",
+      "parts": [],
+      "source": "packages/core/inbox-types.ts INBOX_HOST_NAMES cloud-claude"
+    },
+    "host.cloud-grok": {
+      "text": "Grok Bot",
+      "parts": [],
+      "source": "packages/core/inbox-types.ts INBOX_HOST_NAMES cloud-grok"
+    },
+    "host.cloud-muse": {
+      "text": "Muse by Meta",
+      "parts": [],
+      "source": "packages/core/inbox-types.ts INBOX_HOST_NAMES cloud-muse"
+    },
+    "host.cloud-hermes": {
+      "text": "Hermes Agent server",
+      "parts": [],
+      "source": "packages/core/inbox-types.ts INBOX_HOST_NAMES cloud-hermes"
+    },
+    "host.cloud-openclaw": {
+      "text": "OpenClaw server",
+      "parts": [],
+      "source": "packages/core/inbox-types.ts INBOX_HOST_NAMES cloud-openclaw"
     }
   }
 }

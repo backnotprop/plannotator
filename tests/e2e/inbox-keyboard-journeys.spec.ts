@@ -935,6 +935,9 @@ test('J5: jump with G, and come back', async () => {
 test('J6: Decide mode stays its own', async () => {
   await load();
   const decidedIn = await openDecide(world.threads.stopped);
+  // The card is the thread's own question card, and focus opens on its prompt.
+  const card = decide().locator('[data-decision-card]');
+  await expect(decide().locator('[data-decision-question] [data-question-part="prompt"]')).toBeFocused();
   const entries = await page.evaluate(() => history.length);
   const before = hash();
   const unread = () => row(decidedIn).evaluate((el) => el.classList.contains('ib-u'));
@@ -946,20 +949,25 @@ test('J6: Decide mode stays its own', async () => {
   await expect(map()).toHaveCount(0);
   await expect(page.locator('dialog[data-search-palette]')).toBeHidden();
   expect(hash()).toBe(before);
-  await tabTo(decide().getByRole('radio').first());
+  const shown = await card.getAttribute('data-decision-card');
+  const key = await card.locator('fieldset[data-question-key]').getAttribute('data-question-key');
+  const choice = decide().getByRole('radio').first();
+  await tabTo(choice);
   await press('Space');
-  // The answer stamps the card, then Decide moves to the next one and puts focus on its question: let it land
-  // before Escape, so the move does not take focus from where Escape puts it.
-  await expect(decide().locator('[data-decision-prompt]')).toBeFocused();
+  // A pick by the keyboard answers the card and stays on it (only a click or a tap moves on): focus stays on the
+  // choice, past the time a stamp would take to leave.
+  await expect(choice).toBeChecked();
+  await page.waitForTimeout(600);
+  await expect(card).toHaveAttribute('data-decision-card', shown!);
+  await expect(choice).toBeFocused();
+  // Escape closes at once: nothing is asked, nothing is sent.
   await press('Escape');
-  await expect(decide().locator('[data-decision-confirm]')).toBeVisible();
-  await press('Escape');
-  await expect(decide().locator('[data-decision-close]')).toBeFocused();
-  await press('Escape');
-  await tabTo(decide().locator('[data-decision-keep-draft]'));
-  await press('Enter');
   await expect(decide()).toBeHidden();
   await at('Decide closed', { focus: questionsButton(), address: addr(decidedIn), view: 'thread' });
+  // The answer waits as a draft on the thread's own card.
+  const threadCard = page.locator(`section.ib-pane fieldset[data-question-key="${key}"]`);
+  await expect(threadCard.locator('input[data-question-control]').first()).toBeChecked();
+  await expect(threadCard.locator('[data-question-tag]', { hasText: 'Draft' })).toBeVisible();
   expect(await page.evaluate(() => history.length), 'Decide adds no history: Back never reopens it').toBe(entries);
 });
 

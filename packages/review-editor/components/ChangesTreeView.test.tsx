@@ -155,6 +155,37 @@ describe.skipIf(!hasDom)('The Changes tree on Pierre trees', () => {
     expect(trail(el, 'committed.ts')).toEqual(['+1']);
   });
 
+  test('a staged file carries a Staged mark before its numbers, redrawn as it is staged and unstaged (#3683)', async () => {
+    // One viewed set and one annotations array across the rerenders, so only
+    // the staged set changes: the rows must redraw for it alone.
+    const viewedFiles = new Set<string>();
+    const annotations: NonNullable<TreeProps['annotations']> = [];
+    const tree = (staged: string[], extra: TreeProps = {}) => (
+      <Tree files={working} activeFileIndex={0} sinceBaseSections={sections} viewedFiles={viewedFiles} annotations={annotations} stagedFiles={new Set(staged)} {...extra} />
+    );
+    const mark = (el: HTMLElement, path: string) => row(el, path).querySelector<HTMLElement>('[data-item-section="trail"] [title="Staged"]');
+    const el = await mount(tree(['src/staged.ts']));
+    expect(mark(el, 'staged.ts')).not.toBeNull();
+    // A mark, not a button.
+    expect(mark(el, 'staged.ts')!.getAttribute('role')).toBeNull();
+    expect(trail(el, 'staged.ts')).toEqual(['\u25cf', '+1']);
+    expect(mark(el, 'edited.ts')).toBeNull();
+    await rerender(tree(['src/edited.ts']));
+    expect(mark(el, 'edited.ts')).not.toBeNull();
+    expect(mark(el, 'staged.ts')).toBeNull();
+    // Off with the header's Git add button, as dimming is off with the Viewed button.
+    await rerender(tree(['src/edited.ts'], { showStageControls: false }));
+    expect(mark(el, 'edited.ts')).toBeNull();
+  });
+
+  test('grouped by git status, the Staged group says it and its rows carry no mark', async () => {
+    const el = await mount(
+      <Tree files={working} activeFileIndex={0} sinceBaseSections={sections} stagedFiles={new Set(['src/staged.ts'])} groupBy="status" onSelectGroupBy={() => {}} statusGroupingAvailable />,
+    );
+    expect(rows(el)).toContain('Staged/staged.ts');
+    expect(row(el, 'Staged/staged.ts').querySelector('[title="Staged"]')).toBeNull();
+  });
+
   test('a renamed file names its old path then its new path on hover', async () => {
     const el = await mount(<Tree files={[{ ...file('docs/setup.md'), status: 'renamed', oldPath: 'docs/old-setup.md' }, file('src/a.ts')]} activeFileIndex={1} />);
     const path = rows(el).find((p) => p?.endsWith('setup.md'))!;

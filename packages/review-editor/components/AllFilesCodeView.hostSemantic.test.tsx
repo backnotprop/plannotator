@@ -69,6 +69,7 @@ mock.module('@pierre/diffs/react', () => ({
         getHeight: () => 0,
         getTopForItem: () => 0,
         scrollTo: () => {},
+        render: () => {},
       }),
     }));
     return <div ref={props.containerRef} className={props.className} data-mock-scroll="" />;
@@ -89,6 +90,10 @@ mock.module('./ToolbarHost', () => ({
 }));
 
 const { AllFilesCodeView } = await import('./AllFilesCodeView');
+const { PowerUpStatusSlot } = await import('../semDiff/PowerUpStatusSlot');
+const { usePowerUpConfig } = await import('../semDiff/usePowerUpConfig');
+type PowerUpStatus = import('../semDiff/powerUp').PowerUpStatus;
+const NO_REJECTED: readonly string[] = [];
 
 const hasDom = typeof document !== 'undefined';
 let root: Root | null = null;
@@ -181,6 +186,11 @@ async function headerOf(path: string): Promise<HTMLElement> {
   return box;
 }
 
+async function flip(header: HTMLElement) {
+  await act(async () => header.querySelector<HTMLButtonElement>('[data-semantic-note]')!.click());
+  await act(async () => [...document.querySelectorAll<HTMLButtonElement>('[data-semantic-file-popover] [role="switch"]')].at(-1)!.click());
+}
+
 const touchAt = (type: string, x: number) => Object.assign(new Event(type, { bubbles: true, composed: true }), { changedTouches: [{ clientX: x, clientY: 0 }] });
 
 async function pressArrow(gesture: string | Event[] = 'click', marker = 'data-expand-button') {
@@ -223,7 +233,7 @@ describe('AllFilesCodeView semantic diffs through a host reader', () => {
     expect(reads.sort()).toEqual(['a.ts', 'b.ts']);
     expect(asked.sort()).toEqual(['a.ts', 'b.ts']);
     expect([...items.values()].every((item) => item.fileDiff.isPartial === false)).toBe(true);
-    expect((await headerOf('a.ts')).querySelector('[data-semantic-note="semantic"]')?.textContent).toContain('1 moved');
+    expect((await headerOf('a.ts')).querySelector('[data-semantic-note="semantic"]')?.getAttribute('aria-label')).toContain('1 moved');
   });
 
   test.skipIf(!hasDom)('nothing to say, an unsupported file or texts that do not fit the patch: no note, the plain diff', async () => {
@@ -280,9 +290,9 @@ describe('AllFilesCodeView semantic diffs through a host reader', () => {
     expect(calls).toBe(2);
     expect(asked).toEqual(['a.ts']);
     expect([...items.values()][0]!.fileDiff.semanticOperations).toBeUndefined();
-    const offered = (await headerOf('a.ts')).querySelector<HTMLButtonElement>('[data-semantic-note="off"]');
-    expect(offered?.textContent).toContain('1 moved');
-    await act(async () => offered!.click());
+    const header = await headerOf('a.ts');
+    expect(header.querySelector('[data-semantic-note="off"]')?.getAttribute('aria-label')).toContain('1 moved');
+    await flip(header);
     expect(([...items.values()][0]!.fileDiff.semanticOperations as unknown[] | undefined)?.length).toBe(1);
   });
 
@@ -330,9 +340,10 @@ describe('AllFilesCodeView semantic diffs through a host reader', () => {
       await options.loadDiffFiles({ name: 'a.ts' });
       await new Promise((resolve) => setTimeout(resolve, 400));
     });
-    const offered = (await headerOf('a.ts')).querySelector<HTMLButtonElement>('[data-semantic-note]');
-    expect([offered?.dataset.semanticNote, offered?.textContent?.includes('1 moved')]).toEqual(['off', true]);
-    await act(async () => offered!.click());
+    const header = await headerOf('a.ts');
+    const offered = header.querySelector<HTMLButtonElement>('[data-semantic-note]');
+    expect([offered?.dataset.semanticNote, offered?.getAttribute('aria-label')?.includes('1 moved')]).toEqual(['off', true]);
+    await flip(header);
     expect(([...items.values()][0]!.fileDiff.semanticOperations as unknown[] | undefined)?.length).toBe(1);
   });
 
@@ -358,7 +369,7 @@ describe('AllFilesCodeView semantic diffs through a host reader', () => {
       await new Promise((resolve) => setTimeout(resolve, 400));
     });
     const note = (await headerOf('a.ts')).querySelector<HTMLElement>('[data-semantic-note]');
-    expect([note?.dataset.semanticNote === 'working', note?.textContent?.includes('1 moved')]).toEqual([false, true]);
+    expect([note?.dataset.semanticNote === 'working', note?.getAttribute('aria-label')?.includes('1 moved')]).toEqual([false, true]);
   });
 
   for (const [when, engineMs, settleMs] of [['before the engine answers', 400, 40], ['while its answer waits to be drawn', 20, 80]] as const) {
@@ -380,9 +391,10 @@ describe('AllFilesCodeView semantic diffs through a host reader', () => {
         await options.loadDiffFiles({ name: 'a.ts' });
         await new Promise((resolve) => setTimeout(resolve, 700));
       });
-      const offered = (await headerOf('a.ts')).querySelector<HTMLButtonElement>('[data-semantic-note]');
-      expect([offered?.dataset.semanticNote, offered?.textContent?.includes('1 moved')]).toEqual(['off', true]);
-      await act(async () => offered!.click());
+      const header = await headerOf('a.ts');
+      const offered = header.querySelector<HTMLButtonElement>('[data-semantic-note]');
+      expect([offered?.dataset.semanticNote, offered?.getAttribute('aria-label')?.includes('1 moved')]).toEqual(['off', true]);
+      await flip(header);
       expect(([...items.values()][0]!.fileDiff.semanticOperations as unknown[] | undefined)?.length).toBe(1);
     });
   }
@@ -475,7 +487,7 @@ describe('AllFilesCodeView semantic diffs through a host reader', () => {
       dispose: () => {},
     };
     const { read } = hostReader();
-    await mount([changed('a.ts')], { semDiffClient: client, fetchFileContent: read, powerUp: { active: true, rejected: [], provider: 'jev', retry: 0 } }, 40);
+    await mount([changed('a.ts')], { semDiffClient: client, fetchFileContent: read, powerUp: { active: true, rejected: [], provider: 'jev', settingsRevision: 0, retry: 0 } }, 40);
     await pressArrow();
     const options = lastCodeViewProps?.options as { loadDiffFiles: (fileDiff: { name: string }) => Promise<unknown> };
     await act(async () => {
@@ -571,11 +583,61 @@ describe('AllFilesCodeView semantic diffs through a host reader', () => {
     await mount([changed('a.ts'), changed('b.ts')], { fetchFileContent: read });
     expect(reads).toEqual([]);
   });
+
+  test.skipIf(!hasDom)('Retry on an unavailable Power Up asks the provider again, through the config and slot both hosts use', async () => {
+    const opinionAsks: string[] = [];
+    let refuse = true;
+    const client: SemDiffClient = {
+      supports: (path) => path.endsWith('.ts'),
+      diff: async (path, _old, _new, _signal, opinion) => {
+        if (!opinion) return moved;
+        opinionAsks.push(path);
+        return { ...moved, secondOpinion: (refuse ? { state: 'refusedKey', links: [] } : { state: 'ok', links: [] }) as never };
+      },
+      attempt: async () => ({ result: moved, failed: false }),
+      dispose: () => {},
+    };
+    const { read } = hostReader();
+    const readSettings = async () => ({ configured: true, provider: 'jev' });
+    function Host() {
+      const { powerUp, retry } = usePowerUpConfig({ client, on: true, rejected: NO_REJECTED, readSettings });
+      const [status, setStatus] = React.useState<PowerUpStatus | null>(null);
+      return (
+        <>
+          {status && <PowerUpStatusSlot status={status} provider="jev" onRetry={retry} />}
+          <AllFilesCodeView files={[changed('a.ts')]} diffStyle="unified" annotations={[]} selectedAnnotationId={null} scrollTargetAnnotation={null} pendingSelection={null} onLineSelection={() => {}} onAddAnnotationForFile={() => {}} onEditAnnotation={() => {}} onSelectAnnotation={() => {}} onDeleteAnnotation={() => {}} readOnly contextExpansionAvailable={false} semDiffClient={client} fetchFileContent={read} powerUp={powerUp} onPowerUpStatus={setStatus} />
+        </>
+      );
+    }
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await act(async () => {
+      root!.render(<Host />);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    });
+    const options = lastCodeViewProps?.options as { onPostRender: (node: HTMLElement, instance: unknown, phase: string, context: unknown) => void };
+    await act(async () => {
+      for (const item of items.values()) options.onPostRender(document.createElement('div'), {}, 'mount', { item });
+      await new Promise((resolve) => setTimeout(resolve, 260));
+    });
+    expect(opinionAsks).toEqual(['a.ts']);
+    expect(host.querySelector('[data-power-up-status]')?.getAttribute('data-power-up-status')).toBe('unavailable');
+    refuse = false;
+    const retryButton = [...host.querySelectorAll('button')].find((button) => button.textContent === 'Retry')!;
+    await act(async () => {
+      retryButton.click();
+      await new Promise((resolve) => setTimeout(resolve, 260));
+    });
+    expect(opinionAsks).toEqual(['a.ts', 'a.ts']);
+    expect(host.querySelector('[data-power-up-status]')?.getAttribute('data-power-up-status')).toBe('nothing');
+  });
 });
 
 describe('AllFilesCodeView semantic notes that land after the person started reading', () => {
   const box = (top: number, height: number) => ({ x: 0, y: top, left: 0, right: 800, width: 800, top, bottom: top + height, height, toJSON: () => ({}) }) as DOMRect;
   const tops = new Map<Element, number>();
+  const heights = new Map<Element, number>();
   let pageHeight = 10_000;
   let hidden = false;
   const sizes = ['scrollHeight', 'clientHeight'] as const;
@@ -584,6 +646,7 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
     restore?.();
     restore = null;
     tops.clear();
+    heights.clear();
     pageHeight = 10_000;
     hidden = false;
   });
@@ -601,7 +664,7 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
       };
     }
     Element.prototype.getBoundingClientRect = function (this: Element) {
-      return hidden ? box(0, 0) : box(tops.get(this) ?? 0, tops.has(this) ? 400 : 700);
+      return hidden ? box(0, 0) : box(tops.get(this) ?? 0, tops.has(this) ? heights.get(this) ?? 400 : 700);
     };
     Object.defineProperty(HTMLElement.prototype, 'scrollHeight', { configurable: true, get: () => pageHeight });
     Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get: () => 700 });
@@ -636,6 +699,7 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
     };
     const swapped = (path: string) => ([...items.values()].find((item) => item.id.includes(path))!.fileDiff.semanticOperations as unknown[] | undefined)?.length === 1;
     const move = (path: string, top: number) => void tops.set(nodes.get(path)!, top);
+    const resize = (path: string, height: number) => void heights.set(nodes.get(path)!, height);
     const redraw = async () => {
       await act(async () => {
         for (const item of items.values()) options.onPostRender(nodes.get(files.find((file) => item.id.includes(file))!)!, {}, 'update', { item });
@@ -650,8 +714,88 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
         await new Promise((resolve) => setTimeout(resolve, 25));
       });
     };
-    return { land, swapped, move, redraw, drawnKey, rerender };
+    return { land, swapped, move, resize, redraw, drawnKey, rerender };
   }
+
+  async function atTheEnd(files: string[], scrollTop: number) {
+    const page = await reading(files, Object.fromEntries(files.map((file, index) => [file, 100 + index * 200])));
+    document.dispatchEvent(new Event('wheel'));
+    await page.land();
+    for (const element of document.querySelectorAll('div')) Object.defineProperty(element, 'scrollTop', { configurable: true, value: scrollTop });
+    const tap = async (path: string) => flip(await headerOf(path));
+    const held = () => [...document.querySelectorAll<HTMLElement>('div')].map((element) => element.style.paddingBottom).find(Boolean) ?? '';
+    return { ...page, tap, held };
+  }
+
+  test.skipIf(!hasDom)('a review that fits the window is not padded when a file folds, so no scrollbar comes and goes', async () => {
+    pageHeight = 700;
+    const page = await atTheEnd(['a.ts'], 0);
+    await page.tap('a.ts');
+    expect(page.swapped('a.ts')).toBe(true);
+    expect(page.held()).toBe('');
+  });
+
+  test.skipIf(!hasDom)('at the end of the page a tap on a second file while the first is still held holds the page for both', async () => {
+    const page = await atTheEnd(['a.ts', 'b.ts'], 10_000 - 700);
+    await page.tap('b.ts');
+    expect(page.held()).toBe('400px');
+    await page.tap('a.ts');
+    expect(page.held()).toBe('800px');
+  });
+
+  async function settled(page: { held: () => string }, content: () => number) {
+    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
+      configurable: true,
+      get(this: HTMLElement) {
+        return content() + (parseFloat(this.style.paddingBottom) || 0);
+      },
+    });
+    return async () => {
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      });
+      return page.held();
+    };
+  }
+
+  test.skipIf(!hasDom)('two quick taps at the end of the page settle back to the length the page had before the first', async () => {
+    let content = 10_000;
+    const page = await atTheEnd(['a.ts', 'b.ts'], 10_000 - 700);
+    const settle = await settled(page, () => content);
+    await page.tap('b.ts');
+    await page.tap('a.ts');
+    content = 9_400;
+    expect(await settle()).toBe('600px');
+  });
+
+  test.skipIf(!hasDom)('a fling into the padding right after a tap is not pulled back up when the hold settles', async () => {
+    let content = 10_000;
+    const page = await atTheEnd(['a.ts'], 10_000 - 700);
+    const settle = await settled(page, () => content);
+    await page.tap('a.ts');
+    content = 9_700;
+    for (const element of document.querySelectorAll('div')) Object.defineProperty(element, 'scrollTop', { configurable: true, value: 9_400 });
+    expect(await settle()).toBe('400px');
+  });
+
+  test.skipIf(!hasDom)('a hold that settled to nothing is not picked up by a later toggle on a page that now fits', async () => {
+    let content = 10_000;
+    const page = await atTheEnd(['a.ts'], 10_000 - 700);
+    const settle = await settled(page, () => content);
+    await page.tap('a.ts');
+    expect(await settle()).toBe('');
+    content = 700;
+    for (const element of document.querySelectorAll('div')) Object.defineProperty(element, 'scrollTop', { configurable: true, value: 0 });
+    await page.tap('a.ts');
+    expect(await settle()).toBe('');
+  });
+
+  test.skipIf(!hasDom)('a file taller than what is left below the window holds the page even with more than a screen left', async () => {
+    const page = await atTheEnd(['a.ts'], 10_000 - 700 - 900);
+    page.resize('a.ts', 3000);
+    await page.tap('a.ts');
+    expect(page.held()).toBe('3000px');
+  });
 
   test.skipIf(!hasDom)('after a scroll, a file on screen is offered its note and one wholly below swaps by itself; before any, both swap', async () => {
     const quiet = await reading(['a.ts', 'b.ts'], { 'a.ts': 100, 'b.ts': 3000 });
@@ -664,16 +808,36 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
     document.dispatchEvent(new Event('wheel'));
     await engaged.land();
     expect([engaged.swapped('a.ts'), engaged.swapped('b.ts')]).toEqual([false, true]);
-    const offered = (await headerOf('a.ts')).querySelector<HTMLButtonElement>('[data-semantic-note="off"]');
-    expect([offered?.textContent?.includes('1 moved'), offered?.getAttribute('aria-pressed')]).toEqual([true, 'false']);
-    await act(async () => offered!.click());
+    const header = await headerOf('a.ts');
+    const offered = header.querySelector<HTMLButtonElement>('[data-semantic-note="off"]');
+    expect([offered?.textContent, offered?.dataset.semanticNote, header.querySelector('.line-through')]).toEqual(['sem1', 'off', null]);
+    await flip(header);
     expect(engaged.swapped('a.ts')).toBe(true);
-    expect((await headerOf('a.ts')).querySelector('[data-semantic-note]')?.getAttribute('aria-pressed')).toBe('true');
+    expect(document.querySelector('[data-semantic-file-popover] [role="switch"]')?.isConnected).toBe(true);
+    const shown = (await headerOf('a.ts')).querySelector('[data-semantic-note]');
+    expect([shown?.getAttribute('data-semantic-note'), shown?.getAttribute('aria-label')]).toEqual(['semantic', 'Semantic changes for a.ts: 1 moved']);
   });
 
   test.skipIf(!hasDom)('a view hidden after the person started reading it keeps its notes as offers, so nothing has moved when it is shown again', async () => {
     const page = await reading(['a.ts'], { 'a.ts': 100 });
     document.dispatchEvent(new Event('wheel'));
+    hidden = true;
+    await page.land();
+    expect(page.swapped('a.ts')).toBe(false);
+  });
+
+  test.skipIf(!hasDom)('a page left scrolled with no input still counts as read while its panel is detached and reads the top', async () => {
+    const page = await reading(['a.ts'], { 'a.ts': 100 });
+    const scrollTo = async (top: number, announce: boolean) => {
+      await act(async () => {
+        for (const element of document.querySelectorAll('div')) {
+          Object.defineProperty(element, 'scrollTop', { configurable: true, value: top });
+          if (announce) element.dispatchEvent(new Event('scroll'));
+        }
+      });
+    };
+    await scrollTo(400, true);
+    await scrollTo(0, false);
     hidden = true;
     await page.land();
     expect(page.swapped('a.ts')).toBe(false);
@@ -712,6 +876,49 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
     expect(page.swapped('a.ts')).toBe(true);
   });
 
+  test.skipIf(!hasDom)('a file below when its note is worked out but on screen by the frame that would draw it is offered the note', async () => {
+    const page = await reading(['a.ts'], { 'a.ts': 3000 });
+    document.dispatchEvent(new Event('wheel'));
+    const realFrame = globalThis.requestAnimationFrame;
+    const frames: FrameRequestCallback[] = [];
+    globalThis.requestAnimationFrame = (callback) => frames.push(callback);
+    try {
+      await page.land();
+      page.move('a.ts', 100);
+      await act(async () => {
+        for (const frame of frames.splice(0)) frame(performance.now());
+      });
+    } finally {
+      globalThis.requestAnimationFrame = realFrame;
+    }
+    expect(page.swapped('a.ts')).toBe(false);
+    expect((await headerOf('a.ts')).querySelector<HTMLElement>('[data-semantic-note]')?.dataset.semanticNote).toBe('off');
+  });
+
+  test.skipIf(!hasDom)('the first step of a fling after a pause counts at its own speed, not spread over the pause', async () => {
+    const page = await reading(['a.ts'], { 'a.ts': 1300 });
+    document.dispatchEvent(new Event('wheel'));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    });
+    const realFrame = globalThis.requestAnimationFrame;
+    const frames: FrameRequestCallback[] = [];
+    globalThis.requestAnimationFrame = (callback) => frames.push(callback);
+    try {
+      await page.land();
+      for (const element of document.querySelectorAll('div')) {
+        Object.defineProperty(element, 'scrollTop', { configurable: true, value: 600 });
+        element.dispatchEvent(new Event('scroll'));
+      }
+      await act(async () => {
+        for (const frame of frames.splice(0)) frame(performance.now());
+      });
+    } finally {
+      globalThis.requestAnimationFrame = realFrame;
+    }
+    expect(page.swapped('a.ts')).toBe(false);
+  });
+
   test.skipIf(!hasDom)('where the file is when its note lands decides, and near the end of the page even a file below is offered', async () => {
     const page = await reading(['a.ts', 'b.ts', 'c.ts'], { 'a.ts': -3000, 'b.ts': 3000, 'c.ts': 3000 });
     document.dispatchEvent(new Event('pointerdown'));
@@ -747,7 +954,7 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
     expect(page.swapped('a.ts')).toBe(true);
   });
 
-  const powerUp = { active: true, rejected: [], provider: 'jev', retry: 0 } as never;
+  const powerUp = { active: true, rejected: [], provider: 'jev', settingsRevision: 0, retry: 0 } as never;
 
   test.skipIf(!hasDom)('a second opinion landing after the switch was turned on by hand is offered, not drawn under the reader', async () => {
     configStore.set('diffSemantic', false);
@@ -768,12 +975,12 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
     document.dispatchEvent(new Event('wheel'));
     await page.land();
     expect(page.drawnKey('a.ts')).not.toContain(':c1');
-    const shown = (await headerOf('a.ts')).querySelector<HTMLButtonElement>('[data-semantic-note]');
-    expect(shown?.dataset.semanticNote).toBe('semantic');
-    await act(async () => shown!.click());
-    const off = (await headerOf('a.ts')).querySelector<HTMLButtonElement>('[data-semantic-note]');
-    expect(off?.dataset.semanticNote).toBe('off');
-    await act(async () => off!.click());
+    const shown = await headerOf('a.ts');
+    expect(shown.querySelector<HTMLElement>('[data-semantic-note]')?.dataset.semanticNote).toBe('semantic');
+    await flip(shown);
+    const off = await headerOf('a.ts');
+    expect(off.querySelector<HTMLElement>('[data-semantic-note]')?.dataset.semanticNote).toBe('off');
+    await flip(off);
     expect(page.drawnKey('a.ts')).toContain(':c1');
   });
 
@@ -785,10 +992,24 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
     await page.land();
     expect(page.drawnKey('a.ts')).not.toContain(':c1');
     page.move('a.ts', 3000);
-    await page.rerender({ powerUp: { active: true, rejected: ['c1'], provider: 'jev', retry: 0 } as never });
+    await page.rerender({ powerUp: { active: true, rejected: ['c1'], provider: 'jev', settingsRevision: 0, retry: 0 } as never });
     await page.land();
     expect(page.drawnKey('a.ts')).toContain(':c2');
-    expect((await headerOf('a.ts')).querySelector('[data-semantic-note]')?.textContent).toBe('2 moved');
+    expect((await headerOf('a.ts')).querySelector('[data-semantic-note]')?.getAttribute('aria-label')).toBe('Semantic changes for a.ts: 2 moved');
+  });
+
+  test.skipIf(!hasDom)('turning Power Up off after the switch was turned on by hand offers the answer without it, and leaves the drawn file alone', async () => {
+    const page = await reading(['a.ts'], { 'a.ts': 100 }, { powerUp });
+    await page.land();
+    await page.land();
+    expect(page.drawnKey('a.ts')).toContain(':c1');
+    document.dispatchEvent(new Event('wheel'));
+    await act(async () => configStore.set('diffSemantic', false));
+    await act(async () => configStore.set('diffSemantic', true));
+    expect(page.drawnKey('a.ts')).toContain(':c1');
+    await page.rerender({ powerUp: { active: false, rejected: [], provider: 'jev', retry: 0 } as never });
+    await page.land();
+    expect(page.drawnKey('a.ts')).toContain(':c1');
   });
 
   test.skipIf(!hasDom)('notes that land after the switch was turned on by hand show, on screen or not', async () => {

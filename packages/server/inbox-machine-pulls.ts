@@ -199,6 +199,9 @@ export function createMachinePulls(options: { peers: () => Iterable<PeerLink>; n
       if (!board || board.read_at === before) return null;
       return board.pulls.find((pull) => pull.key === key)?.state ?? null;
     },
+    linkedThere(key: string): boolean {
+      return [...boards.values()].some((board) => !!board.links[key]);
+    },
     /** The link went: nothing of that machine's board stays. */
     forget(machine: string): void {
       reading.get(machine)?.abort.abort();

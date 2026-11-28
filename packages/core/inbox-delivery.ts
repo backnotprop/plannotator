@@ -5,6 +5,8 @@
  * "Ticks"), so a row and its thread never disagree. Pure, browser-safe.
  */
 
+import { isInboxPermissionSession } from "./inbox-permission";
+import { inboxRemovedNow, type RemovalMessage } from "./inbox-removed";
 import type { InboxT3WaitReason } from "./inbox-t3";
 
 /**
@@ -227,17 +229,63 @@ export function inboxDefaultSkip<M>(_messages: readonly M[], _statesOf: (message
 }
 
 /**
+ * An agent message sent with no session, no host, no name and no wake: what `plannotator inbox call` sends from a
+ * shell that names no session and carries no agent's marker (a script, a hook, a cron job), or a raw MCP call naming
+ * none of them. Nothing can be woken for it, and no session reads as its sender. A sender with any session id (a
+ * stdio shim's `ses_…` included), or an agent's shell the CLI names (`inboxShellAgentOf`), is not one.
+ */
+export function inboxSessionlessSend(message: { author: { kind: string; host?: string | null; session?: string | null; name?: string | null }; wakes?: boolean }): boolean {
+  return inboxScriptAuthor(message.author) && message.wakes !== true;
+}
+
+/**
+ * An agent author with no session, no host and no name: the one the window names "Script" and draws a terminal for,
+ * by the author alone, so a list row (which carries no `wakes`) and the thread name it alike. Routing reads
+ * `inboxSessionlessSend`, which also asks that it was not sent through a waking connection (one always names its
+ * session and host, so the two differ only for a record no connection writes).
+ */
+export function inboxScriptAuthor(author: { kind: string; host?: string | null; session?: string | null; name?: string | null } | null | undefined): boolean {
+  return !!author && author.kind === "agent" && !author.session && !author.host && !author.name;
+}
+
+/** What a person reads for a script's post (`inboxScriptAuthor`): the window, and the phone's push. Agents read "An agent". */
+export const INBOX_SCRIPT_AUTHOR_NAME = "Script";
+
+/** The author fields the words rule reads. */
+type WordsAuthorMessage = { author: { kind: string; host?: string | null; session?: string | null; name?: string | null }; wakes?: boolean; scheduled_change?: unknown };
+
+/**
+ * The agent message a plain reply's words answer by default, one rule for the window's `wordsMessage`, the
+ * phone's mirror and `inboxAskingMessage`: the latest agent message that is not a permission prompt's (`perm:…`)
+ * and not a routine's change line. When that is a sessionless send (`inboxSessionlessSend`), the latest such
+ * message that has a session instead (a script's post does not steal the thread), unless `answersItself` (the
+ * person answered its own questions or action items in the draft) or no session wrote. Null when none is left.
+ */
+export function inboxWordsDefault<M extends WordsAuthorMessage>(messages: readonly M[], answersItself: (message: M) => boolean): M | null {
+  // An agent the person removed from the thread is never the default (inbox-removed.ts): its messages are passed over.
+  const out = inboxRemovedNow(messages as unknown as readonly RemovalMessage[]);
+  const agents = messages.filter((m) => m.author.kind === "agent" && !isInboxPermissionSession(m.author.session) && !m.scheduled_change && !(m.author.session && out.has(m.author.session)));
+  const latest = agents.at(-1);
+  if (!latest) return null;
+  if (!inboxSessionlessSend(latest) || answersItself(latest)) return latest;
+  return agents.filter((m) => !!m.author.session).at(-1) ?? latest;
+}
+
+/**
  * The agent message whose session a Send with nothing riding on the latest
  * message reaches (the thread's `askingSessionOf` without words or files):
  * the last agent message a pick answers or, when the Send skips (`skip`),
- * an open question it skips; with none, the latest agent message. Null when
- * no agent wrote. One rule for the thread's "the session that asked" and the
- * list row's delivery, so the two name the same session.
+ * an open question it skips; with none, the message the words would answer
+ * (`inboxWordsDefault`, with `answersItself`: by default a pick on it), else
+ * the latest agent message. Null when no agent wrote. One rule for the
+ * thread's "the session that asked", the list row's delivery and the Send,
+ * so the three name the same session.
  */
-export function inboxAskingMessage<M extends { author: { kind: string } }>(
+export function inboxAskingMessage<M extends WordsAuthorMessage>(
   messages: readonly M[],
   statesOf: (message: M) => readonly AskingQuestionState[],
   skip: boolean,
+  answersItself: (message: M) => boolean = (message) => statesOf(message).includes("picked"),
 ): M | null {
   let latest: M | null = null;
   let answered: M | null = null;
@@ -246,7 +294,7 @@ export function inboxAskingMessage<M extends { author: { kind: string } }>(
     latest = message;
     if (statesOf(message).some((state) => state === "picked" || (skip && state === "open"))) answered = message;
   }
-  return answered ?? latest;
+  return answered ?? inboxWordsDefault(messages, answersItself) ?? latest;
 }
 
 /**
@@ -274,6 +322,11 @@ export interface InboxRowDelivery {
   name: string | null;
   /** It went to another session of the asker's own host ("Claude Code (another session)"). */
   another_session?: boolean;
+  /**
+   * It answers a script's post (`inboxSessionlessSend`): the window names its recipient "Script", as the thread's
+   * line does. Absent otherwise and from an older Inbox. Additive.
+   */
+  script?: true;
   /**
    * `reason: "ended"`: the agent of the session that asked and has ended
    * (`inboxAskingMessage`), which the line names ("Saved for <it>. The

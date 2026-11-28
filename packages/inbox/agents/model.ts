@@ -3,7 +3,7 @@
  * Pure: what each machine's group holds, each agent's name, the thread its row opens and the facts its hover card
  * says, from data the window already has (the list's `agents`, its rows and the linked machines). No read of its own.
  */
-import { INBOX_HOST_NAMES, type InboxAgent, type InboxAgentsGroup, type InboxListRow, type InboxListSection, type InboxParticipant } from '@plannotator/core/inbox-types';
+import { inboxHostName, type InboxAgent, type InboxAgentsGroup, type InboxListRow, type InboxListSection, type InboxParticipant } from '@plannotator/core/inbox-types';
 import { whenTime } from '../format';
 import type { MachineView } from '../api';
 import { awayLine, isAway, type MachinesModel } from '../machines';
@@ -24,8 +24,22 @@ export interface AgentsGroup {
   agents: AgentEntry[];
 }
 
+/** The status order used by the Agents sidebar when "Show agent status" is on. */
+export function sortAgentEntries(entries: readonly AgentEntry[], statusOn: boolean): AgentEntry[] {
+  if (!statusOn) return [...entries];
+  const rank = (entry: AgentEntry): number => {
+    if (entry.agent.status_mark?.state === 'blocked') return 0;
+    if (entry.agent.status_mark?.state === 'working') return 1;
+    return 2;
+  };
+  return entries
+    .map((entry, index) => ({ entry, index }))
+    .sort((a, b) => rank(a.entry) - rank(b.entry) || a.index - b.index)
+    .map(({ entry }) => entry);
+}
+
 /** An agent's host in words ("Claude Code"); "An agent" when nothing said. */
-export const agentHostName = (host: string | null): string => (host ? (INBOX_HOST_NAMES[host] ?? host) : 'An agent');
+export const agentHostName = (host: string | null, runtime?: unknown): string => (host ? inboxHostName(host, runtime) : 'An agent');
 
 const rowName = (row: InboxListRow) => (row.thread_name ?? row.subject ?? '').trim();
 
@@ -60,7 +74,7 @@ export function agentThread(agent: InboxAgent, machine: string | null, self: str
 }
 
 /** An agent's sessions: the one it runs as and those its conversation had before, but for the ones in `others` (listed as agents of their own). */
-function agentSessions(agent: InboxAgent, others?: ReadonlySet<string>): string[] {
+export function agentSessions(agent: InboxAgent, others?: ReadonlySet<string>): string[] {
   return [agent.session, ...(agent.continues ?? []).filter((old) => !others?.has(old))];
 }
 
@@ -86,7 +100,7 @@ export type AgentNameContext = 'list' | 'thread';
  */
 export function agentRowName(agent: InboxAgent, context: AgentNameContext = 'list'): string {
   const fallback = context === 'list' ? agent.first_thread?.name.trim() || agent.project?.name : null;
-  return agentOwnName(agent) || fallback || agentHostName(agent.host);
+  return agentOwnName(agent) || fallback || agentHostName(agent.host, agent.runtime);
 }
 
 /**
@@ -100,8 +114,11 @@ export function agentRowName(agent: InboxAgent, context: AgentNameContext = 'lis
  * the person, so only the continuing one is drawn. Two agents that share a thread and do not continue one another
  * stay two rows.
  */
-export function agentsGroups(groups: readonly InboxAgentsGroup[] | null, machines: MachinesModel, rows: readonly InboxListRow[]): AgentsGroup[] {
-  return sectionGroups(groups, machines).map(({ group, machine, view }) => ({ machine: view, agents: groupEntries(group, machine, machines.self, rows).shown }));
+export function agentsGroups(groups: readonly InboxAgentsGroup[] | null, machines: MachinesModel, rows: readonly InboxListRow[], statusOn = false): AgentsGroup[] {
+  return sectionGroups(groups, machines).map(({ group, machine, view }) => ({
+    machine: view,
+    agents: sortAgentEntries(groupEntries(group, machine, machines.self, rows).shown, statusOn),
+  }));
 }
 
 /** Each group the section draws: one flat group of this Inbox's agents with no machine linked, else one per machine. */
@@ -109,6 +126,14 @@ function sectionGroups(groups: readonly InboxAgentsGroup[] | null, machines: Mac
   const self = machines.self;
   if (machines.all.length === 0) return [{ group: groups?.find((g) => !g.machine || g.machine === self), machine: null, view: null }];
   return machines.all.map((view) => ({ group: groups?.find((g) => (g.machine ?? self) === view.id), machine: view.id, view }));
+}
+
+/**
+ * Every agent the list names, the ended ones too, per group the section draws (`sectionGroups`): the list's Agents
+ * view (agentsView/model.ts) groups threads under them. `machine` null: no machine linked.
+ */
+export function namedAgents(groups: readonly InboxAgentsGroup[] | null, machines: MachinesModel): { machine: string | null; view: MachineView | null; known: boolean; agents: readonly InboxAgent[] }[] {
+  return sectionGroups(groups, machines).map(({ group, machine, view }) => ({ machine, view, known: group !== undefined, agents: group?.agents ?? [] }));
 }
 
 /** `entry` is the older session of `later`'s conversation and opens the same thread: one row, `later`'s. */
@@ -195,6 +220,12 @@ function rexStateWords(agent: InboxAgent): string | null {
   return null;
 }
 
+/**
+ * A live agent whose host reports nothing about its turns (`turns_unknown`: Codex, Qwen Code, T3 Code, Antigravity, an
+ * MCP-only agent): the card says so instead of "Idle", which the Inbox cannot know.
+ */
+export const TURNS_UNKNOWN_WORDS = "Doesn't say when it's working";
+
 /** What an agent's hover card says, line by line; a fact the window does not have is left out. */
 export interface AgentFacts {
   title: string;
@@ -204,9 +235,16 @@ export interface AgentFacts {
   rows: [string, string][];
 }
 
+export function modelName(id: string): string {
+  const parts = /^claude-(opus|sonnet|haiku|fable)-(\d+)(?:-(\d))?(?:-\d{8})?$/.exec(id);
+  if (!parts) return id;
+  const family = parts[1]!.charAt(0).toUpperCase() + parts[1]!.slice(1);
+  return `${family} ${parts[2]}${parts[3] ? `.${parts[3]}` : ''}`;
+}
+
 export function agentFacts(entry: AgentEntry, machine: MachineView | null, now: Date = new Date()): AgentFacts {
   const { agent } = entry;
-  const sub = [agentHostName(agent.host), agent.project?.name, machine?.name].filter(Boolean).join(' · ');
+  const sub = [agentHostName(agent.host, agent.runtime), agent.project?.name, machine?.name].filter(Boolean).join(' · ');
   const away = machine && isAway(machine) ? awayLine(machine, now) : null;
   const state =
     away ??
@@ -218,16 +256,25 @@ export function agentFacts(entry: AgentEntry, machine: MachineView | null, now: 
       : agent.state === 'working'
         ? 'Working'
         : agent.state === 'idle'
-          ? 'Idle'
+          ? agent.turns_unknown
+            ? TURNS_UNKNOWN_WORDS
+            : 'Idle'
           : 'Ended');
   const rows: [string, string][] = [];
   if (agent.started_at) rows.push(['Started', agent.launch ? `From the Inbox, ${whenTime(agent.started_at, now)}` : whenTime(agent.started_at, now)]);
   else if (agent.launch) rows.push(['Started', 'From the Inbox']);
   if (agent.last_seen_at) rows.push(['Last heard', whenTime(agent.last_seen_at, now)]);
+  if (agent.live && agent.model) rows.push(['Model', agent.effort ? `${modelName(agent.model)} · ${agent.effort}` : modelName(agent.model)]);
+  if (agent.live && typeof agent.context === 'number') rows.push(['Context', `${agent.context}% used`]);
   // Where it lives (a Rex pane, as Rex named it at the last read): a row of its own.
   if (agent.place?.line) rows.push(['Where', agent.place.line]);
   if (entry.thread?.subject && entry.thread.subject !== entry.name) rows.push(['Thread', entry.thread.subject]);
   return { title: entry.name, sub, state, rows };
+}
+
+/** What a session's line says it is doing: nothing for a live agent whose host reports no turns (never "idle"). */
+export function agentSessionState(agent: InboxAgent): InboxAgent['state'] | null {
+  return agent.turns_unknown && agent.state === 'idle' ? null : agent.state;
 }
 
 /**
@@ -282,13 +329,13 @@ export function threadSessions(
     // Only a name the session has itself (`agentOwnName`, else the labels' same ladder), else its agent. Never the
     // sidebar's fallbacks (a thread's name, a project), which inside a thread read as the thread's own title.
     const own = Object.hasOwn(labels, p.session) ? labels[p.session]?.trim() : '';
-    const name = (agent && agentOwnName(agent)) || own || p.name || agentHostName(p.host);
+    const name = (agent && agentOwnName(agent)) || own || p.name || agentHostName(p.host, agent?.runtime);
     const same = agent ? out.find((s) => s.agentId === agent!.id) : undefined;
     if (same) {
       if (!same.sessions.includes(p.session)) same.sessions.push(p.session);
       continue;
     }
-    out.push({ session: p.session, sessions: [p.session], host: p.host, machine: group?.machine ?? null, agentId: agent?.id ?? null, name, state: agent ? agent.state : group ? 'ended' : null });
+    out.push({ session: p.session, sessions: [p.session], host: p.host, machine: group?.machine ?? null, agentId: agent?.id ?? null, name, state: agent ? agentSessionState(agent) : group ? 'ended' : null });
   }
   return out;
 }

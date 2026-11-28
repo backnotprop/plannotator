@@ -87,6 +87,11 @@ export const INBOX_PROJECT_ROOT_GIT_TIMEOUT_MS = 3_000;
 export const INBOX_PROJECT_ROOT_TTL_MS = 60_000;
 /** At most this many folders are cached (the oldest leaves first). */
 export const INBOX_PROJECT_ROOT_CACHE_MAX = 512;
+/**
+ * How long the folder a live session's path names (or that it names none here) is kept by that path as written
+ * (`InboxProjectRoots.resolveNamed`): as long as a folder's project is already used as it is.
+ */
+export const INBOX_PROJECT_NAMED_PATH_TTL_MS = INBOX_PROJECT_ROOT_TTL_MS;
 /** How many parents up a folder outside any work tree looks for a checkouts holder (rule 4: `appnotes/notes` is `appnotes`'s). */
 export const INBOX_PROJECT_CONTAINER_WALK_MAX = 3;
 /** A `worktrees` folder, or a folder that holds one, with more folders than this in it is not read (rule 4): the folder stays its own project. */
@@ -674,18 +679,38 @@ export interface InboxProjectRoots {
    * not an existing folder.
    */
   resolve(path: string): Promise<InboxProjectRoot>;
+  /**
+   * `resolve` for the path a live session names on every bridge poll (`project_path`): the folder it names, or that
+   * it names none on this computer (a session started on another machine), is kept by the path as written for
+   * INBOX_PROJECT_NAMED_PATH_TTL_MS, so a poll looks nothing up on disk meanwhile (#2788: `/home/...` on macOS is an
+   * automount, a network home or a sleeping disk holds every lookup). The project then comes from the same cache.
+   */
+  resolveNamed(path: string): Promise<InboxProjectRoot>;
 }
 
 /** Project roots cached per folder (realpath), shared by sends, live sessions and the image route. */
-export function createInboxProjectRoots(options: { git?: InboxGitRunner; home?: string | null; ttlMs?: number; now?: () => number; max?: number } = {}): InboxProjectRoots {
+export function createInboxProjectRoots(
+  options: {
+    git?: InboxGitRunner;
+    home?: string | null;
+    ttlMs?: number;
+    now?: () => number;
+    max?: number;
+    /** The folder a path names (`inboxProjectFolderOf`; tests count it). */
+    folderOf?: (path: string, home: string | null) => string;
+  } = {},
+): InboxProjectRoots {
   const git = options.git ?? inboxGitRunner();
   const home = options.home === undefined ? inboxProjectRootHome() : options.home;
   const rule4: Rule4 = { git, home };
   const ttlMs = options.ttlMs ?? INBOX_PROJECT_ROOT_TTL_MS;
   const now = options.now ?? Date.now;
   const max = Math.max(1, options.max ?? INBOX_PROJECT_ROOT_CACHE_MAX);
+  const folderOf = options.folderOf ?? inboxProjectFolderOf;
   const entries = new Map<string, { value: InboxProjectRoot; at: number }>();
   const pending = new Map<string, Promise<InboxProjectRoot>>();
+  /** `resolveNamed`'s paths as written: the folder each names, or the error naming none gave. */
+  const named = new Map<string, { at: number; folder: string } | { at: number; error: unknown }>();
 
   const remember = (folder: string, value: InboxProjectRoot) => {
     entries.delete(folder);
@@ -708,14 +733,33 @@ export function createInboxProjectRoots(options: { git?: InboxGitRunner; home?: 
     return job;
   };
 
+  const rootOfFolder = async (folder: string): Promise<InboxProjectRoot> => {
+    const entry = entries.get(folder);
+    if (!entry) return run(folder);
+    if (now() - entry.at >= ttlMs) void run(folder).catch(() => {});
+    return entry.value;
+  };
+
   return {
     home,
     async resolve(path) {
-      const folder = inboxProjectFolderOf(path, home);
-      const entry = entries.get(folder);
-      if (!entry) return run(folder);
-      if (now() - entry.at >= ttlMs) void run(folder).catch(() => {});
-      return entry.value;
+      return rootOfFolder(folderOf(path, home));
+    },
+    async resolveNamed(path) {
+      const at = now();
+      let kept = named.get(path);
+      if (!kept || at < kept.at || at - kept.at >= INBOX_PROJECT_NAMED_PATH_TTL_MS) {
+        try {
+          kept = { at, folder: folderOf(path, home) };
+        } catch (error) {
+          kept = { at, error };
+        }
+        named.delete(path);
+        named.set(path, kept);
+        while (named.size > max) named.delete(named.keys().next().value!);
+      }
+      if ("error" in kept) throw kept.error;
+      return rootOfFolder(kept.folder);
     },
   };
 }

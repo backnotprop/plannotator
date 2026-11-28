@@ -57,7 +57,7 @@ function files(): Map<string, string> {
   return out;
 }
 
-function capabilityWorld(options: { fixed?: boolean } = {}) {
+function capabilityWorld(options: { fixed?: boolean; shareFixed?: boolean } = {}) {
   let opened = 0;
   let changed = 0;
   const capability = createPlansCapability({
@@ -129,6 +129,11 @@ describe("Plans off costs nothing", () => {
       "packages/shared/plans/import.ts",
       "packages/shared/plans/routes.ts",
       "packages/shared/plans/switch.ts",
+      // Share this space reads the library to send it: reached only from the capability, behind its own switch.
+      "packages/core/space-share.ts",
+      "packages/shared/spaces/share-job.ts",
+      "packages/shared/spaces/record.ts",
+      "packages/shared/spaces/engine.ts",
       "packages/server/inbox-capability.ts",
       "packages/server/plans-capability.ts",
       "packages/server/inbox.ts",
@@ -332,6 +337,51 @@ describe("Plans on", () => {
       expect(lines).toHaveLength(1);
     } finally {
       setSystemTime();
+    }
+  });
+});
+
+describe("Share this space is its own switch", () => {
+  test("off by default: its paths are any unknown plan path's 404, the settings answer is unchanged, nothing is written", async () => {
+    historyFixture();
+    const { list, capability } = capabilityWorld({ fixed: true });
+    await capability.sync();
+    const id = createPlanStore({ dataDir }).list()[0]!.id;
+    const before = files();
+    for (const [method, tail] of [["GET", ""], ["POST", ""], ["POST", "/keep"], ["POST", "/delete"]] as const) {
+      const answer = await route(list, method, `/api/plans/${id}/share${tail}`, method === "POST" ? {} : undefined);
+      expect([tail, answer?.status]).toEqual([tail, 404]);
+    }
+    expect(capabilitiesWire(list)).toEqual({ plans: { on: true } });
+    expect(files()).toEqual(before);
+  });
+
+  test("on: the status answers the owner's window only, the settings say so, and PLANNOTATOR_SHARE=disabled turns it off", async () => {
+    historyFixture();
+    const { list, capability } = capabilityWorld({ fixed: true, shareFixed: true });
+    await capability.sync();
+    const id = createPlanStore({ dataDir }).list()[0]!.id;
+    const answer = await route(list, "GET", `/api/plans/${id}/share`);
+    expect(answer?.status).toBe(200);
+    expect(await answer!.json()).toMatchObject({ phase: "none", link: null, signed_in: false });
+    // Going down with the Inbox: nothing of a share is left going.
+    capability.stopped!();
+    expect(capability.shares().running(id)).toBeNull();
+    expect(capabilitiesWire(list)).toEqual({ plans: { on: true, share: true } });
+    expect((await route(list, "GET", `/api/plans/${id}/share`, undefined, { ...owner, local: false }))?.status).toBe(404);
+    expect((await route(list, "POST", `/api/plans/${id}/share`, { serverSession: "another-page" }))?.status).toBe(409);
+    // The real switch: config.json, and the one off switch every share has.
+    writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxPlans: true, inboxSpaceShare: true }));
+    const real = createPlansCapability({ dataDir, changed: () => {} });
+    expect(real.settingsWire!()).toEqual({ plans: { on: true, share: true } });
+    const was = process.env.PLANNOTATOR_SHARE;
+    process.env.PLANNOTATOR_SHARE = "disabled";
+    try {
+      expect(real.settingsWire!()).toEqual({ plans: { on: true } });
+      expect((await routeInboxCapabilities([real], request("GET", `/api/plans/${id}/share`), new URL(`http://127.0.0.1:1/api/plans/${id}/share`), owner))?.status).toBe(404);
+    } finally {
+      if (was === undefined) delete process.env.PLANNOTATOR_SHARE;
+      else process.env.PLANNOTATOR_SHARE = was;
     }
   });
 });

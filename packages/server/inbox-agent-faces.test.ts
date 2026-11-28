@@ -8,14 +8,15 @@
  * with no event for the other windows; another site reading the faces. Given names: one lost on a restart, a face
  * change, a removed picture or a continued session; a reset or blank name kept on disk; a name over the cap or with a
  * control character taken. Tile choices: one kept as a face (an older Plannotator would drop the whole entry, its name
- * too) or lost on a name change; an entry this version writes losing its name through the v0.28.66 reader. No Inbox
- * is started: the route is called directly with a temp folder.
+ * too) or lost on a name change; an entry this version writes losing its name through the v0.28.66 reader. Another
+ * host's mark (`mark:<host>`): one refused, lost across a read, or taken with a malformed host; the v0.28.66 reader
+ * dropping more than its entry. No Inbox is started: the route is called directly with a temp folder.
  */
 import { beforeEach, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, statSync, writeFileSync, renameSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { cleanInboxAgentName, cleanInboxFaceSessions, INBOX_AGENT_FACES_KEPT, INBOX_AGENT_NAME_MAX, isInboxAgentFace, isInboxAgentFaceId, readInboxAgentFaces, type InboxAgentFacesWire } from '@plannotator/core/inbox-types';
+import { cleanInboxAgentName, cleanInboxFaceSessions, INBOX_AGENT_FACES_KEPT, INBOX_AGENT_NAME_MAX, inboxMarkFaceHost, isInboxAgentFace, isInboxAgentFaceId, isInboxMarkFace, readInboxAgentFaces, type InboxAgentFacesWire } from '@plannotator/core/inbox-types';
 import { checkInboxAgentFaceChange, createInboxAgentFacesFile, INBOX_AGENT_FACES_FILE } from '@plannotator/shared/inbox/agent-faces';
 import { createInboxAgentFaces } from './inbox-agent-faces';
 
@@ -215,14 +216,15 @@ test('the route takes a name under the page session and tells every window', asy
 
 /**
  * The v0.28.66 reader, verbatim (`git show v0.28.66:packages/core/inbox-types.ts`, `readInboxAgentFaces`); its helpers
- * (`isInboxAgentFace`, `cleanInboxAgentName`, `cleanInboxFaceSessions`, the id check) are unchanged since that tag.
+ * (`isInboxAgentFace`, `cleanInboxAgentName`, `cleanInboxFaceSessions`, the id check) are unchanged since that tag, but
+ * for `isInboxAgentFace` taking `mark:` faces now, which v0.28.66's did not (left out here as it left them out).
  */
 function readAsOf0_28_66(value: unknown): Record<string, { face: string; sessions: string[]; name?: string }> {
   const out = Object.create(null) as Record<string, { face: string; sessions: string[]; name?: string }>;
   if (!value || typeof value !== 'object' || Array.isArray(value)) return out;
   for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
     const entry = raw as { face?: unknown; sessions?: unknown; name?: unknown } | null;
-    if (!isInboxAgentFaceId(key) || !entry || typeof entry !== 'object' || !isInboxAgentFace(entry.face)) continue;
+    if (!isInboxAgentFaceId(key) || !entry || typeof entry !== 'object' || !isInboxAgentFace(entry.face) || isInboxMarkFace(entry.face)) continue;
     const name = cleanInboxAgentName(entry.name);
     if (entry.face === 'agent' && !name) continue;
     out[key] = { face: entry.face, sessions: cleanInboxFaceSessions(entry.sessions, key), ...(name ? { name } : {}) };
@@ -263,4 +265,27 @@ test('an entry this version writes goes through the v0.28.66 reader with its giv
   expect(readInboxAgentFaces(old)).toEqual({ ses_named: { face: 'agent', sessions: [], name: 'Sync bot' }, ses_red: { face: 'glass-red', sessions: [] } });
   // This reader keeps the tile it wrote.
   expect(readInboxAgentFaces(disk).ses_named).toEqual({ face: 'agent', tile: 'project', sessions: [], name: 'Sync bot' });
+});
+
+test('another host’s mark is kept as a face and read back; a malformed one is refused; the v0.28.66 reader drops only its entry', () => {
+  const faces = file();
+  faces.change(checkInboxAgentFaceChange({ agent: 'ses_orca', sessions: ['ses_0'], face: 'mark:codex' }));
+  faces.change(checkInboxAgentFaceChange({ agent: 'ses_cc', face: 'mark:claude-code' }));
+  faces.change({ agent: 'ses_orca', name: 'Billing chat' });
+  faces.change({ agent: 'ses_red', face: 'glass-red' });
+  // A second process reads it back as written: the face, its sessions and the name beside it.
+  const again = createInboxAgentFacesFile(dir, () => {}).wire().faces;
+  expect(again.ses_orca).toEqual({ face: 'mark:codex', sessions: ['ses_0'], name: 'Billing chat' });
+  expect(again.ses_cc).toEqual({ face: 'mark:claude-code', sessions: [] });
+  expect(inboxMarkFaceHost('mark:claude-code')).toBe('claude-code');
+  // Not a host's id: refused like any unknown face (no capitals, no path, no empty or overlong host, not the tile).
+  for (const bad of ['mark', 'mark:', 'mark:Codex', 'mark:-codex', 'mark:co dex', 'mark:a/b', 'mark:../x', 'mark:codex\n', `mark:${'a'.repeat(41)}`, 'marks:codex']) {
+    expect(isInboxAgentFace(bad)).toBe(false);
+    expect(() => checkInboxAgentFaceChange({ agent: 'ses_x', face: bad })).toThrow();
+  }
+  expect(readInboxAgentFaces({ ses_x: { face: 'mark:Codex', sessions: [] } })).toEqual({});
+  // An older Plannotator drops these entries one by one, the rest of the file kept, and never refuses the file.
+  const disk = JSON.parse(readFileSync(join(dir, INBOX_AGENT_FACES_FILE), 'utf8'));
+  expect(disk.v).toBe(1);
+  expect(readAsOf0_28_66(disk.faces)).toEqual({ ses_red: { face: 'glass-red', sessions: [] } });
 });

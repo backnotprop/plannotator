@@ -70,7 +70,7 @@ describe.if(hasDom)('the sound dialog', () => {
     expect(dialog.getAttribute('aria-describedby')).toBe('ib-sound-desc');
     expect(dialog.querySelector('#ib-sound-title')?.textContent).toBe('The Inbox can ring now');
     expect(dialog.querySelector('#ib-sound-desc')?.textContent?.trim()).toBe(
-      'A soft doorbell when an agent asks you something and this tab is hidden.',
+      'A soft doorbell when an agent sends you something and this tab is hidden.',
     );
     expect(dialog.querySelector('[data-sound-nline]')).toBeNull();
     expect([...dialog.querySelectorAll('.ib-acts-row button')].map((b) => b.textContent)).toEqual(['Turn it off', 'Keep it on']);

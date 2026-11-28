@@ -1,0 +1,16 @@
+stateDiagram-v2
+  [*] --> Idle
+  Idle --> Busy: go
+  Busy --> Idle: done
+  Busy --> Busy: retry
+  state Busy {
+    [*] --> Run
+    Run --> Wait: hold
+  }
+  state Other {
+    Run2: Run
+    Run2 --> Halt
+  }
+  Idle --> Other: "x" < y & z
+  note right of Idle: a note
+  Other --> [*]

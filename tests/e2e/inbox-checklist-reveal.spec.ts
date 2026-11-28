@@ -28,7 +28,7 @@ import { expect, test, type Browser, type BrowserContext, type Page } from './in
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
+import { E2E_GROUP_TIP_SEEN, inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { savedConfig } from '../helpers/saved-config';
 
@@ -101,7 +101,8 @@ async function world(steps?: boolean): Promise<World> {
       inboxBoard: true,
       inboxBoardIntro: { shownAt: boardShown },
       // The Sidebar tip (outside the line) was seen too: it shares the calm moment, and these cases read the stamps.
-      inboxReveals: { lastShownAt: boardShown, board: { shownAt: boardShown }, sidebar_tip: { shownAt: boardShown } },
+      // So was "Which view do you prefer?" (five threads, no tenure, armed ahead of the Checklist).
+      inboxReveals: { ...E2E_GROUP_TIP_SEEN, lastShownAt: boardShown, board: { shownAt: boardShown }, sidebar_tip: { shownAt: boardShown }, view_choice: { shownAt: past } },
       ...(steps === undefined ? {} : { inboxSteps: steps }),
     }),
   );

@@ -292,6 +292,15 @@ function faceOf(target: EventTarget | null, body: HTMLElement): HTMLElement | nu
 
 const idOf = (face: HTMLElement) => face.getAttribute('data-thread-id') ?? face.getAttribute('data-row') ?? '';
 
+/**
+ * A row holds the swipe layer (`data-swipe`, set by `take` until `rest`): under the finger, springing back or off, or
+ * resting open on its button. Every one-time dialog waits meanwhile (app/focus.ts `listIntroHeldBack`), so none opens
+ * under a finger mid-swipe or over a row open on Archive.
+ */
+export function rowSwipeInHand(doc: Document = document): boolean {
+  return doc.querySelector('.ib-mrow[data-thread-id][data-swipe], .ib-rw[data-row][data-swipe]') !== null;
+}
+
 interface Current {
   face: HTMLElement;
   id: string;

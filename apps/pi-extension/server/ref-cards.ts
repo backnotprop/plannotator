@@ -1,6 +1,6 @@
 /**
  * node:http adapter for `GET /api/ref`: the hover cards for issue, PR and MR
- * links on the plan, annotate and review servers (packages/shared/ref-cards.ts,
+ * links (and Linear issue links) on the plan, annotate and review servers (packages/shared/ref-cards.ts,
  * vendored to generated/ref-cards.ts). Mirrors `refCardRouteResponse` in
  * packages/server/ref-cards.ts; the CLIs run through the Node runner
  * (generated/ref-cards-node.ts) with the Bun runner's time limit and cache.
@@ -12,14 +12,22 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createRefCards, handleRefCardRoute, REF_CARD_ROUTE, type RefCards, type RefRunner } from "../generated/ref-cards.ts";
 import { nodeRefCliRunner } from "../generated/ref-cards-node.ts";
+import { getPlannotatorDataDir } from "../generated/data-dir.ts";
+import { withSessionLinearCards } from "../generated/linear-cards.ts";
 import { isRemoteSession } from "./network.ts";
 import { isSshTunnelRequest } from "./this-machine.ts";
 
 export type { RefRunner } from "../generated/ref-cards.ts";
 
-/** One cache per server; `run` is for tests (default: the real gh / glab through Node). */
+/**
+ * One cache per server; `run` is for tests (default: the real gh / glab through Node). Linear issue links answer
+ * from Linear as on the Bun servers (`withSessionLinearCards`, packages/shared/linear-cards.ts): the key saved in
+ * the Inbox's Settings → Accounts → Linear, else `LINEAR_API_KEY`, read per fetch. A test's own `run` gets no
+ * real Linear.
+ */
 export function createPiRefCards(run?: RefRunner): RefCards {
-	return createRefCards({ run: run ?? nodeRefCliRunner });
+	if (run) return createRefCards({ run });
+	return withSessionLinearCards(createRefCards({ run: nodeRefCliRunner }), getPlannotatorDataDir());
 }
 
 /** Answers `/api/ref` and returns true, or returns false for any other path. */

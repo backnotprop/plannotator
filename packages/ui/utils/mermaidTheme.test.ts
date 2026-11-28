@@ -19,7 +19,7 @@ import { describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { MERMAID_CONFIG, MERMAID_LABEL_WRAP_WIDTH } from './mermaid';
-import { compositeOver, contrastRatio, parseCssColor, relativeLuminance, toHex, type RgbColor } from './cssColor';
+import { compositeOver, contrastRatio, parseCssColor, relativeLuminance, rgbToOklab, toHex, type RgbColor } from './cssColor';
 import { DEFAULT_DIAGRAM_SHADOW, DIAGRAM_SHADOW_OPTIONS } from './diagramShadow';
 import {
   DEFAULT_MERMAID_SHADOW_AMOUNT,
@@ -304,6 +304,11 @@ describe('contrast guard', () => {
     ['commitLabelColor', 'commitLabelBackground'],
     ['tagLabelColor', 'tagLabelBackground'],
     ['taskTextColor', 'taskBkgColor'],
+    // Mermaid paints the label INSIDE a done, active or critical bar with
+    // taskTextDarkColor (`.doneText0`, `.activeText0`, `.critText0` …).
+    ['taskTextDarkColor', 'doneTaskBkgColor'],
+    ['taskTextDarkColor', 'activeTaskBkgColor'],
+    ['taskTextDarkColor', 'critBkgColor'],
     ['taskTextOutsideColor', 'background'],
     ['pieLegendTextColor', 'background'],
     ['pieTitleTextColor', 'background'],
@@ -328,12 +333,85 @@ describe('contrast guard', () => {
     ...Array.from({ length: 8 }, (_, i) => [`git${i}`, 'background'] as [string, string]),
   ];
 
+  /**
+   * A gantt label too wide for its bar is drawn beside it, on the page. The
+   * class lists are the ones Mermaid 12 writes on such a label, per task kind.
+   * Mermaid's own sheet paints active and active-critical text (inside OR
+   * outside the bar) with `taskTextDarkColor !important`; plain, done and
+   * done-critical outside labels get `taskTextOutsideColor`; a vertical
+   * marker's label (`vertText`, always beside its zero-width bar) gets
+   * `vertLineColor !important`, about 3:1 on the page. A `themeCSS` rule with
+   * `fill: … !important` whose selector matches the label wins over all of
+   * them (it is more specific or later, and the guard only counts a rule it
+   * can match). Every outside label, the marker's included on purpose, is
+   * drawn in the page's text colour.
+   */
+  const OUTSIDE_LABELS: Array<{ kind: string; classes: string[]; mermaidFill: string }> = [
+    { kind: 'plain', classes: ['taskTextOutsideRight', 'taskTextOutside1'], mermaidFill: 'taskTextOutsideColor' },
+    { kind: 'done', classes: ['taskTextOutsideRight', 'taskTextOutside1', 'doneText1'], mermaidFill: 'taskTextOutsideColor' },
+    { kind: 'crit', classes: ['taskTextOutsideRight', 'taskTextOutside1', 'critText1'], mermaidFill: 'taskTextOutsideColor' },
+    { kind: 'done crit', classes: ['taskTextOutsideLeft', 'taskTextOutside0', 'doneCritText0'], mermaidFill: 'taskTextOutsideColor' },
+    { kind: 'active', classes: ['taskTextOutsideRight', 'taskTextOutside1', 'activeText1'], mermaidFill: 'taskTextDarkColor' },
+    { kind: 'active (left)', classes: ['taskTextOutsideLeft', 'taskTextOutside0', 'activeText0'], mermaidFill: 'taskTextDarkColor' },
+    { kind: 'crit active', classes: ['taskTextOutsideRight', 'taskTextOutside1', 'activeCritText1', 'critText1'], mermaidFill: 'taskTextDarkColor' },
+    { kind: 'active milestone', classes: ['taskTextOutsideRight', 'taskTextOutside0', 'activeText0', 'milestoneText'], mermaidFill: 'taskTextDarkColor' },
+    { kind: 'vertical marker', classes: ['taskTextOutsideRight', 'taskTextOutside0', 'vertText'], mermaidFill: 'vertLineColor' },
+  ];
+
+  /** A done bar must not read as a plain, active or critical one (OKLab distance). */
+  const DONE_BAR_MIN_DELTA_E = 0.1;
+  function deltaE(a: RgbColor, b: RgbColor): number {
+    const x = rgbToOklab(a);
+    const y = rgbToOklab(b);
+    return Math.hypot(x.L - y.L, x.a - y.a, x.b - y.b);
+  }
+
+  /** The `fill … !important` of the last themeCSS rule whose selector (class compounds, `:not(.x)`) matches `classes`. */
+  function themeCssFill(themeCSS: string | undefined, classes: string[]): string | null {
+    let found: string | null = null;
+    for (const rule of (themeCSS ?? '').matchAll(/([^{}]+)\{([^}]*)\}/g)) {
+      const fill = /fill\s*:\s*(#[0-9a-f]{6})\s*!important/i.exec(rule[2]!)?.[1];
+      if (!fill) continue;
+      const matches = rule[1]!.split(',').some((selector) => {
+        const sel = selector.trim();
+        const excluded = [...sel.matchAll(/:not\(\.([\w-]+)\)/g)].map((m) => m[1]!);
+        const required = [...sel.replace(/:not\([^)]*\)/g, '').matchAll(/\.([\w-]+)/g)].map((m) => m[1]!);
+        return required.length > 0 && required.every((c) => classes.includes(c)) && !excluded.some((c) => classes.includes(c));
+      });
+      if (matches) found = fill;
+    }
+    return found;
+  }
+
   for (const file of themeFiles) {
     const css = readFileSync(join(themesDir, file), 'utf8');
     const id = file.replace(/\.css$/, '');
     for (const mode of ['dark', 'light'] as MermaidThemeMode[]) {
       const selector = mode === 'dark' ? `.theme-${id}` : `.theme-${id}.light`;
       const tokens = tokensFromCss(css, selector);
+      test(`${id} / ${mode}: a gantt label outside its bar, of every task kind, >= ${MERMAID_TEXT_CONTRAST_MIN}:1 on the page`, () => {
+        const config = buildMermaidConfig(buildMermaidThemeVariables(tokens, mode));
+        const vars = config.themeVariables as Record<string, unknown>;
+        const failures: string[] = [];
+        for (const label of OUTSIDE_LABELS) {
+          const fill = themeCssFill(config.themeCSS, label.classes) ?? (vars[label.mermaidFill] as string);
+          const r = contrastRatio(rgb(fill), rgb(vars.background));
+          if (r < MERMAID_TEXT_CONTRAST_MIN) failures.push(`${label.kind} outside label on background: ${r.toFixed(2)}`);
+          if (fill !== vars.taskTextOutsideColor) failures.push(`${label.kind} outside label is ${fill}, not the page text ${vars.taskTextOutsideColor}`);
+        }
+        expect(failures).toEqual([]);
+      });
+      test(`${id} / ${mode}: a done gantt bar is distinct from plain, active and critical bars (OKLab dE >= ${DONE_BAR_MIN_DELTA_E}) and stands off the page`, () => {
+        const vars = buildMermaidThemeVariables(tokens, mode)!.themeVariables;
+        const failures: string[] = [];
+        for (const other of ['taskBkgColor', 'activeTaskBkgColor', 'critBkgColor']) {
+          const d = deltaE(rgb(vars.doneTaskBkgColor), rgb(vars[other]));
+          if (d < DONE_BAR_MIN_DELTA_E) failures.push(`doneTaskBkgColor ${vars.doneTaskBkgColor} vs ${other} ${vars[other]}: dE ${d.toFixed(3)}`);
+        }
+        const page = ratio(vars, 'doneTaskBkgColor', 'background');
+        if (page < MERMAID_LINE_CONTRAST_MIN) failures.push(`doneTaskBkgColor on background: ${page.toFixed(2)}`);
+        expect(failures).toEqual([]);
+      });
       test(`${id} / ${mode}: every text pair >= ${MERMAID_TEXT_CONTRAST_MIN}:1, every line pair >= ${MERMAID_LINE_CONTRAST_MIN}:1`, () => {
         expect(tokens, `${selector} block in ${file}`).toBeDefined();
         const spec = buildMermaidThemeVariables(tokens, mode);

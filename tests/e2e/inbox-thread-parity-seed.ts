@@ -30,6 +30,7 @@ import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { refuseRealDataDir } from '../helpers/real-data-dir';
 import { markTourDecided } from '../helpers/tour-decided';
+import { E2E_GROUP_TIP_SEEN } from './inbox-scratch';
 import { mp4 } from '../helpers/video-fixtures';
 
 const repo = resolve(__dirname, '../..');
@@ -58,6 +59,8 @@ export function parityEnv(home: string, dataDir: string): Record<string, string>
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_BROWSER: NO_BROWSER,
     PLANNOTATOR_INBOX_CONNECT: '0',
+    // The seed's scratch data dir counts as one the person turned the Inbox on in (packages/shared/inbox/turned-on.ts).
+    PLANNOTATOR_TEST_INBOX_ON: '1',
     PLANNOTATOR_UPDATE_CHECK: '0',
     PLANNOTATOR_INBOX_PHONES: '0',
     // No offer to add a note to an agent's instructions (the scratch HOME has a ~/.claude for the restart line).
@@ -208,6 +211,10 @@ export async function seedThreadParity(binary: string, root: string, stop: (data
   const home = join(root, 'seed-home');
   mkdirSync(home, { recursive: true });
   markTourDecided(dataDir);
+  // The Group tip seen, as in every e2e world (inbox-scratch.ts E2E_GROUP_TIP_SEEN).
+  const configPath = join(dataDir, 'config.json');
+  const config = JSON.parse(readFileSync(configPath, 'utf8')) as Record<string, unknown>;
+  writeFileSync(configPath, JSON.stringify({ ...config, inboxReveals: { ...E2E_GROUP_TIP_SEEN, ...((config.inboxReveals as Record<string, unknown> | undefined) ?? {}) } }));
   const env = parityEnv(home, dataDir);
   const started = spawnSync(binary, ['inbox', '--background'], { env, cwd: root, encoding: 'utf8', timeout: 60_000 });
   if (started.status !== 0) throw new Error(`seed: inbox --background failed: ${started.stderr}`);

@@ -10,6 +10,9 @@ import {
   type ImageDiffMode,
 } from './imageDiffSettings';
 
+// For a host outside review-editor (the Inbox's diffs): the package exports only `components/*.tsx`.
+export { differencesSupported } from './differences';
+
 export type ImageViewChoice = ImageDiffMode | 'source';
 
 const DESCRIBE: Record<ImageViewChoice, string> = {

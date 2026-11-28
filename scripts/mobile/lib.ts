@@ -3,14 +3,13 @@
  * docs/agent-guides/mobile.md): the paths it writes, deterministic JSON, and
  * the write-or-check step.
  *
- * Every output path is a literal here, so scripts/ci-affected.ts sees which
- * files the contract tests read and selects them when one changes. Never list
- * a folder of the checkout from a generator: that makes every test that
- * imports it run on every pull request.
+ * Every output path is a literal here. Never list a folder of the checkout
+ * from a generator. This module imports no product code, so a test may import
+ * it (its emit, on a temp folder) and still never fail for an Inbox change;
+ * scripts/ci-affected-map.test.ts holds that.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { DOOR_CONTRACT } from '../../packages/server/inbox-door-version';
 
 export const ROOT = resolve(import.meta.dir, '../..');
 
@@ -24,16 +23,16 @@ export const OUT = {
   catalog: 'apps/mobile/contract/generated/swift/Tokens.xcassets/Contents.json',
   words: 'apps/mobile/contract/words/words.json',
   wordsSwift: 'apps/mobile/contract/generated/swift/Words.swift',
+  surface: 'apps/mobile/contract/parity/surface.json',
+  ledger: 'apps/mobile/contract/parity/ledger.json',
 } as const;
 
-/**
- * The contract's number: the door's own (packages/server/inbox-door-version.ts DOOR_CONTRACT), which rises only for
- * a breaking wire change. door.ts writes it to VERSION; Wire.swift compiles it in as `wireContract`.
- */
+/** Where door.ts writes the contract's number (contractVersion in door.ts). */
 export const VERSION_FILE = 'apps/mobile/contract/VERSION';
 
-export function contractVersion(): number {
-  return DOOR_CONTRACT;
+/** Write a repository file, by its path from the root (always a path named as a literal by the caller). */
+export function writeRepoText(path: string, text: string): void {
+  writeFileSync(join(ROOT, path), text);
 }
 
 /** Whether a repository file exists, by its path from the root (always a path named as a literal by the caller). */

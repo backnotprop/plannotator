@@ -1,5 +1,5 @@
 /**
- * Plans' HTTP routes, runtime-neutral (the shape of packages/shared/shape/routes.ts). The Inbox mounts them through
+ * Plans' HTTP routes, runtime-neutral. The Inbox mounts them through
  * its capability list (packages/server/plans-capability.ts) only while Plans is on; off, every `/api/plans` path is
  * the Inbox's unknown-route 404, as if absent. The caller owns the guards (the owner's window on this computer,
  * same-origin, the page's server session on the one write).

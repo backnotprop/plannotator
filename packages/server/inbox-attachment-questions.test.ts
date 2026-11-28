@@ -104,7 +104,7 @@ test("an attached plan's questions wait on the person, are answered on the file,
 
   // The agent's read before the answer: both wait on the person, numbered in the file.
   const before = await call(client, "read_thread", { thread_id: sent.structured.thread_id, agent_session: "ses_a" });
-  expect(before.text).toContain("Waiting on the person (2):");
+  expect(before.text).toContain("Waiting on the person (2 questions):");
   expect(before.text).toContain(`- ${messageId}/${questions[0].key} (Q1 in your file plan.md) open: Which database should invoices live in?`);
 
   // The person picks on the file's first card and sends.

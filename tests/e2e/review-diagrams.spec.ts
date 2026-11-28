@@ -45,6 +45,22 @@ digraph G { review -> hook -> binary; review -> engine; }
 Done.
 `;
 
+/** A fence Pele cannot draw and Mermaid can (an icon-only label): Pele gives
+ * it to Mermaid, so the page asks for the Mermaid runtime file, and Mermaid
+ * draws it. */
+const FALLS_BACK = `# Intake
+
+The intake as drawn today:
+
+\`\`\`mermaid
+flowchart LR
+  P["fa:fa-user"] --> A[Start]
+  A --> B[Store]
+\`\`\`
+
+Done.
+`;
+
 const PLAIN = `# Notes
 
 No diagrams here, just words.
@@ -188,7 +204,7 @@ test.afterAll(async () => {
   await browser?.close();
 });
 
-test('Read view draws both diagrams, loading the engine and each runtime once', async () => {
+test('Read view draws both diagrams, loading the engine and the Graphviz runtime once, and no Mermaid runtime', async () => {
   const session = await review(ARCHITECTURE);
   try {
     const advert = ((await (await fetch(new URL('/api/diff', session.url))).json()) as { diagramEngine?: Record<string, string> }).diagramEngine;
@@ -207,8 +223,11 @@ test('Read view draws both diagrams, loading the engine and each runtime once', 
     // The fences are no longer shown as code.
     await expect(page.locator('pre > code', { hasText: 'flowchart LR' })).toHaveCount(0);
     await shot(page, 'read-view');
-    // Each file once, whatever the number of fences and views on the page.
-    expect([...engineRequests].sort()).toEqual([advert!.engine, advert!.graphviz, advert!.mermaid].sort());
+    // Each file once, whatever the number of fences and views on the page. The
+    // engine draws the Mermaid fence with Pele, which it holds: the Mermaid
+    // runtime file is fetched only for a fence that falls back to it.
+    expect([...engineRequests].sort()).toEqual([advert!.engine, advert!.graphviz].sort());
+    await expect(page.locator('[data-diagram-block="mermaid"] [data-diagram-inline] svg.pele').first()).toBeVisible();
     await context.close();
   } finally {
     await session.close();
@@ -286,13 +305,16 @@ test('Retry after a failed engine load fetches the engine again and draws the di
 
 test('a failed Mermaid runtime load is fetched again under a new URL and draws', async () => {
   // The engine's renderer re-attempts a failed runtime import once by itself;
-  // the runtime URL it reads then carries a retry query.
-  const session = await review(ARCHITECTURE);
+  // the runtime URL it reads then carries a retry query. A fence Pele cannot
+  // draw is the one that reaches Mermaid: the re-fetched runtime draws it,
+  // with no Retry of a runtime that did not load.
+  const session = await review(FALLS_BACK);
   try {
     const asked: string[] = [];
     const { context, page } = await open(browser, session.url, 'read', (p) => failEngineFile(p, 'mermaid', asked));
-    await expect(page.locator('[data-diagram-block="mermaid"] [data-diagram-inline] svg').first()).toBeVisible({ timeout: 30_000 });
-    await expect(page.locator('[data-diagram-block="graphviz"] [data-diagram-inline] svg').first()).toBeVisible({ timeout: 30_000 });
+    const block = page.locator('[data-diagram-block="mermaid"]').first();
+    await expect(block.locator('[data-diagram-inline] [data-diagram-svg] > svg:not(.pele)').first()).toBeVisible({ timeout: 30_000 });
+    await expect(block.getByRole('button', { name: 'Retry' })).toHaveCount(0);
     expect(asked).toHaveLength(2);
     expect(asked[0]).toMatch(/^\/assets\/diagram-engine\/mermaid-[^?]+\.js$/);
     expect(asked[1]).toBe(`${asked[0]}?r=1`);

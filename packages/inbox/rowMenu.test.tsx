@@ -556,10 +556,11 @@ test.skipIf(!hasDom)('the context-menu key: the keyup `contextmenu` (Chromium on
     (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   });
   await until(() => !menu(), 'the menu to close');
-  // The guard went with that one event: the next right-click outside the rows is the browser's again.
+  // The guard went with that one event: the next right-click outside the rows is the browser's again. On the list's
+  // body itself, not a band: a band has its own menu (RowMenu.tsx `bands`), which takes the right-click.
   const later = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 5, clientY: 5 });
   await act(async () => {
-    document.querySelector<HTMLElement>('.ib-band')!.dispatchEvent(later);
+    rowButton(ids.stopped)!.closest<HTMLElement>('.ib-lbody')!.dispatchEvent(later);
   });
   expect(later.defaultPrevented).toBe(false);
 });

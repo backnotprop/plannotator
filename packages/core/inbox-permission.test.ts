@@ -1,7 +1,7 @@
 /**
  * Launch PR 2: what a permission question offers and what Claude Code is
  * told. The shapes are the ones bg-perm-test proved on a real `claude --bg`
- * (allow echoes `updatedInput`; deny carries a message that says not to
+ * (allow carries no `updatedInput`, which makes Claude Code ignore an allow on a check that wants a person; deny carries a message that says not to
  * retry); "for this session" never writes the person's settings files.
  */
 import { describe, expect, test } from "bun:test";
@@ -357,14 +357,13 @@ describe("the answer and the decision", () => {
     expect(inboxPermissionAnswer(answer(["Deny"], { note: "Use a branch." }), e)).toEqual({ choice: "deny", reason: "Use a branch." });
   });
 
-  test("Allow once echoes this event's tool input, and nothing more", () => {
-    expect(inboxPermissionDecisionFor(e, { choice: "once" })).toEqual({ behavior: "allow", updatedInput: REAL.tool_input });
+  test("Allow once is a bare allow: the tool input stays the event's own, never echoed", () => {
+    expect(inboxPermissionDecisionFor(e, { choice: "once" })).toEqual({ behavior: "allow" });
   });
 
   test("Allow for this session adds the update Claude Code suggested, with destination session", () => {
     expect(inboxPermissionDecisionFor(e, { choice: "session" })).toEqual({
       behavior: "allow",
-      updatedInput: REAL.tool_input,
       updatedPermissions: [{ type: "setMode", mode: "acceptEdits", destination: "session" }],
     });
     // Nothing suggested: no decision at all (Claude Code's own dialog decides), never a bare allow.
@@ -432,14 +431,12 @@ describe("the answer and the decision", () => {
   test("a mode switch allows this tool input and sets the session's mode, for this session only", () => {
     expect(inboxPermissionDecisionFor(e, { choice: "auto" })).toEqual({
       behavior: "allow",
-      updatedInput: REAL.tool_input,
       updatedPermissions: [{ type: "setMode", mode: "auto", destination: "session" }],
     });
     // Full permissions only where the hook's own launch allows them; otherwise nothing (Claude Code's dialog decides).
     expect(inboxPermissionDecisionFor(e, { choice: "full" })).toBeNull();
     expect(inboxPermissionDecisionFor(e, { choice: "full" }, { fullPermissions: true })).toEqual({
       behavior: "allow",
-      updatedInput: REAL.tool_input,
       updatedPermissions: [{ type: "setMode", mode: "bypassPermissions", destination: "session" }],
     });
   });
@@ -450,8 +447,8 @@ describe("the answer and the decision", () => {
   });
 
   test("the hook's stdout is Claude Code's PermissionRequest shape", () => {
-    expect(JSON.parse(inboxPermissionHookOutput({ behavior: "allow", updatedInput: { command: "ls" } }))).toEqual({
-      hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: "allow", updatedInput: { command: "ls" } } },
+    expect(JSON.parse(inboxPermissionHookOutput({ behavior: "allow" }))).toEqual({
+      hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: "allow" } },
     });
   });
 });

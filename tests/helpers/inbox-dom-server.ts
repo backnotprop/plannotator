@@ -96,8 +96,8 @@
  * guide }`: the inline image's id under `before.png`, the attached copy's under
  * `before.png (attached)`).
  *
- * With `decisions` (decision mode, experimental; approval "inbox-decision-mode"):
- * config.json turns decision mode on, and each project gets only this seed in
+ * With `decisions` (decision mode, on by default; approval "inbox-decision-mode"):
+ * no config.json is written (the default holds), and each project gets only this seed in
  * place of the one above: Claude Code (`ses_da<i>`) asks two questions in one
  * message (a Stopped pick-one of three, recommended, then a two-way), and
  * Codex (`ses_db<i>`) asks one two-way question in the same thread (`reply_to`
@@ -276,11 +276,7 @@ if (pullsMode) {
   const config = existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>) : {};
   writeFileSync(file, JSON.stringify({ ...config, inboxCodeReview: true }));
 }
-// Decision mode is experimental and off by default: this mode turns it on in the scratch config.json.
-if (decisionsMode) {
-  mkdirSync(dataDir, { recursive: true });
-  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ experimental: { decisionMode: true } }));
-}
+// Decision mode is on by default: this mode writes no config.json, so its tests prove the default.
 // The Bro mode offer (approval "bro-mode"; its place in the line, approval "inbox-one-time-dialogs"): first use 3 days
 // ago, Snooze, the switches and the update-day dialogs behind the person, so only it can be next; heavy use (10 threads
 // read, on 2 days), seeded before the Inbox opens the store; and one thread whose last agent message is long (its moment).
@@ -369,17 +365,29 @@ const leakedIds =
       )
     : [];
 // The one-time "themes" dialog is settled in every world (as for someone on another theme): on a release version it is
-// due from day one and would be the line's next dialog, ahead of the one a test is about. The warning before a Mark
+// due from day one and would be the line's next dialog, ahead of the one a test is about. So is "Which view do you
+// prefer?" (reveals.ts `view_choice`: five threads, no tenure, armed ahead of the offers). The warning before a Mark
 // read that sets questions aside is off too (as for someone who ticked "Don't show this again"), so a test about Mark
 // read itself is not stopped by it; the warning's own test turns it on (POST /api/inbox/settings `mark_read_warning`).
 {
   mkdirSync(dataDir, { recursive: true });
   const file = join(dataDir, "config.json");
   const config = existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>) : {};
-  const settled = {
+  const settled: Record<string, unknown> = {
     ...(config.inboxThemeChooser === undefined ? { inboxThemeChooser: { notNeededAt: "2026-10-01T10:00:00.000Z" } } : {}),
     ...(config.inboxMarkReadWarning === undefined ? { inboxMarkReadWarning: false } : {}),
+    ...((config.inboxReveals as { view_choice?: unknown } | undefined)?.view_choice === undefined ? { inboxReveals: { ...(config.inboxReveals as Record<string, unknown> | undefined), view_choice: { shownAt: "2026-10-01T10:00:00.000Z" } } } : {}),
   };
+  // The Group tip (band-tip.ts, a band's one-time tooltip) too, so no hover in a test shows it. And Code review's
+  // one-time offer, as already shown (the switch stays as the world set it): on the release-numbered modes (whats-new,
+  // restart, reload-hosts) it opens at once, over the window a test drives.
+  const reveals = (settled.inboxReveals ?? config.inboxReveals) as Record<string, unknown> | undefined;
+  if (reveals?.band_tip === undefined) Object.assign(settled, { inboxReveals: { ...reveals, band_tip: { shownAt: "2026-10-01T10:00:00.000Z" } } });
+  const revealsNow = (settled.inboxReveals ?? config.inboxReveals) as Record<string, unknown> | undefined;
+  if (revealsNow?.code_review === undefined) Object.assign(settled, { inboxReveals: { ...revealsNow, code_review: { shownAt: "2026-10-01T10:00:00.000Z" } } });
+  // The Search tip (search-tip.ts) as shown, so no test's first search opens it beside the palette.
+  const revealsLast = (settled.inboxReveals ?? config.inboxReveals) as Record<string, unknown> | undefined;
+  if (revealsLast?.search_tip === undefined) Object.assign(settled, { inboxReveals: { ...revealsLast, search_tip: { shownAt: "2026-10-01T10:00:00.000Z" } } });
   if (Object.keys(settled).length > 0) writeFileSync(file, JSON.stringify({ ...config, ...settled }));
 }
 const server = await startInboxServer({

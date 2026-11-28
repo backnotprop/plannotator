@@ -29,7 +29,7 @@ import { expect, test, type Browser, type BrowserContext, type Page } from './in
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
+import { E2E_GROUP_TIP_SEEN, inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { savedConfig } from '../helpers/saved-config';
 
@@ -94,7 +94,8 @@ async function world(): Promise<World> {
       // The "themes" dialog (after the tab icon dialog, ahead of the offers): settled, as for someone on another theme.
       inboxThemeChooser: { notNeededAt: '2026-10-01T10:00:00.000Z' },
       inboxSnoozeIntro: { shownAt: snoozeShown },
-      inboxReveals: { lastShownAt: snoozeShown },
+      // "Which view do you prefer?" (five threads, no tenure, armed ahead of the Board): settled too.
+      inboxReveals: { ...E2E_GROUP_TIP_SEEN, lastShownAt: snoozeShown, view_choice: { shownAt: past } },
       // Personal agents (after Snooze in the line): settled by OpenClaw's Inbox tool turned on.
       inboxTool: { openclaw: true },
       // Priority (after Snooze in the line): settled by a thread once added to Priority.

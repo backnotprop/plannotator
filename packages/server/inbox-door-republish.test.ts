@@ -279,6 +279,33 @@ describe("the tailnet door publishes again by itself", () => {
     expect(readTailnetDoorRecord(dataDir)).toMatchObject({ published: true, target: ts.serve.get(DOOR) });
   });
 
+  test("a reboot (#3591): the clean stop misreads Tailscale shutting down and believes the mapping gone; Tailscale brings it back at boot, and the door takes it back", async () => {
+    const dataDir = world();
+    const ts = fakeTailscale();
+    ts.tailscale.running = true;
+    const box = { shuttingDown: false };
+    const run: TailscaleRunner = (args, ms) => {
+      if (box.shuttingDown && args[0] === "serve" && args[1] === "status") return { status: 0, stdout: "{}", stderr: "" };
+      if (box.shuttingDown && args[0] === "status") return { status: 1, stdout: "", stderr: "failed to connect to local tailscaled" };
+      return ts.run(args, ms);
+    };
+    const first = door(dataDir, run, fakeClock());
+    first.devices.startTailnet();
+    const left = ts.serve.get(DOOR)!;
+    box.shuttingDown = true;
+    first.devices.stopTailnet();
+    box.shuttingDown = false;
+    expect(ts.serve.get(DOOR)).toBe(left);
+
+    const clock = fakeClock();
+    const next = door(dataDir, run, clock);
+    next.devices.startTailnet();
+    if (clock.waits().includes(0)) await clock.fire();
+    expect(next.view()).toEqual({ address: `${MAGIC}:${DOOR}`, error: null });
+    expect(ts.serve.get(DOOR)).not.toBe(left);
+    expect(readTailnetDoorRecord(dataDir)).toMatchObject({ published: true, target: ts.serve.get(DOOR) });
+  });
+
   test("the door switched off while Tailscale is stopped: off at once, its listener closed, the record kept; the mapping is taken down once Tailscale runs, by a status-only look", async () => {
     const dataDir = world();
     const ts = fakeTailscale();

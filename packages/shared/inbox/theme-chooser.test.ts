@@ -7,7 +7,7 @@
  * owner, 2026-11-10; the gap is the line's own, 40 minutes); the dialog behind an offer, or held back on day one; a Not now accepted for it.
  */
 import { describe, expect, test } from "bun:test";
-import { INBOX_REVEALS, REVEAL_SPACING_MS, revealAgainAt, revealMayClaim, revealNext, revealNotNowAllowed, revealQualifies, type RevealId, type RevealState } from "./reveals";
+import { INBOX_REVEALS, REVEAL_SPACING_MS, revealAgainAt, revealMayClaim, revealNext, revealNotNowAllowed, revealQualifies, revealsWithCodeReviewOffer, type RevealId, type RevealState } from "./reveals";
 import { themeChooserLook, themeChooserOnDefault, themeChooserOpen } from "./theme-chooser";
 
 const AT = "2026-11-10T09:00:00.000Z";
@@ -60,7 +60,7 @@ describe("its place in the line", () => {
     expect(revealNext(state({ open: only("tab_icon", "theme_chooser", "snooze", "board") }), now)).toBe("tab_icon");
     expect(revealMayClaim("theme_chooser", state({ open: only("tab_icon", "theme_chooser") }), now)).toBe(false);
     // The tab icon dialog done (or never theirs): it is next, ahead of Snooze, the Board and the rest.
-    expect(revealNext(state({ open: only("theme_chooser", "snooze", "bro", "board", "steps", "list_view") }), now)).toBe("theme_chooser");
+    expect(revealNext(state({ open: only("theme_chooser", "snooze", "bro", "board", "steps", "view_choice") }), now)).toBe("theme_chooser");
     // Not for them (another theme): the line is as it was.
     expect(revealNext(state({ open: only("snooze", "board") }), now)).toBe("snooze");
   });
@@ -81,8 +81,10 @@ describe("its place in the line", () => {
     const entry = INBOX_REVEALS.find((e) => e.id === "theme_chooser")!;
     expect(revealQualifies(entry, state({ firstUseAt: null, threads: 0, open: only("theme_chooser") }), now)).toBe(true);
     expect(revealNext(state({ firstUseAt: now.toISOString(), threads: 0, open: only("theme_chooser") }), now)).toBe("theme_chooser");
-    // Code review's day-0 offer keeps its place ahead of it.
-    expect(revealNext(state({ firstUseAt: null, threads: 0, open: only("code_review", "theme_chooser") }), now)).toBe("code_review");
+    // Code review's day-0 offer keeps its place ahead of it while it is shown; switched off (as from 0.29.6), it holds nothing back.
+    const both = state({ firstUseAt: null, threads: 0, open: only("code_review", "theme_chooser") });
+    expect(revealNext(both, now, revealsWithCodeReviewOffer(true))).toBe("code_review");
+    expect(revealNext(both, now, revealsWithCodeReviewOffer(false))).toBe("theme_chooser");
     expect(revealNotNowAllowed("theme_chooser")).toBe(false);
   });
 });

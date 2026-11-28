@@ -334,7 +334,7 @@ export function FolderMenu({
           // Its drives, after "Another folder…": all of them with no words, else the ones the words name.
           drives:
             onFolder && !group.notice && !group.asleep
-              ? (group.drives ?? []).filter((d) => named || words.length === 0 || words.every((w) => d.name.toLowerCase().includes(w) || (d.network === true && 'network drive'.includes(w))))
+              ? (group.drives ?? []).filter((d) => d.shortcut !== false && (named || words.length === 0 || words.every((w) => d.name.toLowerCase().includes(w) || (d.network === true && 'network drive'.includes(w)))))
               : [],
           path: null as string | null,
           clone: null as CloneRow | null,

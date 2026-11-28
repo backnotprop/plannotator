@@ -430,6 +430,11 @@ export function useListLook(remember = true): [ListLook, (changes: Partial<ListL
   return [look, remember ? change : noChange];
 }
 
+/** How many draws watch the look (a list's rows read it once for the list: letterMarks.tsx `ListRowMarks`). */
+export function listLookWatchersForTests(): number {
+  return listeners.size;
+}
+
 /** Tests only: a fresh page that has read nothing and saves nothing. */
 export function resetListLookForTests(): void {
   current = null;

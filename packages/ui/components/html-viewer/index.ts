@@ -6,6 +6,7 @@ export {
   servedFrameReloadUrl, servedFrameStartUrl,
   type HtmlViewerFrame,
   type BridgeUnavailableInfo,
+  type HtmlViewerInline,
   type HtmlViewerProps,
 } from "./HtmlViewer";
 export { BRIDGE_PROTOCOL_VERSION } from "./bridge-script";

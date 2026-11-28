@@ -14,7 +14,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { createTestEnvironment } from "../../tests/helpers/environment";
 
 export interface OpenInScenarioServer {
@@ -242,6 +242,27 @@ export function defineOpenInScenarios(runtime: string, start: StartOpenInScenari
           expect(lines[0].endsWith("/notes.md")).toBe(true);
         }
       });
+
+      test.skipIf(kind !== "review" || process.platform !== "darwin")(
+        "Android Studio gets the review file through its launcher, with or without a selected line",
+        async () => {
+          await setUp();
+          const cases = [{ filePath: "build.gradle.kts", expectedLine: 1 }, { filePath: "Main Activity.kt", line: 42, expectedLine: 42 }];
+          const expected: string[] = [];
+          for (const { filePath, line, expectedLine } of cases) {
+            const file = join(dirname(docPath), filePath);
+            writeFileSync(file, "// Review fixture\n");
+            const answer = await send(
+              { origin: `http://${host}`, "sec-fetch-site": "same-origin" },
+              { filePath, appId: "android-studio", line, serverSession },
+            );
+            expect(answer.status).toBe(200);
+            expect(answer.body).toEqual({ ok: true });
+            expected.push(`open -na Android Studio --args --line ${expectedLine} ${filePath}`);
+          }
+          expect(launches().map((launched) => launched.replace(/ \/.*\//, " "))).toEqual(expected);
+        },
+      );
 
       test("a line that is not a whole number above zero is dropped: the file opens at its top", async () => {
         await setUp();

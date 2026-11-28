@@ -1,5 +1,6 @@
 import { Popover } from '@base-ui/react/popover';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import { isInboxMarkFace } from '@plannotator/core/inbox-types';
 import { tooltipContainerOf } from '@plannotator/ui/components/HostTitle';
 import { HostMark } from '../icons';
 import { agentHostName } from './model';
@@ -43,8 +44,8 @@ export const FAN_TOUCH: Partial<FanOptions> = { pitch: 44, item: 40, inner: 64, 
 export const OWN_CHOICE = 'own';
 /** "Sets": the inner arc's place after it, which opens the icon sets (SetsBody.tsx, AgentIconDialog.tsx). */
 export const SETS_CHOICE = 'sets';
-/** A place in the fan: a face, "Your own…" or "Sets". */
-export type FanChoice = Exclude<AgentFace, `own:${string}` | `set:${string}`> | typeof OWN_CHOICE | typeof SETS_CHOICE;
+/** A place in the fan: a face, "Your own…" or "Sets". Another host's mark (`mark:<host>`) has none: it is a mark, in the own mark's place. */
+export type FanChoice = Exclude<AgentFace, `own:${string}` | `set:${string}` | `mark:${string}`> | typeof OWN_CHOICE | typeof SETS_CHOICE;
 export const OWN_LABEL = 'Your own…';
 export const SETS_LABEL = 'Sets';
 
@@ -54,19 +55,19 @@ export const SETS_LABEL = 'Sets';
  * second, after the agent's own mark (approval "inbox-generated-agent-icons"; only for an agent whose project has a
  * name to draw).
  */
-export function fanArcs(cx: number, cy: number, w: number, h: number, touch = false, own = true, project = false): { faces: FanChoice[][]; spots: FanSpot[][] } {
+export function fanArcs(cx: number, cy: number, w: number, h: number, touch = false, own = true, project = false, grow = 0): { faces: FanChoice[][]; spots: FanSpot[][] } {
   const kinds: FanChoice[] = ['agent', ...(project ? ['project' as const] : []), 'transparent', 'totman', ...(own ? [OWN_CHOICE as FanChoice] : []), SETS_CHOICE];
   const base = { ...FAN_OPTIONS, ...(touch ? FAN_TOUCH : {}) };
   // Near a window's edge the inner arc's five kinds would crowd: it moves out (and the colours with it) until they
   // keep their pitch, a few steps at most.
   let best: { faces: FanChoice[][]; spots: FanSpot[][] } | null = null;
   for (let extra = 0; extra <= 48; extra += 8) {
-    const options = { ...(touch ? FAN_TOUCH : {}), inner: base.inner + extra };
+    const options = { ...(touch ? FAN_TOUCH : {}), inner: base.inner + extra + grow };
     const one = fanLayout(cx, cy, w, h, [kinds.length, GLASS_FACES.length], options);
     const far = Math.max(...one.flat().map((s) => Math.hypot(s.x, s.y)));
     const half = Math.ceil(GLASS_FACES.length / 2);
     best =
-      far <= (touch ? 165 : 120) + extra
+      far <= (touch ? 165 : 120) + extra + grow
         ? { faces: [kinds, [...GLASS_FACES]], spots: one }
         : { faces: [kinds, GLASS_FACES.slice(0, half), GLASS_FACES.slice(half)], spots: fanLayout(cx, cy, w, h, [kinds.length, half, GLASS_FACES.length - half], options) };
     const inner = best.spots[0]!;
@@ -102,18 +103,31 @@ export interface FaceFanProps {
 const reduceMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 export function FaceFan({ anchor, open, openedBy, host, agent, name, face, sources, onChoose, onOwn, onSets, onMark, onClose }: FaceFanProps) {
-  const chosen: FanChoice = isOwnFace(face) ? OWN_CHOICE : isSetFace(face) ? SETS_CHOICE : face;
-  // Measured once as it opens: the mark's box and the window (nothing is read while the pointer moves).
-  const [place, setPlace] = useState<{ rect: DOMRect; w: number; h: number } | null>(null);
+  const chosen: FanChoice = isOwnFace(face) ? OWN_CHOICE : isSetFace(face) ? SETS_CHOICE : isInboxMarkFace(face) ? 'agent' : face;
+  // Measured once as it opens: the mark's box and the room the choices keep inside, the window, or the list's pane for
+  // a mark in the list (the Agents view's faces: no choice over the sidebar). Nothing is read while the pointer moves.
+  // Nothing clips the fan or anything above its plate (agents.css: a clip, a filter or a mask there stops the blur).
+  const [place, setPlace] = useState<{ rect: DOMRect; w: number; h: number; room: { left: number; top: number; width: number; height: number } } | null>(null);
   useLayoutEffect(() => {
-    if (open) setPlace({ rect: anchor.getBoundingClientRect(), w: window.innerWidth, h: window.innerHeight });
+    if (!open) return;
+    const w = window.innerWidth, h = window.innerHeight;
+    const pane = anchor.closest('.ib-listcol')?.getBoundingClientRect();
+    const left = Math.max(0, pane?.left ?? 0), top = Math.max(0, pane?.top ?? 0);
+    const room = { left, top, width: Math.min(w, pane?.right ?? w) - left, height: Math.min(h, pane?.bottom ?? h) - top };
+    setPlace({ rect: anchor.getBoundingClientRect(), w, h, room });
   }, [open, anchor]);
   const touch = openedBy === 'touch';
   const own = onOwn !== undefined;
   // Offered for an agent with a project, on a machine that keeps a tile (a linked one from before tiles keeps none).
   const takesTiles = useAgentTakesTiles(agent);
   const project = useAgentProjectTile(agent) !== null && takesTiles;
-  const arcs = useMemo(() => (place ? fanArcs(place.rect.left + place.rect.width / 2, place.rect.top + place.rect.height / 2, place.w, place.h, touch, own, project) : null), [place, touch, own, project]);
+  // A mark larger than the sidebar's (its button past 28 px: the Agents view's 44): the arcs and the plate's hole move
+  // out by half the difference, so the choices keep their room round it.
+  const grow = place ? Math.max(0, Math.round((Math.min(place.rect.width, place.rect.height) - 28) / 2)) : 0;
+  const arcs = useMemo(
+    () => (place ? fanArcs(place.rect.left + place.rect.width / 2 - place.room.left, place.rect.top + place.rect.height / 2 - place.room.top, place.room.width, place.room.height, touch, own, project, grow) : null),
+    [place, touch, own, project, grow],
+  );
   const order = useMemo<FanChoice[]>(() => arcs?.faces.flat() ?? [], [arcs]);
   // The dial's plate: a half disc out past the farthest choice, turned the way the fan opens.
   const dial = useMemo(() => {
@@ -288,7 +302,7 @@ export function FaceFan({ anchor, open, openedBy, host, agent, name, face, sourc
               if (event.clientX >= box.left && event.clientX <= box.right && event.clientY >= box.top && event.clientY <= box.bottom) onMark();
             }}
           >
-            <span className="am-fan-dial" aria-hidden="true" style={{ '--r': `${Math.round(dial.reach)}px`, '--a': `${dial.aim.toFixed(1)}deg` } as CSSProperties}>
+            <span className="am-fan-dial" aria-hidden="true" style={{ '--r': `${Math.round(dial.reach)}px`, '--a': `${dial.aim.toFixed(1)}deg`, ...(grow > 0 ? { '--grow': `${grow}px` } : {}) } as CSSProperties}>
               <span className="am-fan-shade">
                 <span className="am-fan-plate" data-shade="" />
               </span>

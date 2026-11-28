@@ -1221,6 +1221,7 @@ diffs-container {
 .call-flow-language-notice button:disabled,
 .call-flow-languages-popover button:disabled { opacity: 0.55; cursor: default; }
 .call-flow-language-notice .call-flow-language-error { display: block; margin-top: 0.125rem; }
+.call-flow-scope-notice { margin: 0; }
 .call-flow-language-progress {
   display: block;
   margin-top: 0.125rem;
@@ -2486,12 +2487,12 @@ diffs-container {
   color: var(--muted-foreground);
 }
 
-.review-sidebar [data-review-panel-list] {
-  padding-bottom: 4px;
-}
-
 .review-sidebar [data-review-sticky-tools] {
   padding-bottom: 0;
+}
+
+.review-sidebar [data-review-file-filter] [data-review-sticky-tools] {
+  padding-block: 12px;
 }
 
 .review-sidebar [data-panel-controls-row] {

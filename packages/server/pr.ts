@@ -7,6 +7,7 @@
 
 import { childEnv } from "@plannotator/shared/child-env";
 import { refRunnerKill } from "@plannotator/shared/ref-cards";
+import { loadConfig, resolveForgejoToken } from "@plannotator/shared/config";
 import type {
   PRRef,
   PRMetadata,
@@ -115,6 +116,8 @@ const runtime: PRRuntime = {
     if (!active.runCommandWithInput) return Promise.reject(new Error(`${cmd}: this runtime takes no input`));
     return active.runCommandWithInput(cmd, args, input, options);
   },
+  // The Forgejo token configured for exactly this origin; artifact fetches send it to that origin only.
+  forgejoToken: (origin) => resolveForgejoToken(loadConfig(), origin),
 };
 
 /**

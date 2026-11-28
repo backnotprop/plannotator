@@ -563,6 +563,12 @@ export interface LiveBridgeSources {
    * output, unchanged.
    */
   nested?: boolean;
+  /**
+   * Optional: every page load starts in Interact (Settings → Display, "Start
+   * in Annotate mode" off) instead of armed, before the editor's first
+   * set-annotate-mode arrives. Absent: armed, as always.
+   */
+  startInteract?: boolean;
 }
 
 /**
@@ -580,6 +586,7 @@ export function composeLiveBridgeJs(sources: LiveBridgeSources): string {
       editorOrigins: sources.editorOrigins,
       css: sources.annotationCss,
       ...(sources.nested ? { nested: true } : {}),
+      ...(sources.startInteract ? { startInteract: true } : {}),
     })
     + ";\n"
     + sources.bridgeBootstrap

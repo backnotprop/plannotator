@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { inboxScheduledDecide, inboxScheduledNext, inboxScheduledPreview, inboxScheduleRefusal, inboxScheduleWords } from "./inbox-scheduled";
+import { inboxScheduledDecide, inboxScheduledNext, inboxScheduledPreview, inboxScheduleRefusal, inboxScheduleWords, routineLineText } from "./inbox-scheduled";
 
 const NY = "America/New_York";
 const at = (iso: string) => new Date(iso);
@@ -135,4 +135,79 @@ test("a step that does not divide the hour or the day says what it does, never a
   expect(inboxScheduleWords({ cron: "*/45 * * * *", tz: NY })).toBe("Every hour at :00 and :45");
   expect(inboxScheduleWords({ cron: "*/20 * * * *", tz: NY })).toBe("Every 20 minutes");
   expect(inboxScheduleWords({ cron: "0 */5 * * *", tz: NY })).toBe("On the schedule 0 */5 * * *");
+});
+
+describe("a routine's name or folder in a change line", () => {
+  // The lines as packages/server/inbox-scheduled.ts writes them; the wording is main's (packages/server/inbox-scheduled-server.test.ts).
+  const made = (name: string, on = false) =>
+    `Made the routine [${routineLineText(name.replace(/[[\]]/g, ""))}](#routine=sch_1). ${on ? "It is on, as you asked with /create-routine." : "It is off until you turn it on."}`;
+
+  test("a plain name or folder is written as it always was, with no code marks", () => {
+    expect(made("Morning triage")).toBe("Made the routine [Morning triage](#routine=sch_1). It is off until you turn it on.");
+    expect(made("Not theirs")).toBe("Made the routine [Not theirs](#routine=sch_1). It is off until you turn it on.");
+    expect(made("Dependency check", true)).toBe("Made the routine [Dependency check](#routine=sch_1). It is on, as you asked with /create-routine.");
+    expect(`Its name was ${routineLineText("Morning triage")}.`).toBe("Its name was Morning triage.");
+    expect(made("Maya's triage")).toBe("Made the routine [Maya's triage](#routine=sch_1). It is off until you turn it on.");
+    expect(`Deleted the routine ${routineLineText("Maya's triage")}. Its thread and past runs stay.`).toBe("Deleted the routine Maya's triage. Its thread and past runs stay.");
+    expect(`It now works in ${routineLineText("~/acme-web", "path")} (was ${routineLineText("~/acme-api", "path")}).`).toBe("It now works in ~/acme-web (was ~/acme-api).");
+    for (const name of [
+      ".,’-–—()+?", // only the allowed punctuation
+      "Weekly sync v2.1",
+      "follow-up (daily)",
+      "What changed?",
+      "🚀 Deploy check",
+      "👨‍👩‍👧 family 👍🏽 🇯🇵",
+      "Café crème",
+      "Cafe\u0301 (decomposed)",
+      "毎朝のトリアージ",
+      "हिन्दी रिपोर्ट",
+      "فرز يومي",
+    ]) expect(routineLineText(name)).toBe(name);
+    for (const folder of ["~/code/my-app_v2", "/srv/apps/acme web", "~/projects/snake__case", "~/linear/ENG-42", "~/maya's app"]) expect(routineLineText(folder, "path")).toBe(folder);
+  });
+
+  test("a name or folder any renderer could read as markup, or not as typed, is code", () => {
+    for (const name of [
+      'Say "hi"',
+      "www.example.com",
+      "Check WWW.example.com",
+      " leading space",
+      "trailing space ",
+      "two\nlines",
+      "tab\there",
+      "no\u00a0break",
+      "\u202eevil", // a right-to-left override
+      "a\u2066b", // a direction isolate
+      "\u3164", // a Hangul filler: a letter that draws nothing
+      "Triage\u115F", // a filler inside a name
+      "a\u034Fb", // a combining grapheme joiner
+      "x\uFE00", // a variation selector with no emoji
+      "\u0301\u0301", // only combining marks
+      "a \u0301b", // a mark with no letter under it
+      "\u200D", // only a joiner
+      "Wait...",
+      "a..b",
+      "a--b",
+      "ENG-42 follow-up", // the window links a Linear issue
+      "Maya's ENG-42",
+      "@maya's sweep",
+      "snake_case",
+      "~tilde~",
+      "a/b",
+      "Fix #123",
+      "@maya",
+      "x = 1",
+      "a | b",
+      "$5",
+      "a & b",
+      "back\\slash",
+      ":rocket:",
+    ]) expect([name, routineLineText(name).startsWith("`")]).toEqual([name, true]);
+    for (const folder of ["~/code/next.js", "~/.config/app", "~/_drafts", "~/a~b", "~/x/ _y", "~/é_x_", "C:\\Users\\maya", "~/notes ENG-42"]) {
+      expect([folder, routineLineText(folder, "path").startsWith("`")]).toEqual([folder, true]);
+    }
+    // The fence outgrows any run of backticks in the text.
+    expect(routineLineText("a `b` c")).toBe("``a `b` c``");
+    expect(routineLineText("`x`")).toBe("`` `x` ``");
+  });
 });

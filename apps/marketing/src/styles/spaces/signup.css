@@ -1,0 +1,65 @@
+button.act{border:0;border-radius:0;margin:0;cursor:pointer;-webkit-appearance:none;appearance:none}
+.act:focus-visible,.sg :focus-visible{outline:2px solid var(--iris);outline-offset:2px}
+html.sg-open{overflow:hidden}
+dialog.sg{--sgt:max(16px,min(120px,13.4vh));width:560px;max-width:calc(100vw - 32px);margin-top:var(--sgt);margin-bottom:auto;margin-left:auto;margin-right:auto;max-height:calc(100dvh - var(--sgt) - 24px);padding:0;border:0;overflow:auto;overscroll-behavior:contain;background:var(--paper);color:var(--ink);box-shadow:var(--shadow);font-family:var(--sans)}
+dialog.sg::backdrop{background:rgba(20,22,43,.44)}
+html:not(.light) dialog.sg::backdrop{background:rgba(3,5,22,.7)}
+.sg-x{position:sticky;top:0;float:right;z-index:2;width:50px;height:50px;display:flex;align-items:center;justify-content:center;padding:0;border:0;border-radius:0;background:var(--q2);color:var(--ink);cursor:pointer}
+.sg-x:hover{background:var(--tv)}
+.sg .ws-form-card{display:block;margin:0;padding:40px 40px 40px}
+.sg .ws-form-title{margin:0;font-weight:500;font-size:32px;line-height:1.1;letter-spacing:-.035em}
+.sg .ws-form-body{margin-top:28px;display:flex;flex-direction:column;gap:22px}
+.sg .ws-honeypot{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
+.sg .ws-row-2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.sg .ws-field{min-width:0}
+.sg .ws-label{display:block;margin:0 0 8px;font-size:14px;line-height:20px;font-weight:500;color:var(--ink)}
+.sg .ws-opt{margin-left:6px;font-weight:400;font-size:13px;color:var(--soft)}
+.sg input[type="email"],.sg input[type="text"],.sg textarea{display:block;width:100%;margin:0;border:0;border-radius:0;background:var(--p-well);box-shadow:inset 0 0 0 1px var(--p-line);color:var(--ink);font:400 16px/24px var(--sans);-webkit-appearance:none;appearance:none}
+.sg input[type="email"],.sg input[type="text"]{height:50px;padding:0 14px}
+.sg textarea{min-height:100px;padding:12px 14px;resize:vertical}
+.sg ::placeholder{color:var(--quiet);opacity:1}
+.sg input:focus-visible,.sg textarea:focus-visible{outline-offset:0}
+.sg input[aria-invalid="true"],.sg textarea[aria-invalid="true"]{box-shadow:inset 0 0 0 2px var(--amber)}
+.sg .ws-pills{display:flex;flex-wrap:wrap;gap:6px}
+.sg .ws-pill{height:50px;min-width:50px;padding:0 16px;border:0;border-radius:0;background:var(--q1);color:var(--ink);font:500 15px/1 var(--mono);letter-spacing:.01em;cursor:pointer}
+.sg .ws-pill:hover{background:var(--q2)}
+html:not(.light) .sg .ws-pill{background:var(--p-chip)}
+html:not(.light) .sg .ws-pill:hover{background:var(--p-bar)}
+html:not(.light) .sg .ws-pill.on{background:var(--sv)}
+.sg .ws-pill.on{background:var(--sv);color:var(--svt)}
+.sg .ws-check-row{display:flex;align-items:flex-start;gap:12px;font-size:15px;line-height:22px;color:var(--ink);cursor:pointer}
+.sg .ws-box{flex:none;width:22px;height:22px;display:flex;align-items:center;justify-content:center;background:var(--p-well);box-shadow:inset 0 0 0 1px var(--p-edge);color:transparent}
+.sg .ws-box svg{width:14px;height:14px}
+.sg .ws-check-row.on .ws-box{background:var(--sv);box-shadow:none;color:var(--svt)}
+.sg .ws-form-foot{display:flex}
+.sg .ws-submit{display:inline-flex;align-items:center;height:50px;padding:0 24px;border:0;border-radius:0;background:var(--btn);color:var(--btn-ink);font:600 16px/1 var(--sans);letter-spacing:-.005em;white-space:nowrap;cursor:pointer}
+.sg .ws-submit:hover{background:var(--sv);color:var(--svt)}
+.sg .ws-submit-busy{display:none}
+.sg .ws-submit.is-loading .ws-submit-idle{display:none}
+.sg .ws-submit.is-loading .ws-submit-busy{display:inline-flex}
+.sg .ws-submit.is-loading,.sg .ws-submit:disabled{background:var(--q2);color:var(--ink);cursor:default}
+.sg .ws-turnstile:empty{display:none}
+.sg .ws-turnstile{margin-top:-6px}
+.sg .sg-form-err:empty{display:none}
+.sg .sg-form-err .ws-err{display:block;margin:0;padding:10px 12px;font-size:14px;line-height:20px}
+.sg .ws-err{display:table;margin-top:8px;padding:3px 8px;background:var(--amber);color:var(--mk-ink);font-size:13px;line-height:18px;font-weight:500}
+.sg .ws-success{display:none;outline:0}
+.sg .ws-form-card.ws-submitted .ws-form-head,.sg .ws-form-card.ws-submitted .ws-form-body{display:none}
+.sg .ws-form-card.ws-submitted .ws-success{display:block}
+.sg .ws-ok{display:inline-flex;align-items:center;height:50px;padding:0 13px;background:var(--green);color:var(--mk-ink);font:500 15px/1 var(--mono);letter-spacing:.02em;white-space:nowrap}
+.sg .ws-success-title{margin:28px 0 0;font-weight:500;font-size:32px;line-height:1.1;letter-spacing:-.035em;overflow-wrap:anywhere}
+.sg .ws-success p{margin:14px 0 0;font-size:16px;line-height:1.5;color:var(--soft);overflow-wrap:anywhere}
+.sg .ws-success p strong{font-weight:600;color:var(--ink)}
+/* The contributor line shows only when that box was ticked, when the form script has written its words. */
+.sg #ok-contrib-note{display:none}
+.sg .ws-contrib-note{margin:-10px 0 0 34px;font-size:13px;line-height:19px;color:var(--soft)}
+.sg .ws-form-card:has(#contributor-toggle.on) #ok-contrib-note{display:block}
+.sg .ws-accent{color:var(--ink);font-weight:500}
+@media (max-width:640px){
+  dialog.sg{width:100vw;max-width:none;height:100dvh;max-height:none;margin:0;box-shadow:none}
+  .sg .ws-form-card{padding:28px 16px 32px}
+  .sg .ws-row-2{grid-template-columns:1fr}
+  .sg .ws-form-title,.sg .ws-success-title{font-size:28px}
+  .sg .ws-submit{width:100%;justify-content:center}
+  .sg .ws-pill{padding:0 12px}
+}

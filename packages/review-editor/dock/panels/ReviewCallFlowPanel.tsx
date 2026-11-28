@@ -388,6 +388,10 @@ export function ReviewCallFlowPanel() {
           </div>
         )}
 
+        {data.notice && (
+          <p className="call-flow-language-notice call-flow-scope-notice" role="status">{data.notice}</p>
+        )}
+
         {data.skippedLanguages.length > 0 && (
           <div className="call-flow-language-notice" role="status">
             <span>

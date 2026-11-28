@@ -20,6 +20,7 @@ import {
   __setConfigSaveMergeWindowHookForTest,
   __setConfigLockTimingsForTest,
   __setConfigWriteForTest,
+  __setConfigReadForTest,
 } from "./generated/config.ts";
 
 describe("vendored config write path", () => {
@@ -35,6 +36,7 @@ describe("vendored config write path", () => {
     __setConfigSaveMergeWindowHookForTest(null);
     __setConfigLockTimingsForTest(null);
     __setConfigWriteForTest(null);
+    __setConfigReadForTest(null);
     if (originalDataDir !== undefined) {
       process.env.PLANNOTATOR_DATA_DIR = originalDataDir;
     } else {
@@ -96,6 +98,23 @@ describe("vendored config write path", () => {
     } finally {
       process.stderr.write = write;
     }
+  });
+
+  test("loadConfig reads an unchanged config.json once, and a save from this process at once", () => {
+    writeFileSync(join(tempDir, "config.json"), JSON.stringify({ agentTerminalSide: "left" }));
+    const reads: string[] = [];
+    __setConfigReadForTest({
+      read: (path) => {
+        reads.push(path);
+        return readFileSync(path, "utf-8");
+      },
+      // A minute ahead: the file just written counts as settled.
+      now: () => Date.now() + 60_000,
+    });
+    for (let i = 0; i < 5; i++) expect(loadConfig().agentTerminalSide).toBe("left");
+    expect(reads.filter((path) => path.endsWith("config.json"))).toHaveLength(1);
+    expect(saveConfig({ agentTerminalSide: "right" })).toBe(true);
+    expect(loadConfig().agentTerminalSide).toBe("right");
   });
 
   test("the side guard the annotate endpoint uses accepts exactly the core sides", () => {

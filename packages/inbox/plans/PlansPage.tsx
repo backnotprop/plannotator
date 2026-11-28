@@ -1,7 +1,7 @@
 /**
  * The sidebar's Spaces page (docs/agent-guides/inbox-plans.md), drawn only while Plans is on (config.json
  * `inboxPlans`, present in the settings only then). Off, nothing of it shows: a `#plans` link goes to the Inbox in
- * place, as a `#shapes` link does with Shape off.
+ * place.
  */
 import { useEffect } from 'react';
 import type { Route } from '../app/route';

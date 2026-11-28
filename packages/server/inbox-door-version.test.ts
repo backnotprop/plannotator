@@ -46,10 +46,10 @@ function door(answer: (path: string) => Response = () => Response.json({ ok: tru
     return pair({ code: made.offer.code, name: "iPhone", platform: "ios" });
   };
   const machine = async (): Promise<Json> => pair({ name: "MacBook", platform: "machine", secret: devices.machineDoor.openMachineOffer().secret });
-  const call = async (token: string, route: string, init: { method?: string; body?: Json; app?: string } = {}) => {
+  const call = async (token: string, route: string, init: { method?: string; body?: Json; app?: string; headers?: Record<string, string> } = {}) => {
     const url = new URL(`http://127.0.0.1/api/inbox/device/${route}`);
     const method = init.method ?? (init.body ? "POST" : "GET");
-    const headers: Record<string, string> = { Authorization: `Bearer ${token}`, ...(init.app ? { [APP_HEADER]: init.app } : {}) };
+    const headers: Record<string, string> = { Authorization: `Bearer ${token}`, ...(init.app ? { [APP_HEADER]: init.app } : {}), ...init.headers };
     return (await devices.door(new Request(url, { method, headers, ...(init.body ? { body: JSON.stringify(init.body) } : {}) }), url))!;
   };
   const listed = async (): Promise<Json[]> => ((await (await devices.windowRoute(new Request("http://127.0.0.1/api/inbox/devices"), new URL("http://127.0.0.1/api/inbox/devices")))!.json()) as Json).devices;
@@ -58,7 +58,7 @@ function door(answer: (path: string) => Response = () => Response.json({ ok: tru
 
 /** A path that the row's pattern matches: each `:id` tried with ids of the shapes the allowlist takes. */
 function concrete(row: { route: string; pattern: string }): string | null {
-  const ids = ["thr_1", "crd_1", "cmb_1", "a-0123abcd"];
+  const ids = ["thr_1", "crd_1", "cmb_1", "sch_1", "a-0123abcd"];
   const slots = row.route.split("/").filter((part) => part === ":id").length;
   const pattern = new RegExp(row.pattern);
   const fill = (route: string, left: number): string | null => {
@@ -74,7 +74,7 @@ function concrete(row: { route: string; pattern: string }): string | null {
 
 describe("the route table: one source for health.door.routes", () => {
   test("every row is plain words that the door answers with the entry it came from, for the token the row names", () => {
-    const own = new Set(["POST pair", "POST revoke", "GET accounts", "GET update", "POST update", "POST link-back", "POST unlink"]);
+    const own = new Set(["POST pair", "POST revoke", "GET accounts", "GET agent-read", "GET agent-file", "GET agent-search", "GET agent-threads", "GET taggable-agents", "POST far-wake", "POST agent-reply", "POST far-delivered", "GET update", "POST update", "POST link-back", "POST unlink", "POST link-through-ask", "POST link-through-offer", "POST link-through-introduce"]);
     const rows = doorRouteTable();
     expect(new Set(rows.map((row) => row.name)).size).toBe(rows.length);
     for (const row of rows) {
@@ -119,7 +119,7 @@ describe("the route table: one source for health.door.routes", () => {
     expect(phone).toEqual(doorRouteTable().filter((row) => row.grant === "phone").map((row) => row.name));
     expect(phone).toContain("GET health");
     expect(phone).toContain("POST revoke");
-    for (const only of ["GET cards", "POST threads/:id/tags", "POST link-back", "GET accounts"]) {
+    for (const only of ["GET cards", "POST threads/:id/tags", "POST link-back", "GET accounts", "GET agent-read", "GET agent-file", "GET agent-search", "GET agent-threads"]) {
       expect(phone).not.toContain(only);
       expect(machine).toContain(only);
     }
@@ -128,17 +128,19 @@ describe("the route table: one source for health.door.routes", () => {
   });
 
   test("a linked machine's own routes are listed exactly when this Inbox answers them, and each listed one answers", async () => {
-    const own = ["GET accounts", "POST link-back", "POST unlink", "GET update", "POST update"];
+    const own = ["GET accounts", "GET agent-read", "GET agent-file", "GET agent-search", "GET agent-threads", "POST link-back", "POST unlink", "GET update", "POST update"];
     const bare = door();
     expect(own.filter((name) => bare.devices.doorReach("machine").routes.includes(name))).toEqual(["GET accounts"]);
     const lone = await bare.machine();
-    for (const name of ["POST link-back", "POST unlink", "GET update", "POST update"]) {
+    for (const name of ["GET agent-read", "GET agent-file", "GET agent-search", "GET agent-threads", "POST link-back", "POST unlink", "GET update", "POST update"]) {
       const [method, route] = name.split(" ");
       const answer = await bare.call(lone.token, route!, method === "POST" ? { body: { idempotency_key: `k-${route}` } } : {});
       expect([name, answer.status, ((await answer.json()) as Json).code]).toEqual([name, 404, "device_route_not_found"]);
     }
     const machines = { linkBack: async () => Response.json({ linked: true }), unlinkedBy: () => Response.json({ unlinked: true }), hasLinks: () => true };
-    const full = door(undefined, { machines: () => machines, machineUpdate: { read: () => ({ state: "idle" }), start: async () => ({ outcome: "started" }) } });
+    const agentRead = { read: () => Response.json({ thread_id: "msg_1" }), file: async () => new Response("bytes") };
+    const agentFind = { search: async () => Response.json({ total: 0, results: [] }), threads: () => Response.json({ total: 0, threads: [] }) };
+    const full = door(undefined, { machines: () => machines, agentRead, agentFind, machineUpdate: { read: () => ({ state: "idle" }), start: async () => ({ outcome: "started" }) } });
     expect(own.filter((name) => full.devices.doorReach("machine").routes.includes(name))).toEqual(own);
     const linked = await full.machine();
     for (const name of own) {
@@ -146,6 +148,79 @@ describe("the route table: one source for health.door.routes", () => {
       const answer = await full.call(linked.token, route!, method === "POST" ? { body: { idempotency_key: `k-${route}` } } : {});
       expect([name, answer.status]).toEqual([name, 200]);
     }
+    // A phone's token never reaches a linked machine's agents' reads.
+    const phone = await full.phone();
+    for (const route of ["agent-read", "agent-file", "agent-search", "agent-threads"]) {
+      const answer = await full.call(phone.token, `${route}?thread_id=msg_1`);
+      expect([route, answer.status, ((await answer.json()) as Json).code]).toEqual([route, 404, "device_route_not_found"]);
+    }
+  });
+
+  test("a far tag's routes: a linked machine's token only, each write named by the machine its token belongs to", async () => {
+    const seen: { route: string; machine: string; body: Json }[] = [];
+    let deviceOf = "";
+    const machines = { linkBack: async () => Response.json({}), unlinkedBy: () => Response.json({}), hasLinks: () => true, machineOfDevice: (device: string) => (device === deviceOf ? { machine: "ibx_LAPTOP", name: "Laptop" } : null) };
+    const farTags = {
+      agents: () => Response.json({ sessions: [{ session: "ses_a" }] }),
+      wake: (machine: string, body: Json) => (seen.push({ route: "far-wake", machine, body }), { kept: true }),
+      reply: async (machine: string, body: Json) => (seen.push({ route: "agent-reply", machine, body }), { message_id: "msg_2" }),
+      delivered: (machine: string, body: Json) => (seen.push({ route: "far-delivered", machine, body }), { ok: true }),
+    };
+    const d = door(undefined, { machines: () => machines, farTags });
+    const own = ["GET taggable-agents", "POST far-wake", "POST agent-reply", "POST far-delivered"];
+    expect(own.filter((name) => d.devices.doorReach("machine").routes.includes(name))).toEqual(own);
+    expect(own.filter((name) => d.devices.doorReach("ios").routes.includes(name))).toEqual([]);
+    const linked = await d.machine();
+    deviceOf = linked.device.id;
+    expect(await (await d.call(linked.token, "taggable-agents")).json()).toEqual({ sessions: [{ session: "ses_a" }] });
+    // The body cannot name another machine: who wrote it is its token's.
+    for (const route of ["far-wake", "agent-reply", "far-delivered"]) {
+      const answer = await d.call(linked.token, route, { body: { idempotency_key: `k-${route}`, machine: "ibx_SOMEONE_ELSE" } });
+      expect([route, answer.status]).toEqual([route, 200]);
+    }
+    expect(seen.map((s) => [s.route, s.machine])).toEqual([["far-wake", "ibx_LAPTOP"], ["agent-reply", "ibx_LAPTOP"], ["far-delivered", "ibx_LAPTOP"]]);
+    // A machine device no link names, and a phone, get the unknown route.
+    deviceOf = "";
+    expect((await d.call(linked.token, "far-wake", { body: { idempotency_key: "k2" } })).status).toBe(404);
+    const phone = await d.phone();
+    for (const route of ["taggable-agents", "far-wake", "agent-reply", "far-delivered"]) {
+      const answer = await d.call(phone.token, route, route === "taggable-agents" ? {} : { body: { idempotency_key: `p-${route}` } });
+      expect([route, answer.status, ((await answer.json()) as Json).code]).toEqual([route, 404, "device_route_not_found"]);
+    }
+  });
+
+  test("linking through a third: a linked machine's token only, with its window's mark passed on as it sent it", async () => {
+    const seen: { route: string; device: string; window: boolean; body: Json }[] = [];
+    const machines = {
+      linkBack: async () => Response.json({}),
+      unlinkedBy: () => Response.json({}),
+      hasLinks: () => true,
+      linkThroughDoor: async (route: string, device: string, window: boolean, body: Json) => (seen.push({ route, device, window, body }), Response.json({ ok: true })),
+    };
+    const d = door(undefined, { machines: () => machines });
+    const own = ["POST link-through-ask", "POST link-through-offer", "POST link-through-introduce"];
+    expect(own.filter((name) => d.devices.doorReach("machine").routes.includes(name))).toEqual(own);
+    expect(own.filter((name) => d.devices.doorReach("ios").routes.includes(name))).toEqual([]);
+    const linked = await d.machine();
+    for (const route of ["link-through-ask", "link-through-offer", "link-through-introduce"]) {
+      expect((await d.call(linked.token, route, { body: { n: 1 }, headers: { "X-Plannotator-Window": "1" } })).status).toBe(200);
+      expect((await d.call(linked.token, route, { body: { n: 2 } })).status).toBe(200);
+    }
+    expect(seen.map((s) => [s.route, s.device === linked.device.id, s.window, s.body.n])).toEqual([
+      ["link-through-ask", true, true, 1],
+      ["link-through-ask", true, false, 2],
+      ["link-through-offer", true, true, 1],
+      ["link-through-offer", true, false, 2],
+      ["link-through-introduce", true, true, 1],
+      ["link-through-introduce", true, false, 2],
+    ]);
+    // A phone's token, even sending the mark, gets the unknown route and reaches nothing.
+    const phone = await d.phone();
+    for (const route of ["link-through-ask", "link-through-offer", "link-through-introduce"]) {
+      const answer = await d.call(phone.token, route, { body: { n: 3 }, headers: { "X-Plannotator-Window": "1" } });
+      expect([route, answer.status, ((await answer.json()) as Json).code]).toEqual([route, 404, "device_route_not_found"]);
+    }
+    expect(seen).toHaveLength(6);
   });
 });
 

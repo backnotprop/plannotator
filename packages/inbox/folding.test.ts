@@ -291,3 +291,14 @@ test('keptFirstWords holds no more than its character cap, however many long bod
   expect(keptFirstWords(huge)).toBe(firstWords(huge));
   expect(keptFirstWordsChars()).toBe(before);
 });
+
+test("an agent's message with a run or secret card stays open, like one with a pick not sent", () => {
+  const card = [':::run', 'Check', '```', 'ls', '```', ':::'].join('\n');
+  const messages = [msg('m1', AGENT, 1), msg('m2', AGENT, 2, { body: card }), msg('m3', PERSON, 3, { body: 'Command you asked the person to run' }), msg('m4', AGENT, 4), msg('m5', PERSON, 5)];
+  const plan = planFolds(messages, new Set(), 9);
+  expect(plan.folded.has('m2')).toBe(false);
+  expect(plan.folded.has('m1')).toBe(true);
+  expect(plan.folded.has('m3')).toBe(true);
+  // A person's message quoting a block is not a card.
+  expect(planFolds([msg('m1', AGENT, 1), msg('m2', PERSON, 2, { body: card }), msg('m3', AGENT, 3)], new Set(), 9).folded.has('m2')).toBe(true);
+});

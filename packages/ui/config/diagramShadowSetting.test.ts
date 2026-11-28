@@ -62,7 +62,15 @@ describe('diagramShadow', () => {
     expect(diagramShadowAmount(Number.NaN)).toBe(DEFAULT_DIAGRAM_SHADOW / 100);
   });
 
-  test('it is cookie-only: no server key, so it never writes ~/.plannotator/config.json', () => {
-    expect(SETTINGS.diagramShadow.serverKey).toBeUndefined();
+  test('config.json carries it as displayOptions.diagramShadow, 0 included, and drops what is out of range', () => {
+    const def = SETTINGS.diagramShadow;
+    expect(def.serverKey).toBe('displayOptions');
+    expect(def.toServer(0)).toEqual({ displayOptions: { diagramShadow: 0 } });
+    expect(def.fromServer({ displayOptions: { diagramShadow: 0 } })).toBe(0);
+    expect(def.fromServer({ displayOptions: { diagramShadow: 100 } })).toBe(100);
+    for (const bad of [101, -1, 12.5, '70', null]) {
+      expect(def.fromServer({ displayOptions: { diagramShadow: bad } })).toBeUndefined();
+    }
+    expect(def.fromServer({})).toBeUndefined();
   });
 });

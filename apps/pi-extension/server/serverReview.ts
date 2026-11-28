@@ -28,13 +28,14 @@ import { basename, dirname as dirnamePath, join as joinPath, resolve as resolveP
 import { SingleFlight } from "../generated/single-flight.ts";
 import { contentHash } from "../generated/draft.ts";
 import { countUnsentDraftComments, hostSessionClosedEvent } from "../generated/host-control.ts";
+import { agentRefusal, type AgentPresence } from "../generated/review-agent-gone.ts";
 import { checkServerSession, createServerSessionNonce, serverSessionMismatchBody } from "../generated/server-session.ts";
 import { handleHostControl, resolveHostControlToken, type HostControl } from "./host-control.ts";
 import { createPiRefCards, handleRefCards, type RefRunner } from "./ref-cards.ts";
 import { createRequestHostGuard } from "./request-host-guard.ts";
 import { refuseCrossOriginWrite } from "./request-origin-guard.ts";
 import { createReviewDraftSession, localGitDraftTargetKey, localReviewDraftKeys, prDraftTargetKey, type ReviewDraftKeys } from "../generated/review-draft.ts";
-import { agentSwitchConfigToSave, agentToolSaveFailed, cookieHostConfigWrite, loadConfig, saveConfig, detectGitUser, getServerConfig, parsePackageChangesConfig, parseReviewAnalysisConfig, resolveAIEnabled, resolvePackageLookup, resolveSharingEnabled, resolveClaudeSandbox, resolveCursorSandbox, resolveFeedbackHistory, resolveGuideHistory, resolveGuideShareUrl, resolveGitRemoteCheck, resolveReviewProgress } from "../generated/config.ts";
+import { agentSwitchConfigToSave, agentToolSaveFailed, cookieHostConfigWrite, loadConfig, saveConfig, detectGitUser, getServerConfig, parseDisplayOptionsConfig, parsePackageChangesConfig, parseReviewAnalysisConfig, resolveAIEnabled, resolvePackageLookup, resolveSharingEnabled, resolveClaudeSandbox, resolveCursorSandbox, resolveFeedbackHistory, resolveGuideHistory, resolveGuideShareUrl, resolveGitRemoteCheck, resolveReviewProgress } from "../generated/config.ts";
 import { currentPiHost } from "../pi-host.ts";
 import { appendFeedbackRecord, countChangedFiles, deriveFeedbackProject, type FeedbackDecision, type FeedbackReviewTarget } from "../generated/feedback-archive.ts";
 import { isFaviconStyle, type FaviconStyle } from "../generated/favicon.ts";
@@ -164,9 +165,13 @@ import { type AgentJobInfo, REVIEW_OUTPUT_FAILED, getAgentJobAnnotationContext, 
 import { createExternalAnnotationHandler } from "./external-annotations.ts";
 import {
 	handleReviewDraftRequest,
+	handleCustomThemesScript,
+	customThemesPage,
 	handleFavicon,
 	handleImageRequest,
 	handleStarAskRequest,
+	handleLaunchSwitchRequest,
+	piLaunchSwitch,
 	readDraftGenerationFromBody,
 	readDraftGenerationFromUrl,
 	handleUploadRequest,
@@ -444,6 +449,13 @@ export async function startReviewServer(options: {
 	onCleanup?: () => void | Promise<void>;
 	/** Called when server starts with the URL, remote status, and port */
 	onReady?: (url: string, isRemote: boolean, port: number) => void;
+	/**
+	 * Whether a Pi session can still receive this review's decision
+	 * (packages/shared/review-agent-gone.ts, mirrors packages/server/review.ts).
+	 * "gone" answers Send and Approve with `410 agent_gone` and keeps the
+	 * draft, unarchived. Absent: every decision is taken as before.
+	 */
+	agentPresence?: () => AgentPresence;
 }): Promise<ReviewServerResult> {
 	// The daily ping (server/daily-ping.ts): in the background, never awaited.
 	schedulePiDailyPing("review");
@@ -1250,7 +1262,7 @@ export async function startReviewServer(options: {
 			return { status: "stale", reason: "snapshot-mismatch", message: "The review changed before call flow could start. Refresh and try again." };
 		}
 		if (!callFlowEnabled()) {
-			return { status: "disabled", reason: "disabled", message: "Call flow is disabled in Settings → Analysis." };
+			return { status: "disabled", reason: "disabled", message: "Call flow is disabled in Settings → Reviews." };
 		}
 		if (workspace) {
 			return { status: "unsupported", reason: "workspace-unsupported", message: "Call flow does not yet support multi-repository workspace reviews." };
@@ -2201,8 +2213,10 @@ export async function startReviewServer(options: {
 		env: process.env,
 	});
 
-	const app = openPackedApp(options.htmlContent);
+	const app = openPackedApp(options.htmlContent, { page: (html) => customThemesPage(html) });
 	const requestHostGuard = createRequestHostGuard();
+	// The launch switch's reader (generated/launch-switch.ts): in the background, never awaited.
+	piLaunchSwitch().start();
 	const server = createServer(async (req, res) => {
 		// Host allowlist first, before any route (request-host-guard.ts).
 		if (requestHostGuard.refuse(req, res)) return;
@@ -2464,7 +2478,11 @@ export async function startReviewServer(options: {
 		}
 
 		if (savedGuideDeleteMatch && req.method === "PATCH") {
-			const savedId = decodeURIComponent(savedGuideDeleteMatch[1]);
+			const savedId = decodePathSegment(savedGuideDeleteMatch[1]);
+			if (savedId === null) {
+				json(res, { error: MALFORMED_PATH_ERROR }, 400);
+				return;
+			}
 			let body: { title?: unknown };
 			try {
 				body = (await parseBody(req)) as { title?: unknown };
@@ -3628,6 +3646,12 @@ export async function startReviewServer(options: {
 			res.writeHead(result.status, result.headers);
 			res.end(result.body ?? undefined);
 		} else if (url.pathname === REPO_FILES_ENDPOINT && req.method === "GET") {
+			const requestAbort = url.searchParams.has("include") || url.searchParams.has("exclude") ? new AbortController() : null;
+			if (requestAbort) {
+				res.once("close", () => {
+					if (!res.writableEnded) requestAbort.abort();
+				});
+			}
 			const result = await handleRepoFilesRequest({
 				params: url.searchParams,
 				unavailable: repoFilesUnavailable(),
@@ -3638,8 +3662,9 @@ export async function startReviewServer(options: {
 						? findRepoOnDiskChanges(reviewRuntime, listing.root, diffFileStates(currentPatch), snapshotCapturedAt)
 						: Promise.resolve(null),
 				lazyThreshold: options.repoFilesLazyThreshold,
+				signal: requestAbort?.signal,
 			});
-			json(res, result.body, result.status);
+			if (!requestAbort?.signal.aborted) json(res, result.body, result.status);
 		} else if (url.pathname === REPO_FILES_SEARCH_ENDPOINT && req.method === "GET") {
 			const result = await handleRepoFilesSearchRequest({
 				params: url.searchParams,
@@ -3857,7 +3882,7 @@ export async function startReviewServer(options: {
 				return;
 			}
 			try {
-				const body = (await parseBody(req)) as { agentSwitch?: unknown; displayName?: string; diffOptions?: Record<string, unknown>; reviewDefaults?: Record<string, { defaultDiffType?: string }>; theme?: Record<string, unknown>; favicon?: FaviconStyle; autoUpdate?: unknown; updateCheck?: unknown; agentTool?: unknown; reviewAnalysis?: Record<string, unknown>; packageChanges?: unknown; conventionalComments?: boolean };
+				const body = (await parseBody(req)) as { agentSwitch?: unknown; displayName?: string; diffOptions?: Record<string, unknown>; displayOptions?: unknown; reviewDefaults?: Record<string, { defaultDiffType?: string }>; theme?: Record<string, unknown>; favicon?: FaviconStyle; autoUpdate?: unknown; updateCheck?: unknown; agentTool?: unknown; reviewAnalysis?: Record<string, unknown>; packageChanges?: unknown; conventionalComments?: boolean };
 				const toSave: Record<string, unknown> = {};
 				// OpenCode's agent switch (#1390): a known shape or nothing is saved.
 				const agentSwitch = agentSwitchConfigToSave(body);
@@ -3865,6 +3890,12 @@ export async function startReviewServer(options: {
 				if (agentSwitch !== undefined) toSave.agentSwitch = agentSwitch;
 				if (body.displayName !== undefined) toSave.displayName = body.displayName;
 				if (body.diffOptions !== undefined) toSave.diffOptions = body.diffOptions;
+				// The plan / annotate Display settings and the markdown selection mode: a plain object or nothing is saved.
+				if (body.displayOptions !== undefined) {
+					const displayOptions = parseDisplayOptionsConfig(body.displayOptions);
+					if (!displayOptions) return json(res, { error: "Invalid displayOptions" }, 400);
+					toSave.displayOptions = displayOptions;
+				}
 				if (body.reviewDefaults !== undefined) toSave.reviewDefaults = body.reviewDefaults;
 				if (body.theme !== undefined) toSave.theme = body.theme;
 				if (isFaviconStyle(body.favicon)) toSave.favicon = body.favicon;
@@ -3898,6 +3929,9 @@ export async function startReviewServer(options: {
 		} else if (url.pathname.startsWith("/api/star-ask/")) {
 			// The "Star the repo" ask on the done screen (generated/star-ask.ts).
 			if (!(await handleStarAskRequest(req, res, url, "review", isRemoteSession()))) handleApiNotFound(res, url.pathname);
+		} else if (url.pathname.startsWith("/api/launch-switch/")) {
+			// The launch switch's one-time dialog (generated/launch-switch.ts).
+			if (!(await handleLaunchSwitchRequest(req, res, url))) handleApiNotFound(res, url.pathname);
 		} else if (url.pathname === "/api/image") {
 			handleImageRequest(res, url);
 		} else if (url.pathname === "/api/upload" && req.method === "POST") {
@@ -4096,6 +4130,9 @@ export async function startReviewServer(options: {
 			await handleReviewDraftRequest(req, res, keys, reviewDrafts);
 		} else if (url.pathname === "/favicon.png" || url.pathname === "/favicon.ico") {
 			handleFavicon(res, url.pathname);
+		} else if (url.pathname === "/plannotator-themes.js" && req.method === "GET") {
+			// The person's own themes, for the page's first frame (packages/shared/theme-files.ts).
+			handleCustomThemesScript(res, url.searchParams);
 		} else if (isDiagramEngineRequest(url.pathname)) {
 			// Code review's diagram engine, fetched by the page only for a
 			// preview or guide overview that holds a diagram fence.
@@ -4221,6 +4258,12 @@ export async function startReviewServer(options: {
 					reviewAlreadyDecided(res);
 					return;
 				}
+				// Nobody left to receive it: keep the draft, archive nothing.
+				const refusal = agentRefusal(body, options.agentPresence);
+				if (refusal) {
+					json(res, refusal.body, refusal.status);
+					return;
+				}
 				// Archive BEFORE the draft delete: a failed write keeps the
 				// draft as the reviewer's recovery copy (#678 ordering).
 				// Defensive on the body's own types: a malformed value must
@@ -4267,7 +4310,7 @@ export async function startReviewServer(options: {
 	boundPort = port;
 	// Remote sessions serve the app page compressed (#1617); start gzip (what
 	// browsers ask for over plain http) now so the first load does not wait.
-	if (isRemoteSession()) prewarmAppHtml(app.html, likelyAppHtmlEncoding(false));
+	if (isRemoteSession()) prewarmAppHtml(app.page(), likelyAppHtmlEncoding(false));
 	serverUrl = buildAdvertisedUrl(port);
 	agentApiUrl = `http://127.0.0.1:${port}`;
 	const exitHandler = () => agentJobs.killAll();

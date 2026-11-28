@@ -20,6 +20,46 @@
       "id",
       "name"
     ],
+    "DoorAckAnswer": [
+      "message",
+      "thread"
+    ],
+    "DoorAckBody": [
+      "idempotency_key"
+    ],
+    "DoorAckBodyReaction": [
+      "emoji"
+    ],
+    "DoorAnnotationAnswer": [
+      "annotation"
+    ],
+    "DoorAnnotationBody": [
+      "annotation",
+      "attachment_id",
+      "idempotency_key",
+      "version"
+    ],
+    "DoorAnnotationRemoveBody": [
+      "idempotency_key"
+    ],
+    "DoorComposeAnswer": [
+      "message",
+      "replayed",
+      "thread_id"
+    ],
+    "DoorComposeAnswerProject": [
+      "id",
+      "name",
+      "root"
+    ],
+    "DoorComposeBody": [
+      "body",
+      "idempotency_key",
+      "to"
+    ],
+    "DoorComposeBodyTo": [
+      "session"
+    ],
     "DoorError": [
       "code",
       "error"
@@ -27,6 +67,18 @@
     "DoorHelloFrame": [
       "cursor",
       "serverSession"
+    ],
+    "DoorKeyBody": [
+      "idempotency_key"
+    ],
+    "DoorMarkUnreadAnswer": [
+      "thread",
+      "through_seq",
+      "wrote"
+    ],
+    "DoorMarkupAnswer": [
+      "name",
+      "path"
     ],
     "DoorPairAnswer": [
       "addresses",
@@ -66,6 +118,28 @@
       "key",
       "revision"
     ],
+    "DoorPinBody": [
+      "idempotency_key",
+      "pinned"
+    ],
+    "DoorPinsBody": [
+      "idempotency_key"
+    ],
+    "DoorPinsBodyRestore": [
+      "index",
+      "pinned_at",
+      "thread_id"
+    ],
+    "DoorPriorityAnswer": [
+      "before"
+    ],
+    "DoorPriorityBefore": [
+      "at",
+      "off_at"
+    ],
+    "DoorPriorityBody": [
+      "idempotency_key"
+    ],
     "DoorQuestionPick": [
       "key",
       "revision"
@@ -93,11 +167,70 @@
     "DoorReplyBodyTo": [
       "session"
     ],
+    "DoorResolveBody": [
+      "idempotency_key",
+      "resolved"
+    ],
     "DoorRevokeAnswer": [
       "device"
     ],
     "DoorSeenBody": [
       "idempotency_key"
+    ],
+    "DoorSessionsAnswer": [
+      "projects",
+      "serverSession"
+    ],
+    "DoorSnoozeAnswer": [
+      "snoozed"
+    ],
+    "DoorSnoozeBody": [
+      "idempotency_key",
+      "until"
+    ],
+    "DoorTaggableAnswer": [
+      "owner",
+      "serverSession",
+      "sessions"
+    ],
+    "DoorTaggableAnswerOwner": [
+      "host",
+      "session"
+    ],
+    "DoorTaggableSession": [
+      "busy",
+      "host",
+      "idle_since",
+      "kind",
+      "last_at",
+      "name",
+      "owner",
+      "project",
+      "session",
+      "started_at",
+      "taggable",
+      "wrote_thread"
+    ],
+    "DoorTaggableSessionProject": [
+      "id",
+      "name",
+      "root"
+    ],
+    "DoorTakeBackAnswer": [
+      "compose",
+      "draft",
+      "message"
+    ],
+    "DoorThreadAttachmentsAnswer": [
+      "attachments",
+      "serverSession"
+    ],
+    "DoorThreadDraftAnswer": [
+      "draft",
+      "serverSession"
+    ],
+    "DoorUploadAnswer": [
+      "upload"
     ],
     "InboxAck": [
       "at",
@@ -148,6 +281,9 @@
       "id",
       "thread_id"
     ],
+    "InboxAgentMark": [
+      "state"
+    ],
     "InboxAgentPlace": [
       "kind",
       "line"
@@ -164,6 +300,20 @@
       "ended_today",
       "total"
     ],
+    "InboxAnnotationRecord": [
+      "annotation",
+      "attachment_id",
+      "created_at",
+      "id",
+      "message_id",
+      "path",
+      "project_id",
+      "removed_at",
+      "sent_reply_id",
+      "thread_id",
+      "updated_at",
+      "version"
+    ],
     "InboxAttachment": [
       "id",
       "kind",
@@ -175,6 +325,30 @@
       "sent_sha256",
       "size"
     ],
+    "InboxAttachmentState": [
+      "changed_since_sent",
+      "current",
+      "id",
+      "kind",
+      "message_id",
+      "name",
+      "named_path",
+      "path",
+      "sent_at",
+      "sent_mtime",
+      "sent_sha256",
+      "size",
+      "unavailable"
+    ],
+    "InboxAttachmentStateCurrent": [
+      "mtime",
+      "sha256",
+      "size"
+    ],
+    "InboxAttachmentStateUnavailable": [
+      "code",
+      "message"
+    ],
     "InboxAuthor": [
       "kind"
     ],
@@ -182,6 +356,33 @@
       "at",
       "name",
       "state"
+    ],
+    "InboxCombineLeftOpenItem": [
+      "machine",
+      "subject"
+    ],
+    "InboxComposeProject": [
+      "project",
+      "sessions"
+    ],
+    "InboxComposeProjectProject": [
+      "id",
+      "name",
+      "root"
+    ],
+    "InboxComposeSession": [
+      "busy",
+      "host",
+      "idle_since",
+      "last_seen_at",
+      "last_thread",
+      "session",
+      "started_at"
+    ],
+    "InboxComposeSessionLastThread": [
+      "at",
+      "id",
+      "subject"
     ],
     "InboxDelivery": [
       "at",
@@ -256,6 +457,13 @@
       "project_root",
       "session",
       "started_at"
+    ],
+    "InboxGuideCommentTarget": [
+      "file",
+      "line_end",
+      "line_start",
+      "side",
+      "title"
     ],
     "InboxGuideRef": [
       "additions",
@@ -344,6 +552,13 @@
       "at",
       "label"
     ],
+    "InboxListRowGridSeen": [
+      "at",
+      "through"
+    ],
+    "InboxListRowLastAgent": [
+      "host"
+    ],
     "InboxListRowProject": [
       "id",
       "name"
@@ -352,16 +567,30 @@
       "at",
       "checked_at"
     ],
+    "InboxListRowStepsProgress": [
+      "at",
+      "doing",
+      "done",
+      "total"
+    ],
     "InboxListSection": [
       "id",
       "label",
       "threads"
+    ],
+    "InboxLiveCommentTarget": [
+      "page_url",
+      "site_id",
+      "url"
     ],
     "InboxLiveSiteRef": [
       "id",
       "opened_at",
       "opened_by",
       "url"
+    ],
+    "InboxMessageCommentTarget": [
+      "at"
     ],
     "InboxMessageWire": [
       "author",
@@ -387,8 +616,23 @@
       "at",
       "session"
     ],
+    "InboxMessageWireSentFrom": [
+      "kind"
+    ],
+    "InboxMessageWireShipNote": [
+      "kind",
+      "ship"
+    ],
     "InboxMessageWireThreadNaming": [
       "status"
+    ],
+    "InboxMovedNote": [
+      "questions",
+      "thread_id"
+    ],
+    "InboxMovedTo": [
+      "subject",
+      "thread_id"
     ],
     "InboxNotifyReach": [
       "allowed",
@@ -403,6 +647,10 @@
     "InboxPicker": [
       "id",
       "name"
+    ],
+    "InboxPictureItPage": [
+      "attachment_id",
+      "title"
     ],
     "InboxProject": [
       "created_at",
@@ -463,6 +711,21 @@
       "value",
       "why"
     ],
+    "InboxQuestionScenarios": [
+      "columns",
+      "rows"
+    ],
+    "InboxQuestionScenariosColumnsItem": [
+      "choice",
+      "header"
+    ],
+    "InboxQuestionScenariosRowsItem": [
+      "cells",
+      "situation"
+    ],
+    "InboxQuestionScenariosRowsItemCellsItem": [
+      "verdict"
+    ],
     "InboxQuestionShows": [
       "kind",
       "label",
@@ -477,6 +740,25 @@
     ],
     "InboxReaction": [
       "emoji"
+    ],
+    "InboxRemoval": [
+      "after",
+      "at",
+      "host",
+      "session"
+    ],
+    "InboxReplyDraft": [
+      "body",
+      "created_at",
+      "thread_id",
+      "updated_at",
+      "v"
+    ],
+    "InboxReplyMention": [
+      "at",
+      "label",
+      "thread_id",
+      "title"
     ],
     "InboxReplyQuote": [
       "of"
@@ -612,6 +894,10 @@
       "session",
       "wakes"
     ],
+    "InboxSkillReaction": [
+      "emoji",
+      "skill"
+    ],
     "InboxSupersededBy": [
       "key",
       "message_id"
@@ -658,6 +944,14 @@
       "key",
       "state"
     ],
+    "InboxThreadPullsSummaryItem": [
+      "added_at",
+      "checks",
+      "key",
+      "read_at",
+      "review",
+      "state"
+    ],
     "InboxTidyMark": [
       "id",
       "wake"
@@ -677,6 +971,37 @@
       "sha256",
       "size",
       "upload_id"
+    ],
+    "LinkThroughPairView": [
+      "a",
+      "c",
+      "status",
+      "waiting_for",
+      "why"
+    ],
+    "LinkThroughPairViewA": [
+      "id",
+      "name"
+    ],
+    "LinkThroughPairViewC": [
+      "id",
+      "name"
+    ],
+    "LinkThroughRowView": [
+      "id",
+      "name",
+      "status",
+      "via",
+      "waiting_for",
+      "why"
+    ],
+    "LinkThroughRowViewVia": [
+      "id",
+      "name"
+    ],
+    "LinkThroughView": [
+      "pairs",
+      "through"
     ],
     "ListModel": [
       "cursor",
@@ -735,6 +1060,10 @@
     "OutboxViewNotice": [
       "at",
       "kind"
+    ],
+    "OutboxViewViewed": [
+      "path",
+      "viewed"
     ],
     "ProjectFolder": [
       "created_at",

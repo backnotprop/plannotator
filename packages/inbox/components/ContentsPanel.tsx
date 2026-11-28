@@ -24,6 +24,11 @@ interface Props {
   onShow: () => void;
   /** The window is phone-sized: the sheet's rows are 44 px touch targets in readable type. */
   phone?: boolean;
+  /**
+   * The host opens the sheet from its own control (the plan page's menu): no button is drawn here, and this hands
+   * the host the way to open it (focus goes back to `back` when it closes). `sheet` mode only.
+   */
+  opener?: (open: ((back: HTMLElement | null) => void) | null) => void;
 }
 
 /** The way to an open document's Contents when the rail is not on screen. */
@@ -59,10 +64,21 @@ const SHEET_FOCUSABLE = 'button:not([disabled]), a[href], [tabindex]:not([tabind
  */
 function ContentsSheet(props: Props) {
   const [open, setOpen] = useState(false);
-  const openRef = useRef<HTMLButtonElement>(null);
+  const openRef = useRef<HTMLElement | null>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const sheetRef = useRef<HTMLDivElement>(null);
   const wasOpen = useRef(false);
+  const { opener } = props;
+  useEffect(() => {
+    if (!opener) return;
+    opener((back) => {
+      if (back) openRef.current = back;
+      setOpen(true);
+    });
+    return () => opener(null);
+  }, [opener]);
+  // Where the sheet is drawn is found from the pane: the host's button may sit outside it.
+  const anchorRef = useRef<HTMLSpanElement>(null);
   useEffect(() => {
     if (open) closeRef.current?.focus({ preventScroll: true });
     else if (wasOpen.current) openRef.current?.focus({ preventScroll: true });
@@ -95,12 +111,17 @@ function ContentsSheet(props: Props) {
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
   }, [open]);
-  const host = open ? peekSheetHost(openRef.current) : null;
+  const host = open ? peekSheetHost(opener ? anchorRef.current : openRef.current) : null;
   return (
     <>
+      {opener ? (
+        <span ref={anchorRef} hidden />
+      ) : (
       <Tip content="Contents">
         <button
-          ref={openRef}
+          ref={(el) => {
+            openRef.current = el;
+          }}
           type="button"
           className="ib-iconbtn ib-contents-open"
           onClick={() => setOpen(true)}
@@ -111,6 +132,7 @@ function ContentsSheet(props: Props) {
           <Icon name="contents" size={16} />
         </button>
       </Tip>
+      )}
       {host &&
         createPortal(
           <>

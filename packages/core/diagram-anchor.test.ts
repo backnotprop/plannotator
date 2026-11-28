@@ -131,6 +131,15 @@ describe('diagramSourceLine', () => {
     expect(lineMentions('  A.b(1) --> C', 'A.b(1)')).toBe(true);
     expect(lineMentions('  Ab1 --> C', 'A.b(1)')).toBe(false);
   });
+
+  test('two relationships with the same ends: the line that carries the label, else the first', () => {
+    // What regresses: a comment on the second `User --> Order` points the
+    // gutter mark and an agent's grep at the first one's line.
+    const twins = ['classDiagram', '  User --> Order : places', '  User "1" --> "*" Order : owns'].join('\n');
+    expect(diagramSourceLine(twins, { family: 'class', kind: 'edge', from: 'User', to: 'Order', label: 'owns' })).toEqual([3, 3]);
+    expect(diagramSourceLine(twins, { family: 'class', kind: 'edge', from: 'User', to: 'Order', label: 'places' })).toEqual([2, 2]);
+    expect(diagramSourceLine(twins, { family: 'class', kind: 'edge', from: 'User', to: 'Order', label: 'renamed' })).toEqual([2, 2]);
+  });
 });
 
 describe('the sequence family and the whole-diagram kind (additive within v: 1)', () => {
@@ -158,6 +167,58 @@ describe('the sequence family and the whole-diagram kind (additive within v: 1)'
     expect(diagramSourceLine(source, { family: 'sequence', kind: 'node', id: 'note-1', label: '' })).toEqual([5, 5]);
     expect(diagramSourceLine(source, { family: 'sequence', kind: 'cluster', id: 'frame-1', label: '' })).toEqual([6, 6]);
     expect(diagramSourceLine(source, { family: 'sequence', kind: 'node', id: 'S', label: 'Server' })).toEqual([3, 3]);
+  });
+
+  test('frames are numbered as both engines draw them: a nested frame first, a rect background not at all', () => {
+    // What regresses: the gutter mark for the frame nested in a loop lands
+    // on the loop's line, or every frame after a `rect` on the one before.
+    const nested = [
+      'sequenceDiagram',
+      '  rect rgb(200, 200, 255)',
+      '    A->>B: in rect',
+      '  end',
+      '  loop Every minute',
+      '    A->>B: ping',
+      '    opt busy',
+      '      B->>B: wait',
+      '    end',
+      '  end',
+      '  alt ok',
+      '    B->>A: ack',
+      '  else failed',
+      '    B-xA: fail',
+      '  end',
+    ].join('\n');
+    const frame = (n: number) => diagramSourceLine(nested, { family: 'sequence', kind: 'cluster', id: `frame-${n}`, label: '' });
+    expect([frame(1), frame(2), frame(3), frame(4)]).toEqual([[7, 7], [5, 5], [11, 11], null]);
+  });
+
+  test('a par_over frame is a frame, and a box around participants is none', () => {
+    // What regresses: `par_over` (Mermaid 12.2.0 draws it as a `par`) is not
+    // read as opening a frame, so its `end` closes the frame around it and
+    // every later frame's gutter mark lands on the wrong line; a `box`'s
+    // `end` does the same to a frame opened before it.
+    const source = [
+      'sequenceDiagram',
+      '  box Aqua Team',
+      '    participant A',
+      '    participant B',
+      '  end',
+      '  participant C',
+      '  loop again',
+      '    par_over both',
+      '      A->>B: one',
+      '    and',
+      '      B->>C: two',
+      '    end',
+      '    A->>C: three',
+      '  end',
+      '  opt last',
+      '    C->>A: four',
+      '  end',
+    ].join('\n');
+    const frame = (n: number) => diagramSourceLine(source, { family: 'sequence', kind: 'cluster', id: `frame-${n}`, label: '' });
+    expect([frame(1), frame(2), frame(3), frame(4)]).toEqual([[8, 8], [7, 7], [15, 15], null]);
   });
 
   test('a whole-diagram anchor has no id, spans the source, and round-trips', () => {

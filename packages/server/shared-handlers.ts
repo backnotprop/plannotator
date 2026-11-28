@@ -15,6 +15,8 @@ import { writeUrlQr } from "./qr";
 import { validateImagePath, validateUploadExtension, UPLOAD_DIR } from "./image";
 import { saveDraft, loadDraft, deleteDraft, getDraftGeneration, missingDraftHeaders } from "./draft";
 import { faviconBody, faviconIcoBody } from "@plannotator/shared/favicon";
+import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
+import { customThemesAnswer, pageWithCustomThemes } from "@plannotator/shared/theme-files";
 import { getServerConfig } from "./config";
 import { saveToObsidian, saveToBear, saveToOctarine, saveToNotion } from "./integrations";
 import type { ObsidianConfig, BearConfig, OctarineConfig, NotionConfig, IntegrationResult } from "./integrations";
@@ -23,7 +25,9 @@ import { crossOriginRefusalBody } from "@plannotator/shared/request-origin";
 import { isSameOriginRequest } from "./request-origin-guard";
 import { checkServerSession, serverSessionMismatchBody } from "@plannotator/shared/server-session";
 import { localImageContentType, localImageResponseHeaders } from "@plannotator/shared/local-image";
+import { annotateMediaAnswer } from "@plannotator/shared/html-assets-node";
 import { starAskRoute, starAskService, type StarAskSurface } from "@plannotator/shared/star-ask";
+import { launchSwitchRoute, launchSwitchService } from "@plannotator/shared/launch-switch";
 
 function normalizeDraftGeneration(value: unknown): number | undefined {
   if (typeof value !== "number") return undefined;
@@ -84,6 +88,20 @@ export async function handleImage(req: Request): Promise<Response> {
   } catch {
     return text("Failed to read file", 500);
   }
+}
+
+/**
+ * `/api/annotate-media`: a local Markdown `<video>` beside or below a document
+ * this session served (`servedDocuments`), annotate and plan servers. The
+ * decision is `annotateMediaAnswer` (Pi serves the same answer); another
+ * site's request is refused before any file is looked at.
+ */
+export function handleAnnotateMedia(req: Request, url: URL, servedDocuments: ReadonlySet<string>): Response {
+  if (!isSameOriginRequest(req)) return new Response("Access denied", { status: 403 });
+  const answer = annotateMediaAnswer(url.searchParams.get("path"), url.searchParams.get("base"), servedDocuments, req.headers.get("range"));
+  if (!("headers" in answer)) return new Response("Video unavailable", { status: answer.status });
+  if (!("path" in answer)) return new Response(null, { status: answer.status, headers: answer.headers });
+  return new Response(Bun.file(answer.path).slice(answer.start, answer.end + 1), { status: answer.status, headers: answer.headers });
 }
 
 /** Upload image to temp dir, return path. Used by all 3 servers. */
@@ -232,6 +250,28 @@ export function handleFavicon(pathname = "/favicon.png"): Response {
   return new Response(body, {
     headers: { "Content-Type": contentType, "Cache-Control": "no-cache" },
   });
+}
+
+/**
+ * `/plannotator-themes.js`: the person's own themes for the page's first frame
+ * (packages/shared/theme-files.ts). Every page links it in its head; it is
+ * read from the data dir on every load, so a theme added since shows on reload.
+ * With `?syntax=<id>`, that theme's code colours as JSON, which the page asks
+ * for when code first renders in it. Pi's servers answer the same
+ * (apps/pi-extension/server/handlers.ts).
+ */
+/**
+ * The page with the person's themes written in, or no themes tag when they have
+ * none (`pageWithCustomThemes`): the `page` option every server's
+ * `openPackedApp` takes, so a page load asks for no themes script.
+ */
+export function customThemesPage(html: string, dataDir: string = getPlannotatorDataDir()): string {
+  return pageWithCustomThemes(html, dataDir);
+}
+
+export function handleCustomThemesScript(search: URLSearchParams = new URLSearchParams(), dataDir: string = getPlannotatorDataDir()): Response {
+  const answer = customThemesAnswer(dataDir, search);
+  return new Response(answer.body, { status: answer.status, headers: answer.headers });
 }
 
 interface ServerReadyOptions {
@@ -449,5 +489,18 @@ export async function handleStarAsk(req: Request, url: URL, surface: StarAskSurf
   if (!url.pathname.startsWith("/api/star-ask/")) return null;
   const body = req.method === "POST" ? await req.json().catch(() => ({})) : undefined;
   const answered = await starAskRoute(starAskService(), surface, req.method, url.pathname, body, { remote: options.remote });
+  return answered ? Response.json(answered.body, { status: answered.status }) : null;
+}
+
+/**
+ * The launch switch's one-time dialog (packages/shared/launch-switch.ts): `POST /api/launch-switch/claim` (from the
+ * kept copy only: `{ show: false }` or `{ show: true, campaign, url }`), `/shown` (stamps it shown on this computer,
+ * `{ show }`) and `/answer` (`{ answer: "opened" | "dismissed" }`). Null for any other path. Nothing
+ * here waits on the site: the reader runs in the background (`launchSwitchService().start()` at the server's start).
+ */
+export async function handleLaunchSwitch(req: Request, url: URL): Promise<Response | null> {
+  if (!url.pathname.startsWith("/api/launch-switch/")) return null;
+  const body = req.method === "POST" ? await req.json().catch(() => ({})) : undefined;
+  const answered = launchSwitchRoute(launchSwitchService(), req.method, url.pathname, body);
   return answered ? Response.json(answered.body, { status: answered.status }) : null;
 }

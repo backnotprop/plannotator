@@ -1,6 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import type { InboxPullRiskAnswer } from '@plannotator/core/inbox-types';
 import { inboxApi } from '../api';
+import { InboxApiError } from '../apiError';
+import { useKeptState } from '../data/keptState';
+import { listedPulls, riskAnswerAtHeads } from './riskAtHeads';
 
 /** While judgments run in the background, they are read this often. */
 export const PULL_RISK_POLL_MS = 4_000;
@@ -8,10 +11,11 @@ export const PULL_RISK_POLL_MS = 4_000;
 /**
  * The rules, the agent and the judgments of the listed PRs. Read when the list
  * changes (`listVersion`: a list read is what starts new judgments), then again
- * while some are still running. A failed read leaves what is on screen.
+ * while some are still running. A failed read leaves what is on screen, but a judgment made at
+ * another head than the list shows keeps no places (`riskAnswerAtHeads`).
  */
 export function usePullRisk(listVersion: unknown): { answer: InboxPullRiskAnswer | null; setAnswer: (answer: InboxPullRiskAnswer) => void } {
-  const [answer, setAnswer] = useState<InboxPullRiskAnswer | null>(null);
+  const [answer, keepAnswer, setAnswer] = useKeptState<InboxPullRiskAnswer | null>(null);
   const controller = useRef<AbortController | null>(null);
   const read = useCallback(() => {
     controller.current?.abort();
@@ -21,9 +25,12 @@ export function usePullRisk(listVersion: unknown): { answer: InboxPullRiskAnswer
       .pullRisk(mine.signal)
       .then((next) => {
         // An answer without judgments isn't one: it never takes the review down with it.
-        if (!mine.signal.aborted && next?.judgments) setAnswer(next);
+        // The same answer keeps the held one: a poll while judgments run draws nothing new until one lands.
+        if (!mine.signal.aborted && next?.judgments) keepAnswer(next);
       })
-      .catch(() => {});
+      .catch((cause) => {
+        if (!mine.signal.aborted && cause instanceof InboxApiError && cause.code === 'code_review_off') setAnswer(null);
+      });
   }, []);
   useEffect(() => {
     read();
@@ -37,5 +44,7 @@ export function usePullRisk(listVersion: unknown): { answer: InboxPullRiskAnswer
     }, PULL_RISK_POLL_MS);
     return () => clearInterval(tick);
   }, [pending, read]);
-  return { answer, setAnswer };
+  const pulls = listedPulls(listVersion);
+  const shown = useMemo(() => (pulls ? riskAnswerAtHeads(answer, pulls) : answer), [answer, pulls]);
+  return { answer: shown, setAnswer };
 }

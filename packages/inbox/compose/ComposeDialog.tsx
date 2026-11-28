@@ -51,7 +51,7 @@ import { linkedToMachines } from './linkedToMachines';
 import { useLinkedTarget } from './useLinkedTarget';
 import type { ComposeHeld, ComposeJoined, ComposeSent } from './composeResults';
 export type { ComposeHeld, ComposeJoined, ComposeSent };
-import { InboxComposerField, type CaretMenuOptions } from '../components/ComposerField';
+import { InboxComposerField } from '../components/ComposerField';
 import { ARM_MS } from '../components/PermissionCard';
 import { VoiceFoot } from '../components/VoiceMic';
 import { useVoiceSession } from '../voice';
@@ -102,15 +102,15 @@ import {
 } from './model';
 import { newUuid } from '../uuid';
 import { handoffKeys, pullHandoffAskLine, pullHandoffMessage, pullHandoffThreadName, pullLaunchAsk } from '../pulls/model';
-import { forgetUnsentReview, keepUnsentReview, localReviewMessage, localReviewName, walkthroughMessage, reviewDefaultTo, reviewLinkListed, reviewLinkStack, reviewToWithChanges, unsentReview, type ReviewBoxPull, type ReviewKind, type ReviewPullsRead, type ReviewBoxRequest, type ReviewSummary } from './reviewBox';
+import { forgetUnsentReview, keepUnsentReview, localReviewMessage, localReviewName, reviewBoxPullAsk, walkthroughMessage, reviewDefaultTo, reviewLinkListed, reviewLinkStack, reviewToWithChanges, reviewWorkOf, unsentReview, type ReviewBoxPull, type ReviewKind, type ReviewPullsRead, type ReviewBoxRequest, type ReviewSummary } from './reviewBox';
 import { ReviewRows } from './ReviewRows';
 import { LaunchTipCard } from './LaunchTipCard';
 import { LAUNCH_TIP_SAID, LAUNCH_TIP_TIMES, launchTipPlace, launchTipPlainOpen, type LaunchTipPlace } from './launchTip';
+import { useComposeAutosave } from './composeAutosave';
+import { useComposeCaretMenu } from './composeCaretMenu';
 
 /** How long after the last keystroke a pasted link is read. */
 const REVIEW_LINK_PAUSE_MS = 300;
-/** A phone's picker shows at most 4½ rows of 44 px (the reply box's rule, inbox.css). */
-const PHONE_SKILL_LIST_HEIGHT = 198;
 
 export interface ComposeRequest {
   /** A draft to reopen (the Drafts page). */
@@ -238,7 +238,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   // The Board card this thread is for (Create thread), kept on its draft so a draft sent later still links it.
   const card = request.card ?? request.draft?.card ?? null;
   // The pull requests this thread is for (Launch an agent), kept on its draft: To offers only their projects' agents.
-  const [reviewKind, setReviewKind] = useState<ReviewKind>(box?.pick ? 'pr' : box?.branch ? 'local' : typed.kind);
+  const [reviewKind, setReviewKind] = useState<ReviewKind>(box?.pick ? 'pr' : box?.branch || box?.project ? 'local' : typed.kind);
   // A pull request link: what the picker's search holds while it looks like one, or the one chosen from it.
   const [reviewLink, setReviewLink] = useState(() => (box ? typed.link : ''));
   const [linkChosen, setLinkChosen] = useState(() => !!box && !!typed.link);
@@ -441,7 +441,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const startAsleep = !!startMachine && startMachine.state === 'offline';
   const [folderMenu, setFolderMenu] = useState(!!request.clone);
   const startAgent = start ? blockOf(start.machine)?.agents.find((a) => a.agent === start.agent) : undefined;
-  const launchChoice = useLaunchChoice(start ? `${start.machine ?? ''}:${start.agent}` : null, startAgent?.choices, phone);
+  const launchChoice = useLaunchChoice(start ? `${start.machine ?? ''}:${start.agent}` : null, startAgent?.choices, phone, { defaultFor: trustPick?.projectId ?? null, say });
   // Trust and start: the folder To names, when the agent does not trust it and the owner can from here. No entry (a
   // trusted folder, home): plain Send. Its facts follow the pick by a read, so a press can come before them.
   const trust = (start?.project.exists ? startAgent?.untrusted?.[start.project.id] : undefined) ?? null;
@@ -468,7 +468,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const [toFilled, setToFilled] = useState(false);
   useEffect(() => {
     if (!box || !model || chosen || startPick) return;
-    const to = reviewDefaultTo(composeTargets(projects), launch, box.branch?.projectId ?? current?.id ?? null, lastSent, linkScratch && launch?.scratch ? SCRATCH_PICK : undefined);
+    const to = reviewDefaultTo(composeTargets(projects), launch, box.branch?.projectId ?? box.project ?? current?.id ?? null, lastSent, linkScratch && launch?.scratch ? SCRATCH_PICK : undefined);
     if (!to) return;
     setToFilled(true);
     if ('session' in to) setChosen(to.session);
@@ -502,21 +502,21 @@ export function ComposeDialog(props: ComposeDialogProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [!!box, reviewKind, reviewLink]);
   useEffect(() => {
-    if (!box || reviewKind !== 'local' || !reviewProject?.id) {
-      setReviewSummary(null);
-      return;
-    }
     // Never the last project's: its branch would go into the message if Start came before this read.
     setReviewSummary(null);
+    if (!box || reviewKind !== 'local' || !reviewProject?.id) return;
     const read = new AbortController();
     inboxApi.reviewChanges(reviewProject.id, reviewChanges, read.signal, reviewChanges === 'branch' && box.branch?.projectId === reviewProject.id ? box.branch.name : undefined).then(setReviewSummary, () => setReviewSummary(null));
     return () => read.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [!!box, reviewKind, reviewProject?.id, reviewChanges]);
+  // What the words name: the summary's branch, else (unread, or past its cap: no summary) the branch the box is for.
+  const reviewWork = reviewWorkOf(reviewSummary, box, reviewChanges, reviewProject?.id);
   // The project To was filled in with has no changes of this kind: another live agent's project that has some, if any.
+  // Never for a box opened on one project's work (a branch, a folder's changes): another project's is not that work.
   const noChanges = !!box && reviewKind === 'local' && !!reviewSummary?.git && reviewSummary.files === 0;
   useEffect(() => {
-    if (!noChanges || !toFilled || !target?.project.id) return;
+    if (!noChanges || !toFilled || !target?.project.id || box?.branch || box?.project) return;
     const others = composeTargets(projects).filter((t) => t.project.id && t.project.id !== target.project.id);
     const ids = [...new Set(others.map((t) => t.project.id!))];
     if (ids.length === 0) return;
@@ -656,7 +656,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
     return () => clearTimeout(timer);
   }, [body, fileNames]);
   // New review names its thread from what it reviews, not from the words.
-  const reviewName = !box ? null : boxPull ? pullHandoffThreadName(boxPull.stack, null) : linkOnly ? pullHandoffThreadName(reviewLinkStack(linkOnly.pull), null) : reviewKind !== 'local' ? null : localReviewName(reviewChanges, reviewProject?.name ?? null, reviewSummary?.branch ?? null, reviewSummary?.base ?? null);
+  const reviewName = !box ? null : boxPull ? pullHandoffThreadName(boxPull.stack, null) : linkOnly ? pullHandoffThreadName(reviewLinkStack(linkOnly.pull), null) : reviewKind !== 'local' ? null : localReviewName(reviewChanges, reviewProject?.name ?? null, reviewWork.branch, reviewWork.base);
   const threadName = draftThreadName(nameState);
   // Kept from the first change: opening the box on another PR doesn't wipe the words kept for this one.
   const keptAny = useRef(false);
@@ -680,6 +680,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const empty = untouched || (body.trim() === '' && files.files.length === 0 && threadName.trim() === '');
   const saved = draftSnapshot(draft);
   const dirty = !untouched && (isDirty({ body, session: chosen, files: uploadIds, threadName, board: boardRequest }, saved, draft !== null) || files.uploading);
+  // A draft from the first key: saved after a pause in typing, and as the page hides or goes (composeAutosave.ts).
+  const autosave = useComposeAutosave({ id: draftId.current, opened: request.draft?.updated_at ?? null, fresh: !request.draft, keeps: keepsDrafts, unsaved: dirty, empty, ready: !files.uploading && busy === null && !conflict && body.length <= INBOX_DRAFT_BODY_MAX, written: [body, threadName, uploadIds.join(','), chosen ?? '', boardRequest].join('\u0000'), input: (base) => draftInput(base), onDraft: setDraft });
   const projectName = current?.name ?? null;
 
   // ── the dialog ──
@@ -722,7 +724,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
     // "inbox-compose-escape-keeps"). A failed save keeps compose open and says why, so the words are never lost.
     // An empty compose (a draft emptied too) is never kept, so it just closes; a reopened draft emptied this way stays
     // saved as it was. No drafts (the tour): nothing to keep.
-    if (keepsDrafts && dirty && !empty) {
+    if (keepsDrafts && (dirty || autosave.saved()) && !empty) {
       void keepDraft();
       return;
     }
@@ -801,14 +803,17 @@ export function ComposeDialog(props: ComposeDialogProps) {
     }
     setBusy('send');
     try {
+      // A save on its way lands first: the Send takes the draft the Inbox holds (none once deleted), and none lands after.
+      await autosave.settle();
+      const draft = autosave.mayHold() ? { id: draftId.current } : null;
       // The skills the words reference go with the message as one block at its end, as New message's do (skills.ts).
       const words = !box
         ? body
         : reviewKind === 'walkthrough'
           ? walkthroughMessage(body)
           : boxPull || linkOnly
-          ? pullHandoffMessage(boxPull?.stack ?? reviewLinkStack(linkOnly!.pull), body.trim() ? { kind: 'custom', words: body } : { kind: 'guide' })
-          : localReviewMessage({ changes: reviewChanges, project: reviewProject?.name ?? null, branch: reviewSummary?.branch ?? null, base: reviewSummary?.base ?? null, words: body });
+          ? pullHandoffMessage(boxPull?.stack ?? reviewLinkStack(linkOnly!.pull), reviewBoxPullAsk(box.ask, body))
+          : localReviewMessage({ changes: reviewChanges, project: reviewProject?.name ?? null, branch: reviewWork.branch, base: reviewWork.base, words: body, ask: box.ask });
       // Checked first: a PR the Inbox can't keep for that agent is never sent to it.
       if (boxPull && sendProject) await inboxApi.pullOwnerCheck(pulls!.keys, sendProject);
       const skills = transport ? null : await inboxSkillsBlock([words], INBOX_MESSAGE_SKILL_AUDIENCE);
@@ -835,9 +840,9 @@ export function ComposeDialog(props: ComposeDialogProps) {
           : { host: target!.host, session: target!.session },
         body: skills ? withSkillsBlock(words, skills) : words,
         idempotency_key: sendKey.current,
-        ...(linkOnly ? { review: { kind: 'link' as const, url: linkOnly.pull.url, title: linkOnly.pull.title, mine: linkOnly.pull.mine, ask: body.trim() ? ('custom' as const) : ('guide' as const) } } : {}),
+        ...(linkOnly ? { review: { kind: 'link' as const, url: linkOnly.pull.url, title: linkOnly.pull.title, mine: linkOnly.pull.mine, ask: box?.ask === 'picture_it' ? ('picture_it' as const) : body.trim() ? ('custom' as const) : ('guide' as const) } } : {}),
         ...(box && reviewKind === 'walkthrough' ? { review: { kind: 'walkthrough' as const } } : {}),
-        ...(box && reviewKind === 'local' ? { review: { kind: 'local' as const, changes: reviewChanges, branch: reviewSummary?.branch ?? null, base: reviewSummary?.base ?? null, ask: body.trim() ? ('custom' as const) : ('guide' as const) } } : {}),
+        ...(box && reviewKind === 'local' ? { review: { kind: 'local' as const, changes: reviewChanges, branch: reviewWork.branch, base: reviewWork.base, ask: box?.ask === 'picture_it' ? ('picture_it' as const) : body.trim() ? ('custom' as const) : ('guide' as const) } } : {}),
         uploads: uploadIds,
         ...named,
         // A second review of the same changes is named too: "… (2)" rather than the request's first line.
@@ -861,7 +866,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
           }
         : { session: target!.session, host: target!.host, projectName: targetMachineName ? `${target!.project.name} · ${targetMachineName}` : target!.project.name };
       if (box) forgetUnsentReview();
-      const sent: ComposeSent = { threadId: result.thread_id, session: sentTo.session, host: sentTo.host, projectName: machine ? sentTo.projectName : (result.project?.name ?? sentTo.projectName), draftId: draft?.id ?? null, cardId: card?.id ?? null, pullKeys: pulls?.keys ?? null, pullAsk: boxPull ? (body.trim() ? 'custom' : 'guide') : pulls ? pullLaunchAsk(body, pulls.ask_line) : null, ...(start ? { launched: true } : {}), ...(machine ? { machine } : {}) };
+      const sent: ComposeSent = { threadId: result.thread_id, session: sentTo.session, host: sentTo.host, projectName: machine ? sentTo.projectName : (result.project?.name ?? sentTo.projectName), draftId: draft?.id ?? null, cardId: card?.id ?? null, pullKeys: pulls?.keys ?? null, pullAsk: boxPull ? reviewBoxPullAsk(box?.ask, body).kind : pulls ? pullLaunchAsk(body, pulls.ask_line) : null, ...(start ? { launched: true } : {}), ...(machine ? { machine } : {}) };
       for (const tell of [props.onSent, request.onSent]) tell?.(sent);
     } catch (cause) {
       if (cause instanceof InboxHeldError && (start?.machine || targetOn) && props.onHeld) {
@@ -873,7 +878,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
           queued: cause.outbox.state === 'queued',
           machineName: cause.machine?.name ?? startMachineName ?? targetMachineName ?? 'the other machine',
           asleep: cause.machine ? cause.machine.state === 'offline' : startAsleep,
-          agentName: start ? start.name : hostLabel(target!.host),
+          agentName: start ? start.name : hostLabel(target!.host, target!.runtime),
           // E9: what that machine does first when it's back.
           ...(start?.clone ? { first: `clones ${start.clone.slug}` } : start?.create ? { first: `makes ${start.project.name}` } : {}),
           draftId: draft?.id ?? null,
@@ -946,7 +951,36 @@ export function ComposeDialog(props: ComposeDialogProps) {
   };
 
   // ── drafts ──
-  const save = async (base: string | null = draft?.updated_at ?? null): Promise<DraftView | null> => {
+  /** A draft save's input: what is written now, against `base` (the draft's `updated_at` this dialog knows). */
+  const draftInput = (base: string | null) => {
+    const to = target ? draftTo(target) : chosen && draft?.to?.session === chosen ? draft.to : null;
+    // A draft keeps the project a new session would start in, not the start itself: reopened, To is chosen again.
+    const project = target
+      ? { id: target.project.id, root: target.project.root, name: target.project.name }
+      : start?.folder
+        ? // A folder picked in "Another folder…" is no project yet: its path (absolute when that machine's home is known) and name.
+          { id: null, root: untildePath(start.folder, startHome), name: start.project.name }
+      : start && !start.scratch
+        ? { id: start.project.id, root: start.project.root, name: start.project.name }
+      : (draft?.project ?? (current?.root ? { id: current.id, root: current.root, name: current.name ?? current.root } : null));
+    // A long paste keeps where it goes back in the words, so a reopened draft still offers Put back.
+    const pasted = new Map(files.pastedDraft(body).map((file) => [file.upload_id, file]));
+    const draftFiles = uploadIds.map((id) => pasted.get(id) ?? id);
+    // A folder that is no project yet (Another folder…, Create a folder) is kept as the pick itself, so it comes back (D8).
+    const keptStart =
+      start?.folder && !target
+        ? {
+            agent: start.agent,
+            machine: start.machine,
+            folder: start.folder,
+            name: start.project.name,
+            ...(start.create ? { create: true as const } : {}),
+            ...(start.clone ? { clone: { url: start.clone.url, ...(start.clone.branch ? { branch: start.clone.branch } : {}) } } : {}),
+          }
+        : null;
+    return { body, to, project, files: draftFiles, base, thread_name: threadName, ...(card ? { card } : {}), ...(pulls ? { pulls } : {}), ...(boardRequest ? { board_request: true as const } : {}), ...(keptStart ? { start: keptStart } : {}) };
+  };
+  const save = async (base?: string | null): Promise<DraftView | null> => {
     if (empty) return null;
     if (files.uploading) {
       setError('Wait for the files to finish uploading.');
@@ -960,33 +994,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
     setBusy('save');
     setError(null);
     try {
-      const to = target ? draftTo(target) : chosen && draft?.to?.session === chosen ? draft.to : null;
-      // A draft keeps the project a new session would start in, not the start itself: reopened, To is chosen again.
-      const project = target
-        ? { id: target.project.id, root: target.project.root, name: target.project.name }
-        : start?.folder
-          ? // A folder picked in "Another folder…" is no project yet: its path (absolute when that machine's home is known) and name.
-            { id: null, root: untildePath(start.folder, startHome), name: start.project.name }
-        : start && !start.scratch
-          ? { id: start.project.id, root: start.project.root, name: start.project.name }
-        : (draft?.project ?? (current?.root ? { id: current.id, root: current.root, name: current.name ?? current.root } : null));
-      // A long paste keeps where it goes back in the words, so a reopened draft still offers Put back.
-      const pasted = new Map(files.pastedDraft(body).map((file) => [file.upload_id, file]));
-      const draftFiles = uploadIds.map((id) => pasted.get(id) ?? id);
-      // A folder that is no project yet (Another folder…, Create a folder) is kept as the pick itself, so it comes back (D8).
-      const keptStart =
-        start?.folder && !target
-          ? {
-              agent: start.agent,
-              machine: start.machine,
-              folder: start.folder,
-              name: start.project.name,
-              ...(start.create ? { create: true as const } : {}),
-              ...(start.clone ? { clone: { url: start.clone.url, ...(start.clone.branch ? { branch: start.clone.branch } : {}) } } : {}),
-            }
-          : null;
-      const result = await inboxApi.saveDraft(draftId.current, { body, to, project, files: draftFiles, base, thread_name: threadName, ...(card ? { card } : {}), ...(pulls ? { pulls } : {}), ...(boardRequest ? { board_request: true as const } : {}), ...(keptStart ? { start: keptStart } : {}) });
-      setDraft(result.draft);
+      const result = await autosave.settle().then(() => inboxApi.saveDraft(draftId.current, draftInput(base === undefined ? autosave.base() : base)));
+      autosave.landed(result.draft);
       setConflict(null);
       return result.draft;
     } catch (cause) {
@@ -1018,7 +1027,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
       voice.session.cancel();
     }
     if (busy) return;
-    const result = await save(conflict ? conflict.updated_at : (draft?.updated_at ?? null));
+    const result = await save(conflict ? conflict.updated_at : undefined); // Keep mine: over the other window's draft.
     if (result) props.onSaved(result);
   };
 
@@ -1055,28 +1064,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
     }
   };
 
-  // The skill picker's room. A desktop: the whole window (the visual viewport), so the picker floats over
-  // everything in the dialog, the footer included, and past the dialog's bottom edge when it needs to; it is
-  // in the dialog's top layer and painted after the footer, so nothing covers it. A phone (a full-screen
-  // sheet): below its top bar, above its footer and the keyboard.
-  const caretMenu = useMemo<CaretMenuOptions>(
-    () => ({
-      prefer: phone ? 'above' : 'below',
-      maxListHeight: phone ? PHONE_SKILL_LIST_HEIGHT : undefined,
-      bounds: () => {
-        const viewport = window.visualViewport;
-        const seen = viewport ? { top: viewport.offsetTop, bottom: viewport.offsetTop + viewport.height } : { top: 0, bottom: window.innerHeight };
-        if (!phone) return seen;
-        const dialog = dialogRef.current;
-        if (!dialog) return null;
-        const box = dialog.getBoundingClientRect();
-        const bar = dialog.querySelector('.ib-cp-bar')?.getBoundingClientRect();
-        const foot = dialog.querySelector('.ib-cp-foot')?.getBoundingClientRect();
-        return { top: Math.max(seen.top, bar ? bar.bottom : box.top), bottom: Math.min(foot ? foot.top : box.bottom, seen.bottom) };
-      },
-    }),
-    [phone],
-  );
+  // The skill picker's room (composeCaretMenu.ts).
+  const caretMenu = useComposeCaretMenu(phone, dialogRef);
 
   // ── keys ──
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDialogElement>) => {
@@ -1203,7 +1192,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const noAgent = !!model && !anyLive && !canStart && !endedNote;
   const toValue = target ? target.session : start ? 'start' : endedNote ? 'ended' : 'choose';
   const toName = target
-    ? `To: ${hostLabel(target.host)}${target.label ? `, ${target.label},` : ''} in ${target.project.name}${targetMachineName ? `, on ${targetMachineName}` : ''}. Change`
+    ? `To: ${hostLabel(target.host, target.runtime)}${target.label ? `, ${target.label},` : ''} in ${target.project.name}${targetMachineName ? `, on ${targetMachineName}` : ''}. Change`
     : start
       ? `To: a new ${start.name} session. Change`
       : endedNote
@@ -1247,7 +1236,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
           ) : target ? (
             <>
               <HostMark host={target.host} agent={target.session} />
-              <b>{hostLabel(target.host)}</b>
+              <b>{hostLabel(target.host, target.runtime)}</b>
               {/* Another machine's agent names its machine, as a start there does ("· kiln-render · Atlas"). */}
               <SessionDetail name={target.project.name} root={target.project.root} label={target.label} suffix={targetMachineName ?? undefined} />
             </>
@@ -1292,7 +1281,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
       host={start ? start.agent : target ? target.host : endedNote ? endedNote.host : undefined}
       agent={start ? null : (target?.session ?? endedNote?.session ?? null)}
       // A new session: the agent's name alone; the line over the row says "New <agent> session in <folder>".
-      label={start ? start.name : target ? (target.label ?? hostLabel(target.host)) : endedNote ? hostLabel(endedNote.host) : model ? 'Choose an agent' : 'Looking for live agents…'}
+      label={start ? start.name : target ? (target.label ?? hostLabel(target.host, target.runtime)) : endedNote ? hostLabel(endedNote.host) : model ? 'Choose an agent' : 'Looking for live agents…'}
       detail={endedNote && !target && !start ? 'ended' : null}
       struck={!!endedNote && !target && !start}
       ask={!start && !target && !endedNote && !loading}
@@ -1493,7 +1482,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
                 type="button"
                 className="ib-lnk"
                 onClick={() => {
-                  setDraft(conflict);
+                  autosave.landed(conflict);
                   setBody(conflict.body);
                   setNameState(threadNameStateOf(conflict));
                   setChosen(conflict.to?.session ?? null);
@@ -1657,8 +1646,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
               Cancel
             </button>
             <h2 id={titleId}>{title}</h2>
-            {/* Only when nothing can be sent, and a saved draft that has not changed has nothing to save. */}
-            {saveOffered && (!draft || dirty) && (
+            {/* Only when nothing can be sent; a saved draft that has not changed has nothing to save, unless dictated words are on their way. */}
+            {saveOffered && (!draft || dirty || voice.busy) && (
               <button type="button" className="ib-cp-barb ib-strong" onClick={() => void keepDraft()} disabled={busy !== null || voice.busy} data-compose-save="">
                 Save draft
               </button>

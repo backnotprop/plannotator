@@ -6,7 +6,7 @@
  * linked: every label, line and filter needs a linked machine. Pure.
  */
 
-import type { InboxLinkedMark, InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
+import { inboxGroupWaitsOnPerson, type InboxLinkedMark, type InboxListRow, type InboxListSection } from '@plannotator/core/inbox-types';
 import { shortTime } from './format';
 import type { MachineView, OutboxView } from './api';
 import { windowProjectNames } from './projectLabels';
@@ -74,13 +74,13 @@ export function machineTakes(row: Pick<InboxListRow, 'machine'>, model: Machines
  * The line for a machine that cannot show its threads now: "MacBook asleep since 10:42 AM", or what to do when it
  * runs an older Plannotator (rule 22: "update", never "reconnecting"). Null for a machine that is there.
  */
-export function awayLine(machine: Pick<MachineView, 'name' | 'state' | 'since' | 'version'>, now: Date = new Date()): string | null {
+export function awayLine(machine: Pick<MachineView, 'name' | 'state' | 'since' | 'version'>, now: Date | null = new Date()): string | null {
   // A machine this Inbox just updated is restarting, not asleep.
   const phase = (machine as Pick<MachineView, 'update'>).update?.phase;
   if (phase === 'restarting') return `${machine.name} is restarting to finish its update`;
   // Nor is one that did not come back: "asleep" says to wait.
   if (phase === 'not_back') return `${machine.name} has not come back after restarting`;
-  if (machine.state === 'offline') return `${machine.name} asleep since ${shortTime(machine.since, now)}`;
+  if (machine.state === 'offline') return now ? `${machine.name} asleep since ${shortTime(machine.since, now)}` : `${machine.name} is asleep`;
   if (machine.state === 'needs_update') return `Update Plannotator on ${machine.name} to see its threads here`;
   return null;
 }
@@ -175,7 +175,7 @@ export function filterMachineRows(sections: readonly InboxListSection[], model: 
 export function machineCounts(sections: readonly InboxListSection[], model: MachinesModel): Map<string, number> {
   const counts = new Map<string, number>(model.all.map((m) => [m.id, 0]));
   for (const section of sections) {
-    if (section.id !== 'stopped' && section.id !== 'holding' && section.id !== 'waiting') continue;
+    if (!inboxGroupWaitsOnPerson(section.id)) continue;
     for (const row of section.threads) {
       const owner = row.machine ?? model.self;
       if (owner && counts.has(owner)) counts.set(owner, counts.get(owner)! + 1);

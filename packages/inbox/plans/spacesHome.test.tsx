@@ -41,6 +41,10 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NO_ACTOR, type SpacesView } from '@plannotator/core/plans';
 import { createPlanStore, type PlanStore } from '../../shared/plans/store';
 import { handlePlanRoute } from '../../shared/plans/routes';
+import { drawMermaidFencesWithMermaid } from '@plannotator/ui/test-setup/mermaidEngine';
+
+// A stand-in Mermaid runtime draws here; Pele is DiagramBlock.engine.test.tsx's.
+drawMermaidFencesWithMermaid();
 
 const hasDom = typeof document !== 'undefined';
 const { PlansRoute } = (hasDom ? await import('./PlansPage') : {}) as typeof import('./PlansPage');

@@ -14,6 +14,7 @@ import { Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } f
 import { SearchPalettePart } from '../lazyParts';
 import { LazyBlockBoundary } from '@plannotator/ui/components/LazyBlockBoundary';
 import type { SearchPaletteProps } from '../search/SearchPalette';
+import { useSearchTipFresh } from '../search/searchTip';
 
 const SearchPalette = SearchPalettePart.Part;
 
@@ -25,8 +26,11 @@ function OnCommit({ run }: { run: () => void }) {
   return null;
 }
 
-export function SearchHost(props: SearchPaletteProps & { mounted: boolean }) {
-  const { mounted, ...palette } = props;
+/** `onSettingsStale`: reads the settings again (App's), for the Search tip while it is offered (`useSearchTipFresh`). */
+export function SearchHost(props: SearchPaletteProps & { mounted: boolean; onSettingsStale?: () => void }) {
+  const { mounted, onSettingsStale, ...palette } = props;
+  // Here, not in the palette: the palette is not mounted before the first open, and a tab may never have opened it.
+  useSearchTipFresh(palette.searchTip, onSettingsStale);
   // `attempt` keys the boundary, a fresh one per open after a failure. `failed`: the last attempt failed and no
   // open has asked again yet, so nothing is mounted (and nothing fetched) while the palette is closed.
   const [load, setLoad] = useState({ attempt: 0, failed: false });

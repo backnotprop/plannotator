@@ -54,6 +54,8 @@ GitLab merge request URLs are also supported when the `glab` CLI is installed an
 
 Bitbucket Cloud pull request URLs (`https://bitbucket.org/<workspace>/<repo>/pull-requests/<id>`) work with an Atlassian API token instead of a CLI. See [Bitbucket Cloud PR review](/docs/guides/bitbucket/).
 
+Forgejo and Gitea pull request URLs (`https://<host>/<owner>/<repo>/pulls/<id>`, on any host) work with an access token instead of a CLI. See [Forgejo and Gitea PR review](/docs/guides/forgejo/).
+
 **Review a patch file, with no repository:**
 
 ```

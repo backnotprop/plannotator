@@ -1,9 +1,8 @@
 /**
  * Context notes, take Line (approval "inbox-context-notes"): each note is one
- * row under its lines, the writer in words (a Picture also Show me's Pebble) and the first
- * words; a click (or Enter / Space: it is a button) opens it in place. A note
- * has no reply, edit, count or Post. A stale one is grey and says the code
- * changed, with Ask again, as Show me's corner card does.
+ * row under its lines, the writer in words and the first words; a click (or
+ * Enter / Space: it is a button) opens it in place. A note has no reply, edit,
+ * count or Post. A stale one is grey and says the code changed, with Ask again.
  *
  * The diff draws the rows through review-editor's `contextNotes` seam: the
  * reader gets the anchors and `renderContextNote(id)`, which draws a row that
@@ -11,7 +10,6 @@
  * goes stale redraws without the diff rebuilding.
  */
 import { createContext, Fragment, useCallback, useContext, useId, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Pebble } from '@plannotator/ui/components/shape/Pebble';
 import type { ContextNoteAnchor } from '@plannotator/review-editor/utils/contextNoteAnchor';
 import { noteTime, staleWords, writerWord, type ContextNote } from './model';
 
@@ -19,8 +17,6 @@ import { noteTime, staleWords, writerWord, type ContextNote } from './model';
 export interface ContextNoteActions {
   /** A stale answer: ask about these lines again (the Ask window, its box filled). */
   onAskAgain?: (note: ContextNote) => void;
-  /** A picture's note: open its board over the review. */
-  onOpenPicture?: (note: ContextNote) => void;
 }
 
 interface NotesApi extends ContextNoteActions {
@@ -57,9 +53,8 @@ export function useContextNotes(notes: readonly ContextNote[], actions: ContextN
       open,
       toggle,
       ...(actions.onAskAgain ? { onAskAgain: (note: ContextNote) => actionsRef.current.onAskAgain?.(note) } : {}),
-      ...(actions.onOpenPicture ? { onOpenPicture: (note: ContextNote) => actionsRef.current.onOpenPicture?.(note) } : {}),
     }),
-    [byId, open, toggle, !!actions.onAskAgain, !!actions.onOpenPicture], // eslint-disable-line react-hooks/exhaustive-deps
+    [byId, open, toggle, !!actions.onAskAgain], // eslint-disable-line react-hooks/exhaustive-deps
   );
   const renderContextNote = useCallback((id: string) => <ContextNoteRow id={id} />, []);
   /** Open a note and bring its row into view (it may still be drawing: a file that just opened, a chapter scrolled to). */
@@ -92,11 +87,8 @@ function Quote({ children }: { children: ReactNode }) {
 function noteByParts(note: ContextNote): ReactNode[] {
   if (note.writer === 'guide') return [<>{note.agent ?? 'The agent'}, in its review</>];
   if (note.writer === 'risk') return note.rule ? [<>your rule <Quote>{note.rule}</Quote></>] : [];
-  if (note.writer === 'thread') {
-    const time = noteTime(note.at);
-    return [...(note.asked ? [<>you asked <Quote>{note.asked}</Quote></>] : []), ...(time ? [time] : [])];
-  }
-  return note.picture ? [<><Quote>{note.picture.title}</Quote>, {note.picture.part}</>] : [];
+  const time = noteTime(note.at);
+  return [...(note.asked ? [<>you asked <Quote>{note.asked}</Quote></>] : []), ...(time ? [time] : [])];
 }
 
 /**
@@ -135,8 +127,8 @@ function NoteByForReaders({ note }: { note: ContextNote }) {
   );
 }
 
-/** Risk's own mark (the owner, option A · Gauge): 12 px, in the row's muted colour. */
-function RiskGauge() {
+/** Risk's own mark (the owner, option A · Gauge): 12 px, in the row's muted colour (the risk bars' card has it too). */
+export function RiskGauge() {
   return (
     <svg className="ib-ctxn-risk-mark" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M2.5 11.5a5.5 5.5 0 1 1 11 0" />
@@ -147,13 +139,12 @@ function RiskGauge() {
 }
 
 /**
- * The writer's name starts the row (the owner, q-9ad31b4e: no mark, only the writer's name). A Picture keeps Show
- * me's mark (it comes from a board, and that mark is drawing's and the board's); Risk, its own family, has a gauge.
+ * The writer's name starts the row (the owner, q-9ad31b4e: no mark, only the writer's name). Risk, its own family,
+ * has a gauge.
  */
 function NoteHead({ note, open }: { note: ContextNote; open: boolean }) {
   return (
     <span className="ib-ctxn-h">
-      {note.writer === 'picture' && <Pebble alive={false} size={12} className="ib-sm-peb ib-ctxn-peb" />}
       {note.writer === 'risk' && <RiskGauge />}
       <b>{writerWord(note)}</b>
       {note.writer === 'risk' && (
@@ -177,20 +168,6 @@ function NoteActions({ note, api }: { note: ContextNote; api: NotesApi }) {
             Ask again
           </button>
         )}
-        {note.writer === 'picture' && api.onOpenPicture && (
-          <button type="button" className="ib-ctxn-link" onClick={() => api.onOpenPicture?.(note)} data-context-note-open-picture="">
-            Open the picture
-          </button>
-        )}
-      </div>
-    );
-  }
-  if (note.writer === 'picture' && api.onOpenPicture) {
-    return (
-      <div className="ib-ctxn-acts">
-        <button type="button" className="ib-ctxn-link" onClick={() => api.onOpenPicture?.(note)} data-context-note-open-picture="">
-          Open the picture
-        </button>
       </div>
     );
   }

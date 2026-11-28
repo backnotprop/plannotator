@@ -4,11 +4,10 @@
  * "Ask for a guided review". The ask is a reply in this thread, so the review comes back to the same thread. Nothing
  * runs until the person asks.
  */
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { inboxApi } from '../api';
-import { localReviewMessage } from '../compose/reviewBox';
 import { INBOX_REPLY_SKILL_AUDIENCE, inboxSkillsBlock, withSkillsBlock } from '../skills';
-import { rankBranch } from './branchReviews';
+import { branchAskWords, rankBranch } from './branchReviews';
 import type { ReviewView } from './reviewsModel';
 
 const newKey = () => (typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `branch-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`);
@@ -28,7 +27,15 @@ function BranchAsk({ note }: { note: NonNullable<ReviewView['branch']> }) {
   const [state, setState] = useState<{ asked: string | null; sending: boolean; error: string | null }>({ asked: null, sending: false, error: null });
   const [ranking, setRanking] = useState<'idle' | 'asking' | 'started' | 'not'>('idle');
   const { report, replyTo } = note;
-  const asked = state.asked !== null && state.asked === replyTo;
+  // Asked for this report (its thread and time), not for the message it replied to: the ask itself becomes the
+  // thread's last message. A new report (a new head) can be asked for again. The thread says so after a reopen.
+  const reportKey = `${report.thread_id}@${report.at}`;
+  const asked = note.asked === true || state.asked === reportKey;
+  // A second press before the first one's render (a double click) sends nothing.
+  const sendingRef = useRef(false);
+  // One idempotency key per report until a send succeeds: a retry after a send that reached the Inbox but failed on
+  // the way back is the same request, never a second ask.
+  const keyRef = useRef<{ report: string; key: string } | null>(null);
   const rank = async () => {
     if (ranking === 'asking') return;
     setRanking('asking');
@@ -39,15 +46,20 @@ function BranchAsk({ note }: { note: NonNullable<ReviewView['branch']> }) {
     }
   };
   const ask = async () => {
-    if (!replyTo || state.sending) return;
+    if (!replyTo || asked || sendingRef.current) return;
+    sendingRef.current = true;
     setState({ asked: null, sending: true, error: null });
     try {
-      const words = localReviewMessage({ changes: 'branch', project: note.projectName, branch: report.branch, base: report.base, words: '' });
+      const words = branchAskWords(report, note.projectName);
       const skills = await inboxSkillsBlock([words], INBOX_REPLY_SKILL_AUDIENCE);
-      await inboxApi.reply(replyTo, { idempotency_key: newKey(), words: withSkillsBlock(words, skills), questions: [] });
-      setState({ asked: replyTo, sending: false, error: null });
+      if (keyRef.current?.report !== reportKey) keyRef.current = { report: reportKey, key: newKey() };
+      await inboxApi.reply(replyTo, { idempotency_key: keyRef.current.key, words: withSkillsBlock(words, skills), questions: [] });
+      keyRef.current = null;
+      setState({ asked: reportKey, sending: false, error: null });
     } catch (cause) {
       setState({ asked: null, sending: false, error: cause instanceof Error ? cause.message : 'The request could not be sent.' });
+    } finally {
+      sendingRef.current = false;
     }
   };
   return (

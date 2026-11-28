@@ -199,7 +199,7 @@ test('desktop: opening rows moves nothing; closing settles with a slide; agent n
 
   // An agent writes while the person reads: it waits behind "1 new".
   const late = await world.agent.send({ project_path: path, subject: 'Payout export', body: 'The payout export is ready to review.', agent_session: 'ses_desk_late' } as Parameters<SimAgent['send']>[0]);
-  await expect(page.locator('[data-inbox-notice]')).toContainText('1 new in docs-site');
+  await expect(page.locator('[data-inbox-notice]')).toContainText('New from Claude Code: “Payout export”');
   expect(await rowsOf(page)).toEqual(before);
   await shot(page, '03-two-read-and-an-agent-wrote');
 
@@ -236,7 +236,7 @@ test('desktop: opening rows moves nothing; closing settles with a slide; agent n
   expect(await sectionOf(page, second)).toBeNull();
   const slot = before.slice(before.indexOf(second) + 1).find((rowId) => last.order.includes(rowId))!;
   expect(await focused(page)).toBe(slot);
-  await expect(page.locator('[data-inbox-notice]')).toContainText('1 new in docs-site');
+  await expect(page.locator('[data-inbox-notice]')).toContainText('New from Claude Code: “Payout export”');
   expect(await sectionOf(page, String(late.thread_id))).toBeNull();
   await shot(page, '04-after-close');
 
@@ -410,9 +410,9 @@ for (const layout of [
       await expect.poll(() => isBold(page, first)).toBe(false);
       await back(page);
       expect(await sectionOf(page, first)).toBe('new');
-      // The agent asks four questions there that hold up work: the list holds still, the news waits behind "1 new".
+      // The agent asks four questions there that hold up work: the list holds still, the news waits behind "… asked in “…”".
       await world.agent.send({ project_path: path, reply_to: first, body: HOLDING_QUESTIONS, agent_session: `ses_${layout.key}_${NEWS.length - 1}` } as Parameters<SimAgent['send']>[0]);
-      await expect(page.locator('[data-inbox-notice]')).toContainText('1 new');
+      await expect(page.locator('[data-inbox-notice]')).toContainText(/^.+ asked in “/);
       expect(await sectionOf(page, first)).toBe('new');
       // The person opens it and reads the questions (the look is recorded), then goes Back.
       await open(page, first);
@@ -512,9 +512,9 @@ test('a thread opened wide, its window narrowed to stacked while it is open: Bac
     await expect(page.locator('section.ib-pane')).toHaveCount(0);
     await page.waitForTimeout(BEAT_MS + 300);
     expect(await drawnIn(page, first)).toBe('quiet');
-    // The agent asks there: held behind "1 new". The person opens it from Quiet, wide, and reads it.
+    // The agent asks there: held behind "… asked in “…”". The person opens it from Quiet, wide, and reads it.
     await world.agent.send({ project_path: path, reply_to: first, body: HOLDING_QUESTIONS, agent_session: `ses_resized_${NEWS.length - 1}` } as Parameters<SimAgent['send']>[0]);
-    await expect(page.locator('[data-inbox-notice]')).toContainText('1 new');
+    await expect(page.locator('[data-inbox-notice]')).toContainText(/^.+ asked in “/);
     await page.locator(`.ib-lbody [data-thread-id="${first}"]`).click();
     await expect(page.locator('section.ib-pane fieldset[data-question-key]')).toHaveCount(4);
     await expect.poll(() => serverRow(first)).toEqual({ section: 'holding', unseen: 0 });

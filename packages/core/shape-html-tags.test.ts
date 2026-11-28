@@ -12,14 +12,10 @@ const regexTags = (html: string) => [...html.matchAll(TAG_RE)].map((m) => ({ nam
 
 const ROOT = join(import.meta.dir, '../..');
 
-/** HTML the repo already draws or tests: the fixtures, and every line (and the whole text) of the Shape test and seed files. */
+/** HTML the repo already tests: the fixtures, and every line (and the whole text) of the drawing test and fixture files. */
 function repoHtml(): string[] {
   const files = [
     'packages/core/shape.test.ts',
-    'packages/ui/components/shape/ShapeDrawn.test.tsx',
-    'packages/server/inbox-shape-switch.test.ts',
-    'tests/e2e/inbox-shape-seed.ts',
-    'tests/manual/shape-harness/fixture.ts',
     'tests/fixtures/shape-outside-loads.ts',
   ].map((f) => readFileSync(join(ROOT, f), 'utf8'));
   return [...SHAPE_OUTSIDE_HTML, ...SHAPE_SAFE_HTML, ...files, ...files.flatMap((text) => text.split('\n').filter((line) => line.includes('<')))];

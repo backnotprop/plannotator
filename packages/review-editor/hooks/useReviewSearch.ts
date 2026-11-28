@@ -33,12 +33,14 @@ export function shouldHandleReviewSearchShortcut(
 
 interface UseReviewSearchOptions {
   files: ReviewSearchableDiffFile[];
+  visiblePaths?: ReadonlySet<string>;
   activeFilePath: string | null;
   onRevealMatch?: (match: ReviewSearchMatch) => void;
 }
 
 export function useReviewSearch({
   files,
+  visiblePaths,
   activeFilePath,
   onRevealMatch,
 }: UseReviewSearchOptions) {
@@ -64,8 +66,8 @@ export function useReviewSearch({
   const searchIndex = useMemo(() => buildSearchIndex(files), [files]);
 
   const searchMatches = useMemo(() => {
-    return findMatchesInIndex(searchIndex, debouncedSearchQuery);
-  }, [searchIndex, debouncedSearchQuery]);
+    return findMatchesInIndex(searchIndex, debouncedSearchQuery, visiblePaths);
+  }, [searchIndex, debouncedSearchQuery, visiblePaths]);
 
   const searchGroups = useMemo(() => {
     return groupReviewSearchMatches(files, searchMatches);
@@ -132,7 +134,10 @@ export function useReviewSearch({
     activateSearchMatch(nextMatch);
   }, [searchMatches, activeSearchMatchId, activateSearchMatch]);
 
+  const previousVisiblePaths = useRef(visiblePaths);
   useEffect(() => {
+    const scopeChanged = previousVisiblePaths.current !== visiblePaths;
+    previousVisiblePaths.current = visiblePaths;
     if (!debouncedSearchQuery.trim() || searchMatches.length === 0) {
       setActiveSearchMatchId(null);
       return;
@@ -142,9 +147,11 @@ export function useReviewSearch({
       && searchMatches.some(match => match.id === activeSearchMatchId);
 
     if (!stillExists) {
-      activateSearchMatch(searchMatches[0]);
+      // Changing the file filter should not pull the reader out of their tab.
+      if (scopeChanged) setActiveSearchMatchId(searchMatches[0].id);
+      else activateSearchMatch(searchMatches[0]);
     }
-  }, [debouncedSearchQuery, searchMatches, activeSearchMatchId, activateSearchMatch]);
+  }, [debouncedSearchQuery, searchMatches, activeSearchMatchId, activateSearchMatch, visiblePaths]);
 
   return {
     searchQuery,

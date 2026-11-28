@@ -17,6 +17,7 @@
 import { useSyncExternalStore } from 'react';
 import { INBOX_SAVED_REACTIONS_MAX, applyInboxReactionChange, parseInboxSavedReactions, type InboxReaction, type InboxReactionChange } from '@plannotator/core/inbox-types';
 import { storage } from '@plannotator/ui/utils/storage';
+import { getCachedSkillCatalog } from '@plannotator/ui/utils/skillCatalog';
 import { inboxApi } from './api';
 
 const EMPTY: InboxReaction[] = [];
@@ -133,6 +134,49 @@ export function nameSavedReaction(index: number, label: string): void {
 export function changeSavedReaction(index: number, emoji: string): void {
   const was = current[index];
   if (was) change({ op: 'change', emoji: was.emoji, to: emoji });
+}
+
+/** Gives saved emoji `index` a skill ('' takes it away; approval "inbox-reactions-every-message", item 6). */
+export function skillSavedReaction(index: number, skill: string): void {
+  const was = current[index];
+  if (was && (was.skill ?? '') !== skill) change({ op: 'skill', emoji: was.emoji, skill });
+}
+
+/**
+ * The skill a `/name` in the editor's field names: this computer's skill of that name (the list's own spelling, any
+ * case typed), or the emoji's own skill as it is saved (one a linked computer gave it). Null: no such skill.
+ * With no list read (its request failed or is still on its way; the Inbox's list always holds its built-ins), what
+ * is there is not known: the name is taken as typed, as before.
+ */
+export function knownReactionSkill(name: string, own?: string): string | null {
+  if (own && name === own) return own;
+  const catalog = getCachedSkillCatalog();
+  if (catalog.length === 0) return name;
+  return (catalog.find((s) => s.name === name) ?? catalog.find((s) => s.name.toLowerCase() === name.toLowerCase()))?.name ?? null;
+}
+
+/** The editor's one field read as a name and a skill: a last `/name` word is the skill, the words before it the name. */
+export function nameAndSkillOf(text: string): { label: string; skill: string | null } {
+  const m = /(?:^|\s)\/([A-Za-z0-9][A-Za-z0-9._-]{0,63})\s*$/.exec(text);
+  return { label: (m ? text.slice(0, m.index) : text).trim(), skill: m ? m[1]! : null };
+}
+
+/** The field ends in a `/name` that names no skill: Enter and Done keep the editor open, and it is never saved. */
+export function namesNoSkill(index: number, text: string): boolean {
+  const { skill } = nameAndSkillOf(text);
+  return skill !== null && knownReactionSkill(skill, current[index]?.skill) === null;
+}
+
+/**
+ * The editor's one field ("Name, or / for a skill"): a last `/name` word is the skill, the words before it the name.
+ * Kept as two changes, the name first. A `/name` that names no skill is never saved: the name is, and the skill
+ * stays as it was.
+ */
+export function nameAndSkillSavedReaction(index: number, text: string): void {
+  const { label, skill } = nameAndSkillOf(text);
+  if ((current[index]?.label ?? '') !== label) nameSavedReaction(index, label);
+  const known = skill === null ? '' : knownReactionSkill(skill, current[index]?.skill);
+  if (known !== null) skillSavedReaction(index, known);
 }
 
 /** Takes saved emoji `index` out of the tray; the ones after it move up. */

@@ -226,7 +226,7 @@ test('grouped: news arriving under a resting pointer reorders no row; "N new · 
   const { page } = world;
   await expect(page.locator('.ib-listcol [data-section-id="quiet"] .ib-band')).toBeVisible();
   const id = await newsKeepsOrder(page, world.threads.new1, '');
-  await expect(notice(page)).toHaveText(/^1 new in docs-site\s*Show$/);
+  await expect(notice(page)).toHaveText(/^New from Codex: “Nightly check \d+”\s*Show$/);
   await expect(notice(page)).toHaveClass(/\bib-notice\b/);
   await expect(page.locator('.ib-listcol .ib-lhead [data-inbox-notice]')).toHaveCount(0);
   await notice(page).click();
@@ -245,7 +245,7 @@ test('the ⋮ menu: View, Grouped or List, each heard with its state; List shows
   await quiet.click();
   await openMenu(page);
   const radios = page.locator('[data-tidy-menu-popup] [role="menuitemradio"]');
-  await expect(radios).toHaveText(['Smart groups', 'Simple list']);
+  await expect(radios).toHaveText(['Smart groups', 'Simple list', 'Agents']);
   await expect(radios.nth(0)).toHaveAttribute('aria-checked', 'true');
   await page.mouse.move(1300, 400);
   await page.waitForTimeout(200);
@@ -303,7 +303,7 @@ test('List: news arriving reorders no row; a hover Mark read with news waiting b
   await page.waitForTimeout(500);
   // Nothing came in, nothing moved, the news still waits.
   expectHeld(before, await rowTops(page));
-  await expect(notice(page)).toHaveText(/^1 new in docs-site\s*Show$/);
+  await expect(notice(page)).toHaveText(/^New from Codex: “Nightly check \d+”\s*Show$/);
   expect(await page.locator(`.ib-listcol .ib-lbody [data-thread-id="${held}"]`).count()).toBe(0);
   // Mark unread is now under the pointer, on the same row.
   await expect(page.locator(`.ib-listcol .ib-rw[data-row="${target}"] [data-row-mark-unread]`)).toBeVisible();
@@ -405,7 +405,7 @@ test('a 390 px phone: List from the ⋮ sheet; news reorders no row; "N new · S
     await expect(notice(page)).toBeVisible();
     await page.waitForTimeout(400);
     expectHeld(before, await rowTops(page), null);
-    await expect(notice(page)).toHaveAccessibleName(/^1 new in mobile-app\s*Show$/);
+    await expect(notice(page)).toHaveAccessibleName(/^New from Codex: “Nightly check \d+”\s*Show$/);
     await expect(notice(page)).toBeInViewport({ ratio: 1 });
     await shot(page, 'phone-list-news');
     await notice(page).tap();

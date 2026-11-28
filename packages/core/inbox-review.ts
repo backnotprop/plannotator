@@ -10,13 +10,6 @@
  *   only while the switch is on;
  * - the words of the person's verdict reply (`inboxReviewVerdictWords`).
  *
- * - Show me (approval "code-review-launch-build", item 1: Show me makes a
- *   Shape): the request the window sends, the refusal an old `plannotator
- *   review draw` gets, and the guide brief's and the skills' lines for the
- *   overview's drawing. These ride Shape's own switch as well (approval
- *   "code-review-029-shape-off"): with Code review on and Shape off, an agent
- *   reads no word of Shape and no drawing.
- *
  * With the switch off, or never set, none of these reach an agent.
  * Browser-safe, no dependencies outside core: the server and the window both read it.
  */
@@ -51,21 +44,18 @@ const OLD_SESSION = 'If submit_guide takes no `review` field in this session, se
  * /review-curate's line for a chapter's diagram (approval "guide-chapter-diagrams": diagrams go in chapters, not the
  * overview), at the end of its instructions. AGENT TEXT: these words await the owner's OK and a clean-room test.
  */
-export const INBOX_REVIEW_CURATE_DRAWING_LINE = 'If a chapter is easier to see than to read (a flow across 3 or more steps, say), give that chapter one diagram (`sections[].diagram`, Mermaid preferred). The guide brief has the format.';
-/** The same line with Shape off: Mermaid is the only kind, so nothing is "preferred" (no word of Shape's html kind). */
-export const INBOX_REVIEW_CURATE_DRAWING_LINE_NO_SHAPE = 'If a chapter is easier to see than to read (a flow across 3 or more steps, say), give that chapter one Mermaid diagram (`sections[].diagram`). The guide brief has the format.';
+export const INBOX_REVIEW_CURATE_DRAWING_LINE = 'If a chapter is easier to see than to read (a flow across 3 or more steps, say), give that chapter one Mermaid diagram (`sections[].diagram`). The guide brief has the format.';
 
 /** /review-recheck's line for a chapter's diagram, after "Give one chapter to each comment you acted on…". AGENT TEXT: awaits the owner's OK. */
 export const INBOX_REVIEW_RECHECK_DRAWING_LINE = "If a chapter of the earlier review had a diagram and you changed what it shows, draw it again in the chapter of this review that covers that change (`sections[].diagram`).";
 
 /**
- * Every review skill Plannotator knows, by name, as an agent reads it with Shape off or on. A chapter's diagram is
- * offered either way (Mermaid needs no Shape; approval "guide-chapter-diagrams"); with Shape off the curate line names
- * Mermaid only, and no skill asks for an overview drawing (approval "code-review-029-shape-off").
+ * Every review skill Plannotator knows, by name, as an agent reads it. A chapter's diagram is offered in Mermaid
+ * (approval "guide-chapter-diagrams"), and no skill asks for an overview drawing.
  * `diagrams` false (Settings → Capabilities → Chapter diagrams off): the curate and recheck diagram lines are left
  * out, with the blank line before each, and nothing takes their place.
  */
-function reviewSkillTexts(shape: boolean, diagrams = true): Readonly<Record<string, InboxReviewSkill>> {
+function reviewSkillTexts(diagrams = true): Readonly<Record<string, InboxReviewSkill>> {
   return {
     'review-curate': {
       name: 'review-curate',
@@ -76,7 +66,7 @@ function reviewSkillTexts(shape: boolean, diagrams = true): Readonly<Record<stri
         'By default, sort every changed file into two groups. Needs the person: logic, security, data, money, public interfaces, and anything you are unsure of. Safe to skim: renames, formatting, generated and lock files, and tests that only mirror the new code. Write chapters for the first group only, at most 6, the one you are least sure of first, and put the second group in `unplacedFiles`. In the overview, list the second group in one line per kind, with why it is safe. Start the message body with how many of the changed files need them. For a full review, every changed file goes in a chapter and `unplacedFiles` stays empty.',
         '',
         `Call get_guide_brief, then submit_guide with \`review: true\` and \`reply_to\` set to this reply. Do not change code while you write it. ${OLD_SESSION} ${NO_CODE}`,
-        ...(diagrams ? ['', shape ? INBOX_REVIEW_CURATE_DRAWING_LINE : INBOX_REVIEW_CURATE_DRAWING_LINE_NO_SHAPE] : []),
+        ...(diagrams ? ['', INBOX_REVIEW_CURATE_DRAWING_LINE] : []),
       ].join('\n'),
     },
     'review-walkthrough': {
@@ -116,43 +106,36 @@ function reviewSkillTexts(shape: boolean, diagrams = true): Readonly<Record<stri
   };
 }
 
-/** Every review skill, as an agent reads it with Shape off (chapter diagrams in Mermaid only). Adding or removing one is one entry above. */
-export const INBOX_REVIEW_SKILL_TEXTS: Readonly<Record<string, InboxReviewSkill>> = reviewSkillTexts(false);
-/** Every review skill, as an agent reads it with Shape on too ("Mermaid preferred": the brief offers Shape's html kind as well). */
-export const INBOX_REVIEW_SKILL_TEXTS_WITH_SHAPE: Readonly<Record<string, InboxReviewSkill>> = reviewSkillTexts(true);
+/** Every review skill, as an agent reads it (chapter diagrams in Mermaid). Adding or removing one is one entry above. */
+export const INBOX_REVIEW_SKILL_TEXTS: Readonly<Record<string, InboxReviewSkill>> = reviewSkillTexts();
 
 /** The review skills the "/" list offers, in the list's order. One entry adds or removes a skill. */
 export const INBOX_REVIEW_SKILL_NAMES: readonly string[] = ['review-curate', 'review-walkthrough', 'review-recheck'];
 
-/** Every review skill with Chapter diagrams off (no diagram line), Shape off and on. */
-const INBOX_REVIEW_SKILL_TEXTS_NO_DIAGRAMS: Readonly<Record<string, InboxReviewSkill>> = reviewSkillTexts(false, false);
-const INBOX_REVIEW_SKILL_TEXTS_WITH_SHAPE_NO_DIAGRAMS: Readonly<Record<string, InboxReviewSkill>> = reviewSkillTexts(true, false);
+/** Every review skill with Chapter diagrams off (no diagram line). */
+const INBOX_REVIEW_SKILL_TEXTS_NO_DIAGRAMS: Readonly<Record<string, InboxReviewSkill>> = reviewSkillTexts(false);
 
 /**
- * The review skills' choices of text: Shape (`shape`, off unless true) and Chapter diagrams (`diagrams`, on unless
- * false: Settings → Capabilities → Chapter diagrams, config.json `inboxChapterDiagrams`).
+ * The review skills' choice of text: Chapter diagrams (`diagrams`, on unless false: Settings → Capabilities →
+ * Chapter diagrams, config.json `inboxChapterDiagrams`).
  */
 export interface InboxReviewSkillOptions {
-  shape?: boolean;
   diagrams?: boolean;
 }
 
-/** The offered skills, in order, as an agent reads them with Shape off (`{ shape: true }`: with Shape on; `{ diagrams: false }`: no diagram lines). */
+/** The offered skills, in order, as an agent reads them (`{ diagrams: false }`: no diagram lines). */
 export function inboxReviewSkills(options: InboxReviewSkillOptions = {}): readonly InboxReviewSkill[] {
-  const diagrams = options.diagrams !== false;
-  const texts = options.shape
-    ? diagrams ? INBOX_REVIEW_SKILL_TEXTS_WITH_SHAPE : INBOX_REVIEW_SKILL_TEXTS_WITH_SHAPE_NO_DIAGRAMS
-    : diagrams ? INBOX_REVIEW_SKILL_TEXTS : INBOX_REVIEW_SKILL_TEXTS_NO_DIAGRAMS;
+  const texts = options.diagrams !== false ? INBOX_REVIEW_SKILL_TEXTS : INBOX_REVIEW_SKILL_TEXTS_NO_DIAGRAMS;
   return INBOX_REVIEW_SKILL_NAMES.map((name) => texts[name]!);
 }
 
-/** The offered skills, in order, with Shape off. The "/" list's names and descriptions are the same either way. */
+/** The offered skills, in order. */
 export const INBOX_REVIEW_SKILLS: readonly InboxReviewSkill[] = inboxReviewSkills();
 
 /** The skill catalog's root for a built-in skill (the "/" list's right column: "Plannotator"). */
 export const INBOX_BUILTIN_SKILL_ROOT = 'plannotator';
 
-/** A built-in review skill by name, or undefined (offered skills only); its instructions as read with Shape off unless `shape`, with diagram lines unless `diagrams` is false. */
+/** A built-in review skill by name, or undefined (offered skills only); its instructions with diagram lines unless `diagrams` is false. */
 export function inboxReviewSkill(name: string, options: InboxReviewSkillOptions = {}): InboxReviewSkill | undefined {
   return inboxReviewSkills(options).find((skill) => skill.name === name);
 }
@@ -244,16 +227,15 @@ export function inboxReviewVerdictWords(verdict: InboxReviewVerdict, title: stri
     : `I reviewed ${name} and I am asking for changes.`;
 }
 
-// ───────────────────────────── Show me (approval "code-review-launch-build", item 1) ─────────────────────────────
+// ───────────────────────────── An older Inbox's Show me, as stored ─────────────────────────────
 //
-// Show me asks the session that wrote the review for a Shape: the same board,
-// store and commands as Shape on its own. The details are `plannotator shape
-// --help`'s. None of it reaches an agent while Code review is off: the window
-// offers no Show me, and `plannotator shape` is off unless a switch is on.
+// An Inbox before this one could store an Ask turn that was a Show me (`kind: "show_me"`, `show_me`). It is gone; a
+// conversation that holds one still reads, and the Ask window shows such a turn as the person asked it. Nothing
+// makes one any more.
 
-/** What a Show me points at: a review, its file and lines (null: the Overview, the whole review), the round asked in, the person's words. */
+/** What an older Show me pointed at: a review, its file and lines (null: the Overview, the whole review), the round asked in, the person's words. */
 export interface InboxShowMeTarget {
-  /** The review's message id; null: a Show me from a board with no review behind it (a Shape on its own). */
+  /** The review's message id; null: a Show me from a board with no review behind it. */
   review: string | null;
   file: string | null;
   lines: [number, number] | null;
@@ -263,7 +245,7 @@ export interface InboxShowMeTarget {
   part?: InboxShowMePart;
 }
 
-/** What a Show me from a board is on: a part, words picked, a file's lines, or the whole board. */
+/** What an older Show me from a board was on: a part, words picked, a file's lines, or the whole board. */
 export interface InboxShowMePart {
   /** The board it was pressed on. */
   board: string;
@@ -273,10 +255,7 @@ export interface InboxShowMePart {
   code?: string;
   /** A box over several parts: their names, and `name` is "A part of the board". */
   parts?: string[];
-  /**
-   * A box's picture, the box drawn on it: a PNG `data:` URL as the window sends it; once the Inbox keeps it in the
-   * board's folder, that file's full path, which the request names.
-   */
+  /** A box's picture, the box drawn on it: the file's full path, as the older Inbox kept it. */
   picture?: string;
 }
 
@@ -295,63 +274,10 @@ export function inboxReviewRound(messages: readonly { id: string; guide?: { revi
   return round;
 }
 
-/** Words written by the person or an agent, inside quotes the agent reads: one line, and a quote cannot end them. */
-function quoted(text: string): string {
-  return text.replace(/[\\"]/g, '\\$&').replace(/\s+/g, ' ').trim();
-}
-
-/**
- * The Show me request, the words the window sends as an Ask turn. The bridge
- * puts its own session header first. `threadId` and the review tie the board to
- * this thread, so it opens over the review. `again`: Show me again, a new
- * version of that board.
- */
-export function inboxShowMeRequest(input: { target: InboxShowMeTarget; title: string; threadId: string; again?: string }): string {
-  const { target, threadId } = input;
-  const title = quoted(inboxReviewTitleLine(input.title));
-  const words = target.words?.trim() ? `: "${quoted(target.words)}"` : '';
-  const tie = `--thread ${threadId}${target.review ? ` --through ${target.review}` : ''}`;
-  const part = target.part;
-  // A box over several parts names them; a part on its own, its code.
-  const after = part?.parts?.length ? ` (parts: ${part.parts.map(quoted).join(', ')})` : part?.code ? ` (${quoted(part.code)})` : '';
-  // The picture's line only once the Inbox kept it: the window's request, before, has none.
-  const picture = part?.picture && !part.picture.startsWith('data:') ? [`A picture of what they boxed, the box drawn on it: ${part.picture}.`] : [];
-  const where = part
-    ? `on "${quoted(part.name)}"${after} in your Shape ${part.board}, from`
-    : target.file !== null && target.lines
-      ? `on ${target.lines[0] === target.lines[1] ? 'line' : 'lines'} ${inboxReviewLines(target.lines)} of ${target.file} in`
-      : 'on the Overview of';
-  return [
-    target.review
-      ? `The reviewer pressed Show me ${where} your review "${title}" (${target.review})${words}.`
-      : `The person pressed Show me on "${quoted(part?.name ?? '')}"${after} in your Shape ${part?.board ?? ''}${words}.`,
-    ...picture,
-    input.again
-      ? `Bring your Shape ${input.again} up to date with the code as it is now, as a new version. \`plannotator shape --help\` has how.`
-      : part
-        ? `Make a new Shape of that part, so they can see it the way you see it, and leave ${part.board} as it is. It can show code the board doesn't. \`plannotator shape --help\` has how.`
-        : 'Make a Shape of it, so they can see it the way you see it. `plannotator shape --help` has how.',
-    `Store it with \`${tie}\`: it opens ${target.review ? 'over the review ' : ''}by itself, so don't open a page.`,
-    // A board with no review behind it has no diff for a click to land in: the agent draws it as any board.
-    ...(target.review ? ['On each part that is code, put `data-code="path#L42"` (or `#L42-L48`) with the review\'s paths and the new file\'s line numbers: a click lands on those lines of the diff.'] : []),
-    'Then answer here in one or two sentences.',
-  ].join('\n');
-}
-
-/** The view Shape's renderer draws: `source` becomes `html`. */
-export function inboxDrawnViewOf(d: { source: string; css?: string; width?: number; height?: number; tall?: { source: string; css?: string } }): ShapeDrawnView {
-  return {
-    html: d.source,
-    ...(d.css !== undefined ? { css: d.css } : {}),
-    ...(d.width !== undefined && d.height !== undefined ? { width: d.width, height: d.height } : {}),
-    ...(d.tall ? { tall: { html: d.tall.source, ...(d.tall.css !== undefined ? { css: d.tall.css } : {}) } } : {}),
-  };
-}
-
 /**
  * Every `data-code` value in a drawing's HTML (the wide and the tall one), in
- * order, once each: read by Shape's own tag and attribute tokenizer, so a
- * value unquoted, or after `/` or another attribute's closing quote, is read.
+ * order, once each: read by the drawing rules' own tag and attribute tokenizer
+ * (./shape), so a value unquoted, or after `/` or another attribute's closing quote, is read.
  */
 export function inboxDrawingCodes(view: { html: string; tall?: { html: string } }): string[] {
   const out: string[] = [];
@@ -371,9 +297,9 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * A drawing as the agent sent it, checked by Shape's own rules (the board's
- * Picture) plus one of the review's: a part's code must be a file of the
- * review's diff. Field names are the agent's (`source`, `tall.source`).
+ * A drawing as the agent sent it (a guide's html diagram), checked by the
+ * drawing rules (./shape) plus one of the review's: a part's code must be a
+ * file of the review's diff. Field names are the agent's (`source`, `tall.source`).
  * `title`: allowed (a drawing has one) unless `withTitle` is false (the guide's overview diagram).
  */
 export function checkInboxDrawing(
@@ -415,14 +341,14 @@ export function checkInboxDrawing(
     }
   }
   const view = 'value' in checked ? checked.value : null;
-  // Every part's code, even when Shape found other problems: the agent hears them all at once.
+  // Every part's code, even when the rules found other problems: the agent hears them all at once.
   const sources = {
     html: typeof d.source === 'string' ? d.source : '',
     ...(isPlainObject(tall) && typeof tall.source === 'string' ? { tall: { html: tall.source } } : {}),
   };
   for (const value of inboxDrawingCodes(sources)) {
     const at = parseShapeCodeTarget(value);
-    // Shape's own check names a code it cannot read (shapeHtmlProblems); one it can must be a file of the review.
+    // The rules' own check names a code it cannot read (shapeHtmlProblems); one it can must be a file of the review.
     if (at && !files.includes(at.path)) problems.push(`data-code="${value.slice(0, 80)}": ${at.path} is not a file in this review`);
   }
   if (problems.length || !view) return { ok: false, problems: problems.length ? problems : ['source: is required'] };
@@ -430,37 +356,22 @@ export function checkInboxDrawing(
 }
 
 /**
- * What an old `plannotator review draw` or `review drawings` gets while Code review and Shape are on: Show me makes a
- * Shape now. With Shape off the review parse takes them, as with Code review off (approval "code-review-029-shape-off").
- */
-export const INBOX_REVIEW_DRAW_GONE = 'review_draw_gone: `plannotator review draw` is gone: Show me makes a Shape now. Run `plannotator shape --help`.';
-
-/**
  * get_guide_brief's field doc for a chapter's diagram, served only while Code review is on (it replaces the overview
- * diagram's doc: approval "guide-chapter-diagrams"). The Mermaid kind is offered whether Shape is on or off; the html
- * kind (a drawing by Shape's rules), its words and its drawing only while Shape is on too (approval
- * "code-review-029-shape-off": with Shape off an agent reads no word of Shape). get_guide_brief passes `shapeOn`.
- * AGENT TEXT: the rule's words are the owner's (clean-room verdict, "Candidate entry"); the html lines are the PR's.
+ * diagram's doc: approval "guide-chapter-diagrams"). It offers the Mermaid kind only.
+ * AGENT TEXT: the rule's words are the owner's (clean-room verdict, "Candidate entry").
  */
-export function inboxReviewChapterDiagramDoc(shapeOn: boolean): string {
-  return [
-    '- **sections[].diagram** (optional): one diagram at the top of a chapter, when a',
-    '  picture explains that chapter better than words. A chapter whose code is a flow of',
-    '  3 or more steps or outcomes (a request through middleware and a cache, a state',
-    '  machine, a handshake) gets one. A rename, a config value or one small function gets',
-    '  none. If a flow runs across several chapters, draw it once, in the chapter that holds',
-    '  most of it. It sits above the chapter\'s code, full width and at most about 320px tall',
-    '  (the person can expand it), so prefer a left-to-right flow (`flowchart LR`) and keep',
-    '  it to a handful of boxes. Mermaid arrows such as `-->` are fine: the rule against',
-    '  double hyphens is for prose.',
-    '  Mermaid: { "kind": "mermaid", "source" }.',
-    ...(shapeOn
-      ? ['  Or { "kind": "html", "source", "css"?, "width"?, "height"?, "tall"? }: `source` is a', '  drawing by the rules in `plannotator shape --help`.']
-      : []),
-  ].join('\n');
-}
-/** The doc with Shape on (Mermaid and the html kind). */
-export const INBOX_REVIEW_CHAPTER_DIAGRAM_DOC = inboxReviewChapterDiagramDoc(true);
+export const INBOX_REVIEW_CHAPTER_DIAGRAM_DOC: string = [
+  '- **sections[].diagram** (optional): one diagram at the top of a chapter, when a',
+  '  picture explains that chapter better than words. A chapter whose code is a flow of',
+  '  3 or more steps or outcomes (a request through middleware and a cache, a state',
+  '  machine, a handshake) gets one. A rename, a config value or one small function gets',
+  '  none. If a flow runs across several chapters, draw it once, in the chapter that holds',
+  '  most of it. It sits above the chapter\'s code, full width and at most about 320px tall',
+  '  (the person can expand it), so prefer a left-to-right flow (`flowchart LR`) and keep',
+  '  it to a handful of boxes. Mermaid arrows such as `-->` are fine: the rule against',
+  '  double hyphens is for prose.',
+  '  Mermaid: { "kind": "mermaid", "source" }.',
+].join('\n');
 
 /**
  * Context notes (issue #2588, approval "inbox-context-notes"): get_guide_brief's rule for a guide's notes, served only

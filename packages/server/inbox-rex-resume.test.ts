@@ -5,7 +5,7 @@
  * starting a second process on the same session id.
  */
 import { describe, expect, test } from "bun:test";
-import { INBOX_REX_RESUME_AFTER_BOOT_MS, inboxListingRunsSession, inboxListingSessionAgents, inboxProcessListing, inboxProcessStartedAt, inboxRexResumeHeld } from "./inbox-rex-resume";
+import { INBOX_REX_RESUME_AFTER_BOOT_MS, inboxListingRunsSession, inboxListingSessionAgents, inboxProcessListing, inboxProcessStartedAt, inboxRexResumeHeld, inboxCommandBeforeName } from "./inbox-rex-resume";
 
 const ID = "0b9f6c1e-2d3a-4c5b-8e7f-123456789abc";
 const CLAUDE = `  412   401 claude --resume ${ID} --settings /tmp/s.json --permission-mode auto`;
@@ -16,6 +16,26 @@ const PI = "  518   502 pi";
 describe("which process runs a session", () => {
   test("Claude Code resumed, or the tab's own shell line: each names it", () => {
     for (const line of [CLAUDE, TAB]) expect(inboxListingRunsSession(`  1     0 /sbin/launchd\n${line}\n`, ID)).toBe(true);
+  });
+
+  test("a thread whose name reads like another session's flag (`--name '--resume <id>'`) is never that session's process", () => {
+    const other = "99999999-2222-4333-8444-555555555555";
+    const named = `  402     1 claude --session-id ${ID} --name --resume ${other} --settings /tmp/s.json`;
+    const tab = `  403     1 /bin/zsh -l -c cd '/work/app' && exec claude '--session-id' '${ID}' '--name' '--session-id ${other}' '--settings' /tmp/s.json`;
+    for (const line of [named, tab]) {
+      expect(inboxListingRunsSession(line, other)).toBe(false);
+      expect(inboxCommandBeforeName(line)).not.toContain(other);
+    }
+    // Its own session is still found.
+    expect(inboxListingRunsSession(named, ID)).toBe(true);
+  });
+
+  test("a session the person resumed by hand with `--name` first (`claude --name foo --resume <id>`) is still that session's process, so a reply never opens a second copy", () => {
+    for (const line of [`  404     1 claude --name foo --resume ${ID}`, `  405     1 claude --name 'my fix' --session-id ${ID} --settings /tmp/s.json`]) {
+      expect(inboxListingRunsSession(line, ID)).toBe(true);
+    }
+    // A line that names no session is left whole.
+    expect(inboxCommandBeforeName("claude --name foo")).toBe("claude --name foo");
   });
 
   test("another session, a longer id that starts the same, the id only elsewhere on the line, or a Pi (its argv is not listed): not by the listing alone", () => {

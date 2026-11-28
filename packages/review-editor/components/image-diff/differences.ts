@@ -74,14 +74,25 @@ export function differenceScale(canvas: Size): number {
 
 const cache = new Map<string, Promise<DifferenceMask | null>>();
 
-async function bitmapOf(url: string, size: Size, scale: number): Promise<ImageBitmap> {
-  const blob = await (await fetch(url)).blob();
+/**
+ * One side to compare: its object URL, its size, and (a host whose page policy refuses `fetch` of a `blob:` URL, the
+ * Inbox's `connect-src 'self'`) `read`, its bytes again through that host's own route. Absent, the object URL is read.
+ */
+export interface DifferenceSide {
+  url: string;
+  size: Size;
+  read?: () => Promise<Blob>;
+}
+
+async function bitmapOf(side: DifferenceSide, scale: number): Promise<ImageBitmap> {
+  const { size } = side;
+  const blob = side.read ? await side.read() : await (await fetch(side.url)).blob();
   const resizeWidth = Math.max(1, Math.round(size.width * scale));
   const resizeHeight = Math.max(1, Math.round(size.height * scale));
   return createImageBitmap(blob, scale < 1 ? { resizeWidth, resizeHeight, resizeQuality: 'medium' } : {});
 }
 
-export function computeDifferences(key: string, old: { url: string; size: Size }, next: { url: string; size: Size }): Promise<DifferenceMask | null> {
+export function computeDifferences(key: string, old: DifferenceSide, next: DifferenceSide): Promise<DifferenceMask | null> {
   const cached = cache.get(key);
   if (cached) return cached;
   const task = (async () => {
@@ -90,7 +101,7 @@ export function computeDifferences(key: string, old: { url: string; size: Size }
     const scale = differenceScale(canvas);
     const width = Math.max(1, Math.round(canvas.width * scale));
     const height = Math.max(1, Math.round(canvas.height * scale));
-    const [a, b] = await Promise.all([bitmapOf(old.url, old.size, scale), bitmapOf(next.url, next.size, scale)]);
+    const [a, b] = await Promise.all([bitmapOf(old, scale), bitmapOf(next, scale)]);
     const id = (nextId += 1);
     const result = await new Promise<{ mask: ImageBitmap; changed: number }>((resolve) => {
       pending.set(id, resolve);

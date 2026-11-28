@@ -109,19 +109,6 @@ dialog.ib-dlg.ib-chow[open] { display: flex; flex-direction: column; }
 .ib-chow-seal svg.ib-ic { stroke-width: 2; }
 .ib-chow-relay .ib-chow-wire { margin-top: 10px; }
 
-.ib-chow-limits { gap: 32px; align-items: flex-start; padding-top: 28px; }
-.ib-chow-col { display: flex; flex-direction: column; gap: 10px; }
-.ib-chow-col-t { font-size: var(--ib-fs-11-5, 11.5px); font-weight: 600; color: var(--foreground); }
-.ib-chow-threads { display: flex; flex-direction: column; gap: 6px; width: 220px; flex: none; }
-.ib-chow-thread { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 10px; border: 1px solid var(--ib-line, var(--border)); border-radius: 8px; background: var(--card); box-shadow: 0 1px 2px oklch(0 0 0 / 0.05); }
-.ib-chow-thread > .ib-chow-bar { flex: 1 1 auto; max-width: 64px; }
-.ib-chow-why { margin-left: auto; font-size: var(--ib-fs-11-5, 11.5px); color: var(--muted-foreground); white-space: nowrap; }
-.ib-chow-cannot { display: grid; grid-template-columns: repeat(2, 96px); gap: 12px 10px; }
-.ib-chow-no { display: flex; flex-direction: column; align-items: center; gap: 6px; }
-.ib-chow-no-i { position: relative; display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 10px; border: 1px solid var(--ib-line, var(--border)); background: var(--card); color: var(--muted-foreground); }
-.ib-chow-no-i::after { content: ""; position: absolute; left: 7px; right: 7px; top: 50%; height: 1.5px; border-radius: 1px; background: var(--destructive); transform: rotate(-45deg); box-shadow: 0 0 0 1.5px var(--card); }
-.ib-chow-no-t { font-size: var(--ib-fs-11, 11px); line-height: 1.25; color: var(--foreground); text-align: center; }
-
 .ib-chow-replies { flex-direction: column; align-items: stretch; justify-content: center; gap: 12px; padding: 16px 28px; }
 .ib-chow-lane { display: flex; flex-direction: column; gap: 4px; width: 100%; max-width: 440px; align-self: center; }
 .ib-chow-lane-t { font-size: var(--ib-fs-11, 11px); font-weight: 550; color: var(--muted-foreground); }
@@ -150,10 +137,6 @@ dialog.ib-dlg.ib-chow[open] { display: flex; flex-direction: column; }
   .ib-chow-relay .ib-chow-wire-h { top: auto; bottom: 0; right: auto; left: 50%; transform: translateX(-50%) rotate(90deg); }
   .ib-chow-relay .ib-chow-wire[data-toward="left"] .ib-chow-wire-h { bottom: auto; top: 0; left: 50%; transform: translateX(-50%) rotate(-90deg); }
   .ib-chow-relay .ib-chow-wire-t { left: calc(50% + 34px); top: 50%; transform: translateY(-50%); }
-  .ib-chow-limits { flex-direction: column; align-items: center; gap: 16px; padding-top: 18px; }
-  .ib-chow-limits > .ib-chow-col { width: 100%; max-width: 320px; }
-  .ib-chow-threads { width: 100%; }
-  .ib-chow-cannot { grid-template-columns: repeat(4, minmax(0, 72px)); gap: 8px; }
   .ib-chow-replies { padding: 14px 12px; }
   .ib-chow-lane-r { padding: 8px 10px; }
   .ib-chow-lane .ib-chow-wire { min-width: 32px; margin: 0 6px; }

@@ -25,13 +25,35 @@
       "#guide-reader": ["./guide/reader-module.d.ts"],
       "#surface-guide-reader": ["./guide/surface-reader-module.d.ts"],
       "#search-palette": ["./search/SearchPalette.tsx"],
+      "#reviews-settings": ["./reviewSettings/ReviewsSettings.tsx"],
       // Post to GitHub/GitLab (the review app's dialog); PlatformPost.tsx is checked by tsconfig.guide.json.
-      "#platform-post": ["./guide/platform-post-module.d.ts"],
-      // The board's shape; the board itself is checked by tsconfig.guide.json.
-      "#shape-board": ["./shape/board-module.d.ts"]
+      "#platform-post": ["./guide/platform-post-module.d.ts"]
     }
   },
   "include": ["**/*.ts", "**/*.tsx"],
   // guideFeedback.test.ts compares the window's export with review-editor's, which does not compile under these settings.
-  "exclude": ["node_modules", "dist", "guide/GuideReader.tsx", "guide/SurfaceGuideReader.tsx", "guide/PlatformPost.tsx", "guide/PullRepoParts.tsx", "guide/PullChangesTree.tsx", "guide/useSemDiffClient.ts", "guide/useSemDiffClient.test.tsx", "shape/ShapeBoard.tsx", "guideFeedback.test.ts"]
+  // One path per line, so two changes that each add one do not touch the same line.
+  "exclude": [
+    "node_modules",
+    "dist",
+    "guide/GuideReader.tsx",
+    "guide/SurfaceGuideReader.tsx",
+    "guide/PlatformPost.tsx",
+    "guide/PullRepoParts.tsx",
+    "guide/PullChangesTree.tsx",
+    // guide/pullChangesTreeRisk.test.tsx renders guide/PullChangesTree.tsx, excluded for the same reason (it reaches
+    // review-editor's ReviewStateContext and AllFilesCodeView); tsconfig.guide.json checks both.
+    "guide/pullChangesTreeRisk.test.tsx",
+    // Renders guide/GuideReader.tsx's GuideDiff (excluded above) to prove a diff loads the picked code font.
+    "guide/diffFontLoad.test.tsx",
+    "guide/useSemDiffClient.ts",
+    "guide/renderedFiles.tsx",
+    "guide/useSemDiffClient.test.tsx",
+    // Renders guide/useSemDiffClient.ts (excluded above) to prove config.json's "Semantic changes" switch reaches it.
+    "reviewAnalysis.test.tsx",
+    "guide/ReviewKeys.tsx",
+    "guide/reviewWalk.ts",
+    "guide/reviewKeys.test.tsx",
+    "guideFeedback.test.ts"
+  ]
 }

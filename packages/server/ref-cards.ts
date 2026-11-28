@@ -20,6 +20,8 @@ import { fetchBbPRCard } from "@plannotator/shared/pr-provider";
 import { prCommandRuntime } from "./pr";
 
 import { childEnv } from "@plannotator/shared/child-env";
+import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
+import { withSessionLinearCards } from "@plannotator/shared/linear-cards";
 import { sessionTailnetAskAllowed } from "./session-tailnet";
 
 export * from "@plannotator/shared/ref-cards";
@@ -109,6 +111,18 @@ export const bitbucketRefReader: BitbucketRefReader = (ref, signal) => fetchBbPR
 /** `createRefCards` with the Bun runner by default (tests pass their own). */
 export function createRefCards(options: Partial<Parameters<typeof createSharedRefCards>[0]> = {}): ReturnType<typeof createSharedRefCards> {
   return createSharedRefCards({ ...options, run: options.run ?? refCliRunner });
+}
+
+/**
+ * The cards behind `GET /api/ref` on a Bun plan, annotate or review server: the forges', with Linear issue links
+ * answered from Linear (`withSessionLinearCards`, packages/shared/linear-cards.ts; Pi's servers do the same) under
+ * the Inbox's key (the one saved in its Settings → Accounts, else `LINEAR_API_KEY`), read per fetch. A test's own
+ * `refRunner` gets no real Linear.
+ */
+export function createRefCardsWithLinear(refRunner?: RefRunner): ReturnType<typeof createRefCards> {
+  const cards = createRefCards(refRunner ? { run: refRunner } : {});
+  if (refRunner) return cards;
+  return withSessionLinearCards(cards, getPlannotatorDataDir());
 }
 
 /**

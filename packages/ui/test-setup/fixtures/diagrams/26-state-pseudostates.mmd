@@ -1,0 +1,14 @@
+stateDiagram-v2
+  state "Long name" as L
+  state ch <<choice>>
+  state fk <<fork>>
+  state jn <<join>>
+  [*] --> L
+  L --> ch
+  ch --> fk: yes
+  ch --> jn: no
+  fk --> A
+  fk --> B
+  A --> jn
+  B --> jn
+  jn --> [*]

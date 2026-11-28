@@ -335,9 +335,10 @@ describe("a reply to a running Qwen Code session", () => {
   test("misaddressed (the socket serves another session now, after /clear): the session has ended, the reply is saved, and it is never sent again", async () => {
     const w = await world();
     const sent = await qwenSends(w.client, w.project, "Ship it?");
-    const replyId = await reply(w.server, sent.message_id, "Yes.");
     // The record still names the session, but the process behind the socket moved on (/clear swapped its id).
+    // Set before the reply: the reply wakes the session by itself, and a frame answered before this line got "delivered".
     w.session.answer = "misaddressed";
+    const replyId = await reply(w.server, sent.message_id, "Yes.");
     await w.server.qwenWake.sweep();
     await until(() => w.session.received.length > 0);
     await until(async () => (await asker(w.server, sent.thread_id)).live === false);

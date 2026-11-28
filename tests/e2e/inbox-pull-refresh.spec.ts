@@ -189,9 +189,9 @@ for (const phone of [
         await expect(body(page).locator('[data-thread-id]').first()).toBeVisible();
         await expect(indicator(page)).toHaveAttribute('aria-hidden', 'true');
 
-        // An agent writes while the person reads: held behind "1 new".
+        // An agent writes while the person reads: held behind "New from …".
         const late = await agentWrites(`Release notes (${tag})`);
-        await expect(notice(page)).toContainText('1 new');
+        await expect(notice(page)).toContainText(/^New from .+: “/);
         await expect(row(page, late)).toHaveCount(0);
 
         const box = (await body(page).boundingBox())!;
@@ -210,7 +210,7 @@ for (const phone of [
         await expect(indicator(page)).not.toHaveAttribute('data-state', /./);
         await page.waitForTimeout(300);
         expect(reads).toBe(before);
-        await expect(notice(page)).toContainText('1 new');
+        await expect(notice(page)).toContainText(/^New from .+: “/);
 
         // Mid-pull: the ↻ shows under the header, the list follows the finger.
         await touch.down(x, y);
@@ -273,7 +273,7 @@ for (const phone of [
           await expect(indicator(page)).toHaveAttribute('data-state', 'ready');
           const old = await row(page, late).elementHandle();
           await world.agent.send({ project_path: world.path, reply_to: late, body: ':::question\nShip it today?\n- Yes\n- No\n:::', agent_session: `ses_pull_ask_${tag}` } as Parameters<SimAgent['send']>[0]);
-          await expect(notice(page)).toContainText('1 new');
+          await expect(notice(page)).toContainText(/^.+ asked in “/);
           // Show, taken in without lifting the finger (as a second finger could).
           await notice(page).evaluate((el) => (el as HTMLElement).click());
           await expect.poll(() => old!.evaluate((el) => el.isConnected)).toBe(false);

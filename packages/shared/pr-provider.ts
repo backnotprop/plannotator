@@ -2,7 +2,7 @@
  * Server-only PR/MR dispatch.
  *
  * Each platform is one `PRProvider` implementation (pr-github.ts,
- * pr-gitlab.ts, pr-bitbucket.ts) registered in `PROVIDERS`; the exported
+ * pr-gitlab.ts, pr-bitbucket.ts, pr-forgejo.ts) registered in `PROVIDERS`; the exported
  * functions look the provider up from `PRRef.platform` and delegate. Optional
  * provider methods are capabilities: a platform that omits one gets the
  * documented neutral answer (no viewed state, no stack, empty PR list), and
@@ -20,9 +20,10 @@ import { checkGhAuth, getGhUser, fetchGhPR, fetchGhPRContext, fetchGhRequestedRe
 import { checkGlAuth, getGlUser, fetchGlMR, fetchGlMRContext, fetchGlFileContent, fetchGlFileBytes, submitGlMRReview, fetchGlTree, upsertGlDescriptionSection, upsertGlMarkedNote } from "./pr-gitlab";
 import { fetchGlMRList, fetchGlMRStack } from "./pr-gitlab-stack";
 import { checkBbAuth, getBbUser, fetchBbPR, fetchBbPRContext, fetchBbFileContent, fetchBbFileBytes, submitBbPRReview, fetchBbPRList, fetchBbTree } from "./pr-bitbucket";
+import { checkFjAuth, getFjUser, fetchFjPR, fetchFjPRContext, fetchFjFileContent, fetchFjFileBytes, submitFjPRReview, fetchFjPRList, fetchFjTree } from "./pr-forgejo";
 import { ensureGhPRAccess, ghScopedRuntime } from "./pr-github-account";
 import type { PRMarkedCommentInput, PRMarkedResult, PRMarkedSectionInput } from "./pr-marked";
-import type { BitbucketPRRef, GithubPRRef, GitlabMRRef, Platform, PRAuthResult, PRFileBytesResult, PRRuntime, PRRef, PRMetadata, PRContext, PRReviewFileComment, PRReviewFileLevelComment, PRReviewAction, PRReviewSubmissionResult, PRStackTree, PRListItem, PRTreeResult } from "./pr-types";
+import type { BitbucketPRRef, ForgejoPRRef, GithubPRRef, GitlabMRRef, Platform, PRAuthResult, PRFileBytesResult, PRRuntime, PRRef, PRMetadata, PRContext, PRReviewFileComment, PRReviewFileLevelComment, PRReviewAction, PRReviewSubmissionResult, PRStackTree, PRListItem, PRTreeResult } from "./pr-types";
 
 // Re-export the browser-safe surface so server callers can keep using
 // pr-provider as a single facade. Browser code imports from pr-types
@@ -124,12 +125,27 @@ const bitbucketProvider: PRProvider<BitbucketPRRef> = {
   fetchTree: fetchBbTree,
 };
 
+const forgejoProvider: PRProvider<ForgejoPRRef> = {
+  checkAuth: checkFjAuth,
+  getUser: getFjUser,
+  fetchPR: fetchFjPR,
+  fetchContext: fetchFjPRContext,
+  fetchFileContent: fetchFjFileContent,
+  fetchFileBytes: fetchFjFileBytes,
+  // File-level comments fold into the body: the review post anchors line comments only.
+  submitReview: (runtime, ref, headSha, action, body, fileComments, fileLevelComments) =>
+    submitFjPRReview(runtime, ref, headSha, action, foldFileLevelComments(body, fileLevelComments), fileComments),
+  fetchList: fetchFjPRList,
+  fetchTree: fetchFjTree,
+};
+
 type ProviderRegistry = { [P in Platform]: PRProvider<Extract<PRRef, { platform: P }>> };
 
 const PROVIDERS: ProviderRegistry = {
   github: githubProvider,
   gitlab: gitlabProvider,
   bitbucket: bitbucketProvider,
+  forgejo: forgejoProvider,
 };
 
 /** The provider for a ref's platform. */

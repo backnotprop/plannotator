@@ -4,6 +4,7 @@ import { COMPACT_FILE_HEADER_HEIGHT, COMPACT_HUNK_SEPARATOR_HEIGHT, FILE_HEADER_
 import React, { memo, startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ContextNoteAnchor } from '../utils/contextNoteAnchor';
 import { createPortal } from 'react-dom';
+import { RegionBoundary } from '@plannotator/ui/components/RegionBoundary';
 import { revealFirstChange } from '../utils/revealFirstChange';
 import { DEFAULT_CODE_VIEW_FILE_METRICS, getSingularPatch, hydratePartialDiff, processFile } from '@pierre/diffs';
 import type {
@@ -25,6 +26,7 @@ import type {
   ConventionalDecoration,
   ConventionalLabel,
   DiffAnnotationMetadata,
+  ImageAttachment,
   TokenAnnotationMeta,
 } from '@plannotator/ui/types';
 import { CommentPopover } from '@plannotator/ui/components/CommentPopover';
@@ -35,7 +37,7 @@ import { useConfigValue } from '@plannotator/ui/config';
 import type { SemDiffClient, SemDiffResult } from '../semDiff/semDiffClient';
 import type { PowerUpConfig, PowerUpFileState, PowerUpStatus } from '../semDiff/powerUp';
 import { POWER_UP_PERIOD_MS, POWER_UP_ROW, powerUpCss } from '../semDiff/powerUpCss';
-import { SemanticFileNote, type SemanticFileState } from '../semDiff/SemanticFileNote';
+import type { SemanticFileState } from '../semDiff/semanticFileState';
 import type { DiffFile, AnnotationScrollTarget } from '../types';
 import type { MarkdownFileView } from '../utils/markdownPreview';
 import { buildFileTree, getVisualFileOrder } from '../utils/buildFileTree';
@@ -99,6 +101,7 @@ import {
   type HostFileNote,
   type HostLineNote,
 } from './hostLineNotes';
+import { dropHostLineMarks, HOST_LINE_MARKS_CSS, keepHostLineMarks, NO_HOST_LINE_MARKS, type HostLineMark, type OnHostLineMark } from './hostLineMarks';
 import { applyFileLanguageFixes } from '../utils/highlightLanguage';
 import type { AIChatEntry } from '../hooks/useAIChat';
 import type { ReviewSearchMatch } from '../utils/reviewSearch';
@@ -230,6 +233,11 @@ export interface AllFilesCodeViewProps {
   /** What the host draws itself about a whole file (hostLineNotes.ts): in the file's header, under its path, above its
    *  first lines and the person's own file comments; read-only, never annotations. Absent: none, as before. */
   hostFileNotes?: readonly HostFileNote[];
+  /** The host's marks at the right edge of lines (hostLineMarks.ts): a button at each marked line's end, never over
+   *  code. Only a view of one file draws them. Absent: none, as before. */
+  hostLineMarks?: readonly HostLineMark[];
+  /** Hears the marks: hover, keyboard focus, a press (hostLineMarks.ts). */
+  onHostLineMark?: OnHostLineMark;
   selectedAnnotationId: string | null;
   scrollTargetAnnotation: AnnotationScrollTarget | null;
   lineTarget?: AllFilesLineTarget | null;
@@ -327,7 +335,8 @@ export interface AllFilesCodeViewProps {
   onExplainAnnotation?: (id: string) => void;
   agentFindingSources?: ReadonlySet<string>;
   // Header actions (P3). Mirror AllFilesDiffView's header surface.
-  onAddFileCommentForFile?: (filePath: string, text: string) => void;
+  /** A file's comment box: its words and what was attached (pictures, files). */
+  onAddFileCommentForFile?: (filePath: string, text: string, images?: ImageAttachment[]) => void;
   viewedFiles?: Set<string>;
   onToggleViewed?: (filePath: string) => void;
   /** Chrome preference (#1277): false hides the header Viewed buttons; the `v`
@@ -374,8 +383,12 @@ export interface AllFilesCodeViewProps {
    * the caller decides what a hoverable symbol is. Stitching a fragmented
    * identifier is app-only work, and this component is also compiled into the
    * read-only portable guide viewer, which passes neither handler.
+   *
+   * Return `false` when the token is not a symbol a card can open for (a
+   * comment, punctuation, a keyword): the view then paints no hover underline
+   * or hand cursor on it.
    */
-  onTokenHoverEnter?: (props: DiffTokenEventBaseProps, filePath: string) => void;
+  onTokenHoverEnter?: (props: DiffTokenEventBaseProps, filePath: string) => boolean | void;
   onTokenHoverLeave?: () => void;
   /** The token under the pointer, and the last one clicked: where code
    *  review's F12 looks. The portable viewer passes none. */
@@ -502,7 +515,7 @@ export interface AllFilesCodeViewProps {
   askOnly?: boolean;
   /**
    * A host's choices for selected lines before the comment box (the Inbox's
-   * code review: Comment · Ask · Show me). Absent: a selection opens the
+   * code review: Comment · Ask). Absent: a selection opens the
    * comment box at once, as always.
    */
   selectionActions?: DiffSelectionActions;
@@ -769,6 +782,27 @@ function markdownPreviewFileDiff(full: FileDiffMetadata): FileDiffMetadata {
  */
 const SCROLLED_PAST_EPSILON_PX = 8;
 
+/** The reader's own input that can move the list (scrollbar and tree clicks are pointer presses). */
+const READER_INPUT_EVENTS = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;
+
+/**
+ * How long the scroll a remount's restore makes belongs to the view (from the
+ * moment it is issued). Short and self-ending: after it, every scroll counts
+ * for Viewed as you scroll exactly as before, whatever produced it.
+ */
+const RESTORE_SCROLL_WINDOW_MS = 300;
+
+/** Input types that take no typing: a key pressed on one can move the list. */
+const NON_TEXT_INPUT_TYPES = new Set(['button', 'checkbox', 'color', 'file', 'image', 'radio', 'range', 'reset', 'submit']);
+
+/** Typing into a field (the file filter, a comment) is not moving the list. */
+function isTextEntryTarget(event: Event): boolean {
+  const target = event.composedPath()[0] ?? event.target;
+  if (!(target instanceof HTMLElement)) return false;
+  if (target instanceof HTMLInputElement) return !NON_TEXT_INPUT_TYPES.has(target.type);
+  return target.isContentEditable || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement;
+}
+
 /** The one VirtualizedFileDiff method the image-header sizing needs. */
 type HeaderMetricsTarget = { setMetrics(metrics?: Partial<VirtualFileMetrics>, force?: boolean): void };
 const isHeaderMetricsTarget = (value: unknown): value is HeaderMetricsTarget =>
@@ -853,13 +887,27 @@ const EMPTY_CONTEXT_NOTES: readonly ContextNoteAnchor[] = [];
 const noopAIMarkerClick = () => {};
 
 const SCROLL_SPEED_FRESH_MS = 100;
+const FRAME_MS = 16;
+const SETTLE_FRAMES = 10;
 const SWAP_LEAD_MS = 100;
 
 function stickyHeaderHeight(node: HTMLElement | undefined): number {
   return node?.shadowRoot?.querySelector('[data-diffs-header]')?.getBoundingClientRect().height || FILE_HEADER_HEIGHT;
 }
 
-export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
+/**
+ * The diff in its own boundary: a draw that throws (a "+" on a line, the comment box under it) says so in the diff's
+ * place, and the page around it stays (ui's RegionBoundary). The selection a "+" sets is the host's, above the
+ * boundary: Try again clears it first, or the diff would draw it again and fail again. The words typed in the comment
+ * box are not in it (the toolbar's draft store keeps them by file and lines), so they are there when the box opens again.
+ */
+export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = (props) => (
+  <RegionBoundary name="Diff" onRetry={() => props.onLineSelection(null)}>
+    <AllFilesCodeViewBody {...props} />
+  </RegionBoundary>
+);
+
+const AllFilesCodeViewBody: React.FC<AllFilesCodeViewProps> = ({
   files,
   diffStyle,
   diffOverflow,
@@ -874,6 +922,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   annotations,
   hostLineNotes = NO_HOST_LINE_NOTES,
   hostFileNotes = NO_HOST_FILE_NOTES,
+  hostLineMarks = NO_HOST_LINE_MARKS,
+  onHostLineMark,
   selectedAnnotationId,
   scrollTargetAnnotation,
   lineTarget,
@@ -1109,6 +1159,46 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // file the reviewer merely arrived at, without touching anything, which is
   // the one thing auto-mark-viewed must never do.
   const hasScrolledRef = useRef(false);
+  // A remount (a file filter, a diff switch, a sort change) puts the reader
+  // back on their file, and that restore, clamped when the list got shorter,
+  // fires scroll events nobody made: on a short list it lands at the bottom and
+  // would mark the last file. So the restore's own scroll belongs to the view:
+  // from its scrollTo for RESTORE_SCROLL_WINDOW_MS, or until the reader's next
+  // wheel, touch, pointer press or key (outside a text field) once the
+  // restore's first scroll event has been seen; input before that event is
+  // ignored, so it cannot hand the restore's scroll to the reader.
+  const viewScrollRef = useRef(false);
+  const restoreScrollSeenRef = useRef(false);
+  const restoreRafRef = useRef<number | null>(null);
+  const restoreTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const endViewScroll = useCallback(() => {
+    if (restoreTimerRef.current != null) clearTimeout(restoreTimerRef.current);
+    restoreTimerRef.current = null;
+    viewScrollRef.current = false;
+    restoreScrollSeenRef.current = false;
+  }, []);
+  useEffect(() => () => {
+    if (restoreRafRef.current != null) cancelAnimationFrame(restoreRafRef.current);
+    endViewScroll();
+  }, [endViewScroll]);
+  // Whether a scroll that counts has happened on this file set (see
+  // viewScrollRef). Gates the at-bottom signal and new pass candidates.
+  const readerScrolledRef = useRef(false);
+  // Listened for only where auto-view is wired: a read-only or portable host
+  // gets no window key listener from this view.
+  const tracksReaderInput = onFileScrolledPast != null && !readOnly;
+  useEffect(() => {
+    if (!tracksReaderInput) return;
+    const readerMoved = (event: Event) => {
+      if (!viewScrollRef.current || !restoreScrollSeenRef.current) return;
+      if (event.type === 'keydown' && isTextEntryTarget(event)) return;
+      endViewScroll();
+    };
+    for (const type of READER_INPUT_EVENTS) window.addEventListener(type, readerMoved, { capture: true, passive: true });
+    return () => {
+      for (const type of READER_INPUT_EVENTS) window.removeEventListener(type, readerMoved, { capture: true });
+    };
+  }, [tracksReaderInput, endViewScroll]);
 
   // The file CodeView last reported a selection / line-click in. The toolbar is
   // keyed off this file's path + patch, but the value is sourced from the
@@ -1355,8 +1445,10 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     const moved = () => {
       if (!page) return;
       const now = { top: page.scrollTop, at: performance.now() };
-      scrollSpeedRef.current = { pxPerMs: Math.abs(now.top - last.top) / Math.max(1, now.at - last.at), at: now.at };
+      const gap = now.at - last.at;
+      scrollSpeedRef.current = { pxPerMs: Math.abs(now.top - last.top) / (gap > SCROLL_SPEED_FRESH_MS ? FRAME_MS : Math.max(1, gap)), at: now.at };
       last = now;
+      if (now.top > 0) engage();
     };
     moves?.addEventListener('scroll', moved, { passive: true });
     return () => {
@@ -1613,10 +1705,21 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     const previousVisible = visibleFileRef.current;
     const offset = restoredContentKeyRef.current === contentKey ? -visibleOffsetRef.current : 0;
     restoredContentKeyRef.current = contentKey;
+    endViewScroll();
+    readerScrolledRef.current = false;
     if (previousVisible) {
       const restoreId = filePathToItemId.get(previousVisible);
       if (restoreId != null) {
-        requestAnimationFrame(() => {
+        // A second remount in the same frame replaces the first one's restore.
+        if (restoreRafRef.current != null) cancelAnimationFrame(restoreRafRef.current);
+        restoreRafRef.current = requestAnimationFrame(() => {
+          restoreRafRef.current = null;
+          if (tracksReaderInput) {
+            // The window opens as the restore's scroll is issued.
+            endViewScroll();
+            viewScrollRef.current = true;
+            restoreTimerRef.current = setTimeout(endViewScroll, RESTORE_SCROLL_WINDOW_MS);
+          }
           restoringRef.current = true;
           try {
             viewerRef.current?.scrollTo({ type: 'item', id: restoreId, align: 'start', offset });
@@ -2113,6 +2216,20 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   useEffect(() => () => {
     if (augmentFlushTimerRef.current != null) clearTimeout(augmentFlushTimerRef.current);
   }, []);
+  const landingsRef = useRef(new Map<string, () => boolean>());
+  const landingFrameRef = useRef<number | null>(null);
+  const landInFrame = useCallback((itemId: string, decide: () => boolean) => {
+    landingsRef.current.set(itemId, decide);
+    landingFrameRef.current ??= requestAnimationFrame(() => {
+      landingFrameRef.current = null;
+      const decisions = [...landingsRef.current.values()];
+      landingsRef.current.clear();
+      if (decisions.map((decide) => decide()).includes(true)) viewerRef.current?.getInstance()?.render(true);
+    });
+  }, []);
+  useEffect(() => () => {
+    if (landingFrameRef.current != null) cancelAnimationFrame(landingFrameRef.current);
+  }, []);
 
   const [semanticNotes, setSemanticNotes] = useState<ReadonlyMap<string, SemanticMinimapNote[]>>(new Map());
   const openHeldFolds = useStableCallback((itemId: string, fileDiff: FileDiffMetadata, annotations: readonly { side: string; lineNumber: number }[] | undefined): FileDiffMetadata => {
@@ -2160,6 +2277,57 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     handle.updateItem(item);
   });
 
+  const heldLengthRef = useRef<((keep?: boolean) => { px: number; height: number } | null) | null>(null);
+  const toggleInPlace = useStableCallback((itemId: string, on: boolean) => {
+    const root = scrollRef.current;
+    const page = root && (scrollsWithPageRef.current ? pageScrollRef.current?.page ?? null : root);
+    const node = itemNodeRef.current.get(itemId);
+    const most = page ? Math.ceil(node?.isConnected ? node.getBoundingClientRect().height : page.clientHeight) : 0;
+    const held = heldLengthRef.current?.(true) ?? null;
+    if (root && page && (held || (page.scrollTop > 0 && page.scrollHeight - page.scrollTop - page.clientHeight < most))) {
+      const height = held?.height ?? page.scrollHeight;
+      let px = (held?.px ?? 0) + most;
+      root.style.paddingBottom = `${px}px`;
+      let settled = false;
+      let calm = 0;
+      let last = -1;
+      let frame = 0;
+      const settle = () => {
+        const natural = page.scrollHeight - px;
+        calm = natural === last ? calm + 1 : 0;
+        last = natural;
+        if (calm < SETTLE_FRAMES) {
+          frame = requestAnimationFrame(settle);
+          return;
+        }
+        px = Math.min(px, Math.max(0, Math.max(height, page.scrollTop + page.clientHeight) - natural));
+        root.style.paddingBottom = px > 0 ? `${px}px` : '';
+        settled = true;
+      };
+      frame = requestAnimationFrame(settle);
+      const moves = page === document.documentElement ? window : page;
+      const check = () => {
+        if (settled && px > 0 && page.scrollTop + page.clientHeight <= page.scrollHeight - px) heldLengthRef.current?.();
+      };
+      const gesture = () => {
+        if (settled && px === 0) heldLengthRef.current?.();
+      };
+      const gestures = ['wheel', 'touchstart', 'keydown'] as const;
+      moves.addEventListener('scroll', check, { passive: true });
+      for (const type of gestures) document.addEventListener(type, gesture, { capture: true, passive: true });
+      heldLengthRef.current = (keep = false) => {
+        cancelAnimationFrame(frame);
+        moves.removeEventListener('scroll', check);
+        for (const type of gestures) document.removeEventListener(type, gesture, { capture: true });
+        if (!keep) root.style.paddingBottom = '';
+        heldLengthRef.current = null;
+        return settled && px === 0 ? null : { px, height };
+      };
+    }
+    showSemantic(itemId, on);
+  });
+  useEffect(() => () => void heldLengthRef.current?.(), [fileSetKey]);
+
   const allMinimapMarks = useMemo(
     () => (semanticNotes.size === 0 ? minimapMarks : [...(minimapMarks ?? []), ...[...semanticNotes.values()].flat()]),
     [minimapMarks, semanticNotes],
@@ -2168,7 +2336,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   const semanticWasEnabledRef = useRef(semanticEnabled);
   const semanticAskedForRef = useRef(new Set<string>());
   useEffect(() => {
-    if (semanticEnabled && !semanticWasEnabledRef.current) semanticAskedForRef.current = new Set([...itemNodeRef.current.keys()].map((itemId) => `${fileSetKeyRef.current}::${itemId}`));
+    if (semanticEnabled && !semanticWasEnabledRef.current) semanticAskedForRef.current = new Set([...itemNodeRef.current.keys()].filter((itemId) => !semDiffsRef.current.has(itemId)).map((itemId) => `${fileSetKeyRef.current}::${itemId}`));
     semanticWasEnabledRef.current = semanticEnabled;
     for (const itemId of semDiffsRef.current.keys()) showSemantic(itemId, semanticEnabled);
     for (const itemId of semStateRef.current.keys()) if (!semDiffsRef.current.has(itemId) || itemId === editSession.editingItemIdRef.current) refreshItem(itemId);
@@ -2259,17 +2427,22 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       semantic.cacheKey = `${generation}::${itemId}#semantic${links.length > 0 ? `:${links.map((link) => link.candidateId).join(',')}` : ''}`;
       const previous = semDiffsRef.current.get(itemId);
       const plain = previous?.plain ?? (previewAppliedRef.current.has(itemId) ? fullDiffsRef.current.get(itemId) ?? item.fileDiff : item.fileDiff);
-      const drawnSemantic = previous != null && semStateRef.current.get(itemId)?.status === 'semantic';
-      semDiffsRef.current.set(itemId, { plain, semantic });
-      if (swap && !arrowLoadedRef.current.has(`${generation}::${itemId}`) && swapsUnseen(itemId, secondOpinion)) {
-        semStateRef.current.set(itemId, { status: 'off', summary: result.summary });
-        pendingSummaryRef.current.delete(itemId);
-        showSemantic(itemId, semanticEnabledRef.current);
-        return;
-      }
-      if (drawnSemantic) pendingSummaryRef.current.set(itemId, result.summary);
-      else semStateRef.current.set(itemId, { status: 'off', summary: result.summary });
-      refreshItem(itemId);
+      const landed = { plain, semantic };
+      semDiffsRef.current.set(itemId, landed);
+      landInFrame(itemId, () => {
+        if (stale() || semDiffsRef.current.get(itemId) !== landed) return false;
+        const drawnSemantic = previous != null && semStateRef.current.get(itemId)?.status === 'semantic';
+        if (swap && !arrowLoadedRef.current.has(`${generation}::${itemId}`) && swapsUnseen(itemId, secondOpinion)) {
+          semStateRef.current.set(itemId, { status: 'off', summary: result.summary });
+          pendingSummaryRef.current.delete(itemId);
+          showSemantic(itemId, semanticEnabledRef.current);
+          return true;
+        }
+        if (drawnSemantic) pendingSummaryRef.current.set(itemId, result.summary);
+        else semStateRef.current.set(itemId, { status: 'off', summary: result.summary });
+        refreshItem(itemId);
+        return false;
+      });
     });
   });
 
@@ -2279,11 +2452,11 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     const powerUp = powerUpRef.current;
     if (!client || !texts || !powerUp?.active) return;
     const { file, oldText, newText, generation, signal } = texts;
-    const stale = () => signal.aborted || fileSetKeyRef.current !== generation;
+    const stale = () => signal.aborted || fileSetKeyRef.current !== generation || powerUpRef.current !== powerUp;
     const hadLinks = (powerUpFilesRef.current.get(itemId)?.links.length ?? 0) > 0;
     powerUpFilesRef.current.set(itemId, { state: 'asking', links: [] });
     reportPowerUp();
-    void client.diff(file.path, oldText, newText, signal, { rejected: powerUp.rejected }).then((result) => {
+    void client.diff(file.path, oldText, newText, signal, powerUp).then((result) => {
       if (stale()) return;
       const report = result?.secondOpinion;
       if (!result || !report) {
@@ -2344,20 +2517,38 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     restartPowerUpStream();
   }, [powerUpStream]);
   const powerUpRetry = powerUp?.retry ?? 0;
+  const settingsRevision = powerUp?.settingsRevision ?? 0;
+  const previousSettingsRevision = useRef(settingsRevision);
   useEffect(() => {
-    if (!powerUpActive) {
+    const providerChanged = previousSettingsRevision.current !== settingsRevision;
+    previousSettingsRevision.current = settingsRevision;
+    if (!powerUpActive || providerChanged) {
       const client = semClientRef.current;
+      const config = powerUpRef.current;
+      const restoring = new Set<string>();
       for (const [itemId, entry] of powerUpFilesRef.current) {
         const texts = semTextsRef.current.get(itemId);
         if (entry.links.length === 0 || !client || !texts) continue;
+        restoring.add(itemId);
         const { file, oldText, newText, generation, signal } = texts;
-        const stale = () => signal.aborted || fileSetKeyRef.current !== generation;
+        const stale = () => signal.aborted || fileSetKeyRef.current !== generation || powerUpRef.current !== config;
+        if (powerUpActive) {
+          showSemantic(itemId, false);
+          semDiffsRef.current.delete(itemId);
+          semStateRef.current.delete(itemId);
+          refreshItem(itemId);
+        }
         void client.diff(file.path, oldText, newText, signal).then((result) => {
-          if (result && !stale()) applySemanticResult(itemId, file, oldText, newText, generation, stale, result, () => {});
+          if (stale()) return;
+          if (result) applySemanticResult(itemId, file, oldText, newText, generation, stale, result, () => {}, true, undefined, true);
+          if (powerUpActive) runPowerUp(itemId);
         });
       }
       powerUpFilesRef.current = new Map();
       reportPowerUp();
+      if (powerUpActive) {
+        for (const itemId of semTextsRef.current.keys()) if (!restoring.has(itemId)) runPowerUp(itemId);
+      }
       return;
     }
     for (const [itemId, entry] of powerUpFilesRef.current) {
@@ -2365,7 +2556,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     }
     for (const itemId of semTextsRef.current.keys()) if (!powerUpFilesRef.current.has(itemId)) runPowerUp(itemId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rejectedKey, powerUpActive, powerUpRetry]);
+  }, [rejectedKey, powerUpActive, powerUpRetry, settingsRevision]);
 
   const prefetchWholeFile = useCallback((itemId: string) => {
     const hostRead = fetchFileContentRef.current;
@@ -2613,6 +2804,18 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     for (const itemId of itemNodeRef.current.keys()) if (!semDiffsRef.current.has(itemId)) prefetchWholeFile(itemId);
   }, [semanticEnabled, prefetchWholeFile]);
 
+  // The host's line marks (hostLineMarks.ts): this view's file's, kept on its lines each time the file draws, and
+  // again on every drawn file when they change.
+  const onlyPath = files.length === 1 ? files[0]!.path : null;
+  const lineMarks = useMemo(() => (onlyPath ? hostLineMarks.filter((mark) => mark.filePath === onlyPath) : NO_HOST_LINE_MARKS), [hostLineMarks, onlyPath]);
+  const lineMarksRef = useRef(lineMarks);
+  lineMarksRef.current = lineMarks;
+  const onHostLineMarkRef = useRef(onHostLineMark);
+  onHostLineMarkRef.current = onHostLineMark;
+  useEffect(() => {
+    for (const node of itemNodeRef.current.values()) if (node.shadowRoot) keepHostLineMarks(node.shadowRoot, lineMarks, onHostLineMarkRef.current);
+  }, [lineMarks, onHostLineMark]);
+
   const handlePostRender = useStableCallback(
     (
       node: HTMLElement,
@@ -2624,6 +2827,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       if (!hasFirstCodePainted()) requestAnimationFrame(() => setTimeout(markFirstCodePainted, 0));
       if (phase === 'unmount') {
         clearItemSearchHighlights(node);
+        if (node.shadowRoot) dropHostLineMarks(node.shadowRoot);
         nodeToItemIdRef.current.delete(node);
         if (itemNodeRef.current.get(context.id) === node) itemNodeRef.current.delete(context.id);
         return;
@@ -2645,6 +2849,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       if (heldSelectionIdRef.current === context.id && context.fileDiff.isPartial !== true) setWholeAfterHold((n) => n + 1);
       if (flushesFiles) syncTrailingRow(node, context);
       if (powerUpStreamRef.current) keepPowerUpInStep(node);
+      if (node.shadowRoot) keepHostLineMarks(node.shadowRoot, lineMarksRef.current, onHostLineMarkRef.current);
       prefetchWholeFile(context.id);
       const itemId = context.id;
       requestAnimationFrame(() => applyItemHighlights(node, itemId));
@@ -2911,6 +3116,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
               'F', a.id, a.text ?? '', a.source ?? '', a.author ?? '',
               a.reviewProfileLabel ?? '', a.conventionalLabel ?? '',
               (a.decorations ?? []).join(','), a.createdAt ?? 0, a.reasoning ?? '',
+              (a.images ?? []).map((image) => image.path),
             ])
           : JSON.stringify([
               a.id, a.lineEnd, a.side, a.type,
@@ -3338,18 +3544,21 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         if (pointedPath != null) onTokenTarget('enter', props, pointedPath);
       }
       if (!onTokenHoverEnter || item.type !== 'diff') return;
+      // File identity comes from the owning item, exactly as handleTokenClick
+      // resolves it — never from an active-file side channel.
+      const filePath = itemIdToFilePath.get(item.id);
+      if (filePath == null) return;
       // The hovered-token treatment (underline + pointer cursor), the same one
       // DiffViewer paints and the one the announcement dialog's try-it shows.
       // This view is the DEFAULT review surface, so leaving it out meant the
       // affordance the demo advertises was absent from the surface most
       // reviewers actually use. Gated on the hover handler, so a read-only or
-      // portable host (which passes none) still paints nothing.
-      props.tokenElement.classList.add('pn-token-hover');
-      // File identity comes from the owning item, exactly as handleTokenClick
-      // resolves it — never from an active-file side channel.
-      const filePath = itemIdToFilePath.get(item.id);
-      if (filePath == null) return;
-      onTokenHoverEnter(props, filePath);
+      // portable host (which passes none) still paints nothing, and on its
+      // answer, so a comment or a `;` that can never open a card does not
+      // look clickable.
+      if (onTokenHoverEnter(props, filePath) !== false) {
+        props.tokenElement.classList.add('pn-token-hover');
+      }
     },
   );
 
@@ -3395,8 +3604,9 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       // Auto-mark-viewed (Rule 1): the file the reader just left becomes a
       // PASS CANDIDATE. It is not marked yet — the geometry still has to say
       // it genuinely scrolled out above.
+      // Only the reader's own scroll leaves a file; a restore jumping over it does not.
       const previousItemId = visibleItemIdRef.current;
-      if (previousItemId != null && previousItemId !== bestId) {
+      if (previousItemId != null && previousItemId !== bestId && readerScrolledRef.current) {
         passCandidateItemRef.current = previousItemId;
       }
       visibleItemIdRef.current = bestId;
@@ -3430,9 +3640,10 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     // The last file can never scroll out above, so reaching the end of the
     // diff is its completion signal. Re-fires on every at-bottom tick; the
     // owner's dwell floor decides whether it actually marks. Gated on a real
-    // scroll having happened, because a diff shorter than the viewport is
-    // at-bottom from the mount seed onwards.
-    if (atBottom && hasScrolledRef.current && path != null && onFileScrolledPast
+    // scroll by the reader having happened, because a diff shorter than the
+    // viewport is at-bottom from the mount seed onwards, and a restore onto a
+    // shorter list lands there by itself.
+    if (atBottom && readerScrolledRef.current && path != null && onFileScrolledPast
         && !isCollapsed(bestId)) {
       onFileScrolledPast(path);
     }
@@ -3460,6 +3671,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     }
     scheduleWarmUp(WARM_UP_REST_MS);
     hasScrolledRef.current = true;
+    if (viewScrollRef.current) restoreScrollSeenRef.current = true;
+    else readerScrolledRef.current = true;
     onScrollPositionChange?.(position);
     if (scrollReportRafRef.current != null) return;
     scrollReportRafRef.current = requestAnimationFrame(() => {
@@ -4047,6 +4260,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
             data-pn-touch-target-icon={compactTouchLayout || undefined}
             className="flex items-center justify-center w-6 h-6 rounded hover:bg-foreground/10 transition-colors flex-shrink-0"
             title={collapsed ? 'Expand diff' : 'Collapse diff'}
+            data-file-collapse-toggle={collapsed ? 'collapsed' : 'expanded'}
           >
             <svg
               className={`w-3 h-3 transition-transform ${collapsed ? '' : 'rotate-90'}`}
@@ -4060,10 +4274,10 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
           </button>
         }
         onCollapseToggle={() => toggleItemCollapsed(item.id)}
-        semanticNote={(() => {
+        semantic={(() => {
           const semState = semStateRef.current.get(item.id);
           if (!semState || !semanticEnabledRef.current) return undefined;
-          return <SemanticFileNote state={semState} onToggle={() => showSemantic(item.id, semState.status !== 'semantic')} />;
+          return { state: semState, onToggle: () => toggleInPlace(item.id, semState.status !== 'semantic') };
         })()}
         />
         {/* A collapsed generated file must read as an intentional fold, never
@@ -4204,10 +4418,13 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   const getMinimapViewer = useCallback(() => viewerRef.current?.getInstance(), []);
   const getMinimapScroller = useCallback(() => scrollRef.current, []);
 
+  // The host's line marks: buttons inside each file's shadow root, so only a view of one file can say which file's lines.
+  const lineMarksCss = lineMarks.length > 0 ? HOST_LINE_MARKS_CSS : '';
+
   const options = useMemo<CodeViewOptions<DiffAnnotationMetadata>>(
     () => ({
       themeType: pierreTheme.type,
-      unsafeCSS: `${scrollsWithPage ? `${pierreTheme.css}${SCROLLS_WITH_PAGE_CSS}${flushFiles ? FLUSH_FILES_CSS : STUCK_HEADER_LINE_CSS}` : pierreTheme.css}${powerUpActive ? powerUpCss(powerUpMotion, diffIndicators ?? 'bars') : ''}`,
+      unsafeCSS: `${scrollsWithPage ? `${pierreTheme.css}${SCROLLS_WITH_PAGE_CSS}${flushFiles ? FLUSH_FILES_CSS : STUCK_HEADER_LINE_CSS}` : pierreTheme.css}${powerUpActive ? powerUpCss(powerUpMotion, diffIndicators ?? 'bars') : ''}${lineMarksCss}`,
       ...(pierreTheme.syntaxTheme && { theme: pierreTheme.syntaxTheme }),
       diffStyle,
       overflow: diffOverflow,
@@ -4282,6 +4499,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       pierreTheme.syntaxTheme,
       powerUpActive,
       powerUpMotion,
+      lineMarksCss,
       diffStyle,
       diffOverflow,
       diffIndicators,
@@ -4449,8 +4667,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
           contextText={fileCommentAnchor.filePath.split('/').pop() || fileCommentAnchor.filePath}
           isGlobal={false}
           draftKey={`file:${prUrl ?? ''}:${prDiffScope ?? ''}:${fileCommentAnchor.filePath}`}
-          onSubmit={(text) => {
-            onAddFileCommentForFile(fileCommentAnchor.filePath, text);
+          onSubmit={(text, images) => {
+            onAddFileCommentForFile(fileCommentAnchor.filePath, text, images);
             setFileCommentAnchor(null);
           }}
           onClose={() => setFileCommentAnchor(null)}

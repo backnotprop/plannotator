@@ -67,4 +67,9 @@ export interface PlatformPostProps {
   onWent?: (went: readonly CodeAnnotation[]) => void;
   /** A refused post closes this dialog and the host reads the PR again, so the next opening is a new decision. */
   hostReadsAgain?: boolean;
+  /**
+   * The dialog went away open (the PR merged or closed under it, so the host took Post away) with a summary written
+   * and not posted: the host keeps those words (the Pull requests review: as a global comment of the review).
+   */
+  onLeft?: (summary: string) => void;
 }

@@ -4,13 +4,14 @@ import type { Edge, PaneNode } from '@plannotator/vendor-pierre-layouts';
 import type { HeldThread } from '../data/apply/record';
 import { useHeldThread } from '../data/queries/thread';
 import { announce } from './paneDrag';
+import { placementKey, roomShrankToast } from './beside';
 import { ThreadSlot } from '../thread/ThreadSlot';
 import type { ThreadSlotHost } from '../thread/slotHost';
 import FreeLayout from './FreeLayout';
 import * as L from './layoutModel';
 import { drawnTree, fits, hiddenForRoom, neighbor } from './layoutRoom';
 import { measureRoom, paneRects, usePaneDrop } from './paneDrop';
-import { liveHost, quietDigest, quietHost, sameDigest, withPaneClose, type ThreadPanesHost } from './paneHosts';
+import { landAfterPaneClose, liveHost, quietDigest, quietHost, sameDigest, withPaneClose, type ThreadPanesHost } from './paneHosts';
 import { createPaneKeeper, PaneDock, PaneKeeperContext } from './paneKeeper';
 import { PaneMenuContext, type PaneMenu } from './PaneMenu';
 import type { WindowPanes } from './useRoutePanes';
@@ -58,7 +59,7 @@ export function ThreadPanes({ windowPanes, held, host }: ThreadPanesProps) {
   const { panes, layout } = windowPanes;
   const { route } = host;
   const engine = windowPanes.allowed && !host.phone && !host.stack.thread && !host.fromCard && route.page === 'inbox' && !route.reviews && !route.full && !!layout.root;
-  const roomHidden = useRoomHidden(layout, engine && !host.fileOpen);
+  const roomHidden = useRoomHidden(layout, engine && !host.fileOpen, (ids) => host.showToast(roomShrankToast(ids.flatMap((id) => layout.threads[id] ?? []), host.rowOf)));
   const ids = useMemo(() => L.panesOf(layout.root).map((pane) => pane.id), [layout.root]);
   const shownAlone = (panes.panes.find((entry) => entry.id === panes.active) ?? panes.panes[0]!).id;
   // Off the page: beside a file every pane but the active one; in today's one slot, every pane but the one it shows.
@@ -132,30 +133,75 @@ function useMemoTree(root: L.FreeLayout['root'], hidden: ReadonlySet<L.PaneId>) 
   return useMemo(() => (root ? drawnTree(root, hidden) : null), [root, hidden]);
 }
 
+/** How long the room must stay as it is after a resize before panes it left aside are said (a window edge dragged). */
+const ROOM_SETTLE_MS = 400;
+
 /**
  * The panes that step aside for room (layoutRoom.ts), worked out again when the window, the sidebar or the list
- * changes size; the window draws again only when the set changes, not for every pixel of a resize.
+ * changes size; the window draws again only when the set changes, not for every pixel of a resize. Panes that step
+ * aside because the room shrank (not for a layout change, where "Open to the side" says its own) go to `stepped` once
+ * the resize settles, those aside then that were not before it began, so the person is told where they went
+ * (beside.ts `roomShrankToast`) instead of seeing them vanish, and a narrowing undone at once says nothing.
  */
-function useRoomHidden(layout: L.FreeLayout, on: boolean): ReadonlySet<L.PaneId> {
+function useRoomHidden(layout: L.FreeLayout, on: boolean, stepped: (ids: L.PaneId[]) => void): ReadonlySet<L.PaneId> {
   const [key, setKey] = useState('');
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
-  const measure = useCallback(() => {
+  const keyRef = useRef(key);
+  const steppedRef = useRef(stepped);
+  steppedRef.current = stepped;
+  /** A resize under way: what was aside before it began, and the timer that says what it left aside. */
+  const settling = useRef<{ before: ReadonlySet<string>; timer: ReturnType<typeof setTimeout> } | null>(null);
+  const measure = useCallback((resized = false) => {
     const measured = on ? measureRoom() : null;
-    const next = measured ? [...hiddenForRoom(layoutRef.current, measured.room, measured.gap)].sort().join('\u0000') : '';
-    setKey((current) => (current === next ? current : next));
+    const ids = measured ? [...hiddenForRoom(layoutRef.current, measured.room, measured.gap)].sort() : [];
+    const next = ids.join('\u0000');
+    if (!resized && settling.current) {
+      clearTimeout(settling.current.timer);
+      settling.current = null;
+    }
+    if (next === keyRef.current) return;
+    const was = new Set(keyRef.current ? keyRef.current.split('\u0000') : []);
+    keyRef.current = next;
+    setKey(next);
+    if (!resized) return;
+    const before = settling.current?.before ?? was;
+    if (settling.current) clearTimeout(settling.current.timer);
+    const timer = setTimeout(() => {
+      settling.current = null;
+      const aside = keyRef.current ? keyRef.current.split('\u0000') : [];
+      const added = aside.filter((id) => !before.has(id));
+      if (added.length) steppedRef.current(added);
+    }, ROOM_SETTLE_MS);
+    settling.current = { before, timer };
   }, [on]);
-  useLayoutEffect(measure, [measure, layout]);
+  // A layout whose placement is the same (only sizes: the engine reports them as the window resizes, or a divider
+  // moved) is part of the resize, not a change of layout.
+  const placed = useRef<{ key: string; on: boolean } | null>(null);
+  useLayoutEffect(() => {
+    const key = placementKey(layout);
+    const same = placed.current?.key === key && placed.current.on === on;
+    placed.current = { key, on };
+    measure(same);
+  }, [measure, layout, on]);
+  useEffect(
+    () => () => {
+      if (settling.current) clearTimeout(settling.current.timer);
+      settling.current = null;
+    },
+    [on],
+  );
   useEffect(() => {
     if (!on) return;
     const main = document.querySelector('.pn-inbox .ib-main');
     const root = document.querySelector('.pn-inbox');
-    window.addEventListener('resize', measure);
-    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    const resized = () => measure(true);
+    window.addEventListener('resize', resized);
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(resized);
     for (const el of [root, main, main?.querySelector(':scope > .ib-listcol'), root?.querySelector('.ib-sb-inner')]) if (el && observer) observer.observe(el);
     return () => {
       observer?.disconnect();
-      window.removeEventListener('resize', measure);
+      window.removeEventListener('resize', resized);
     };
   }, [on, measure]);
   return useMemo(() => new Set(key ? key.split('\u0000') : []), [key]);
@@ -173,7 +219,10 @@ function PaneSlot({ paneId }: { paneId: L.PaneId }) {
     () => ({
       moves: () => paneMoves(windowPanes, paneId),
       move: (edge) => moveBeside(windowPanes, paneId, edge),
-      close: () => windowPanes.closePane(paneId),
+      close: () => {
+        windowPanes.closePane(paneId);
+        landAfterPaneClose();
+      },
     }),
     [windowPanes, paneId],
   );

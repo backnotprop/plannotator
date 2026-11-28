@@ -10,7 +10,7 @@
  * toolbar (above the bar beside the thread; one row per message, the open
  * file ringed) and owns the keys while open; an inline
  * image takes a comment and a markup and rides the Send under its path and
- * message; an image the agent overwrites says "Changed since Claude sent it"
+ * message; an image the agent overwrites says "Claude sent an earlier version at …"
  * and opens the version it sent; a typed comment asks before a step; on an
  * iPhone (WebKit) the toolbar's ⋯ opens the peek as a bottom sheet; and plan
  * review's annotate surface gets the light version (full screen, ← →, the
@@ -322,11 +322,11 @@ test('an image the agent overwrites says it changed since it was sent, and opens
   await expect(line).toContainText('Changed since sent');
   await expect(line).not.toHaveAttribute('title', /./);
   await line.locator('.ib-fvver-t').hover();
-  await expect(page.locator('[data-side].bg-popover')).toHaveText(/^Changed since Claude sent it/);
+  await expect(page.locator('[data-side].bg-popover')).toHaveText(/^Viewing the current file \(edited [^)]*\)\. Claude sent an earlier version at /);
   await page.mouse.move(700, 600);
   await expect(page.locator('[data-side].bg-popover')).toHaveCount(0);
   await shot(page, '05-inline-image-changed');
-  await line.getByRole('button', { name: 'Open the version it sent' }).click();
+  await line.getByRole('button', { name: 'View sent version' }).click();
   await expect(pane()).toHaveAttribute('data-version', 'sent');
 });
 

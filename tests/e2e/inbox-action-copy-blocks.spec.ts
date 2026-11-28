@@ -18,7 +18,11 @@
  *    place after mouseup, on a desktop and on a phone viewport (touch
  *    emulation), so Cmd+C or the copy menu works; a drag across a question
  *    card's prompt opens the comment toolbar (its words take comments, approval
- *    "inbox-annotate-own-and-questions"), and Cmd+C still copies them.
+ *    "inbox-annotate-own-and-questions"), and Cmd+C still copies them;
+ *  - a drag across an action item's task (its words sat inside the toggle
+ *    button), part of its why, or a command selects those words and leaves
+ *    the item as it was (still open, not marked), desktop and phone
+ *    (action-select/01-selected-light.png).
  *
  * Build the binary first (see inbox.spec.ts). PNGs land in
  * <PLANNOTATOR_E2E_PROOF_DIR or .local/proof>/action-copy-blocks/.
@@ -180,7 +184,7 @@ test('a task list item with indented fences under it (the coordinator\'s markdow
   const { context, page } = await desktop(browser, 'light');
   try {
     const card = await openThread(page, sshThread);
-    const task = card.locator('[data-action-toggle]').first();
+    const task = card.locator('[data-action-task]').first();
     await expect(task).toContainText(/^Let this MacBook.s key into the Mac mini/);
     await expect(task).not.toContainText('[ ]');
     await expect(card.locator('[data-action-why] pre code')).toHaveText([COPY_ID, MKDIR]);
@@ -237,15 +241,99 @@ test('desktop: a drag across the why keeps its selection and Cmd+C copies it; a 
     // A click with no selection still does what it did: the row's toggle closes and opens it.
     await page.evaluate(() => window.getSelection()?.removeAllRanges());
     const toggle = card.locator('[data-action-toggle]').first();
-    await toggle.click();
+    const task = card.locator('[data-action-task]').first();
+    await task.click();
     await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    await toggle.click();
+    await task.click();
     await expect(toggle).toHaveAttribute('aria-expanded', 'true');
     // The message's own text still takes a comment: a drag there opens the comment toolbar.
     await dragAcross(page, page.locator('section.ib-pane [data-message-id] p', { hasText: 'Both tarballs are built.' }).first());
     await expect(page.locator('.annotation-toolbar')).toBeVisible();
   } finally {
     await context.close();
+  }
+});
+
+/** Drag the mouse along `el`'s first line, from its left edge to `to` (a fraction of its width). */
+async function dragPart(page: Page, el: Locator, to: number): Promise<void> {
+  await el.scrollIntoViewIfNeeded();
+  const box = await el.boundingBox();
+  if (!box) throw new Error('no box to drag across');
+  const y = box.y + Math.min(box.height / 2, 10);
+  await page.mouse.move(box.x + 2, y);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * to, y, { steps: 12 });
+  await page.mouse.up();
+}
+
+/** Drag the mouse along the words of `el`'s first line of text (not its padding), from their start to `to` (a fraction of their width). */
+async function dragWords(page: Page, el: Locator, to: number): Promise<void> {
+  await el.scrollIntoViewIfNeeded();
+  const rect = await el.evaluate((node) => {
+    const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+    let text: Node | null;
+    while ((text = walker.nextNode()) && !text.textContent!.trim());
+    if (!text) return null;
+    const range = document.createRange();
+    range.selectNodeContents(text);
+    const r = range.getClientRects()[0]!;
+    return { x: r.left, y: r.top, width: r.width, height: r.height };
+  });
+  if (!rect) throw new Error('no words to drag across');
+  const y = rect.y + rect.height / 2;
+  await page.mouse.move(rect.x + 1, y);
+  await page.mouse.down();
+  await page.mouse.move(rect.x + rect.width * to, y, { steps: 12 });
+  await page.mouse.up();
+}
+
+test('a drag across an action item\'s task, part of its why, or a command selects those words and leaves the item as it was, desktop and phone', async ({ browser }) => {
+  const shotDir = join(proofDir, '..', 'action-select');
+  mkdirSync(shotDir, { recursive: true });
+  for (const where of ['desktop', 'phone'] as const) {
+    const pixel = devices['Pixel 7'];
+    const context = where === 'desktop'
+      ? (await desktop(browser, 'light')).context
+      : await browser.newContext({ viewport: pixel.viewport, userAgent: pixel.userAgent, deviceScaleFactor: pixel.deviceScaleFactor, isMobile: pixel.isMobile, hasTouch: pixel.hasTouch, colorScheme: 'light', reducedMotion: 'reduce' });
+    try {
+      const page = context.pages()[0] ?? (await context.newPage());
+      const card = await openThread(page, npmThread);
+      const row = card.locator('[data-action-card]').first();
+      const toggle = row.locator('[data-action-toggle]');
+      await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+      await expect(row).toHaveAttribute('data-action-state', 'open');
+      const asItWas = async () => {
+        await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+        await expect(row).toHaveAttribute('data-action-state', 'open');
+        await expect(row.locator('[data-action-draft]')).toHaveCount(0);
+      };
+
+      // The task's own words (they sat inside the toggle button, where no drag selects).
+      await dragAcross(page, row.locator('[data-action-task]'));
+      await page.waitForTimeout(300);
+      expect(await selected(page)).toContain('Publish the two npm tarballs');
+      await asItWas();
+
+      // Part of the why.
+      await page.evaluate(() => window.getSelection()?.removeAllRanges());
+      const why = row.locator('[data-action-why] p').first();
+      await dragPart(page, why, 0.45);
+      await page.waitForTimeout(300);
+      const part = await selected(page);
+      expect(part.startsWith('The registry')).toBe(true);
+      expect(part.length).toBeLessThan((await why.textContent())!.length);
+      await asItWas();
+      if (where === 'desktop') await page.screenshot({ path: join(shotDir, '01-selected-light.png') });
+
+      // A command's text.
+      await page.evaluate(() => window.getSelection()?.removeAllRanges());
+      await dragWords(page, row.locator('[data-action-why] pre code').first(), 0.8);
+      await page.waitForTimeout(300);
+      expect(await selected(page)).toContain('npm pack ./packages/core');
+      await asItWas();
+    } finally {
+      await context.close();
+    }
   }
 });
 
