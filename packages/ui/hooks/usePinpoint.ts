@@ -12,6 +12,7 @@ import {
   resolveSemanticTargetAtPoint,
   type SemanticTarget,
 } from '../utils/blockTargeting';
+import { followableLinkOf } from '../utils/followableLink';
 
 /** Inputs for pointer Pinpoint targeting within one rendered document. */
 export interface UsePinpointOptions {
@@ -31,6 +32,21 @@ export interface UsePinpointReturn {
   hoverTarget: SemanticTarget | null;
   /** Release pointer-owned feedback so keyboard navigation can take over. */
   clearHover: () => void;
+}
+
+/**
+ * Whether the document's selection is a drag that covers `link`: the click
+ * that ends such a drag neither follows nor pins (the HTML viewer's
+ * `dragEndedClick`).
+ */
+function dragSelectionReaches(link: Element): boolean {
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed || selection.rangeCount === 0) return false;
+  try {
+    return selection.getRangeAt(0).intersectsNode(link);
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -82,7 +98,18 @@ export function usePinpoint({
     });
     observer.observe(container, { childList: true, subtree: true });
 
+    // Cmd/Ctrl state, read from each pointer move and from the keys, and the
+    // last pointer position so a key press can redraw the hover in place.
+    let modifierHeld = false;
+    let lastPointer: { clientX: number; clientY: number; target: HTMLElement } | null = null;
+
     const updateHover = (clientX: number, clientY: number, target: HTMLElement) => {
+      // A followable link shows no pin outline until Cmd/Ctrl is held, so the
+      // outline matches what a click will do (a plain click follows it).
+      if (!modifierHeld && followableLinkOf(target)) {
+        clearHover();
+        return;
+      }
       const resolved = resolveSemanticTargetAtPoint(
         liveGraph(),
         target,
@@ -102,23 +129,37 @@ export function usePinpoint({
     };
 
     const handleMouseMove = (e: MouseEvent) => {
+      modifierHeld = e.metaKey || e.ctrlKey;
+      lastPointer = { clientX: e.clientX, clientY: e.clientY, target: e.target as HTMLElement };
       updateHover(e.clientX, e.clientY, e.target as HTMLElement);
+    };
+
+    const handleModifierKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Meta' && e.key !== 'Control') return;
+      modifierHeld = e.metaKey || e.ctrlKey;
+      if (lastPointer) updateHover(lastPointer.clientX, lastPointer.clientY, lastPointer.target);
     };
 
     const handleTouchStart = (e: TouchEvent) => {
       if (e.touches.length !== 1) return;
+      // Touch has no modifier: a tap on a link follows it, so it gets no hover.
+      modifierHeld = false;
+      lastPointer = null;
       const touch = e.touches[0];
       const target = document.elementFromPoint(touch.clientX, touch.clientY) as HTMLElement;
       if (target) updateHover(touch.clientX, touch.clientY, target);
     };
 
     const handleMouseLeave = () => {
+      lastPointer = null;
       clearHover();
     };
 
     container.addEventListener('mousemove', handleMouseMove);
     container.addEventListener('mouseleave', handleMouseLeave);
     container.addEventListener('touchstart', handleTouchStart, { passive: true });
+    window.addEventListener('keydown', handleModifierKey);
+    window.addEventListener('keyup', handleModifierKey);
 
     return () => {
       observer.disconnect();
@@ -127,6 +168,8 @@ export function usePinpoint({
       container.removeEventListener('mousemove', handleMouseMove);
       container.removeEventListener('mouseleave', handleMouseLeave);
       container.removeEventListener('touchstart', handleTouchStart);
+      window.removeEventListener('keydown', handleModifierKey);
+      window.removeEventListener('keyup', handleModifierKey);
     };
   }, [clearHover, isActive, containerRef]);
 
@@ -141,6 +184,22 @@ export function usePinpoint({
       // target: a click on a radio, a checkbox or a text box answers.
       const inQuestion = !!target.closest?.('fieldset.question-block');
       if (inQuestion && target.closest('input, textarea, select')) return;
+
+      // A plain click on a followable link follows it, Cmd/Ctrl-click pins it
+      // (same rule as the HTML viewer, owner's ruling `html-link-click`).
+      // Returning here leaves the click to the link's own handler, the same
+      // path Select mode takes. The click that ends a drag over the link
+      // neither follows nor pins.
+      const followable = followableLinkOf(target);
+      if (followable && container.contains(followable) && !e.metaKey && !e.ctrlKey) {
+        clearHover();
+        if (dragSelectionReaches(followable)) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+        return;
+      }
+
       const resolved = resolveSemanticTargetAtPoint(
         buildSemanticTargetGraph(container),
         target,
@@ -154,10 +213,12 @@ export function usePinpoint({
         e.preventDefault();
       }
 
-      // Prevent link navigation in pinpoint mode
+      // A click that pins a link (Cmd/Ctrl, or one that goes nowhere) must not
+      // also follow it: stop the link's own handler (linked doc, anchor) too.
       const link = (target.closest('a') as HTMLAnchorElement | null);
       if (link && container.contains(link)) {
         e.preventDefault();
+        e.stopPropagation();
       }
 
       // Clear hover state
@@ -181,13 +242,13 @@ export function usePinpoint({
       onSelectRange(range);
     };
 
-    // Use capture phase so we get the click before links navigate
+    // Use capture phase so we get the click before a link's own handler
     container.addEventListener('click', handleClick, true);
 
     return () => {
       container.removeEventListener('click', handleClick, true);
     };
-  }, [isActive, containerRef, onCodeBlockClick, onSelectRange]);
+  }, [clearHover, isActive, containerRef, onCodeBlockClick, onSelectRange]);
 
   return { hoverTarget, clearHover };
 }
