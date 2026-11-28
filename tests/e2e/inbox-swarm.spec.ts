@@ -536,25 +536,112 @@ test('a phone: the plan card fits the screen, each part in one column', async ({
   await cardShot(page, '12-phone-plan-card');
 });
 
-test('a phone: New message with a second agent and the Swarm badge in its row keeps Send on the screen', async ({ page }) => {
-  await openWindow(page, 390, 844);
+/** New message to Claude Code, then Codex added, with words; the first-time note answered "show" for this page. */
+async function newMessageTwoAgents(page: Page, width: number, height: number) {
+  await page.route('**/api/inbox/reveal', async (route) => {
+    const body = JSON.parse(route.request().postData() ?? '{}') as { id?: string };
+    if (body.id === 'swarm_tip') return route.fulfill({ json: { show: true, reveal: { next: null }, board: { on: false }, steps: { on: false } } });
+    return route.continue();
+  });
+  await openWindow(page, width, height);
   await page.locator('[data-open-compose]:visible').first().click();
   const dialog = page.locator('dialog[data-compose]');
   const to = dialog.locator('[data-compose-to]').first();
   await expect(to).not.toHaveAttribute('data-loading', /.*/, { timeout: 20_000 });
   await to.click();
   await page.locator(`[data-compose-session="${CLAUDE.session}"]`).first().click();
-  await dialog.getByRole('textbox', { name: 'Message' }).fill('Refunds are off by a cent after Bob Tully\'s rounding change.');
+  await dialog.getByRole('textbox', { name: 'Message' }).fill("Refunds are off by a cent after Bob Tully's rounding change. Claude, find the cause in the ledger. Codex, find every refund that went out wrong and get a replay ready. Don't replay anything until I say so.");
   await dialog.locator('[data-compose-add-agent]').click();
   await page.locator(`[data-compose-session="${CODEX.session}"]`).first().click();
-  await expect(dialog.locator('[data-compose-swarm-line] [data-swarm-badge]')).toBeVisible();
-  // The fullest row: the saved draft's check is in it too.
-  await expect(dialog.locator('[data-compose-saved]')).toBeVisible({ timeout: 20_000 });
-  const fit = await page.evaluate(() => {
-    const foot = document.querySelector('dialog[data-compose] .ib-cp-foot')!;
-    const send = document.querySelector('dialog[data-compose] [data-compose-send]')!.getBoundingClientRect();
-    const inner = foot.getBoundingClientRect().right - parseFloat(getComputedStyle(foot).paddingRight);
-    return { inRow: send.right <= inner + 0.5, onScreen: send.right <= window.innerWidth + 0.5 };
+  return dialog;
+}
+
+type Rect = { left: number; right: number; top: number; bottom: number };
+const overlaps = (a: Rect, b: Rect) => a.left < b.right - 0.5 && b.left < a.right - 0.5 && a.top < b.bottom - 0.5 && b.top < a.bottom - 0.5;
+
+// Send is never pushed off a phone's screen, at 390 with the whole row there (Skills and the badge's word). Narrower,
+// what gives way is a stop-gap until the row's design is picked, so only Send and the badge's name are held to here.
+for (const [width, height] of [[390, 844], [360, 800], [320, 700]] as const) {
+  const whole = width >= 390;
+  test(`a phone ${width} px wide: New message with a second agent and the Swarm badge in its row keeps Send whole on the screen, in one row`, async ({ page }) => {
+    const dialog = await newMessageTwoAgents(page, width, height);
+    const badge = dialog.locator('[data-compose-swarm-line] [data-swarm-badge]');
+    await expect(badge).toBeVisible();
+    // The fullest row: the saved draft's check is in it too.
+    await expect(dialog.locator('[data-compose-saved]')).toBeVisible({ timeout: 20_000 });
+    await expect(badge).toHaveAccessibleName('Swarm');
+    const fit = await page.evaluate(() => {
+      const foot = document.querySelector('dialog[data-compose] .ib-cp-foot')!;
+      const send = document.querySelector('dialog[data-compose] [data-compose-send]')!.getBoundingClientRect();
+      const clip = document.querySelector('dialog[data-compose] .ib-cp-foot > .ib-cp-clip')!.getBoundingClientRect();
+      const inner = foot.getBoundingClientRect().right - parseFloat(getComputedStyle(foot).paddingRight);
+      const shown = (selector: string) => {
+        const el = document.querySelector<HTMLElement>(`dialog[data-compose] ${selector}`);
+        return !!el && el.getBoundingClientRect().width > 2;
+      };
+      return {
+        inRow: send.right <= inner + 0.5,
+        onScreen: send.left >= 0 && send.right <= window.innerWidth + 0.5,
+        tappable: send.width >= 36 && send.height >= 36,
+        oneRow: Math.abs(send.top + send.height / 2 - (clip.top + clip.height / 2)) < 1,
+        skills: shown('[data-compose-skills]'),
+        word: shown('[data-swarm-badge] .ib-sw-lab-on .ib-sw-word'),
+      };
+    });
+    expect(fit).toEqual({ inRow: true, onScreen: true, tappable: true, oneRow: true, ...(whole ? { skills: true, word: true } : { skills: fit.skills, word: fit.word }) });
   });
-  expect(fit).toEqual({ inRow: true, onScreen: true });
+}
+
+test('a phone: the Swarm badge on, its stars lie on none of the row\'s other controls', async ({ page }) => {
+  const dialog = await newMessageTwoAgents(page, 390, 844);
+  await expect(dialog.locator('[data-compose-saved]')).toBeVisible({ timeout: 20_000 });
+  const badge = dialog.locator('[data-compose-swarm-line] [data-swarm-badge]');
+  await badge.click();
+  await expect(badge).toHaveAttribute('aria-pressed', 'true');
+  const hits = await page.evaluate(() => {
+    const d = document.querySelector('dialog[data-compose]')!;
+    const layer = d.querySelector('.ib-sw-stars')!;
+    const box = layer.getBoundingClientRect();
+    // What the layer shows: its box grown or cut by its clip-path's inset (none: everything).
+    const inset = /^inset\((.*)\)$/.exec(getComputedStyle(layer).clipPath)?.[1]?.split(/\s+/).map(parseFloat);
+    const [t, r = t, b = t, l = r] = inset ?? [-Infinity];
+    const seen = { left: box.left + l!, right: box.right - r!, top: box.top + t!, bottom: box.bottom - b! };
+    const stars = [...d.querySelectorAll('.ib-sw-st')].map((s) => {
+      const a = s.getBoundingClientRect();
+      return { left: Math.max(a.left, seen.left), right: Math.min(a.right, seen.right), top: Math.max(a.top, seen.top), bottom: Math.min(a.bottom, seen.bottom) };
+    }).filter((a) => a.right > a.left && a.bottom > a.top);
+    const others = ['[data-compose-saved]', '[data-compose-add-agent]', '[data-compose-send]', '[data-compose-also]'].map((s) => d.querySelector(s)!.getBoundingClientRect());
+    return { stars: stars.length, others: others.map((o) => ({ left: o.left, right: o.right, top: o.top, bottom: o.bottom })), seen: stars };
+  });
+  expect(hits.stars).toBeGreaterThan(0);
+  expect(hits.seen.filter((star) => hits.others.some((o) => overlaps(star, o)))).toEqual([]);
 });
+
+// The first-time note opens away from the message box on a computer: it covers none of the words being written.
+for (const [width, height] of [[1440, 900], [1280, 800], [1280, 600]] as const) {
+  test(`a computer ${width}×${height}: the Swarm first-time note stays by the badge, inside the window, off the message`, async ({ page }) => {
+    const dialog = await newMessageTwoAgents(page, width, height);
+    const note = page.locator('[data-swarm-tip]');
+    await expect(note).toBeVisible({ timeout: 20_000 });
+    const place = async () =>
+      page.evaluate(() => {
+        const r = (el: Element) => {
+          const b = el.getBoundingClientRect();
+          return { left: b.left, right: b.right, top: b.top, bottom: b.bottom };
+        };
+        const d = document.querySelector('dialog[data-compose]')!;
+        return { note: r(document.querySelector('[data-swarm-tip]')!), badge: r(d.querySelector('[data-swarm-badge]')!), text: r(d.querySelector('[data-compose-text] textarea')!), w: innerWidth, h: innerHeight };
+      });
+    const check = (p: Awaited<ReturnType<typeof place>>) => ({
+      offMessage: !overlaps(p.note, p.text),
+      inWindow: p.note.left >= 0 && p.note.top >= 0 && p.note.right <= p.w && p.note.bottom <= p.h,
+      // Attached: within the caret's reach of the badge on one side.
+      byBadge: Math.max(p.note.left - p.badge.right, p.badge.left - p.note.right, p.note.top - p.badge.bottom, p.badge.top - p.note.bottom) <= 12,
+    });
+    expect(check(await place())).toEqual({ offMessage: true, inWindow: true, byBadge: true });
+    // The draft saves while it is open: "Draft · saved" comes into the To row and the badge moves; still off the message.
+    await expect(dialog.locator('.ib-cp-dsaved')).toBeVisible({ timeout: 20_000 });
+    await expect(note).toBeVisible();
+    expect(check(await place())).toEqual({ offMessage: true, inWindow: true, byBadge: true });
+  });
+}

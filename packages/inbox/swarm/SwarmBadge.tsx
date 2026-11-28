@@ -74,7 +74,7 @@ export function SwarmBadge({
    * new agent being started). 0: none yet.
    */
   highlight?: number;
-  /** The first-time card at the badge (useSwarmTip), hung under it while shown. */
+  /** The first-time card at the badge (useSwarmTip), beside, over or under it while shown (swarmTipPlace.ts). */
   tip?: ReactNode;
 }) {
   const slot = useRef<HTMLSpanElement>(null);

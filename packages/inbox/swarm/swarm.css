@@ -16,6 +16,21 @@
 /* With them in it the row's gaps narrow (8 → 4 px, the saved check's own 6 px gone), so Send stays on a 390 px screen. */
 .pn-inbox dialog.ib-cp[data-phone] .ib-cp-foot:has(> .ib-swarm-phoneline) { gap: 4px; }
 .pn-inbox dialog.ib-cp[data-phone] .ib-cp-foot:has(> .ib-swarm-phoneline) > .ib-cp-savedline { margin-left: 0; }
+/* A stop-gap until the phone row's design is picked (PR #4013): only so Send is never off the screen.
+   Narrower than 390 px that is still too long, so the least needed give way, only as far as each width needs: Skills
+   first, as it does for a Send with words (phoneComposer.css); under 360 px the badge also keeps only its mark, the
+   word staying its name, and wide enough that its stars above and below stay on it. Nothing wraps to a second row. */
+@media (max-width: 389px) {
+  .pn-inbox dialog.ib-cp[data-phone] .ib-cp-foot:has(> .ib-swarm-phoneline) > [data-compose-skills] { display: none; }
+}
+@media (max-width: 359px) {
+  .ib-swarm-phoneline .ib-swarm-badge { padding: 0 13px; }
+  .ib-swarm-phoneline .ib-sw-lab-off .ib-sw-word { display: none; }
+  .ib-swarm-phoneline .ib-sw-lab-on .ib-sw-word { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+}
+/* In the row the badge's neighbours are 4 px away: its stars keep to the badge's own width (those beside it are cut
+   away whole, never sliced) and to its glow's reach above and below, so none lies on the + or the saved check. */
+.ib-swarm-phoneline .ib-sw-stars { clip-path: inset(-18px 0); }
 
 /* ── The ghost mark: the owner's drawing as a mask over the colour of the words around it ── */
 .ib-ghost-g { display: inline-block; flex: none; background-color: currentColor; -webkit-mask: var(--ib-ghost-src) center / contain no-repeat; mask: var(--ib-ghost-src) center / contain no-repeat; }

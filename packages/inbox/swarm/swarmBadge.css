@@ -95,6 +95,15 @@
   .ib-sw-tip { animation: ib-sw-tip-in 200ms cubic-bezier(0.23, 1, 0.32, 1) both; }
 }
 @keyframes ib-sw-tip-in { from { opacity: 0; transform: translateY(-4px) scale(0.97); } }
-/* A phone: the badge sits in the composer's foot, at the screen's bottom, so the card stands above it, inside the screen. */
-.pn-inbox[data-phone] .ib-sw-tip, [data-phone] .ib-sw-tip { top: auto; bottom: calc(100% + 10px); transform-origin: calc(100% - 40px) 100%; }
-[data-phone] .ib-sw-tip::before { top: auto; bottom: -5px; border-radius: 0 0 2px 0; box-shadow: 1px 1px 0 0 color-mix(in oklch, var(--border) 70%, transparent); }
+/* A phone: the badge sits in the composer's foot, at the screen's bottom, so the card stands above it, inside the screen.
+   A computer with no room beside the badge but room over it (swarmTipPlace.ts `above`): the same. */
+.pn-inbox[data-phone] .ib-sw-tip, [data-phone] .ib-sw-tip, .ib-sw-tip[data-side="above"] { top: auto; bottom: calc(100% + 10px); transform-origin: calc(100% - 40px) 100%; }
+:is([data-phone] .ib-sw-tip, .ib-sw-tip[data-side="above"])::before { top: auto; bottom: -5px; border-radius: 0 0 2px 0; box-shadow: 1px 1px 0 0 color-mix(in oklch, var(--border) 70%, transparent); }
+/* A computer (swarmTipPlace.ts `right`): right of the badge, level with To, its caret pointing left at the badge, so it
+   lies over the dialog's edge and not over the words being written. */
+.ib-sw-tip[data-side="right"] { top: calc(50% - 24px); right: auto; left: calc(100% + 10px); transform-origin: 0 24px; }
+.ib-sw-tip[data-side="right"]::before { top: 19px; right: auto; left: -5px; border-radius: 0 0 0 2px; box-shadow: -1px 1px 0 0 color-mix(in oklch, var(--border) 70%, transparent); }
+@media (prefers-reduced-motion: no-preference) {
+  .ib-sw-tip[data-side="right"] { animation-name: ib-sw-tip-in-r; }
+}
+@keyframes ib-sw-tip-in-r { from { opacity: 0; transform: translateX(-4px) scale(0.97); } }

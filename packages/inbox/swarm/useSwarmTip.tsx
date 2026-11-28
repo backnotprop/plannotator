@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { claimRevealOnce } from '../reveal';
 import { newUuid } from '../uuid';
 import { swarmTipAfterMs } from './swarmBadgeMotion';
+import { swarmTipSide, type SwarmTipSide } from './swarmTipPlace';
 
 /**
  * The Swarm tip (the owner, 2026-11-24): the first time the Swarm badge appears, a small card hangs from it saying what
@@ -60,6 +61,21 @@ export function useSwarmTip(badgeShown: boolean, swarmOn: boolean): { node: Reac
   }, [swarmOn]);
   const key = useRef<string | null>(null);
   const card = useRef<HTMLDivElement>(null);
+  // A computer: beside the badge, else above, else under it (swarmTipPlace.ts); measured before it is painted. A phone: CSS.
+  const [side, setSide] = useState<SwarmTipSide | undefined>(undefined);
+  useLayoutEffect(() => {
+    if (!open) return setSide(undefined);
+    const place = () => {
+      const note = card.current;
+      const badge = note?.parentElement;
+      if (!note || !badge || note.closest('[data-phone]')) return setSide(undefined);
+      const { width, height } = note.getBoundingClientRect();
+      setSide(swarmTipSide({ badge: badge.getBoundingClientRect(), note: { width, height }, window: { width: window.innerWidth, height: window.innerHeight } }));
+    };
+    place();
+    window.addEventListener('resize', place);
+    return () => window.removeEventListener('resize', place);
+  }, [open]);
 
   useEffect(() => {
     if (!badgeShown) {
@@ -100,7 +116,7 @@ export function useSwarmTip(badgeShown: boolean, swarmOn: boolean): { node: Reac
   }, [open]);
 
   const node = open ? (
-    <div ref={card} className="ib-sw-tip" role="note" aria-label="What Swarm turns on" data-swarm-tip="">
+    <div ref={card} className="ib-sw-tip" role="note" aria-label="What Swarm turns on" data-swarm-tip="" data-side={side}>
       <div className="ib-sw-tip-h">{SWARM_TIP_HEAD}</div>
       {SWARM_TIP_SHOWN.map((key) => (
         <div key={key} className="ib-sw-tip-r" data-swarm-tip-line={key}>

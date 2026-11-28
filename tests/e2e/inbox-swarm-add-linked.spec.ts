@@ -182,8 +182,10 @@ async function openStatus(threadId: string): Promise<void> {
   await page.goto(`${studio.url}#thread=${threadId}`);
   const summary = page.locator('[data-swarm-summary]');
   await expect(summary).toBeVisible({ timeout: 20_000 });
-  await summary.locator('[data-swarm-toggle]').click();
-  await expect(page.locator('[data-swarm-status]')).toBeVisible();
+  // The same address again is a same-page jump: a view left open stays open, and a press on its toggle would close it.
+  const status = page.locator('[data-swarm-status]');
+  if (!(await status.isVisible())) await summary.locator('[data-swarm-toggle]').click();
+  await expect(status).toBeVisible();
 }
 
 /** Add an agent, and the pick of `session` from its list. */
