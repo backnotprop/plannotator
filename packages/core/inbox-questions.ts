@@ -977,12 +977,11 @@ export function inboxStillOpenLine(questions: readonly InboxQuestionRecord[]): s
   const open = states.filter((s) => s === "open" || s === "picked").length;
   if (open === 0) return "";
   // Some were answered in an earlier reply: "No questions answered yet" would not be true.
-  const settle = ` If their words answer ${open === 1 ? "it" : "one"}, name it in answered_in_reply.`;
   if (states.includes("sent")) {
-    return `No new answers in this reply; ${questionsWord(open)} ${open === 1 ? "is" : "are"} still open. Don't re-ask ${open === 1 ? "it" : "them"}; the person will answer in the Inbox.${settle}`;
+    return `No new answers in this reply; ${questionsWord(open)} ${open === 1 ? "is" : "are"} still open. Don't re-ask ${open === 1 ? "it" : "them"}; the person will answer in the Inbox.`;
   }
-  if (open === 1) return `No question answered yet; it is still open. Don't re-ask it; the person will answer in the Inbox.${settle}`;
-  return `No questions answered yet; all ${open} are still open. Don't re-ask them; the person will answer in the Inbox.${settle}`;
+  if (open === 1) return "No question answered yet; it is still open. Don't re-ask it; the person will answer in the Inbox.";
+  return `No questions answered yet; all ${open} are still open. Don't re-ask them; the person will answer in the Inbox.`;
 }
 
 /**
@@ -1003,7 +1002,7 @@ export function inboxOtherStillOpenLine(questions: readonly InboxQuestionRecord[
 
 /** Matches `inboxStillOpenLine`'s and `inboxOtherStillOpenLine`'s line (one line of a reply body). */
 export const INBOX_STILL_OPEN_LINE =
-  /^(?:(?:No questions? answered yet|No new answers in this reply); .* still open\. Don't re-ask (?:it|them); the person will answer in the Inbox\.(?: If their words answer (?:it|one), name it in answered_in_reply\.)?|You have \d+ other questions? open in this thread\. (?:It stays|They stay) open; the person will answer (?:it|them) in the Inbox\. Don't re-ask (?:it|them)\.)$/;
+  /^(?:(?:No questions? answered yet|No new answers in this reply); .* still open\. Don't re-ask (?:it|them); the person will answer in the Inbox\.|You have \d+ other questions? open in this thread\. (?:It stays|They stay) open; the person will answer (?:it|them) in the Inbox\. Don't re-ask (?:it|them)\.)$/;
 
 const questionsWord = (n: number): string => `${n} question${n === 1 ? "" : "s"}`;
 

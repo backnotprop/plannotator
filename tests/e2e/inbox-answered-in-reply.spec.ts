@@ -76,7 +76,6 @@ test('the person answers in words, the agent takes it as the answer, and Reopen 
   await page.getByRole('textbox', { name: 'Reply to Claude Code' }).fill(WORDS);
   await page.locator('.ib-pfoot').getByRole('button', { name: 'Send', exact: true }).click();
   const reply = await claude.nextReply(first.thread_id, 20);
-  expect(String(reply.body)).toContain('name it in answered_in_reply');
 
   const ref = `${first.message_id}/${first.questions[1]!.key}`;
   const sent = await claude.send({ project_path: harbor, reply_to: String(reply.id), body: 'Got it: Jenkins stays as a fallback for a week.', answered_in_reply: [{ question: ref }] });

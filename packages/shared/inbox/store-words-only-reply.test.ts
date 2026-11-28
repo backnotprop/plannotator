@@ -33,7 +33,7 @@ const THREE = [
   question("Show paid invoices?", ["Yes", "No"]),
 ].join("\n");
 
-const STILL_OPEN_3 = "No questions answered yet; all 3 are still open. Don't re-ask them; the person will answer in the Inbox. If their words answer one, name it in answered_in_reply.";
+const STILL_OPEN_3 = "No questions answered yet; all 3 are still open. Don't re-ask them; the person will answer in the Inbox.";
 
 function setup(body = THREE) {
   const dir = mkdtempSync(join(tmpdir(), "plannotator-inbox-words-only-"));
@@ -84,7 +84,7 @@ describe("a reply that answers nothing", () => {
   test("one question: the line in the singular", () => {
     const { store, asked } = setup(question("Ship it today?", ["Yes", "No"]));
     const result = store.sendReply(asked.id, { words: "Later.", idempotency_key: "k-1" });
-    expect(result.reply.body).toBe("Later.\n\nNo question answered yet; it is still open. Don't re-ask it; the person will answer in the Inbox. If their words answer it, name it in answered_in_reply.");
+    expect(result.reply.body).toBe("Later.\n\nNo question answered yet; it is still open. Don't re-ask it; the person will answer in the Inbox.");
   });
 
   test("a pick saved but not in this reply still counts as open", () => {
@@ -100,7 +100,7 @@ describe("a reply that answers nothing", () => {
     store.sendReply(asked.id, { idempotency_key: "k-1", questions: [{ key: questions[0]!.key, revision: 0, answer: pickFor(questions[0]!, "Cards") }] });
     const result = store.sendReply(asked.id, { words: "The rest tomorrow.", idempotency_key: "k-2" });
     expect(result.reply.body).toBe(
-      "The rest tomorrow.\n\nNo new answers in this reply; 2 questions are still open. Don't re-ask them; the person will answer in the Inbox. If their words answer one, name it in answered_in_reply.",
+      "The rest tomorrow.\n\nNo new answers in this reply; 2 questions are still open. Don't re-ask them; the person will answer in the Inbox.",
     );
   });
 
@@ -143,7 +143,7 @@ describe("a session asked, then posted a plain update (the words go to the updat
     const { store, project, asked } = setup();
     const update = store.sendMessage({ project_id: project.id, author: AGENT, reply_to: asked.id, body: question("Deploy tonight?", ["Yes", "No"]) }).message;
     const result = store.sendReply(update.id, { words: "Later.", idempotency_key: "k-1" });
-    expect(result.reply.body).toBe("Later.\n\nNo questions answered yet; all 4 are still open. Don't re-ask them; the person will answer in the Inbox. If their words answer one, name it in answered_in_reply.");
+    expect(result.reply.body).toBe("Later.\n\nNo questions answered yet; all 4 are still open. Don't re-ask them; the person will answer in the Inbox.");
   });
 
   test("a partial answer on the update: its own questions in the section, and a line for the session's other questions", () => {

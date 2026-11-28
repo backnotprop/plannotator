@@ -319,7 +319,7 @@ describe("what the agent gets", () => {
   test("a reply's question sections never count or number an action item", () => {
     const question = record({ kind: "single", key: "q-11111111", prompt: "Ship on Friday?", parsed: { context: null, choices: [{ label: "Yes", description: null, recommended: false, settled: false }], aliases: [null], recommendation: null, suggested_text: null, line: 2 } });
     const body = composeInboxReplyBody({ questions: [], sent: [], earlier: [], words: "Thanks.", stillOpen: [question, record({})] });
-    expect(body).toBe("Thanks.\n\nNo question answered yet; it is still open. Don't re-ask it; the person will answer in the Inbox. If their words answer it, name it in answered_in_reply.");
+    expect(body).toBe("Thanks.\n\nNo question answered yet; it is still open. Don't re-ask it; the person will answer in the Inbox.");
   });
 
   test("Mark read's note lists action items as A1 after the questions", () => {

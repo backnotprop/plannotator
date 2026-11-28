@@ -79,11 +79,11 @@ async function world(existing?: { root: string }) {
 }
 
 /** The sentence the store writes after a reply's words while the one question asked is open, for the agent only. */
-const STILL_OPEN = "No question answered yet; it is still open. Don't re-ask it; the person will answer in the Inbox. If their words answer it, name it in answered_in_reply.";
+const STILL_OPEN = "No question answered yet; it is still open. Don't re-ask it; the person will answer in the Inbox.";
 const QUESTION = ":::question\nWhich runner?\n\n- [ ] ARM\n- [ ] x86\n:::";
 const times = (text: string, part: string) => text.split(part).length - 1;
 /** The same sentence once an earlier reply answered one of the questions (the owner's report, 0.29.0). */
-const NO_NEW_ANSWERS = "No new answers in this reply; 1 question is still open. Don't re-ask it; the person will answer in the Inbox. If their words answer it, name it in answered_in_reply.";
+const NO_NEW_ANSWERS = "No new answers in this reply; 1 question is still open. Don't re-ask it; the person will answer in the Inbox.";
 const PR_REPO = "acme/api";
 const PR = {
   key: `github.com/${PR_REPO}#7`,

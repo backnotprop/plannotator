@@ -88,7 +88,7 @@ describe("text the index reads", () => {
   test("a reply: the still-open line the store writes is not the person's words (approval inbox-explicit-skip)", () => {
     const some = "Answered 1 question.\n\nShip it.\n\nYou have 10 other questions open in this thread. They stay open; the person will answer them in the Inbox. Don't re-ask them.\n\n## Answers to your questions\n\n1 of 1 question answered.";
     expect(inboxSearchReplyText(some)).toBe("Ship it.");
-    const none = "Later.\n\nNo questions answered yet; all 3 are still open. Don't re-ask them; the person will answer in the Inbox. If their words answer one, name it in answered_in_reply.";
+    const none = "Later.\n\nNo questions answered yet; all 3 are still open. Don't re-ask them; the person will answer in the Inbox.";
     expect(inboxSearchReplyText(none)).toBe("Later.");
   });
 

@@ -141,7 +141,7 @@ describe("the details line", () => {
 
   test("a paragraph the person typed that reads exactly like the sentence stays: another session's question open, the store wrote none", async () => {
     const w = await setup();
-    const typed = "No question answered yet; it is still open. Don't re-ask it; the person will answer in the Inbox. If their words answer it, name it in answered_in_reply.";
+    const typed = "No question answered yet; it is still open. Don't re-ask it; the person will answer in the Inbox.";
     const sent = await w.send("Quota is climbing.");
     await w.send(QUESTION, { reply_to: sent.message_id }, "ses-other");
     const reply = await w.reply(sent.message_id, `Noted.\n\n${typed}`);
@@ -154,7 +154,7 @@ describe("the details line", () => {
 
   test("typed and written both: the store's goes, the person's stays, with an action result moving the first line", async () => {
     const w = await setup({ setAsideDelayMs: 60_000 });
-    const typed = "No question answered yet; it is still open. Don't re-ask it; the person will answer in the Inbox. If their words answer it, name it in answered_in_reply.";
+    const typed = "No question answered yet; it is still open. Don't re-ask it; the person will answer in the Inbox.";
     const sent = (await w.send(`${ACTION}\n\n${QUESTION}`)) as unknown as { message_id: string; actions: { key: string }[] };
     const key = sent.actions[0]!.key;
     await w.post(`/api/inbox/messages/${sent.message_id}/actions/${key}`, { outcome: "done", staged: true });
@@ -420,7 +420,7 @@ describe("every host", () => {
   });
 
   test("an older Inbox's command through the mod's copy: the thread id, no details, the words as sent", () => {
-    const old = { type: "reply" as const, id: "msg_R", thread_id: "msg_T", subject: null, body: "Yes.\n\nNo question answered yet; it is still open. Don't re-ask it; the person will answer in the Inbox. If their words answer it, name it in answered_in_reply." };
+    const old = { type: "reply" as const, id: "msg_R", thread_id: "msg_T", subject: null, body: "Yes.\n\nNo question answered yet; it is still open. Don't re-ask it; the person will answer in the Inbox." };
     const text = modWakeText(old);
     expect(text.split("\n")[2]).toBe("[Thread msg_T]");
     expect(text).toContain(old.body);

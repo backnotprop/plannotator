@@ -226,7 +226,7 @@ async function expectWordsOnly(firstId: string, secondId: string, words: string)
   const mine = model.thread.messages.filter((m) => m.author.kind === 'person');
   // Pinned word for word on purpose: the still-open line is the approved agent wording (approval "inbox-words-only-reply").
   expect(mine.map((m) => [m.reply_to, m.body])).toEqual([
-    [secondId, `${words}\n\nNo questions answered yet; all 2 are still open. Don't re-ask them; the person will answer in the Inbox. If their words answer one, name it in answered_in_reply.`],
+    [secondId, `${words}\n\nNo questions answered yet; all 2 are still open. Don't re-ask them; the person will answer in the Inbox.`],
   ]);
 }
 

@@ -264,7 +264,7 @@ describe("a Send skips only what the person chose (approval inbox-explicit-skip)
     const result = store.sendReply(asked.id, { words: "Redo the design.", idempotency_key: "k-1", skip_unanswered: true } as never);
     expect(result.questions.map((q) => q.state)).toEqual(["open", "open", "open"]);
     expect(result.reply.body).toBe(
-      "Redo the design.\n\nNo questions answered yet; all 3 are still open. Don't re-ask them; the person will answer in the Inbox. If their words answer one, name it in answered_in_reply.",
+      "Redo the design.\n\nNo questions answered yet; all 3 are still open. Don't re-ask them; the person will answer in the Inbox.",
     );
   });
 
@@ -274,7 +274,7 @@ describe("a Send skips only what the person chose (approval inbox-explicit-skip)
     // The words, then the line that keeps the agent from asking again
     // (approval "inbox-words-only-reply", store-words-only-reply.test.ts).
     expect(result.reply.body).toBe(
-      "Redo the design.\n\nNo questions answered yet; all 3 are still open. Don't re-ask them; the person will answer in the Inbox. If their words answer one, name it in answered_in_reply.",
+      "Redo the design.\n\nNo questions answered yet; all 3 are still open. Don't re-ask them; the person will answer in the Inbox.",
     );
     expect(result.questions.map((q) => q.state)).toEqual(["open", "open", "open"]);
     expect(rowOf(store, asked.id).section).toBe("stopped");

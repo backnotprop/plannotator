@@ -108,7 +108,7 @@ test.skipIf(!hasDom)("a sent reply's rest and its feedback keep the person's lin
     '',
     'my words',
     '',
-    "No questions answered yet; 1 question still open. Don't re-ask it; the person will answer in the Inbox. If their words answer it, name it in answered_in_reply.",
+    "No questions answered yet; 1 question still open. Don't re-ask it; the person will answer in the Inbox.",
     '',
     'rest one',
     'rest two',

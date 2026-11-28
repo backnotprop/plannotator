@@ -76,13 +76,13 @@ describe('a reply that answers nothing (approval inbox-words-only-reply)', () =>
     ({ ...question(key), answer: null, revision: 0, sent_revision: 0, superseded_by: null }) as unknown as InboxQuestionRecord;
   test('the words, then the still-open line; no first line, no answers section', () => {
     const text = composeInboxReplyBody({ questions: [open('q0'), open('q1')], sent: [], earlier: [], words: ' Later. ' });
-    expect(text).toBe("Later.\n\nNo questions answered yet; all 2 are still open. Don't re-ask them; the person will answer in the Inbox. If their words answer one, name it in answered_in_reply.");
+    expect(text).toBe("Later.\n\nNo questions answered yet; all 2 are still open. Don't re-ask them; the person will answer in the Inbox.");
     expect(INBOX_STILL_OPEN_LINE.test(text.split('\n\n')[1]!)).toBe(true);
   });
   test('a superseded question is not counted; with none left open there is no line', () => {
     const gone = { ...open('q1'), superseded_by: { message_id: 'msg_x', key: null } } as unknown as InboxQuestionRecord;
     expect(composeInboxReplyBody({ questions: [open('q0'), gone], sent: [], earlier: [], words: 'Later.' })).toBe(
-      "Later.\n\nNo question answered yet; it is still open. Don't re-ask it; the person will answer in the Inbox. If their words answer it, name it in answered_in_reply.",
+      "Later.\n\nNo question answered yet; it is still open. Don't re-ask it; the person will answer in the Inbox.",
     );
     expect(composeInboxReplyBody({ questions: [gone], sent: [], earlier: [], words: 'Later.' })).toBe('Later.');
   });
