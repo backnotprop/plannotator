@@ -28,8 +28,8 @@ function everyStoredLook(): string[][] {
 describe('Settings → Rows control model', () => {
   test('every stored look reads into the controls and writes back the identical list', () => {
     const looks = everyStoredLook();
-    // 23 options; the rival rules leave 1,161,216 distinct looks (Agent icons is three ways: 774,144 × 1.5). A new option or rule changes this on purpose.
-    expect(looks.length).toBe(1_161_216);
+    // The independent machine-name option doubles the upstream 1,161,216 looks.
+    expect(looks.length).toBe(2_322_432);
     let bad: { stored: string[]; back: string[] } | null = null;
     for (const stored of looks) {
       const back = rowsFromLook(lookFromControlValues(rowsControlValues(lookFromRows(stored))));
@@ -51,8 +51,8 @@ describe('Settings → Rows control model', () => {
     for (const click of clicks) expect([click.control.id, click.control.get(click.end)]).toEqual([click.control.id, click.value]);
   });
 
-  test('each option belongs to exactly one control: 8 first, 9 under More choices', () => {
-    expect([ROWS_MAIN_CONTROLS.length, ROWS_MORE_CONTROLS.length]).toEqual([8, 9]);
+  test('each option belongs to exactly one control: 8 first, 10 under More choices', () => {
+    expect([ROWS_MAIN_CONTROLS.length, ROWS_MORE_CONTROLS.length]).toEqual([8, 10]);
     expect(ROWS_CONTROLS.flatMap((control) => control.keys).sort()).toEqual([...INBOX_ROWS_OPTIONS].sort());
   });
 
@@ -62,6 +62,15 @@ describe('Settings → Rows control model', () => {
     expect(inboxRowsList(['smallNames', 'hidePulls'])).toEqual(['smallNames', 'hidePulls']);
     expect(rowsFromLook(lookWithChoice(lookFromRows(['compact', 'smallNames']), pulls, false))).toEqual(['compact', 'smallNames', 'hidePulls']);
     expect(rowsFromLook(lookWithChoice(lookFromRows(['compact', 'smallNames', 'hidePulls']), pulls, true))).toEqual(['compact', 'smallNames']);
+  });
+
+  test('machine names remain visible for old looks and can be hidden without changing other choices', () => {
+    const control = ROWS_CONTROLS.find((entry) => entry.id === 'machineNames')!;
+    const old = lookFromRows(['smallNames', 'compact']);
+    expect(control.get(old)).toBe(true);
+    const hidden = lookWithChoice(old, control, false);
+    expect(rowsFromLook(hidden)).toEqual(['compact', 'smallNames', 'hideMachineNames']);
+    expect(rowsFromLook(lookWithChoice(hidden, control, true))).toEqual(rowsFromLook(old));
   });
 
   test('the presets write exactly these lists: three as before this page, Dense new, none with Pull requests hidden', () => {

@@ -6,6 +6,7 @@
 
 import { useCallback, useMemo } from 'react';
 import { flushSync } from 'react-dom';
+import { useListLook } from '../listLook';
 import type { InboxListRow, InboxListSection, InboxThread } from '@plannotator/core/inbox-types';
 import { patchedRow, withCombining, withPinPatches } from '../rowActions';
 import { filterMachineRows, machineCounts, machineProjectNames } from '../machines';
@@ -99,9 +100,10 @@ export function useListShown({ latest, projects, route, thread, threadRow, rowPa
   // The Agents section's filter (`#agent=<id>`): one agent's threads, named by its row's name.
   const filterAgent = useAgentListFilter(route.page === 'inbox' ? (route.agent ?? null) : null, machines, windowRows);
   const { tagsOfRow, filterTagsOfRow, filterTag, shownTagId, threadTagsHost, sidebarTags, listColours } = useThreadTagsHost({ ...tags, routeTag: route.page === 'inbox' ? (route.tag ?? null) : null, machines, windowRows, openRow: threadRow, latestSections, tagColours: latest?.tag_colours ?? null, projects });
+  const [look] = useListLook();
   const projectNames = useMemo(
-    () => machineProjectNames({ projects, sidebar: shownProjects(projects, sidebarKeeps), sections: shown ?? [], pins: pinRows }, machines, !filterMachine),
-    [projects, sidebarKeeps, shown, pinRows, machines, filterMachine],
+    () => machineProjectNames({ projects, sidebar: shownProjects(projects, sidebarKeeps), sections: shown ?? [], pins: pinRows }, machines, !filterMachine, look.hideMachineNames),
+    [projects, sidebarKeeps, shown, pinRows, machines, filterMachine, look.hideMachineNames],
   );
   /** The sidebar's Machines counts: rows waiting on the person per machine, as Projects counts them. */
   const sidebarMachineCounts = useMemo(() => machineCounts(latestSections, machines), [latestSections, machines]);

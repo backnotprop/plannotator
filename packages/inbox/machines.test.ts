@@ -87,6 +87,21 @@ describe('linked', () => {
     expect(machineProjectNames({ projects, sidebar: projects, sections: [] }, model, false).get('prj_mac')).toBe('billing-svc');
   });
 
+  test('hiding machine names keeps custom names intact and retains suffixes for ambiguous projects', () => {
+    const projects = [
+      { id: 'prj_own', root: '/work/api', name: 'api' },
+      { id: 'prj_mac', root: '/work/api', name: 'api', machine: MAC },
+      { id: 'prj_named', root: '/work/tools', name: 'tools', display_name: 'Build tools', machine: MINI },
+    ];
+    const input = { projects, sidebar: projects, sections: [] };
+    const hidden = machineProjectNames(input, model, true, true);
+    expect(hidden.get('prj_named')).toBe('Build tools');
+    expect(hidden.get('prj_own')).toBe('api');
+    expect(hidden.get('prj_mac')).toBe('api · MacBook');
+    expect(machineProjectNames(input, model, true).get('prj_named')).toBe('Build tools · Mini');
+    expect(projects[2]!.machine).toBe(MINI);
+  });
+
   test('a machine filter keeps its rows (this machine: rows with no machine); Hide offline machines drops only the away ones', () => {
     expect(model.away).toEqual(new Set([MAC]));
     expect(ids(filterMachineRows(sections, model, MAC, false))).toEqual([['mac'], ['mac2']]);

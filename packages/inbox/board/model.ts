@@ -17,6 +17,7 @@
  *   The store decides what is allowed; these say what the menu offers.
  */
 
+import { projectMachineLabels } from '../projectLabels';
 import {
   INBOX_CARD_COLUMN_LABELS,
   INBOX_CARD_LIVE_COLUMNS,
@@ -300,6 +301,7 @@ export function boardLookOf(card: Pick<InboxCardWire, 'machine'>, visitLook: num
 export function boardProjectNames(
   projects: readonly (Parameters<typeof projectNames>[0][number] & { machine?: string })[],
   machineNames: ReadonlyMap<string, string>,
+  hideMachineNames = false,
 ): Map<string, string> {
   if (machineNames.size === 0) return projectNames(projects);
   const groups = new Map<string, (typeof projects)[number][]>();
@@ -307,12 +309,10 @@ export function boardProjectNames(
     const owner = project.machine && machineNames.has(project.machine) ? project.machine : '';
     groups.set(owner, [...(groups.get(owner) ?? []), project]);
   }
-  const out = new Map<string, string>();
-  for (const [owner, group] of groups) {
-    const machine = machineNames.get(owner);
-    for (const [id, name] of projectNames(group)) out.set(id, machine ? `${name} · ${machine}` : name);
-  }
-  return out;
+  return projectMachineLabels([...groups].map(([owner, group]) => ({
+    names: projectNames(group),
+    machine: machineNames.get(owner),
+  })), hideMachineNames);
 }
 
 /** A move the person makes on a card (the window's route `POST /api/inbox/cards/:id`). */

@@ -34,3 +34,23 @@ export function windowProjectNames(input: {
   }
   return names;
 }
+
+/** Project labels across machines, keeping suffixes where a bare name would be ambiguous. */
+export function projectMachineLabels(
+  groups: readonly { names: ReadonlyMap<string, string>; machine?: string }[],
+  hideMachineNames = false,
+): Map<string, string> {
+  const counts = new Map<string, number>();
+  const key = (name: string) => name.normalize('NFC').toLocaleLowerCase();
+  for (const { names } of groups) {
+    for (const name of names.values()) counts.set(key(name), (counts.get(key(name)) ?? 0) + 1);
+  }
+  const out = new Map<string, string>();
+  for (const { names, machine } of groups) {
+    for (const [id, name] of names) {
+      const showMachine = machine && (!hideMachineNames || (counts.get(key(name)) ?? 0) > 1);
+      out.set(id, showMachine ? `${name} · ${machine}` : name);
+    }
+  }
+  return out;
+}

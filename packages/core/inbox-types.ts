@@ -2875,6 +2875,8 @@ export const INBOX_ROWS_OPTIONS = [
   // list, threads and pickers. A face picked for one agent stays. Agent icons is one three-way choice: each agent's
   // own (neither), from the project name (this), or hidden (`hideAgents`, which wins).
   "agentProjectIcons",
+  // Omit a project's machine suffix when its name already distinguishes it.
+  "hideMachineNames",
 ] as const;
 export type InboxRowsOption = (typeof INBOX_ROWS_OPTIONS)[number];
 

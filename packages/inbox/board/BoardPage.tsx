@@ -1,4 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type ReactNode } from 'react';
+import { useBoardProjectNames } from './useBoardProjectNames';
 import { ProjectMark, showsProjects, useRowMarks } from '../letterMarks';
 import { knownProjectName, useKnownProjects } from '../projectPictures';
 import { INBOX_CARD_COLUMN_LABELS, INBOX_CARD_LIVE_COLUMNS, displayInboxSubject, inboxCardMarkRef, type InboxCardColumn, type InboxCardMark, type InboxCardWire, type InboxListRow, type InboxInitiative } from '@plannotator/core/inbox-types';
@@ -57,7 +58,6 @@ import {
   laneWindowStart,
   cardOwnerName,
   boardLookOf,
-  boardProjectNames,
   cardShowsUnread,
   moveSaid,
   sentTo,
@@ -155,7 +155,7 @@ export function BoardPage(props: BoardPageProps) {
   // Filtered to a project and/or an initiative: everything below reads only those cards (the opened card is found among all).
   const projectCards = cardsInProject(allCards, project);
   const machineNames = props.machines?.names ?? NO_MACHINES;
-  const names = useMemo(() => boardProjectNames(props.projects, machineNames), [props.projects, machineNames]);
+  const names = useBoardProjectNames(props.projects, machineNames);
   const homeProjects = props.homeProjects ?? props.projects;
   const offered = boardProjects(allCards, props.projects, project);
   const projectName = project ? (names.get(project) ?? null) : null;

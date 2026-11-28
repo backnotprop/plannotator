@@ -9,7 +9,7 @@
 import { inboxGroupWaitsOnPerson, type InboxLinkedMark, type InboxListRow, type InboxListSection } from '@plannotator/core/inbox-types';
 import { shortTime } from './format';
 import type { MachineView, OutboxView } from './api';
-import { windowProjectNames } from './projectLabels';
+import { projectMachineLabels, windowProjectNames } from './projectLabels';
 
 export interface MachinesModel {
   /** This Inbox's own id, or null (an Inbox that cannot link). */
@@ -197,6 +197,7 @@ export function machineProjectNames(
   input: Parameters<typeof windowProjectNames>[0] & { projects: readonly NamedProject[] },
   model: MachinesModel,
   label: boolean,
+  hideMachineNames = false,
 ): Map<string, string> {
   if (model.linked.length === 0) return windowProjectNames(input);
   const groups = new Map<string, NamedProject[]>();
@@ -204,13 +205,10 @@ export function machineProjectNames(
     const owner = project.machine ?? model.self ?? '';
     groups.set(owner, [...(groups.get(owner) ?? []), project]);
   }
-  const out = new Map<string, string>();
-  for (const [owner, projects] of groups) {
-    const names = windowProjectNames({ ...input, projects });
-    const machine = label ? model.names.get(owner) : undefined;
-    for (const [id, name] of names) out.set(id, machine ? `${name} · ${machine}` : name);
-  }
-  return out;
+  return projectMachineLabels([...groups].map(([owner, projects]) => ({
+    names: windowProjectNames({ ...input, projects }),
+    machine: label ? model.names.get(owner) : undefined,
+  })), hideMachineNames);
 }
 
 /** A held write's thread-scoped id: the message (`messages/<id>/…`) or the thread (`threads/<id>/…`) it is for. */

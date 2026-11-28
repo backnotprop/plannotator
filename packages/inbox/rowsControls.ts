@@ -9,7 +9,7 @@
  */
 import { LIST_LOOK_DEFAULT, LIST_LOOK_KEYS, LIST_LOOK_OFF, lookMarks, lookWithChange, markStyleLook, marksWhatLook, type ListLook, type ListLookKey, type MarkStyle, type MarksWhat } from './listLook';
 
-export type RowsControlId = 'spacing' | 'preview' | 'first' | 'time' | 'needs' | 'agents' | 'project' | 'pulls' | 'newer' | 'boldAll' | 'pill' | 'dividers' | 'timeAt' | 'badges' | 'shape' | 'logo' | 'github';
+export type RowsControlId = 'spacing' | 'preview' | 'first' | 'time' | 'needs' | 'agents' | 'project' | 'pulls' | 'newer' | 'boldAll' | 'pill' | 'dividers' | 'timeAt' | 'badges' | 'shape' | 'logo' | 'github' | 'machineNames';
 
 /** A control's value: a segmented choice's id, a switch's on or off, or null for a choice with none picked. */
 export type RowsControlValue = string | boolean | null;
@@ -120,8 +120,9 @@ export const ROWS_MAIN_CONTROLS: readonly RowsControl[] = [
   showSwitch('pulls', 'hidePulls', 'Pull requests', 'Their state at the end of the row'),
 ];
 
-/** Under "More choices": nine choices over the other twelve options. */
+/** Under "More choices": ten choices over the other thirteen options. */
 export const ROWS_MORE_CONTROLS: readonly RowsControl[] = [
+  showSwitch('machineNames', 'hideMachineNames', 'Machine names on projects', 'Same-name projects keep the machine name so you can tell them apart'),
   seg({
     id: 'newer',
     label: 'New threads',
