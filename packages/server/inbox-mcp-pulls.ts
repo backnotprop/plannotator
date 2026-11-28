@@ -19,6 +19,7 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod";
 import { inboxStoredAgentName } from "@plannotator/core/inbox-format";
+import { linkEnd } from "@plannotator/core";
 import {
   inboxAgentName,
   inboxThreadPullText,
@@ -167,12 +168,13 @@ export async function changePullsAsAgent(
 
 /** One line of what a change did, for a tool's answer: "Added …. Removed …. Not on this thread: …." */
 export function pullsChangeText(change: Pick<InboxThreadPullsChange, "added" | "already" | "removed" | "missing">): string {
-  const refs = (pulls: readonly { pull: string; url: string }[]) => pulls.map((pull) => inboxThreadPullText(pull)).join(", ");
+  // A PR on another host reads as its URL: `linkEnd` keeps the comma or full stop after it out of the link.
+  const refs = (pulls: readonly { pull: string; url: string }[]) => pulls.map((pull) => linkEnd(inboxThreadPullText(pull))).join(", ");
   return [
     change.added.length > 0 ? `Added ${refs(change.added)}.` : "",
     change.already.length > 0 ? `Already on this thread: ${refs(change.already)}.` : "",
     change.removed.length > 0 ? `Removed ${refs(change.removed)}.` : "",
-    change.missing.length > 0 ? `Not on this thread: ${change.missing.map((ref) => inboxThreadPullText({ pull: ref.key, url: ref.url })).join(", ")}.` : "",
+    change.missing.length > 0 ? `Not on this thread: ${refs(change.missing.map((ref) => ({ pull: ref.key, url: ref.url })))}.` : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -229,7 +231,7 @@ export function registerInboxThreadPullsTool(server: McpServer, context: InboxPu
         const logged = !input.ship
           ? ""
           : shipped && "ship" in shipped
-            ? ` Logged in the ship log of ${shipped.ship.url}.`
+            ? ` Logged in the ship log of ${shipped.ship.url}`
             : shipped && "stopped" in shipped
               ? ` ${shipStopLine(shipped.stopped)}`
               : shipped

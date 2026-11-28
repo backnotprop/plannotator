@@ -213,12 +213,12 @@ export function explainTailscaleSetup(result: TailscaleRunResult): string | unde
       "Tailscale Serve is off for your tailnet. That is a one-time Tailscale setting, not a Plannotator bug.\n" +
       (link
         ? `Open ${link} and press Enable HTTPS (keep "HTTPS certificates" ticked; Funnel is not needed), then try again.`
-        : "Turn on HTTPS certificates in the Tailscale admin console (https://login.tailscale.com/admin/dns), then try again.")
+        : "Turn on HTTPS certificates in the Tailscale admin console at https://login.tailscale.com/admin/dns and then try again.")
     );
   }
   if (/\bLogged out\b/.test(output)) {
     const login = /Log in at:\s*(https:\/\/\S+)/.exec(output)?.[1];
-    return `Tailscale is signed out on this computer. Sign in ${login ? `at ${login}` : "with `tailscale up` or the Tailscale app"}, then try again.`;
+    return `Tailscale is signed out on this computer. Sign in ${login ? `at ${login} and then try again.` : "with `tailscale up` or the Tailscale app, then try again."}`;
   }
   if (/Tailscale is stopped/.test(output)) {
     return "Tailscale is turned off on this computer. Turn it on with `tailscale up` or the Tailscale app, then try again.";

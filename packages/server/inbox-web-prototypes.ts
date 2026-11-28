@@ -215,6 +215,6 @@ export function webFramePage(site: Pick<InboxLiveSiteRef, "url">): Response {
 
 export function prototypesNotFramedText(urls: readonly string[]): string {
   return urls
-    .map((url) => ` Prototype: ${url}: this page does not allow being shown inside another page, so the person opens it in a new tab. To show it in the Inbox, let it be framed (no X-Frame-Options DENY or SAMEORIGIN; frame-ancestors allowing it).`)
+    .map((url) => ` The prototype ${url} does not allow being shown inside another page, so the person opens it in a new tab. To show it in the Inbox, let it be framed (no X-Frame-Options DENY or SAMEORIGIN; frame-ancestors allowing it).`)
     .join("");
 }

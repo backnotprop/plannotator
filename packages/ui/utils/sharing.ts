@@ -220,12 +220,20 @@ export async function generateShareUrl(
 }
 
 /**
+ * A share link's payload, key or paste origin (base64url, no padding) without the punctuation a sentence put
+ * after the link (`…#key=abc).`, a terminal that linkified up to the next space). base64url never ends with one.
+ */
+export function shareFragmentValue(value: string): string {
+  return /^[A-Za-z0-9_-]+[).,;:\]>"']+$/.test(value) ? value.replace(/[).,;:\]>"']+$/, '') : value;
+}
+
+/**
  * Parse a share URL hash and return the payload
  * Returns null if no valid hash or parsing fails
  */
 export async function parseShareHash(): Promise<SharePayload | null> {
   const raw = window.location.hash.slice(1); // Remove leading #
-  const hash = raw.split('?')[0]; // Strip callback params (?cb=...&ct=...)
+  const hash = shareFragmentValue(raw.split('?')[0]); // Strip callback params (?cb=...&ct=...)
 
   if (!hash) {
     return null;

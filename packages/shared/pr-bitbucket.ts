@@ -272,7 +272,7 @@ async function bbRequest(
     if (res.status >= 300 && res.status < 400 && res.headers.get("location")) {
       const next = new URL(res.headers.get("location")!, url);
       if (next.origin !== ctx.apiOrigin) {
-        throw new BitbucketApiError(`Bitbucket redirected off the API origin (${next.origin})`, res.status);
+        throw new BitbucketApiError(`Bitbucket redirected off the API origin to ${next.origin}`, res.status);
       }
       url = next.toString();
       continue;

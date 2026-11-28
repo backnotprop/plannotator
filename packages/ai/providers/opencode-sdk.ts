@@ -149,7 +149,7 @@ export class OpenCodeProvider implements AIProvider {
 			// reasons that have nothing to do with the binary.
 			if ((err as NodeJS.ErrnoException | null)?.code === "ENOENT") {
 				throw new Error(
-					"OpenCode CLI (`opencode`) was not found on PATH. Install it (https://opencode.ai) or choose a different AI provider.",
+					"OpenCode CLI (`opencode`) was not found on PATH. Install it from https://opencode.ai or choose a different AI provider.",
 					{ cause: err },
 				);
 			}

@@ -163,13 +163,13 @@ function refuse(message: string): never {
  * (Plannotator's own). Returns the URL without its fragment.
  */
 export function checkInboxLiveUrl(raw: unknown, reservedPorts: Iterable<number>): URL {
-  if (typeof raw !== "string" || raw.trim() === "") refuse("a running local site's address, e.g. http://localhost:5173/.");
+  if (typeof raw !== "string" || raw.trim() === "") refuse("a running local site's address, e.g. http://localhost:5173/");
   if (raw.length > INBOX_LIVE_URL_MAX) refuse(`at most ${INBOX_LIVE_URL_MAX} characters.`);
   let url: URL;
   try {
     url = new URL(raw.trim());
   } catch {
-    refuse(`${raw.trim()} is not an address; give one like http://localhost:5173/.`);
+    refuse(`${raw.trim()} is not an address; give one like http://localhost:5173/`);
   }
   if (url.protocol !== "http:") refuse("only an http:// address on this computer opens live.");
   if (!isLoopbackHostname(url.hostname)) refuse(`${url.host} is not this computer: give its https:// address, or a localhost one.`);
@@ -391,7 +391,7 @@ export function createInboxLiveSites(options: InboxLiveSitesOptions): InboxLiveS
         if (error instanceof InboxError) {
           // The reason without the address again (the probe's own words start with it).
           const reason = error.message.replace(/^url: /, "").replace(/^(\S+) (?=did not answer)/, "");
-          throw new InboxError("validation_error", `body: ${prototypePlace(app)}: Prototype: ${app.target}: ${reason}`, { field: "body" });
+          throw new InboxError("validation_error", `body: ${prototypePlace(app)}: The prototype ${app.target} cannot be shown: ${reason}`, { field: "body" });
         }
         throw error;
       }

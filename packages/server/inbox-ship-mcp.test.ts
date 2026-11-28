@@ -120,7 +120,8 @@ describe("thread_pulls ship", () => {
     expect(w.ships.get(KEY)!.told).toEqual([]);
     expect(w.ships.get(KEY)!.log.map((e) => e.text)).toEqual(["Started"]);
     const own = await w.call({ thread_id: w.thread, ship: { kind: "step", text: "Pushed a fix", sha: "b".repeat(40) }, agent_session: "ses_ship", agent_host: "claude-code", agent_name: "Claude Code" });
-    expect(textOf(own)).toContain("Logged in the ship log of https://github.com/harbor/fern-api/pull/614.");
+    // The link ends its line: a terminal would take a full stop after it into the link.
+    expect(textOf(own)).toContain("Logged in the ship log of https://github.com/harbor/fern-api/pull/614\n");
     expect(w.ships.get(KEY)!.log.at(-1)!.text).toBe("Pushed a fix");
     expect(w.ships.get(KEY)!.told).toEqual(["b".repeat(40)]);
   });
@@ -191,7 +192,7 @@ describe("thread_pulls ship in the schema every agent carries", () => {
     const parsed = schema.safeParse({ ...base, ship: { kind: "step", text: "Pushed a fix", sha: "c".repeat(40) } });
     expect(parsed.success).toBe(true);
     const result = await w.call(parsed.data as Record<string, unknown>);
-    expect(textOf(result)).toContain("Logged in the ship log of https://github.com/harbor/fern-api/pull/614.");
+    expect(textOf(result)).toContain("Logged in the ship log of https://github.com/harbor/fern-api/pull/614\n");
     expect(w.ships.get(KEY)!.log.at(-1)!.text).toBe("Pushed a fix");
   });
 });

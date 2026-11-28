@@ -82,6 +82,7 @@ import { withoutRexPane } from "@plannotator/server/inbox-launch-env";
 import { INBOX_REX_SERVER_ENV, inboxRexServerSocket } from "@plannotator/server/inbox-rex-where";
 import { addInboxNote, INBOX_NOTE_BODY, inboxNotesDisabled, markNotesAsked } from "@plannotator/server/inbox-agent-notes";
 import { INBOX_AGENT_LABELS, INBOX_AUTO_SEND_AFTER_MS, INBOX_NOTE_AGENT_IDS, type InboxConnectReport, type InboxNoteAgentId } from "@plannotator/core/inbox-types";
+import { withoutLinkTail } from "@plannotator/core";
 import { writeUrlQr } from "@plannotator/server/qr";
 import { shellLine } from "@plannotator/inbox/harnesses";
 import { getCliVersion, hasHelpFlag } from "./cli";
@@ -321,6 +322,8 @@ async function publishRunningInbox(entry: InboxRegistryEntry): Promise<void> {
   }
 }
 
+const INBOX_OPEN_ID = /^[A-Za-z0-9_-]{1,128}$/;
+
 /**
  * The thread `--open` names: a thread or message id (`msg_…`), or a link
  * with `#thread=` (the Inbox's own, or the one the agent tools hand out).
@@ -330,7 +333,9 @@ export function inboxThreadRef(arg: string): string | null {
   const value = arg.trim();
   const hash = value.indexOf("#");
   const id = hash === -1 ? value : new URLSearchParams(value.slice(hash + 1)).get("thread");
-  return id && /^[A-Za-z0-9_-]{1,128}$/.test(id) ? id : null;
+  // A link copied with the punctuation of the sentence it sat in (`…#thread=msg_…).`): no id ends with it.
+  const kept = id ? withoutLinkTail(id, INBOX_OPEN_ID) : null;
+  return kept && INBOX_OPEN_ID.test(kept) ? kept : null;
 }
 
 /**

@@ -350,7 +350,7 @@ test.skipIf(!hasDom)("Approve goes into the agent's thread as a reply to its las
   await settle();
   expect(posted).toHaveLength(1);
   expect(posted[0]!.path).toBe(`/api/inbox/messages/${LAST}/reply`);
-  expect(posted[0]!.body.words).toBe('I approved pull request #412 "Layer 412" (https://github.com/northwind/billing-svc/pull/412).');
+  expect(posted[0]!.body.words).toBe('I approved pull request #412 "Layer 412" at https://github.com/northwind/billing-svc/pull/412 .');
   expect(typeof posted[0]!.body.idempotency_key).toBe('string');
 });
 

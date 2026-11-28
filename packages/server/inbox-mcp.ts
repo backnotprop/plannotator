@@ -1481,7 +1481,8 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           }, 0);
         }
         return ok(
-          `${sent.replayed ? "Already sent" : "Sent"} to the Plannotator Inbox${asked} (thread ${sent.structured.thread_id}, ${sent.structured.url}).${branchLine}${stepsLine}${pullsLine}${priorityLine(sent.priority)}${namingLine(sent.naming)} ${replyNextStepText(wakes, input.agent_host, await t3WokenOnlyWhileRunning(context, wakes, input), antigravityHandsOver(ctx, wakes, input))}${hints.join("")}`,
+          // The link ends its line: a terminal links up to the next space, so a `).` after it would be part of the link.
+          `${sent.replayed ? "Already sent" : "Sent"} to the Plannotator Inbox${asked}, thread ${sent.structured.thread_id}: ${sent.structured.url}\n${`${branchLine}${stepsLine}${pullsLine}${priorityLine(sent.priority)}${namingLine(sent.naming)} ${replyNextStepText(wakes, input.agent_host, await t3WokenOnlyWhileRunning(context, wakes, input), antigravityHandsOver(ctx, wakes, input))}`.trimStart()}${hints.join("")}`,
           stale ? { ...sent.structured, not_read_since: lastContactOf(stale) } : sent.structured,
         );
       }),

@@ -4485,7 +4485,7 @@ export async function startReviewServer(
                 );
               }
 
-              console.error(`[pr-action] ${action} with ${body.fileComments.length} line comment(s) and ${fileLevelComments.length} file-level comment(s), target=${targetUrl}, headSha=${targetHeadSha}`);
+              console.error(`[pr-action] ${action} with ${body.fileComments.length} line comment(s) and ${fileLevelComments.length} file-level comment(s), target=${targetUrl} headSha=${targetHeadSha}`);
 
               const submission = await submitPlatformReview(
                 targetRef,

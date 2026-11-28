@@ -12,6 +12,7 @@ import { pullFilterOf, type PullFilter } from '../pulls/model';
 import { boardInitiativeOf, boardViewOf, type BoardView } from '../board/model';
 import { reviewAtOf, type ReviewAt } from './reviewAt';
 import { viewScopeOf, type PullViewScope } from '../pulls/viewScope';
+import { routeIdWithoutLinkTail } from '@plannotator/core';
 
 export interface Route {
   page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'tour' | 'board' | 'reviews' | 'prs' | 'artifacts' | 'scheduled' | 'plans' | 'grid';
@@ -166,11 +167,32 @@ export function readRoute(): Route {
   return routeOf(window.location.hash);
 }
 
+/**
+ * The keys whose value is an id the window looks up: an Inbox or plan id, or a pull request's key. `file` is an
+ * attachment id in a thread but an artifact's path in a plan (`#plans=…&file=<path>`), so a plan's is left alone.
+ */
+const ROUTE_ID_KEYS = ['thread', 'msg', 'file', 'guide', 'card', 'project', 'machine', 'initiative', 'board-project', 'board-initiative', 'in', 'plans', 'doc', 'routine', 'stack', 'layer', 'back', 'system', 'local'];
+
+/**
+ * The ids with the punctuation a sentence put after the link taken off: `#thread=msg_…).` from a link an older
+ * version printed in parentheses, or one pasted from prose (core link-tail.ts). A value that is no such id is kept.
+ */
+function withoutLinkTails(params: URLSearchParams): URLSearchParams {
+  for (const key of ROUTE_ID_KEYS) {
+    if (key === 'file' && params.has('plans')) continue;
+    const value = params.get(key);
+    if (value === null) continue;
+    const id = routeIdWithoutLinkTail(value);
+    if (id !== value) params.set(key, id);
+  }
+  return params;
+}
+
 export function routeOf(fullHash: string): Route {
   const hash = withoutClickSignal(fullHash).replace(/^#/, '');
   const settingsAt = parseSettingsHash(hash);
   if (settingsAt) return { page: 'settings', project: null, thread: null, section: settingsAt.section, pair: settingsAt.pair, experimental: settingsAt.experimental };
-  const params = new URLSearchParams(hash);
+  const params = withoutLinkTails(new URLSearchParams(hash));
   if (params.has('whats-new')) return { page: 'whats-new', project: null, thread: null, version: params.get('whats-new') };
   if (params.has('tour')) return { page: 'tour', project: null, thread: null, step: tourStepOf(params.get('tour')) };
   if (params.has('drafts')) return { page: 'drafts', project: null, thread: null };

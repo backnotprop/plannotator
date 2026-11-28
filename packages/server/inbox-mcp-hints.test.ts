@@ -11,8 +11,10 @@
  *
  * A real store in a temp dir and send_message's own handler; no Inbox
  * server, no network: the lookup after a send reads a stand-in forge.
+ * PLANNOTATOR_DATA_DIR points at a temp folder while each test runs, so
+ * nothing reaches the real data folder.
  */
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -24,7 +26,16 @@ import { createInboxPullLookups } from "./inbox-pull-lookups";
 import { attachPullText, pullsNamedInBody, pullsToLookUp, QUESTION_OPTIONS_HINT, questionWithBareOptions, quietHint, type InboxKnownPulls } from "./inbox-mcp-hints";
 
 const roots: string[] = [];
+let savedDataDir: string | undefined;
+beforeEach(() => {
+  savedDataDir = process.env.PLANNOTATOR_DATA_DIR;
+  const dataDir = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-hints-data-")));
+  roots.push(dataDir);
+  process.env.PLANNOTATOR_DATA_DIR = dataDir;
+});
 afterEach(() => {
+  if (savedDataDir === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+  else process.env.PLANNOTATOR_DATA_DIR = savedDataDir;
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
@@ -37,6 +48,7 @@ const nudge = (label: string, add: string) => `You named ${label}, which is on n
 /** What the Inbox knows: the project is acme/api on github.com, and these keys are PRs (any other number is an issue or unknown). */
 const knowing = (...pulls: string[]): InboxKnownPulls => ({ repo: { host: "github.com", repo: "acme/api" }, isPull: (key) => pulls.includes(key) });
 
+/** A send's answer is two lines before any hint: the thread's link ends the first. */
 type Result = { content: { text: string }[]; isError?: boolean; structuredContent?: Record<string, unknown> };
 
 function world(options: { projectHost?: InboxMcpContext["projectHost"]; known?: InboxKnownPulls } = {}) {
@@ -63,7 +75,7 @@ function world(options: { projectHost?: InboxMcpContext["projectHost"]; known?: 
 test("a #N only in a picture's alt text or caption, or in a URL, names no PR; the same #N in prose does, and the agent reads that line once", async () => {
   const w = world({ known: knowing("github.com/acme/api#411") });
   const quiet = await w.send("ses_a", { body: 'Before and after:\n\n![Header after #411](shots/after.png "the fix for #411")\n\nSee https://example.com/notes#411.', thread: "pictures" });
-  expect(quiet.lines).toHaveLength(1);
+  expect(quiet.lines).toHaveLength(2);
   const named = await w.send("ses_a", { body: "This lands #411.", thread: "prose" });
   expect(named.last).toBe(nudge("#411", "acme/api#411"));
   expect(inboxToolResultText(named.result).text.split(named.last)).toHaveLength(2);
@@ -113,32 +125,32 @@ test("a bare #N the Inbox knows as the project's PR is named once per thread; th
   const first = await w.send("ses_a", { body: "Opened #3405; it is like issue #7.", thread: "one" });
   expect(first.result.isError).toBeUndefined();
   expect(first.lines[0]).toStartWith("Sent to the Plannotator Inbox");
-  expect(first.lines).toHaveLength(2);
+  expect(first.lines).toHaveLength(3);
   expect(first.last).toBe(nudge("#3405", "acme/api#3405"));
   expect(first.result.structuredContent!.hint).toBe(first.last);
   // The same thread, any session: told already.
-  expect((await w.send("ses_a", { body: "#3405 is green.", reply_to: first.id })).lines).toHaveLength(1);
+  expect((await w.send("ses_a", { body: "#3405 is green.", reply_to: first.id })).lines).toHaveLength(2);
   // (Its one extra line is the "not read this thread" one.)
   expect((await w.send("ses_b", { body: "Reviewing #3405.", reply_to: first.id })).result.content[0]!.text).not.toContain("You named");
   // Another thread, the same session: still on no row, so said there too.
   expect((await w.send("ses_a", { body: "Follow-up to #3405.", thread: "two" })).last).toBe(nudge("#3405", "acme/api#3405"));
   // An issue's number (not a PR the Inbox knows): nothing.
-  expect((await w.send("ses_a", { body: "Fixes #7.", thread: "three" })).lines).toHaveLength(1);
+  expect((await w.send("ses_a", { body: "Fixes #7.", thread: "three" })).lines).toHaveLength(2);
 });
 
 test("owner/repo#N and a URL count; the line names the ref an agent passes back", async () => {
   const w = world({ known: knowing("github.com/acme/web#12") });
   const sent = await w.send("ses_a", { body: "Opened acme/web#12 and https://github.com/acme/api/pull/13; #99 is unknown here." });
-  expect(sent.lines.slice(1)).toEqual([nudge("#12", "acme/web#12"), nudge("#13", "acme/api#13")]);
+  expect(sent.lines.slice(2)).toEqual([nudge("#12", "acme/web#12"), nudge("#13", "acme/api#13")]);
 });
 
 test("no PR line when the PR is on any thread's row, passed in this send's pulls (even refused), or taken off this thread", async () => {
   const w = world({ known: knowing("github.com/acme/api#3405", "github.com/acme/api#3406") });
   const now = await w.send("ses_a", { body: "Opened #3405.", pulls: ["acme/api#3405"], thread: "one" });
-  expect(now.lines).toHaveLength(1);
-  expect(now.lines[0]).toContain("PRs: Added acme/api#3405.");
+  expect(now.lines).toHaveLength(2);
+  expect(now.lines[1]).toContain("PRs: Added acme/api#3405.");
   // On another thread's row: a roll-up that lists it is quiet.
-  expect((await w.send("ses_b", { body: "Release notes: #3405.", thread: "release" })).lines).toHaveLength(1);
+  expect((await w.send("ses_b", { body: "Release notes: #3405.", thread: "release" })).lines).toHaveLength(2);
   // This send's own `pulls`, refused because the thread holds its 20: no line telling it to add what it just tried.
   const full = await w.send("ses_a", { body: "Busy thread.", thread: "full" });
   const twenty = parseInboxThreadPullRefs(Array.from({ length: INBOX_THREAD_PULLS_MAX }, (_, i) => `acme/other#${i + 1}`), "add").refs!;
@@ -164,7 +176,7 @@ test("the store shows a PR too: its URL in an earlier message, the agent's or th
   // The person's words count the same way; a PR of another repository does not make this one's number a PR.
   w.store.sendReply(first.id, { words: "Also see https://github.com/acme/api/pull/3410 and https://github.com/acme/web/pull/3411.", idempotency_key: "p1" });
   const later = await w.send("ses_a", { body: "Next: #3410 and #3411.", thread: "three" });
-  expect(later.lines.slice(1)).toEqual([nudge("#3410", "acme/api#3410")]);
+  expect(later.lines.slice(2)).toEqual([nudge("#3410", "acme/api#3410")]);
 });
 
 test("a PR taken off a thread's row is known: quiet in that thread, still named in another", async () => {
@@ -181,17 +193,18 @@ test("five PRs in one message: three lines in text order and nothing more; a lat
   const w = world({ known: knowing(...numbers.map((n) => `github.com/acme/api#${n}`)) });
   const body = `Merged ${numbers.map((n) => `#${n}`).join(", ")}.`;
   const sent = await w.send("ses_a", { body, thread: "roll-up" });
-  expect(sent.lines.slice(1)).toEqual(numbers.slice(0, 3).map((n) => nudge(`#${n}`, `acme/api#${n}`)));
+  expect(sent.lines.slice(2)).toEqual(numbers.slice(0, 3).map((n) => nudge(`#${n}`, `acme/api#${n}`)));
   const again = await w.send("ses_a", { body, reply_to: sent.id });
-  expect(again.lines.slice(1)).toEqual(numbers.slice(3).map((n) => nudge(`#${n}`, `acme/api#${n}`)));
+  expect(again.lines.slice(2)).toEqual(numbers.slice(3).map((n) => nudge(`#${n}`, `acme/api#${n}`)));
   expect(attachPullText(parseInboxThreadPullRefs(numbers.map((n) => `acme/api#${n}`), "pulls").refs!).split("\n")).toHaveLength(3);
 });
 
 test("in a project on a self-hosted GitLab, send_message's short group/project!n lands on that host, and the same words in the body ask nothing", async () => {
   const w = world({ projectHost: async (projectId) => (projectId === w.project.id ? "gitlab.acme.dev" : null) });
   const sent = await w.send("ses_a", { body: "Opened acme/web!7.", pulls: ["acme/web!7"] });
-  expect(sent.lines).toHaveLength(1);
-  expect(sent.lines[0]).toContain("PRs: Added https://gitlab.acme.dev/acme/web/-/merge_requests/7.");
+  expect(sent.lines).toHaveLength(2);
+  // The URL ends at a space: the full stop after it is not part of the link.
+  expect(sent.lines[1]).toContain("PRs: Added https://gitlab.acme.dev/acme/web/-/merge_requests/7 .");
   expect(w.store.threadPulls(sent.thread).map((p) => p.url)).toEqual(["https://gitlab.acme.dev/acme/web/-/merge_requests/7"]);
   expect(keys("acme/web!7")).toEqual(["gitlab.com/acme/web#7:pull"]);
   expect(pullsNamedInBody("acme/web!7", "gitlab.acme.dev").map((ref) => ref.key)).toEqual(["gitlab.acme.dev/acme/web#7:pull"]);
@@ -205,7 +218,7 @@ test("one kind a send: the PR line first, the question line on a later send that
   const next = await w.send("ses_a", { body: `${PR}\n\n${BARE.replace("Which", "And which")}`, reply_to: both.id });
   expect(next.last).toBe(QUESTION_OPTIONS_HINT);
   const third = await w.send("ses_a", { body: `${PR}\n\n${BARE.replace("Which", "Then which")}`, reply_to: next.id });
-  expect(third.lines).toHaveLength(2);
+  expect(third.lines).toHaveLength(3);
   expect(third.last).toStartWith(`- ${third.id}/q-`);
 });
 
@@ -218,9 +231,9 @@ test("no hint on a refused send or a replay; a refused send does not use up the 
   expect(sent.last).toBe(nudge("#12", "acme/api#12"));
   const replay = await w.send("ses_c", { body: `Opened ${PR}.`, idempotency_key: "k1" });
   expect(replay.lines[0]).toStartWith("Already sent");
-  expect(replay.lines).toHaveLength(1);
+  expect(replay.lines).toHaveLength(2);
   const anon = await w.send("", { body: BARE, thread: "anon" });
-  expect(anon.lines).toHaveLength(2);
+  expect(anon.lines).toHaveLength(3);
   expect(anon.last).toStartWith(`- ${anon.id}/q-`);
 });
 

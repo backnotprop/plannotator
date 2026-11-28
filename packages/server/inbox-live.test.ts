@@ -197,8 +197,8 @@ describe("an option's prototype is a public https page", () => {
     expect(sent.isError).toBeFalsy();
     expect(checked).toEqual([a, b, "https://preview.example.com/broken"]);
     expect(sent.structured.prototypes_not_framed).toEqual([b]);
-    expect(sent.text).toContain(`Prototype: ${b}: this page does not allow being shown inside another page`);
-    expect(sent.text).not.toContain(`Prototype: ${a}:`);
+    expect(sent.text).toContain(`The prototype ${b} does not allow being shown inside another page`);
+    expect(sent.text).not.toContain(`The prototype ${a} `);
 
     const sites = (await thread(server, sent.structured.thread_id)).messages[0]!.live_sites!;
     expect(sites.map((site) => [site.url, site.web, site.framed])).toEqual([
@@ -287,7 +287,7 @@ describe("an option's prototype is a running app", () => {
       if (urls.length <= INBOX_LIVE_SITES_MAX) expect(refused.text).toContain('question "Which page ships?", option "Page');
     }
     const dying = await send(client, project, { live_sites: [app.url, dead] });
-    expect(dying.text).toContain(`question "Which page ships?", option "Page 2": Prototype: ${dead}`);
+    expect(dying.text).toContain(`question "Which page ships?", option "Page 2": The prototype ${dead} cannot be shown: `);
     expect(await threads(server)).toEqual([]);
     expect(server.liveSites.running()).toEqual([]);
   });

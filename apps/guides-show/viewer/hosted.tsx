@@ -30,6 +30,7 @@ import {
   type GuideViewerAssets,
 } from '@plannotator/core/guide-format';
 import { decrypt } from '@plannotator/core/crypto';
+import { LINK_BASE64URL, withoutLinkTail } from '@plannotator/core';
 import { decompress } from '@plannotator/core/compress';
 
 export interface HostedPageInfo {
@@ -54,7 +55,8 @@ export function readShareKey(hash: string): string | null {
   const fragment = hash.startsWith('#') ? hash.slice(1) : hash;
   if (!fragment) return null;
   const key = new URLSearchParams(fragment).get(GUIDE_SHARE_KEY_PARAM)?.trim();
-  return key ? key : null;
+  // A link clicked with the sentence's punctuation after it (`#key=….`): the key is base64url, so it never ends with one.
+  return key ? withoutLinkTail(key, LINK_BASE64URL) : null;
 }
 
 export type HostedLoadResult =

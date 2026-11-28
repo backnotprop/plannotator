@@ -90,7 +90,7 @@ export async function checkSendPrototypes(
     if (!attachment) {
       throw new InboxError(
         "validation_error",
-        `body: ${prototypePlace(file)}: Prototype: ${file.target}: not in attachments. Attach the HTML file in the same send, or give its https:// address, or the address of an app running on this computer (http://localhost:…).`,
+        `body: ${prototypePlace(file)}: Prototype: ${file.target}: not in attachments. Attach the HTML file in the same send, or give its https:// address, or the address of an app running on this computer, such as http://localhost:5173`,
         { field: "body" },
       );
     }
@@ -101,7 +101,7 @@ export async function checkSendPrototypes(
   const apps = targets.filter((t) => t.kind === "app");
   if (apps.length === 0) return { liveSites: [] };
   if (!options.checkApps) {
-    throw new InboxError("validation_error", `body: ${prototypePlace(apps[0]!)}: Prototype: ${apps[0]!.target}: this Inbox shows no running app.`, { field: "body" });
+    throw new InboxError("validation_error", `body: ${prototypePlace(apps[0]!)}: The prototype ${apps[0]!.target} cannot be shown: this Inbox shows no running app.`, { field: "body" });
   }
   return { liveSites: await options.checkApps(apps, options.probing) };
 }

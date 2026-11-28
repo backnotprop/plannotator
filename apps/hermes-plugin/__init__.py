@@ -86,7 +86,7 @@ class InboxPlugin:
             fresh.stop()
             if fresh.why != self.said:
                 self.said = fresh.why
-                logger.info("plannotator: no Inbox tool (%s)", fresh.why)
+                logger.info("plannotator: no Inbox tool: %s", fresh.why)
             return
         if self.stopped.is_set():
             fresh.stop()

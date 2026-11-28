@@ -17,7 +17,8 @@ export function sessionOpenedMessage(label: string, url: string): string {
 	const tail = intent.kind === "none"
 		? ` ${browserNoneReason(intent)} You can keep chatting while it runs.`
 		: " You can keep chatting while it runs.";
-	if (!isRemoteSession()) return `${label} at ${url}.${tail}`;
+	// The link ends its line: a terminal links up to the next space, so a `.` after it would be part of the link.
+	if (!isRemoteSession()) return `${label} at ${url}\n${tail.trimStart()}`;
 	// A non-local advertised URL (a tailnet host, a reverse-proxy origin) is
 	// directly reachable, so the port-forwarding advice would be wrong.
 	return !isLocalOnlyAdvertisedUrl(url)

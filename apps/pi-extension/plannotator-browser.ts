@@ -372,7 +372,7 @@ export function startBrowserDecisionSession<T>(
 		// opening) is an uncaught error that kills the whole pi process.
 		void openBrowserForServer(server.url, ctx, options.announcedInTurn === true).catch((err: unknown) => {
 			console.error(
-				`Plannotator: could not announce the browser URL ${server.url}: ${err instanceof Error ? err.message : String(err)}`,
+				`Plannotator: could not announce the browser URL ${server.url} (${err instanceof Error ? err.message : String(err)})`,
 			);
 		});
 	}

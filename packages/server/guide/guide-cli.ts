@@ -81,7 +81,7 @@ export const GUIDE_CLI_USAGE = [
   "  --patch <file>     The unified diff the guide describes (`git diff <base>...HEAD > guide.patch`); `-` reads stdin",
   "  --snapshot <file>  A complete portable guide snapshot document (JSON)",
   "  --out <file>       Where to write the HTML (default: ./guided-review-<slug>.html); `-` writes to stdout",
-  "  --viewer-url <u>   Viewer base URL override (default https://guides.show/v1/; also PLANNOTATOR_GUIDE_VIEWER_URL)",
+  "  --viewer-url <u>   Viewer base URL override, default https://guides.show/v1/ (also PLANNOTATOR_GUIDE_VIEWER_URL)",
   "  --pr <url>         (import) The PR this guide reviews: it's saved with that PR's repository and labelled with it.",
   "                     Default: the guide's own PR, else the origin remote, else this directory.",
   "                     A --pr that names a different PR than the guide is refused.",
@@ -533,7 +533,7 @@ export async function runGuideImport(argv: string[], cwd = process.cwd(), io: Gu
   if (ownUrl && !ownRef) return unrecognizedPr(ownUrl, "The guide's source.pr.url");
   const ownCanonical = ownRef ? canonicalPRUrl(ownRef) : undefined;
   if (argUrl && ownCanonical && argUrl.toLowerCase() !== ownCanonical.toLowerCase()) {
-    return { code: 1, stderr: `--pr ${prOpt.value} is not the PR the guide names (source.pr.url ${ownUrl}). Drop --pr, or fix source.pr in the guide.\n` };
+    return { code: 1, stderr: `--pr ${prOpt.value} is not the PR the guide names, source.pr.url ${ownUrl}\nDrop --pr, or fix source.pr in the guide.\n` };
   }
 
   const pr = argRef ?? ownRef;

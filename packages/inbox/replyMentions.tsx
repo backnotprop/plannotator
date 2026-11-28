@@ -36,10 +36,12 @@ import {
   type MentionRef,
 } from './threadMentions';
 import { isTouchScreen } from './phone';
+import { LINK_TAIL } from '@plannotator/core';
 
 /** A thread link this Inbox gave out (`…/#thread=msg_…`, Copy link), or a bare thread id: the thread's id, else null. */
 export function pastedThreadId(text: string): string | null {
-  const one = text.trim();
+  // The punctuation a sentence put after the link (`…/#thread=msg_…).`) is not the id's: no thread id ends with it.
+  const one = text.trim().replace(LINK_TAIL, '');
   if (/\s/.test(one)) return null;
   const bare = /^(msg_[0-9A-Za-z]{6,64})$/.exec(one);
   if (bare) return bare[1]!;

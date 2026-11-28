@@ -570,6 +570,7 @@ packages/ui/components/AnnotationPanel.breakUi.test.tsx
 packages/ui/hooks/useHtmlRefresh.test.tsx
 packages/ui/hooks/useSharing.contentRevision.test.tsx
 packages/ui/hooks/useSharing.shortUrlLifecycle.test.tsx
+packages/ui/hooks/useSharing.importLinkTail.test.tsx
 packages/ui/components/AnnotationToolbar.commentOnly.test.tsx
 packages/ui/components/AnnotationToolbar.selectionActions.test.tsx
 packages/ui/components/CommentPopover.mentionSource.test.tsx

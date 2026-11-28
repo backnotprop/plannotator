@@ -222,7 +222,7 @@ describe("installing an agent on Windows", () => {
     for (const a of KNOWN_AGENTS) expect(win(a) ?? "").not.toContain("| bash");
     expect(installCommandFor(CURSOR.installCommand, CURSOR.installCommandWindows, "darwin")).toBe(CURSOR.installCommand);
     const kiro = resolveAgentLaunch(KIRO, {}, () => null, () => null, "win32");
-    expect(!kiro.ok && kiro.message).toBe("Kiro CLI is not installed: `kiro-cli` is not on PATH. Install it as its docs say (https://kiro.dev/docs/cli/acp/), then try again.");
+    expect(!kiro.ok && kiro.message).toBe("Kiro CLI is not installed: `kiro-cli` is not on PATH. Install it as its docs say, then try again. Its docs: https://kiro.dev/docs/cli/acp/");
   });
 });
 

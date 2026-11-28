@@ -82,7 +82,7 @@ export async function runT3Command(args: readonly string[], selfCommand: readonl
     const removed = new T3Credentials(options.dataDir, options.endpoint).forget();
     const workers = stopped.filter((worker) => worker.state === "stopped").length;
     console.log([
-      removed ? `Plannotator forgot its T3 authorization for ${options.endpoint.href}.` : `Plannotator had no saved T3 authorization for ${options.endpoint.href}.`,
+      removed ? `Plannotator forgot its T3 authorization for ${options.endpoint.href}` : `Plannotator had no saved T3 authorization for ${options.endpoint.href}`,
       ...(workers ? [`Stopped ${workers} T3 companion${workers === 1 ? "" : "s"}; open reviews stay open, and their decisions are kept until you log in again.`] : []),
       "The grant itself stays listed in T3 until you revoke it there. The Claude hook stays installed (install.sh --without-t3 removes it).",
     ].join("\n"));

@@ -127,7 +127,7 @@ export async function probeLiveAppTarget(
 
 /** --app given with a file/folder target. */
 export const LIVE_APP_REQUIRES_URL_MESSAGE =
-  "--app requires a URL target (a running local app, e.g. http://localhost:5173)";
+  "--app requires a URL target, a running local app such as http://localhost:5173";
 
 /** --app given with a non-loopback URL. */
 export const LIVE_APP_REQUIRES_LOOPBACK_MESSAGE = "--app requires a localhost/loopback URL";
@@ -149,10 +149,10 @@ export function buildForceAppFailureMessage(
     return `--app: ${targetUrl} is a Plannotator server; live annotation never proxies a Plannotator server, because the proxied page would get same-origin access to it`;
   }
   if (probe.probeError !== null) {
-    return `--app: could not reach ${targetUrl}: ${probe.probeError}`;
+    return `--app: could not reach ${targetUrl} (${probe.probeError})`;
   }
   if (probe.probeRedirectedTo !== null) {
-    return `--app: ${targetUrl} redirected off its loopback origin (${probe.probeRedirectedTo}); live mode requires the app to serve HTML from the probed origin`;
+    return `--app: ${targetUrl} redirected off its loopback origin to ${probe.probeRedirectedTo} but live mode requires the app to serve HTML from the probed origin`;
   }
   return `--app: ${targetUrl} did not return an HTML page`;
 }

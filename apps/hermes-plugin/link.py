@@ -36,7 +36,7 @@ class Link:
 
     def start(self, timeout: float) -> bool:
         if not self._argv:
-            self.why = "the plannotator command is not installed (https://plannotator.ai/docs/getting-started/installation/)"
+            self.why = "the plannotator command is not installed, see https://plannotator.ai/docs/getting-started/installation/"
             return False
         try:
             self._process = subprocess.Popen(

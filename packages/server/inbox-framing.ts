@@ -89,7 +89,7 @@ export function resolveInboxFrameAncestors(value: unknown, warn: (line: string) 
     const origin = inboxFrameAncestor(entry);
     if (origin === null) {
       const shown = JSON.stringify(typeof entry === "string" ? entry.slice(0, 120) : entry) ?? String(entry);
-      warn(`Inbox: config.json inboxFrameAncestors: ${shown} is not used. List exact origins of an app on this computer, such as "app://myapp" or "http://localhost:5173".\n`);
+      warn(`Inbox: config.json inboxFrameAncestors: ${shown} is not used. List exact origins of an app on this computer, such as app://myapp or http://localhost:5173\n`);
       continue;
     }
     if (!kept.includes(origin)) kept.push(origin);

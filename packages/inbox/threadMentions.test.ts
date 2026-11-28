@@ -242,6 +242,13 @@ describe('a pasted thread link', () => {
     expect(pastedThreadId(FLAKY.id)).toBe(FLAKY.id);
   });
 
+  test('a link copied with the punctuation of its sentence still names the thread (an older agent printed `…#thread=msg_…).`)', () => {
+    for (const tail of [').', '.', ',', ';', ':', ']', '>', '"', "'"]) {
+      expect(pastedThreadId(`http://localhost:19432/#thread=${FLAKY.id}${tail}`)).toBe(FLAKY.id);
+      expect(pastedThreadId(`${FLAKY.id}${tail}`)).toBe(FLAKY.id);
+    }
+  });
+
   test('words around a link, or any other link, paste as words', () => {
     expect(pastedThreadId(`see http://localhost:19432/#thread=${FLAKY.id}`)).toBeNull();
     expect(pastedThreadId('https://example.com/page#section')).toBeNull();

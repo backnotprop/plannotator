@@ -3244,7 +3244,7 @@ export function resolveBitbucketApiUrl(env: Record<string, string | undefined> =
   if (!warnedBitbucketApiUrls.has(raw)) {
     warnedBitbucketApiUrls.add(raw);
     console.error(
-      `[plannotator] Ignoring PLANNOTATOR_BITBUCKET_API_URL: must be an https URL (or http on localhost). Using ${DEFAULT_BITBUCKET_API_URL}.`,
+      `[plannotator] Ignoring PLANNOTATOR_BITBUCKET_API_URL: must be an https URL (or http on localhost). Using ${DEFAULT_BITBUCKET_API_URL}`,
     );
   }
   return DEFAULT_BITBUCKET_API_URL;
