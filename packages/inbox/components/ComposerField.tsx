@@ -108,6 +108,8 @@ export interface InboxComposerFieldProps {
   voice?: VoiceHandle;
   /** The voice note opens and closes in one motion (the reply box, approval "inbox-reply-box"). */
   voiceNoteGlide?: boolean;
+  /** False: no skill list, no skills painted, no catalog read (a host with no skills). Default true. */
+  skills?: boolean;
   /** Which skills this field offers and paints (skills.ts `inboxSkillFilter`); absent, the thread's (`ThreadSkillFilter`). Keep its identity stable. */
   skillFilter?: (entry: SkillCatalogEntry) => boolean;
   /** The Inbox's own commands this field lists with the skills after a `/` (`ComposerCommand`). Absent: none. Keep its identity stable. */
@@ -152,6 +154,7 @@ export function InboxComposerField({
   escapeClosesMenu = false,
   voice,
   voiceNoteGlide = false,
+  skills: skillsOn = true,
   skillFilter: ownSkillFilter,
   commands,
   mentionThread,
@@ -198,7 +201,7 @@ export function InboxComposerField({
     text: value,
     setText,
     textareaRef: innerRef,
-    enabled: true,
+    enabled: skillsOn,
     bareEscapeDismisses: escapeClosesMenu,
     catalogFilter: skillFilter,
     commands: commandRows,

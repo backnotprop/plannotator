@@ -124,7 +124,7 @@ import {
 import { ReaskNote } from './ReaskNote';
 import { CombineLeftNote, ShipNote, TidyNote } from './Tidy';
 import { reaskedIn, reaskNoteAgent, reaskOffered, reaskTargets, reaskTooltip } from '../reask';
-import { StaleGuard, replacedBy, replacementOf, type JumpTarget } from './ReplacedQuestion';
+import { ChangedNotice, StaleGuard, replacedBy, replacementOf, type JumpTarget } from './ReplacedQuestion';
 import type { ComposerCommand } from './ComposerField';
 import { ReplyBox } from './reply/ReplyBox';
 import { SEND_MAY_NOT_HAVE_GONE, sendFailure } from '../sendFailure';
@@ -5339,7 +5339,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           // The open box (components/reply/ReplyBox.tsx): drawn from what the thread holds; what it does comes back here.
           <ReplyBox
             phone={phone}
-            thread={thread}
+            threadId={thread.thread_id}
             offerShown={offerShown}
             onRestoreDraft={restoreDraft}
             conflict={
@@ -5358,7 +5358,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   }
             }
             takeBack={takeBack.state}
-            staleQuestions={staleQuestions}
+            changedNotice={staleQuestions.length > 0 && <ChangedNotice questions={staleQuestions} thread={thread} onJump={jumpTo} />}
             onJump={jumpTo}
             draftStamp={draftStamp}
             draftAboveRef={draftAboveRef}
@@ -5378,10 +5378,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             textRef={textRef}
             voice={voice}
             replyToNames={replyToNames}
+            placeholder="Write a reply. Type / for a skill"
             askerNoteId={showAskerNote ? noteId : null}
             recipients={rcptBox}
-            skillFilter={skillFilter}
-            commands={replyCommands}
+            skills={{ onOpen: openSkillsFromBox, noneHint: noSkillsHint, filter: skillFilter, commands: replyCommands }}
             tags={composerTags}
             onChange={changeReply}
             onFieldKeyDown={(event) => {
@@ -5422,14 +5422,13 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             fold={replyFold}
             onFold={setReplyFold}
             fitKey={replyFitKey}
-            noSkillsHint={noSkillsHint}
             routeChoiceOpen={!!routeChoiceOpen}
             routeChoice={routeChoice}
             sending={sending}
             sendRef={sendRef}
             sendAria={sendAria}
             onSend={() => void send()}
-            onOpenSkills={openSkillsFromBox}
+            onSendWhileUploading={() => void send()} // which says why itself ("Wait for the files to finish uploading.")
             onDiscardDraft={discardReply}
             errorLine={lineError && errorLine}
           />
