@@ -363,6 +363,7 @@ export const MAX_QUESTION_NOTE_CHARS = 2000;
 
 const CHOICE_RE = /^\s*(?:[-*+]|\d{1,3}[.)])\s+\[([ xX])\]\s+(.*)$/;
 const PLAIN_BULLET_RE = /^\s*[-*+]\s+(.*)$/;
+const NUMBERED_BULLET_RE = /^\s*(\d{1,3})[.)]\s+(\*\*.+)$/;
 const RECOMMENDED_RE = /^\s*(?:[*_]{1,2})?(?:recommended|recommendation)(?:[*_]{1,2})?\s*:\s*(?:[*_]{1,2})?\s*(.*)$/i;
 const ARROW_RE = /^\s*(?:➡️|➡|->|=>|→)\s*(.*)$/;
 const LABEL_DESC_SEP_RE = /\s+(?:—|–|-)\s+/;
@@ -1224,6 +1225,7 @@ export const parseQuestionBlock = (
   // A plain bullet's context lines: its own line plus every continuation
   // line, so all of them leave the context when the bullets become choices.
   const plainBullets: { text: string; first: string; contextIndices: number[]; legacyText?: string }[] = [];
+  const numberedLists: { lastLine: number; options: { text: string; first: string; contextIndices: number[]; label: string }[] }[] = [];
   // Context lines to drop at the end: plain bullets that became choices, and
   // the lines that wrap the final recommendation.
   const dropContext = new Set<number>();
@@ -1553,6 +1555,20 @@ export const parseQuestionBlock = (
         afterBlank: false,
       };
     }
+    if (!fenceBefore && !bodyFence && atBlockIndent) {
+      const numbered = line.match(NUMBERED_BULLET_RE);
+      const text = numbered?.[2].trim();
+      const label = text && splitBoldLead(text)?.label;
+      if (text && label) {
+        const number = Number(numbered![1]);
+        if (number === 1) numberedLists.push({ lastLine: i - 1, options: [] });
+        const list = numberedLists.at(-1);
+        if (list?.lastLine === i - 1 && number === list.options.length + 1) {
+          list.options.push({ text, first: text, contextIndices: [contextLines.length], label });
+          list.lastLine = i;
+        }
+      }
+    }
     pushContext(line.trimEnd());
   }
   // The change lines the card draws whole (`acceptChangeLines`): their
@@ -1591,9 +1607,17 @@ export const parseQuestionBlock = (
   if (!prompt) return null;
 
   // A pick question written with plain bullets: the bullets are the choices.
-  const choicesArePlainBullets = choices.length === 0 && directiveKind !== 'question-text' && plainBullets.length > 0;
+  // A recommendation that names one bold label can disambiguate a numbered
+  // choices list from the background's ordinary bullets.
+  const recommendationName = recommendation ? normalizeQuestionText(recommendation) : '';
+  const namedLists = recommendationName
+    ? numberedLists.filter(({ options }) => options.length >= 2 &&
+        options.filter(({ label }) => normalizeQuestionText(label) === recommendationName).length === 1)
+    : [];
+  const fallbackBullets: typeof plainBullets = namedLists.length === 1 ? namedLists[0]!.options : plainBullets;
+  const choicesArePlainBullets = choices.length === 0 && directiveKind !== 'question-text' && fallbackBullets.length > 0;
   if (choicesArePlainBullets) {
-    const bullets = plainBullets;
+    const bullets = fallbackBullets;
     const { splits, names } = plainBulletSplits(bullets);
     bullets.forEach((bullet, i) => {
       const { label, description } = splits[i];
