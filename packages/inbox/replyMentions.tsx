@@ -19,21 +19,15 @@ import { useInboxQueryClient } from './data/client';
 import { knownMentionRef, resolveMentionRef } from './data/threadMentionRefs';
 import { registerThreadDropTarget, sayThreadDrag, THREAD_DROP_LAYER, type DropAnswer } from './threadDrag';
 import {
-  addReplyMentions,
   backspaceMention,
-  commitReplyEdit,
-  forgetReplyThread,
+  inboxThreadMentions,
   mentionAt,
   mentionLabel,
   mentionReadable,
-  mentionsFor,
-  noteReplyThread,
-  registerMentionTaker,
-  replyMentionsVersion,
   snapToWordEnd,
-  subscribeReplyMentions,
   withMentionsAt,
   type MentionRef,
+  type ThreadMentions,
 } from './threadMentions';
 import { isTouchScreen } from './phone';
 
@@ -166,16 +160,19 @@ export interface ReplyMentionsHost {
   voiceLive: boolean;
   /** A field that takes no mentions (New message, compose, a comment): nothing here runs. */
   off?: boolean;
+  /** Where the reply's mentions are kept (default: the Inbox's own, threadMentions.ts `inboxThreadMentions`). Keep its identity stable. */
+  scope?: ThreadMentions;
 }
 
 const NO_MENTIONS: readonly InboxReplyMention[] = [];
 
-export function useReplyMentions({ threadId, text, fieldRef, wrapRef, voiceLive, off = false }: ReplyMentionsHost) {
+export function useReplyMentions({ threadId, text, fieldRef, wrapRef, voiceLive, off = false, scope = inboxThreadMentions }: ReplyMentionsHost) {
+  const { subscribeReplyMentions, replyMentionsVersion, mentionsFor, commitReplyEdit, addReplyMentions, noteReplyThread, forgetReplyThread, registerMentionTaker } = scope;
   const client = useInboxQueryClient();
   const version = useSyncExternalStore(subscribeReplyMentions, replyMentionsVersion, replyMentionsVersion);
   // The mentions standing in the words on screen: the same ones the Send writes (threadMentions.ts `mentionsFor`).
   // `version`: read again when the store changes.
-  const mentions = useMemo(() => (off ? NO_MENTIONS : mentionsFor(threadId, text)), [off, threadId, text, version]);
+  const mentions = useMemo(() => (off ? NO_MENTIONS : mentionsFor(threadId, text)), [off, threadId, text, version, mentionsFor]);
   const tokens = useMemo<SkillReferenceToken[]>(() => mentions.map((m) => ({ start: m.at, end: m.at + m.label.length, entry: { name: tokenName(m), root: 'plannotator', humanOnly: false } })), [mentions]);
   const describedId = `ib-tmention-${useId().replace(/:/g, '')}`;
   const noteId = `${describedId}-note`;
@@ -199,7 +196,7 @@ export function useReplyMentions({ threadId, text, fieldRef, wrapRef, voiceLive,
       seen.current = next;
       commitReplyEdit(threadId, from, next, caret, undo);
     },
-    [off, threadId],
+    [off, threadId, commitReplyEdit],
   );
 
   /** Where the caret was last seen: a step in from a token's edge goes across it. */
@@ -218,7 +215,7 @@ export function useReplyMentions({ threadId, text, fieldRef, wrapRef, voiceLive,
     const to = was === inside.at ? end : was === end ? inside.at : at - inside.at < end - at ? inside.at : end;
     field.setSelectionRange(to, to);
     lastCaret.current = to;
-  }, [fieldRef, threadId, off]);
+  }, [fieldRef, threadId, off, mentionsFor]);
 
   /** A mention already in the words lights up instead of going in twice. */
   const flash = useCallback(
@@ -265,7 +262,7 @@ export function useReplyMentions({ threadId, text, fieldRef, wrapRef, voiceLive,
       sayThreadDrag(`Mentioned ${fresh.map((ref) => spokenMention(ref, !mentionReadable(threadId, ref))).join(', ')} in your reply.`);
       return true;
     },
-    [client, fieldRef, flash, threadId],
+    [client, fieldRef, flash, threadId, mentionsFor, addReplyMentions, noteReplyThread],
   );
   const putInRef = useRef(putIn);
   putInRef.current = putIn;
@@ -275,10 +272,10 @@ export function useReplyMentions({ threadId, text, fieldRef, wrapRef, voiceLive,
     if (off || !fieldRef.current || fieldRef.current.ownerDocument.activeElement !== fieldRef.current) return;
     if (text.trim() !== '') noteReplyThread(threadId);
     else forgetReplyThread(threadId);
-  }, [off, text, threadId, fieldRef]);
+  }, [off, text, threadId, fieldRef, noteReplyThread, forgetReplyThread]);
 
   // The way in from outside: the row menu's Mention in reply, a phone's sheet.
-  useEffect(() => (off ? undefined : registerMentionTaker(threadId, (refs) => void putInRef.current(refs, null))), [threadId, off]);
+  useEffect(() => (off ? undefined : registerMentionTaker(threadId, (refs) => void putInRef.current(refs, null))), [threadId, off, registerMentionTaker]);
 
   // The drop target: the whole reply box (or full screen's card), only while a thread is carried.
   const [look, setLook] = useState<DropLook>(NO_LOOK);
@@ -326,7 +323,7 @@ export function useReplyMentions({ threadId, text, fieldRef, wrapRef, voiceLive,
           putInRef.current(refs, at ?? (field ? field.value.length : null));
         },
       }),
-    [boxOf, client, fieldRef, threadId, wrapRef, off],
+    [boxOf, client, fieldRef, threadId, wrapRef, off, mentionsFor],
   );
 
   /** Backspace right after a mention takes it whole (an ordinary Backspace otherwise). True: it took the key. */
@@ -342,7 +339,7 @@ export function useReplyMentions({ threadId, text, fieldRef, wrapRef, voiceLive,
       sayThreadDrag(`Removed the mention of ${gone.mention.title}.`);
       return true;
     },
-    [threadId, off],
+    [threadId, off, mentionsFor],
   );
 
   /** A pasted thread link (or id) of this Inbox becomes a mention; anything else pastes as it would. */

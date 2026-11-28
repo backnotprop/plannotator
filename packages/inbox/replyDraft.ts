@@ -69,7 +69,7 @@ import {
 import { httpReplyDraftStore } from './replyDraftHttp';
 import { dropKept, forgetWords, keepWords, keptWordsGone, newKeptPageForTests, type KeptWords } from './replyWordsKept';
 import { onInboxReconnected } from './sessionAdopt';
-import { clearReplyMentions, noteDraftMentions, replyMentionsSave } from './threadMentions';
+import { inboxThreadMentions } from './threadMentions';
 
 import { NO_FILES, codeOf, draftFilesOf, draftKey, idsOf, messageOf, noOps, placesIn, replyContentKey, type ReplyDraftFiles, type ReplyDraftState } from './replyDraftKeys';
 export { replyContentKey, type ReplyDraftFiles, type ReplyDraftState };
@@ -86,7 +86,8 @@ export type { ReplyBoxTook, ReplyDraftOptions, ReplyDraftPageOptions };
  * panes and floaters share `inboxReplyDraftPage` below, so a pane closed and opened again finds them. A second page (a
  * host of its own, a test) shares nothing with it. Its body keeps the module's indentation, as it was before it moved in.
  */
-export function createReplyDraftPage({ keepInBrowser = true }: ReplyDraftPageOptions = {}) {
+export function createReplyDraftPage({ keepInBrowser = true, mentions = inboxThreadMentions }: ReplyDraftPageOptions = {}) {
+const { clearReplyMentions, noteDraftMentions, replyMentionsSave } = mentions;
 /** Saves waiting or in flight anywhere on the page, and words left unsaved by a conflict (the restart guard reads them). */
 let unsaved = 0;
 /** When a save last ended (landed or not): a drafts list asked for before then may not have it yet. */
