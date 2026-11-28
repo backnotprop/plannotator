@@ -3,19 +3,25 @@
  * Inbox. Failures this catches: a Send that reaches the host while a file uploads (from the button or ⌘Enter); a draft
  * save that lands after the Send cleared the draft, or runs while it is out; words or files lost to a Send that
  * failed, or left in the box after one that went; a double press sending twice; two boxes on one thread sharing
- * mentions; and, with `browserStorage: false`, anything written to localStorage or sessionStorage.
+ * mentions; and, with `browserStorage: false`, anything written to localStorage or sessionStorage. Then the rules of
+ * replyComposerHost.ts's note: no discard after a conflict (another window's draft), no store call after a good Send
+ * that carried a file, a conflict reaching the host and resolved through `handle.draft`, a reload taking newer words
+ * only into an untouched box, a read-only box while a Send is out, a thread change carrying nothing across, a discard
+ * that never answers, a host's upload refusal, no fetch of the box's own, an empty Send the host carries content for,
+ * the same result for an unchanged box from press to press, and `to` as the picker shows it.
  *
  * Assertions compare strings and numbers, never elements (a failed `expect(element)` can take bun down).
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, expect, test } from 'bun:test';
-import { act } from 'react';
+import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { DraftFileUploader, ReplyDraftSaveInput, ReplyDraftStore } from '@plannotator/core/inbox-reply-draft';
 import type { InboxReplyDraft, InboxUpload } from '@plannotator/core/inbox-types';
 import type { ReplyComposerHandle } from './useReplyComposer';
-import type { ReplyComposerHost, ReplySendResult } from './replyComposerHost';
+import type { ReplyComposerHost, ReplyDraftConflict, ReplySendResult } from './replyComposerHost';
+import type { RecipientRow } from '../../replyRecipients';
 
 const hasDom = typeof document !== 'undefined';
 const { ReplyBox } = (hasDom ? await import('./ReplyBox') : {}) as typeof import('./ReplyBox');
@@ -72,11 +78,15 @@ function fakeSend() {
   return { send, calls, ends, watch: (saves: () => number) => (savesNow = saves) };
 }
 
+/** The last box mounted: its host changed as a host would change it (another thread, another choice of recipients). */
+let rehost: (over: Partial<ReplyComposerHost>) => void = () => {};
 function Box({ host, out }: { host: ReplyComposerHost; out: { current: ReplyComposerHandle } }) {
-  const { box, handle } = useReplyComposer(host);
+  const [over, setOver] = useState<Partial<ReplyComposerHost>>({});
+  rehost = setOver;
+  const { box, handle } = useReplyComposer({ ...host, ...over });
   out.current = handle;
   return (
-    <div className="pn-inbox" data-box={host.threadId}>
+    <div className="pn-inbox" data-box={over.threadId ?? host.threadId}>
       <ReplyBox {...box.props} />
     </div>
   );
@@ -324,3 +334,431 @@ test.skipIf(!hasDom)('the same use with browserStorage true does write there (th
     localStorage.clear();
   }
 });
+
+/** A store that refuses a save made on a version it no longer holds (`draft_conflict`), as a server does; every call kept. */
+function strictStore() {
+  const drafts = new Map<string, InboxReplyDraft>();
+  const calls: string[] = [];
+  let clock = 0;
+  const put = (threadId: string, body: string) => {
+    clock += 1;
+    const draft: InboxReplyDraft = { v: 1, thread_id: threadId, body, created_at: STAMP, updated_at: new Date(Date.UTC(2026, 10, 2, 11, 0, clock)).toISOString() };
+    drafts.set(threadId, draft);
+    return draft;
+  };
+  const store: ReplyDraftStore = {
+    read: async (threadId) => drafts.get(threadId) ?? null,
+    save: async (threadId, input: ReplyDraftSaveInput) => {
+      calls.push(`save ${threadId.slice(-1)} ${JSON.stringify(input.body)}`);
+      const held = drafts.get(threadId) ?? null;
+      if ((held?.updated_at ?? null) !== input.base) throw Object.assign(new Error('This reply changed in another window since you opened it.'), { code: 'draft_conflict', details: { draft: held } });
+      return { draft: put(threadId, input.body) };
+    },
+    discard: async (threadId, options) => {
+      calls.push(`discard ${threadId.slice(-1)} ${options?.base ?? null}`);
+      drafts.delete(threadId);
+    },
+  };
+  return { store, drafts, calls, elsewhere: put };
+}
+
+const SAVED = REPLY_DRAFT_SAVE_MS + 150;
+const LONG = 15_000;
+const discards = (calls: readonly string[]) => calls.filter((call) => call.startsWith('discard'));
+
+/** Words saved, then another window saves its own, then the box's next save is refused: the conflict. */
+async function raiseConflict(el: HTMLElement, s: ReturnType<typeof strictStore>) {
+  typeIn(el, 'Mine first.');
+  await wait(SAVED);
+  s.elsewhere(THREAD, 'Theirs, from another window.');
+  typeIn(el, 'Mine first, and more.');
+  await wait(SAVED);
+}
+
+test.skipIf(!hasDom)('a conflict keeps the words, pauses saving and reaches the host with the store\'s refusal', async () => {
+  const s = strictStore();
+  const out = fakeSend();
+  const heard: ReplyDraftConflict[] = [];
+  const { el, handle } = mount(host({ send: out.send, draftStore: s.store, uploader: fakeUploader().uploader, onDraftConflict: (conflict) => heard.push(conflict) }));
+  await wait(30);
+  await raiseConflict(el, s);
+  expect(field(el).value).toBe('Mine first, and more.');
+  expect(handle.current.draft.conflict?.mine).toBe('Mine first, and more.');
+  expect(handle.current.draft.conflict?.theirs?.body ?? null).toBe('Theirs, from another window.');
+  expect(heard.length).toBe(1);
+  expect((heard[0]!.refusal as { code?: string; details?: { draft?: InboxReplyDraft } }).details?.draft?.body ?? null).toBe('Theirs, from another window.');
+  // Saving waits for the person's choice; no empty "not saved" line is drawn.
+  const calls = s.calls.length;
+  typeIn(el, 'Mine first, and more, and more.');
+  await wait(SAVED);
+  expect(s.calls.length).toBe(calls);
+  expect(el.querySelector('[data-reply-note]') === null).toBe(true);
+}, LONG);
+
+test.skipIf(!hasDom)('a Send after a conflict clears no draft: result.draft is null, no discard runs, the other window\'s draft stays', async () => {
+  const s = strictStore();
+  const out = fakeSend();
+  const { el } = mount(host({ send: out.send, draftStore: s.store, uploader: fakeUploader().uploader }));
+  await wait(30);
+  await raiseConflict(el, s);
+  pressSend(el);
+  await wait(60);
+  expect(out.calls[0]!.result.draft).toBe(null);
+  await act(async () => out.ends[0]!.resolve());
+  await wait(60);
+  expect(discards(s.calls)).toEqual([]);
+  expect(s.drafts.get(THREAD)?.body ?? null).toBe('Theirs, from another window.');
+}, LONG);
+
+test.skipIf(!hasDom)('after a conflict Keep mine saves the box\'s words over the newer draft; Discard mine takes the other window\'s in', async () => {
+  const s = strictStore();
+  const { el, handle } = mount(host({ send: fakeSend().send, draftStore: s.store, uploader: fakeUploader().uploader }));
+  await wait(30);
+  await raiseConflict(el, s);
+  act(() => handle.current.draft.keepMine());
+  await wait(150);
+  expect(handle.current.draft.conflict).toBe(null);
+  expect(s.drafts.get(THREAD)?.body ?? null).toBe('Mine first, and more.');
+  typeIn(el, 'Mine, kept.');
+  await wait(SAVED);
+  expect(s.drafts.get(THREAD)?.body ?? null).toBe('Mine, kept.');
+  s.elsewhere(THREAD, 'Theirs again.');
+  typeIn(el, 'Mine, kept, and more.');
+  await wait(SAVED);
+  expect(handle.current.draft.conflict?.mine ?? null).toBe('Mine, kept, and more.');
+  act(() => handle.current.draft.takeTheirs());
+  await wait(30);
+  expect(handle.current.draft.conflict).toBe(null);
+  expect(field(el).value).toBe('Theirs again.');
+}, LONG);
+
+test.skipIf(!hasDom)('reload: an untouched box takes newer words from another device; an edited one raises the conflict instead', async () => {
+  const s = strictStore();
+  const { el, handle } = mount(host({ send: fakeSend().send, draftStore: s.store, uploader: fakeUploader().uploader }));
+  await wait(30);
+  typeIn(el, 'From this computer.');
+  await wait(SAVED);
+  s.elsewhere(THREAD, 'From the phone.');
+  await act(async () => handle.current.draft.reload());
+  await wait(30);
+  expect(field(el).value).toBe('From the phone.');
+  expect(handle.current.draft.conflict).toBe(null);
+  typeIn(el, 'From the phone, edited here.');
+  s.elsewhere(THREAD, 'From the phone, again.');
+  await act(async () => handle.current.draft.reload());
+  await wait(SAVED);
+  expect(field(el).value).toBe('From the phone, edited here.');
+  expect(handle.current.draft.conflict?.theirs?.body ?? null).toBe('From the phone, again.');
+}, LONG);
+
+test.skipIf(!hasDom)('a save that did not land draws no empty line; the host\'s own line shows when it gives one', async () => {
+  const bare = mount(host({ send: fakeSend().send, draftStore: fakeStore({ refuse: true }).store, uploader: fakeUploader().uploader }));
+  await wait(30);
+  typeIn(bare.el, 'Not saved yet.');
+  await wait(SAVED);
+  expect(bare.handle.current.draft.failed).toBe(true);
+  expect(bare.el.querySelector('[data-reply-note]') === null).toBe(true);
+  const slotted = mount(host({ send: fakeSend().send, draftStore: fakeStore({ refuse: true }).store, uploader: fakeUploader().uploader, slots: { draftStamp: <span data-host-stamp="">Not saved</span> } }));
+  await wait(30);
+  typeIn(slotted.el, 'Not saved yet.');
+  await wait(SAVED);
+  expect(slotted.el.querySelectorAll('[data-reply-note] [data-host-stamp]').length).toBe(1);
+}, LONG);
+
+test.skipIf(!hasDom)('after a good Send that carried a file: with sendClearsDraft no store call at all; without it one discard at the saved version', async () => {
+  for (const clears of [true, false]) {
+    const s = strictStore();
+    const up = fakeUploader();
+    const out = fakeSend();
+    // A host whose send clears the draft does it on its server, as the Inbox's clear_draft does.
+    const send = (result: ReplySendResult) => out.send(result).then(() => void (clears && s.drafts.delete(THREAD)));
+    const { el, handle } = mount(host({ send, draftStore: s.store, uploader: up.uploader, sendClearsDraft: clears }));
+    await wait(30);
+    typeIn(el, 'With a file.');
+    act(() => handle.current.addFiles([notes('notes.txt')] as unknown as FileList));
+    await wait(30);
+    up.finish[0]!(upload(clears ? 'upl_11' : 'upl_12', 'notes.txt'));
+    await wait(SAVED);
+    pressSend(el);
+    await wait(30);
+    const version = s.drafts.get(THREAD)!.updated_at;
+    const before = s.calls.length;
+    await act(async () => out.ends[0]!.resolve());
+    // Long enough for a save queued after the Send to have run.
+    await wait(REPLY_DRAFT_SAVE_MS + 400);
+    expect(s.calls.slice(before)).toEqual(clears ? [] : [`discard 1 ${version}`]);
+    expect(field(el).value).toBe('');
+    expect(tiles(el)).toBe(0);
+  }
+}, LONG);
+
+test.skipIf(!hasDom)('Discard with a file in the box makes one discard and no save after it', async () => {
+  const s = strictStore();
+  const up = fakeUploader();
+  const { el, handle } = mount(host({ send: fakeSend().send, draftStore: s.store, uploader: up.uploader }));
+  await wait(30);
+  typeIn(el, 'Thrown away.');
+  act(() => handle.current.addFiles([notes('notes.txt')] as unknown as FileList));
+  await wait(30);
+  up.finish[0]!(upload('upl_13', 'notes.txt'));
+  await wait(SAVED);
+  const version = s.drafts.get(THREAD)!.updated_at;
+  const before = s.calls.length;
+  act(() => el.querySelector<HTMLButtonElement>('[data-reply-discard]')!.click());
+  await wait(REPLY_DRAFT_SAVE_MS + 400);
+  expect(s.calls.slice(before)).toEqual([`discard 1 ${version}`]);
+  expect(field(el).value).toBe('');
+}, LONG);
+
+test.skipIf(!hasDom)('while a Send is out the field is read-only and a mention asked for does not go in; it takes keys again after', async () => {
+  const out = fakeSend();
+  const { el, handle } = mount(host({ send: out.send, draftStore: strictStore().store, uploader: fakeUploader().uploader }));
+  await wait(30);
+  typeIn(el, 'Slow send.');
+  pressSend(el);
+  await wait(30);
+  expect(field(el).readOnly).toBe(true);
+  act(() => handle.current.mentions.requestMention(THREAD, [{ id: OTHER, title: 'Rate limit' }]));
+  await wait(30);
+  expect(field(el).value).toBe('Slow send.');
+  expect(handle.current.mentions.mentionsFor(THREAD, field(el).value).length).toBe(0);
+  await act(async () => out.ends[0]!.reject(new Error('Not sent.')));
+  await wait(30);
+  expect(field(el).readOnly).toBe(false);
+  expect(field(el).value).toBe('Slow send.');
+}, LONG);
+
+/** A paste of `text` (no files) on `target`, as a browser's. */
+function pasteText(target: HTMLElement, text: string) {
+  act(() => {
+    const event = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', { value: { files: [], items: [], types: ['text/plain'], getData: (kind: string) => (kind === 'text/plain' ? text : '') } });
+    target.dispatchEvent(event);
+  });
+}
+
+test.skipIf(!hasDom)('while a Send is out Discard, attach, a tile\'s remove and a pasted file do nothing; a failed Send finds all of it', async () => {
+  const s = strictStore();
+  const up = fakeUploader();
+  const out = fakeSend();
+  const { el, handle } = mount(host({ send: out.send, draftStore: s.store, uploader: up.uploader }));
+  await wait(30);
+  typeIn(el, 'Keep all of this.');
+  act(() => handle.current.addFiles([notes('a.txt')] as unknown as FileList));
+  await wait(30);
+  up.finish[0]!(upload('upl_14', 'a.txt'));
+  await wait(30);
+  pressSend(el);
+  await wait(30);
+  act(() => el.querySelector<HTMLButtonElement>('[data-reply-discard]')!.click());
+  act(() => handle.current.addFiles([notes('b.txt')] as unknown as FileList));
+  act(() => el.querySelector<HTMLButtonElement>('[aria-label="Remove a.txt"]')!.click());
+  act(() => {
+    const event = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', { value: { files: [notes('c.txt')], items: [], types: ['Files'], getData: () => '' } });
+    el.querySelector('.ib-rbox')!.dispatchEvent(event);
+  });
+  await wait(30);
+  expect(field(el).value).toBe('Keep all of this.');
+  expect(tiles(el)).toBe(1);
+  expect(up.finish.length).toBe(1);
+  await act(async () => out.ends[0]!.reject(new Error('Not sent.')));
+  await wait(30);
+  expect(field(el).value).toBe('Keep all of this.');
+  expect(tiles(el)).toBe(1);
+  expect(discards(s.calls)).toEqual([]);
+}, LONG);
+
+test.skipIf(!hasDom)('a thread change under one box carries nothing across: the first thread\'s draft keeps its words, the second\'s Send has none', async () => {
+  const s = strictStore();
+  const out = fakeSend();
+  const { el } = mount(host({ send: out.send, draftStore: s.store, uploader: fakeUploader().uploader }));
+  await wait(30);
+  typeIn(el, 'For thread A only.');
+  act(() => rehost({ threadId: OTHER }));
+  await wait(SAVED);
+  expect(field(el).value).toBe('');
+  expect(s.drafts.get(THREAD)?.body ?? null).toBe('For thread A only.');
+  typeIn(el, 'For B.');
+  pressSend(el);
+  await wait(60);
+  expect(out.calls.length).toBe(1);
+  expect(out.calls[0]!.result.threadId).toBe(OTHER);
+  expect(out.calls[0]!.result.body).toBe('For B.');
+  expect(s.calls.filter((call) => call.startsWith('save 2') && call.includes('thread A')).length).toBe(0);
+  await act(async () => out.ends[0]!.resolve());
+  await wait(60);
+  act(() => rehost({ threadId: THREAD }));
+  await wait(60);
+  expect(field(el).value).toBe('For thread A only.');
+}, LONG);
+
+test.skipIf(!hasDom)('a discard that never answers leaves the box free; cancel frees a Send the host gave up on, words kept', async () => {
+  const s = strictStore();
+  s.store.discard = () => new Promise<void>(() => {});
+  const out = fakeSend();
+  const { el, handle } = mount(host({ send: out.send, draftStore: s.store, uploader: fakeUploader().uploader }));
+  await wait(30);
+  typeIn(el, 'Goes.');
+  await wait(SAVED);
+  pressSend(el);
+  await wait(30);
+  await act(async () => out.ends[0]!.resolve());
+  await wait(60);
+  expect(handle.current.sending).toBe(false);
+  expect(el.querySelector<HTMLButtonElement>('[data-reply-send]')!.disabled).toBe(false);
+  expect(field(el).readOnly).toBe(false);
+  typeIn(el, 'Next reply.');
+  await wait(30);
+  expect(field(el).value).toBe('Next reply.');
+  // A Send the host never settles: it gives up on the press, and the box is free with its words.
+  pressSend(el);
+  await wait(30);
+  expect(out.calls.length).toBe(2);
+  expect(handle.current.sending).toBe(true);
+  act(() => handle.current.cancel());
+  await wait(30);
+  expect(handle.current.sending).toBe(false);
+  expect(field(el).readOnly).toBe(false);
+  expect(field(el).value).toBe('Next reply.');
+  pressSend(el);
+  await wait(30);
+  expect(out.calls.length).toBe(3);
+}, LONG);
+
+test.skipIf(!hasDom)('an upload the host refuses shows its own sentence on that tile; the other file and the words still go', async () => {
+  const finish: ((done: InboxUpload) => void)[] = [];
+  const uploader: DraftFileUploader = {
+    upload: (file) =>
+      file.name === 'big.bin'
+        ? Promise.reject({ message: 'Files over 10 MB cannot be attached here.' })
+        : file.name === 'odd.bin'
+          ? Promise.reject(new Error('This space takes no files of that kind.'))
+          : new Promise<InboxUpload>((resolve) => finish.push(resolve)),
+    readText: async () => '',
+  };
+  const out = fakeSend();
+  const { el, handle } = mount(host({ send: out.send, draftStore: strictStore().store, uploader }));
+  await wait(30);
+  typeIn(el, 'Three files.');
+  act(() => handle.current.addFiles([notes('notes.txt'), new File(['x'], 'big.bin'), new File(['y'], 'odd.bin')] as unknown as FileList));
+  await wait(30);
+  finish[0]!(upload('upl_20', 'notes.txt'));
+  await wait(30);
+  const text = el.textContent ?? '';
+  expect(text.includes('Files over 10 MB cannot be attached here.')).toBe(true);
+  expect(text.includes('This space takes no files of that kind.')).toBe(true);
+  pressSend(el);
+  await wait(30);
+  expect(out.calls.length).toBe(1);
+  expect(out.calls[0]!.result.files).toEqual(['upl_20']);
+  expect(out.calls[0]!.result.body).toBe('Three files.');
+}, LONG);
+
+test.skipIf(!hasDom)('the box fetches nothing of its own: typing, a pasted thread id, a file and a Send call no fetch', async () => {
+  const was = globalThis.fetch;
+  const fetched: string[] = [];
+  globalThis.fetch = ((input: unknown) => {
+    fetched.push(String(input));
+    return Promise.reject(new TypeError('No network in this test.'));
+  }) as typeof fetch;
+  try {
+    const up = fakeUploader();
+    const out = fakeSend();
+    const { el, handle } = mount(host({ send: out.send, draftStore: strictStore().store, uploader: up.uploader }));
+    await wait(30);
+    typeIn(el, 'See ');
+    pasteText(field(el), 'msg_01M6RF00000000000000000099');
+    await wait(60);
+    act(() => handle.current.addFiles([notes('notes.txt')] as unknown as FileList));
+    await wait(30);
+    up.finish[0]!(upload('upl_21', 'notes.txt'));
+    await wait(SAVED);
+    pressSend(el);
+    await wait(30);
+    await act(async () => out.ends[0]!.resolve());
+    await wait(60);
+    expect(out.calls.length).toBe(1);
+    expect(fetched).toEqual([]);
+  } finally {
+    globalThis.fetch = was;
+  }
+}, LONG);
+
+test.skipIf(!hasDom)('an empty box sends only when the host says it carries something else (answers in extra)', async () => {
+  let answers = 0;
+  const out = fakeSend();
+  const { el } = mount(host({ send: out.send, draftStore: strictStore().store, uploader: fakeUploader().uploader, extra: () => ({ answers }), hasOtherContent: () => answers > 0 }));
+  await wait(30);
+  pressSend(el);
+  await wait(30);
+  expect(out.calls.length).toBe(0);
+  answers = 2;
+  pressSend(el);
+  await wait(30);
+  expect(out.calls.length).toBe(1);
+  expect(out.calls[0]!.result.body).toBe('');
+  expect(out.calls[0]!.result.files).toEqual([]);
+  expect(out.calls[0]!.result.extra).toEqual({ answers: 2 });
+}, LONG);
+
+test.skipIf(!hasDom)('an unchanged box hands the host the same Send from press to press; one character changes it', async () => {
+  const up = fakeUploader();
+  const out = fakeSend();
+  const { el, handle } = mount(host({ send: out.send, draftStore: strictStore().store, uploader: up.uploader, replyTo: 'line_01', extra: () => ({ route: 'live' }) }));
+  await wait(30);
+  typeIn(el, 'Same words.');
+  act(() => handle.current.addFiles([notes('a.txt'), notes('b.txt')] as unknown as FileList));
+  await wait(30);
+  up.finish[1]!(upload('upl_31', 'b.txt'));
+  up.finish[0]!(upload('upl_30', 'a.txt'));
+  await wait(SAVED);
+  for (let press = 0; press < 3; press += 1) {
+    pressSend(el);
+    await wait(30);
+    await act(async () => out.ends[press]!.reject(new Error('Not sent.')));
+    await wait(SAVED);
+  }
+  // What names the message (all but the draft's version, which a store moves with each save).
+  const message = ({ draft: _version, ...rest }: ReplySendResult) => rest;
+  expect(out.calls.length).toBe(3);
+  expect(message(out.calls[1]!.result)).toEqual(message(out.calls[0]!.result));
+  expect(message(out.calls[2]!.result)).toEqual(message(out.calls[0]!.result));
+  expect(out.calls[0]!.result.files).toEqual(['upl_30', 'upl_31']);
+  typeIn(el, 'Same words!');
+  pressSend(el);
+  await wait(30);
+  expect(out.calls[3]!.result.body).toBe('Same words!');
+  expect(out.calls[3]!.result.files).toEqual(['upl_30', 'upl_31']);
+}, LONG);
+
+const row = (session: string, label: string): RecipientRow => ({ session, host: null, label, short: label, state: 'live' });
+
+test.skipIf(!hasDom)('`to` is who the picker shows, at most maxRecipients, and follows the host\'s choice when it changes', async () => {
+  const rows = [row('ses_a', 'Ada'), row('ses_b', 'Bob')];
+  const out = fakeSend();
+  const { el } = mount(host({ send: out.send, draftStore: strictStore().store, uploader: fakeUploader().uploader, recipients: { rows, chosen: ['ses_a', 'ses_b', 'ses_gone'], maxRecipients: 1 } }));
+  await wait(30);
+  typeIn(el, 'To one.');
+  pressSend(el);
+  await wait(30);
+  expect(out.calls[0]!.result.to).toEqual(['ses_a']);
+  await act(async () => out.ends[0]!.resolve());
+  await wait(30);
+  act(() => rehost({ recipients: { rows, chosen: ['ses_b'] } }));
+  await wait(30);
+  typeIn(el, 'To Bob.');
+  pressSend(el);
+  await wait(30);
+  expect(out.calls[1]!.result.to).toEqual(['ses_b']);
+}, LONG);
+
+test.skipIf(!hasDom)('opening the box through the handle puts the caret in the field', async () => {
+  const { el, handle } = mount(host({ send: fakeSend().send, draftStore: strictStore().store, uploader: fakeUploader().uploader }));
+  await wait(30);
+  field(el).blur();
+  expect(document.activeElement === field(el)).toBe(false);
+  act(() => handle.current.open());
+  await wait(30);
+  expect(document.activeElement === field(el)).toBe(true);
+}, LONG);
