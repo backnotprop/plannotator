@@ -101,6 +101,34 @@ test('a refusal is still the Inbox\'s own answer, never a timeout', async () => 
   expect((result.error as { code?: string }).code).toBe('session_not_live');
 });
 
+/** A healthy Inbox that answers after three limits (a launch's preparation: the agent's checks, the login shell, git). */
+const slow = (answer: unknown) => (init: RequestInit | undefined) =>
+  new Promise<Response>((resolve, reject) => {
+    const timer = setTimeout(() => resolve(Response.json(answer)), LIMIT * 3);
+    init?.signal?.addEventListener('abort', () => (clearTimeout(timer), reject(new DOMException('aborted', 'AbortError'))), { once: true });
+  });
+const START = { launch: { agent: 'claude-code', project_id: 'prj_1' } };
+const REPLIED = { message_id: 'msg_A', questions: [], reply: { id: 'msg_R' }, replayed: false };
+
+test('a reply that starts a new session waits for an Inbox slow to prepare it, as New message\'s start does', async () => {
+  network(slow(REPLIED));
+  const reply = await outcome(inboxApi.reply('msg_A', { idempotency_key: 'k4', words: 'Carry on.', questions: [], to: START }));
+  expect(reply.error).toBe(undefined);
+  expect((reply.value?.reply as { id?: string } | null)?.id).toBe('msg_R');
+  network(slow({ thread_id: 'thr_N', message: { id: 'msg_N' }, replayed: false }));
+  const started = await outcome(inboxApi.startThread({ to: START, body: 'Go.', idempotency_key: 'k5' } as Parameters<typeof inboxApi.startThread>[0]));
+  expect(started.error).toBe(undefined);
+});
+
+test('an ordinary reply (or one to another live session) to the same slow Inbox is still given up at the limit', async () => {
+  network(slow(REPLIED));
+  const plain = await outcome(inboxApi.reply('msg_A', { idempotency_key: 'k6', words: 'Carry on.', questions: [] }));
+  expect(plain.error instanceof InboxWriteTimeout).toBe(true);
+  network(slow(REPLIED));
+  const routed = await outcome(inboxApi.reply('msg_A', { idempotency_key: 'k7', words: 'Carry on.', questions: [], to: { session: 'ses_b' } }));
+  expect(routed.error instanceof InboxWriteTimeout).toBe(true);
+});
+
 test('a write that does not ask for the limit (an update, a restart) waits as it always did: no signal on its request', async () => {
   network(async () => Response.json({ ok: true }));
   await post('/api/inbox/restart', {});

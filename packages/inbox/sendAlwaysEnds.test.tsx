@@ -7,11 +7,14 @@
  * for good. Each case is a fake network in front of a fake Inbox that keeps one message per idempotency key, as the
  * real store does (`InboxStore.sendReply` answers a key it has seen with the reply it wrote).
  *
- * - The reply's POST never answers: Send ends with the failure line, the words stay in the box, Send works again.
+ * - The reply's POST never answers: Send ends with the line that it may not have gone (a request given up may still
+ *   arrive), the words stay in the box, Send works again.
  * - The reply landed but its answer was lost, and the read back fails too: the line says it may have gone; the next
  *   Send finds it and posts nothing.
- * - The reply arrives late, after the read back said it was not there: Send again carries the same key, and the Inbox
- *   holds one reply.
+ * - The reply arrives late, after the read back said it was not there: a read of the thread that shows it says it went
+ *   and empties the box and its draft (only while the box holds the words sent; edited words stay, as a new reply);
+ *   Send again before it arrives carries the same key, also after leaving the thread; the Inbox holds one reply.
+ * - A refusal (4xx) or a connection refused says "was not sent", and nothing watches for that reply.
  * - A draft save that never answers no longer holds the Send that waits for it.
  * - A conflict retry (another client saved the same answer, sendSameAnswers.ts) still goes, with the same key, and a
  *   retry that never answers ends too.
@@ -27,6 +30,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { parseInboxQuestionBlocks } from '@plannotator/core/inbox-questions';
 import type { InboxAuthor, InboxMessageWire, InboxProject, InboxQuestion, InboxReplyDraft, InboxThread } from '@plannotator/core/inbox-types';
 import { setWriteIdleForTests } from './apiWrite';
+import { sendErrors, unconfirmed } from './data/actions/sendLanded';
 
 const hasDom = typeof document !== 'undefined';
 const { ThreadPane } = (hasDom ? await import('./components/Thread') : {}) as typeof import('./components/Thread');
@@ -113,7 +117,11 @@ function threadNow(asks: boolean, revision: number): InboxThread {
   };
 }
 
-type ReplyMode = 'ok' | 'hang' | 'land-then-hang' | 'conflict-then-ok' | 'conflict-then-hang';
+type ReplyMode = 'ok' | 'hang' | 'land-then-hang' | 'conflict-then-ok' | 'conflict-then-hang' | 'refuse-4xx' | 'refused';
+
+const WORDS = 'eu-west first, then us-east.';
+const EDITED_MAY = 'Your earlier reply may have gone; Send sends your edited words as another reply.';
+const EDITED_WENT = 'Your earlier reply went; Send sends your edited words as another reply.';
 
 let root: Root | null = null;
 let host: HTMLElement | null = null;
@@ -130,6 +138,8 @@ let messageHangs: boolean;
 let revision: number;
 /** The body of the last reply POST that never answered: `landLate` writes it, as a request that reached the Inbox late. */
 let hungBody: { key: string; words: string } | null;
+/** The thread's draft as the fake Inbox holds it: a save writes it, a reply carrying the same words clears it (`clear_draft`). */
+let draftNow: string | null;
 
 /** A request whose connection died without a word: it never answers, and ends only when the window gives it up. */
 function silent(init?: RequestInit): Promise<Response> {
@@ -143,12 +153,17 @@ function silent(init?: RequestInit): Promise<Response> {
 
 function write(key: string, words: string): Response {
   const had = stored.get(key);
-  if (!had) stored.set(key, { id: `msg_reply_${stored.size + 1}`, key, words });
+  if (!had) store(key, words);
   return Response.json({ message_id: ASKED, questions: [], reply: { id: stored.get(key)!.id }, replayed: !!had });
 }
 
+function store(key: string, words: string): void {
+  stored.set(key, { id: `msg_reply_${stored.size + 1}`, key, words });
+  if (draftNow !== null && draftNow.trim() === words.trim()) draftNow = null;
+}
+
 function landLate(): void {
-  if (hungBody && !stored.has(hungBody.key)) stored.set(hungBody.key, { id: `msg_reply_${stored.size + 1}`, ...hungBody });
+  if (hungBody && !stored.has(hungBody.key)) store(hungBody.key, hungBody.words);
 }
 
 beforeEach(() => {
@@ -164,14 +179,20 @@ beforeEach(() => {
   messageHangs = false;
   revision = 1;
   hungBody = null;
+  draftNow = WORDS;
   savedFetch = globalThis.fetch;
-  const draft = (body: string): InboxReplyDraft => ({ v: 1, thread_id: THREAD, body, created_at: '2026-11-27T10:05:00.000Z', updated_at: '2026-11-27T10:05:00.000Z' });
+  const draft = (body: string | null): InboxReplyDraft | null => (body === null ? null : { v: 1, thread_id: THREAD, body, created_at: '2026-11-27T10:05:00.000Z', updated_at: '2026-11-27T10:05:00.000Z' });
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
     const post = init?.method === 'POST';
     if (path.includes('/draft') && post && draftSaveHangs) return silent(init);
+    if (path.endsWith('/draft/delete') && post) {
+      draftNow = null;
+      return Response.json({ ok: true, deleted: true });
+    }
     // The box opens holding a saved draft; a save is taken as it is.
-    if (path.includes('/draft')) return Response.json({ serverSession: 's', draft: draft(post ? JSON.parse(String(init!.body)).body : 'eu-west first, then us-east.') });
+    if (path.includes('/draft') && post) draftNow = JSON.parse(String(init!.body)).body;
+    if (path.includes('/draft')) return Response.json({ serverSession: 's', draft: draft(draftNow) });
     if (path.includes('/attachments')) return Response.json({ serverSession: 's', attachments: [], annotations: [] });
     if (path.includes('/sessions')) return Response.json({ serverSession: 's', home: '/home/me', project: PROJECT, sessions: [] });
     if (path.endsWith(`/threads/${THREAD}/message`) && post) {
@@ -188,6 +209,8 @@ beforeEach(() => {
         hungBody = { key: body.idempotency_key, words: body.words };
         return silent(init);
       }
+      if (replyMode === 'refused') throw new TypeError('Load failed');
+      if (replyMode === 'refuse-4xx') return Response.json({ error: "EACCES: permission denied, open '/work/inbox/threads/x.jsonl'", code: 'validation_error' }, { status: 400 });
       if (replyMode === 'land-then-hang') {
         write(body.idempotency_key, body.words);
         return silent(init);
@@ -219,6 +242,9 @@ afterEach(async () => {
   await new Promise((resolve) => setTimeout(resolve, 50));
   globalThis.fetch = savedFetch;
   setWriteIdleForTests(null);
+  // A Send given up outlives its pane (it may still land): each case starts with none.
+  unconfirmed.clear();
+  sendErrors.clear();
 });
 
 async function settle(turns = 4, ms = 20) {
@@ -229,21 +255,54 @@ async function settle(turns = 4, ms = 20) {
   }
 }
 
-async function open(asks = false): Promise<HTMLElement> {
+const pane = (asks: boolean) => (
+  <div className="pn-inbox">
+    <ThreadPane thread={threadNow(asks, 1)} sent={null} onQuestions={() => {}} onChanged={async () => {}} onClose={() => {}} file={null} onOpenFile={() => {}} onOpenGuide={() => {}} phone />
+  </div>
+);
+
+/** The thread open (the box opens holding its draft, when there is one). */
+async function mount(asks = false): Promise<HTMLElement> {
   host = document.createElement('div');
   document.body.appendChild(host);
   act(() => {
     root = createRoot(host!);
-    root.render(
-      <div className="pn-inbox">
-        <ThreadPane thread={threadNow(asks, 1)} sent={null} onQuestions={() => {}} onChanged={async () => {}} onClose={() => {}} file={null} onOpenFile={() => {}} onOpenGuide={() => {}} phone />
-      </div>,
-    );
+    root.render(pane(asks));
   });
   await settle();
-  expect(!!host.querySelector('.ib-rbox textarea')).toBe(true);
   return host;
 }
+
+async function open(asks = false): Promise<HTMLElement> {
+  const el = await mount(asks);
+  expect(!!el.querySelector('.ib-rbox textarea')).toBe(true);
+  return el;
+}
+
+/** The thread read again (the live stream after a record), drawn with every reply the fake Inbox holds now. */
+async function readAgain(): Promise<void> {
+  act(() => root!.render(pane(false)));
+  await settle(6);
+}
+
+/** The person leaves the thread (the pane goes). */
+function leave(): void {
+  act(() => root?.unmount());
+  host?.remove();
+  root = null;
+  host = null;
+}
+
+const liveText = (el: HTMLElement) => [...el.querySelectorAll('[aria-live]')].map((n) => n.textContent).join(' ');
+/** The thread's foot offers the kept draft ("Edit draft") rather than an empty Reply. */
+const footDraft = (el: HTMLElement) => [...el.querySelectorAll('.ib-pfoot button')].some((b) => b.textContent?.replace(/\s+/g, ' ').trim() === 'Edit draft');
+
+const type = (el: HTMLElement, words: string) =>
+  act(() => {
+    const field = el.querySelector<HTMLTextAreaElement>('.ib-rbox textarea')!;
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(field, words);
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+  });
 
 /** What the person is left with: the line under the box, the box's words, and whether Send can be pressed. */
 function state(el: HTMLElement) {
@@ -268,7 +327,7 @@ async function until(done: () => boolean, ms: number): Promise<void> {
   while (!done() && Date.now() < end) await settle(1, 25);
 }
 
-test.skipIf(!hasDom)("the reply's POST never answers: Send ends with the failure line, the words stay in the box, and Send can be pressed again", async () => {
+test.skipIf(!hasDom)("the reply's POST never answers: Send ends with the line that it may not have gone, the words stay in the box, and Send can be pressed again", async () => {
   replyMode = 'hang';
   const el = await open();
   await pressSend(el);
@@ -276,7 +335,8 @@ test.skipIf(!hasDom)("the reply's POST never answers: Send ends with the failure
   // Busy while the POST is out.
   expect(state(el).sendable).toBe(false);
   await until(() => state(el).line !== null, LIMIT * 6);
-  expect(state(el)).toEqual({ line: NOT_SENT, words: 'eu-west first, then us-east.', sendable: true });
+  // Given up, it may still be on its way: never "was not sent".
+  expect(state(el)).toEqual({ line: MAY_HAVE_GONE, words: WORDS, sendable: true });
   // It looked for the reply before saying so.
   expect(threadReads).toBe(1);
   expect(stored.size).toBe(0);
@@ -297,22 +357,124 @@ test.skipIf(!hasDom)('the reply landed but its answer was lost and the read back
   expect(state(el).line).toBe(null);
 });
 
-test.skipIf(!hasDom)('the reply reached the Inbox late, after the read back: Send again carries the same key, and the Inbox holds one reply', async () => {
+test.skipIf(!hasDom)('the reply reached the Inbox late, after the read back: Send again looks for it first, finds it, and posts nothing', async () => {
   replyMode = 'hang';
   const el = await open();
   await pressSend(el);
   await until(() => state(el).line !== null, LIMIT * 6);
-  expect(state(el)).toEqual({ line: NOT_SENT, words: 'eu-west first, then us-east.', sendable: true });
+  expect(state(el)).toEqual({ line: MAY_HAVE_GONE, words: WORDS, sendable: true });
   // The first request reaches the Inbox now, after the window gave it up.
   landLate();
   replyMode = 'ok';
   await pressSend(el);
   await until(() => state(el).words === null || state(el).words === '', LIMIT * 6);
-  expect(replyPosts.length).toBe(2);
-  expect(replyPosts[1]!.key).toBe(replyPosts[0]!.key);
+  expect(replyPosts.length).toBe(1);
   expect(stored.size).toBe(1);
   expect(state(el).line).toBe(null);
 });
+
+test.skipIf(!hasDom)('Send again before the late reply arrives carries the same key: when the first request lands after it, the Inbox still holds one reply', async () => {
+  replyMode = 'hang';
+  const el = await open();
+  await pressSend(el);
+  await until(() => state(el).line !== null, LIMIT * 6);
+  replyMode = 'ok';
+  await pressSend(el);
+  await until(() => state(el).words === null || state(el).words === '', LIMIT * 6);
+  landLate();
+  expect(replyPosts.map((p) => p.key)).toEqual([replyPosts[0]!.key, replyPosts[0]!.key]);
+  expect(stored.size).toBe(1);
+});
+
+test.skipIf(!hasDom)('a reply given up that lands later is noticed by the next read of the thread: it went, the line goes, the box and its draft empty, one reply', async () => {
+  replyMode = 'hang';
+  const el = await open();
+  await pressSend(el);
+  await until(() => state(el).line !== null, LIMIT * 6);
+  expect(state(el).line).toBe(MAY_HAVE_GONE);
+  landLate();
+  await readAgain();
+  const after = state(el);
+  expect(after.line).toBe(null);
+  expect(after.words === null || after.words === '').toBe(true);
+  expect(liveText(el)).toContain('Your reply went.');
+  // No draft of the sent words is left, here or in the Inbox.
+  expect(footDraft(el)).toBe(false);
+  await settle(4);
+  expect(draftNow).toBe(null);
+  expect(replyPosts.length).toBe(1);
+  expect(stored.size).toBe(1);
+});
+
+test.skipIf(!hasDom)('words edited after a Send given up stay when it lands: the earlier reply is said to have gone, and Send sends the edit as one new reply', async () => {
+  replyMode = 'hang';
+  const el = await open();
+  await pressSend(el);
+  await until(() => state(el).line !== null, LIMIT * 6);
+  const edit = 'eu-west first, then us-east, then ap-south.';
+  type(el, edit);
+  await settle(2);
+  expect(state(el).line).toBe(EDITED_MAY);
+  landLate();
+  await readAgain();
+  expect(state(el)).toEqual({ line: EDITED_WENT, words: edit, sendable: true });
+  replyMode = 'ok';
+  await pressSend(el);
+  await until(() => state(el).words === null || state(el).words === '', LIMIT * 6);
+  expect(replyPosts.length).toBe(2);
+  expect(replyPosts[1]!.key === replyPosts[0]!.key).toBe(false);
+  expect([...stored.values()].map((r) => r.words)).toEqual([WORDS, edit]);
+});
+
+test.skipIf(!hasDom)('leaving the thread and coming back keeps a Send given up: Send again of the same words carries its key, so a late landing is still one reply', async () => {
+  replyMode = 'hang';
+  let el = await open();
+  await pressSend(el);
+  await until(() => state(el).line !== null, LIMIT * 6);
+  leave();
+  el = await open();
+  expect(state(el).words).toBe(WORDS);
+  replyMode = 'ok';
+  await pressSend(el);
+  await until(() => state(el).words === null || state(el).words === '', LIMIT * 6);
+  landLate();
+  expect(replyPosts.map((p) => p.key)).toEqual([replyPosts[0]!.key, replyPosts[0]!.key]);
+  expect(stored.size).toBe(1);
+});
+
+test.skipIf(!hasDom)('a Send given up that lands while the person is away is said to have gone when they come back, with nothing left to send', async () => {
+  replyMode = 'hang';
+  let el = await open();
+  await pressSend(el);
+  await until(() => state(el).line !== null, LIMIT * 6);
+  leave();
+  landLate();
+  el = await mount();
+  await settle(4);
+  expect(liveText(el)).toContain('Your reply went.');
+  expect(!!el.querySelector('.ib-rbox textarea')).toBe(false);
+  expect(footDraft(el)).toBe(false);
+  expect(stored.size).toBe(1);
+});
+
+for (const [mode, line, reads] of [
+  ['refuse-4xx', 'The reply was not sent.', 0],
+  ['refused', NOT_SENT, 1],
+] as const) {
+  test.skipIf(!hasDom)(`a reply the Inbox did not take (${mode}) says it was not sent, and nothing watches for it`, async () => {
+    replyMode = mode;
+    const el = await open();
+    await pressSend(el);
+    await until(() => state(el).line !== null && !busy(el), LIMIT * 6);
+    expect(state(el)).toEqual({ line, words: WORDS, sendable: true });
+    expect(threadReads).toBe(reads);
+    // Were a person reply with that key to show up, this window would not take it for its own Send.
+    store(replyPosts[0]!.key, WORDS);
+    await readAgain();
+    expect(state(el)).toEqual({ line, words: WORDS, sendable: true });
+    expect(liveText(el)).not.toContain('Your reply went.');
+  });
+}
 
 test.skipIf(!hasDom)('a draft save that never answers does not hold the Send: the reply goes with the words in the box', async () => {
   draftSaveHangs = true;
@@ -347,7 +509,7 @@ test.skipIf(!hasDom)('a conflict retry that never answers ends too: the failure 
   await pressSend(el);
   await until(() => state(el).line !== null, LIMIT * 8);
   expect(replyPosts.length).toBe(2);
-  expect(state(el)).toEqual({ line: NOT_SENT, words: 'eu-west first, then us-east.', sendable: true });
+  expect(state(el)).toEqual({ line: MAY_HAVE_GONE, words: WORDS, sendable: true });
 });
 
 test.skipIf(!hasDom)('a good network: one POST, no read back, and nothing changes after the limit has passed', async () => {

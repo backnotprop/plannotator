@@ -4,8 +4,8 @@
  * never answered, the way a connection that dies without a word (a phone changing networks, a proxy dropping the
  * answer) holds one:
  *
- * - the request never reaches the Inbox: Send ends with the failure line, the words stay in the box, and Send again
- *   writes one reply;
+ * - the request never reaches the Inbox: Send ends with the line that it may not have gone (a request given up may
+ *   still arrive), the words stay in the box, and Send again writes one reply;
  * - the request reaches the Inbox and only its answer is lost: Send ends, the reply is found by its key, the box
  *   closes, and the Inbox holds one reply.
  *
@@ -88,7 +88,8 @@ test('the reply never reaches the Inbox: Send ends with the failure line, the wo
     await page.route(REPLY, (_route: Route) => void (held += 1));
     await send(page).tap();
     await expect(send(page)).toBeDisabled();
-    await expect(failure(page)).toHaveText(/^The reply was not sent\. Send again to retry\./, { timeout: SEND_ENDS_MS });
+    // Given up with no answer, the request may still be on its way: "may not have gone", never "was not sent".
+    await expect(failure(page)).toHaveText(/^The reply may not have gone\. Send again: it looks for this one first, so it is not sent twice\./, { timeout: SEND_ENDS_MS });
     await expect(pane(page).locator('textarea')).toHaveValue(WORDS);
     await expect(send(page)).toBeEnabled();
     expect(held).toBe(1);

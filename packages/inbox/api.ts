@@ -83,7 +83,7 @@ export type { CardsModel } from './cardsWire';
 import type { InboxAskChat } from './askChatWire';
 export type { InboxAskChat } from './askChatWire';
 import { gzipped, wholeBody } from './apiBody';
-import { WITHIN, fetchWithin, sendReadMs } from './apiWrite';
+import { WITHIN, fetchWithin, sendReadMs, withinUnlessLaunch } from './apiWrite';
 import { referencedFileUrl, type OpenInFileCode, type OpenInFileScope, type ReferencedFileScope, type ReferencedFileView } from './openInWire';
 export { InboxApiError };
 import type { InboxSearchAnswer, InboxSearchFrom, InboxSearchGroupId, InboxSearchSort, InboxSearchStatus } from '@plannotator/core/inbox-search';
@@ -1473,8 +1473,8 @@ export const inboxApi = {
     },
   ) =>
     // To another machine: the newest seq the person saw there rides along (rule 11), and a reply its Inbox has not
-    // confirmed yet is held (`held`): the Send went into this Inbox's outbox, not into the thread.
-    post<ReplyResult>(messageUrl(messageId, `/reply`), { ...input, ...seenThrough(messageId) }, WITHIN).then(
+    // confirmed yet is held (`held`): the Send went into this Inbox's outbox, not into the thread. One that starts a session: no limit.
+    post<ReplyResult>(messageUrl(messageId, `/reply`), { ...input, ...seenThrough(messageId) }, withinUnlessLaunch(input.to)).then(
       (result) => {
         if (input.author_only !== true) noteReplySent(input.words);
         // Only this Inbox's own thread, read as `thread` reads one; a linked machine's thread is read after, as before.
@@ -1659,7 +1659,7 @@ export const inboxApi = {
     get<{ reach: CloneReach }>(inboxUrl('/launch/clone-check', new URLSearchParams({ url }).toString(), machine), signal),
   /** `machine`: start the agent on that linked machine (remote launch), through the forward; a `202` is `InboxHeldError`. */
   startThread: (input: StartThreadInput, machine?: string | null) =>
-    post<{ thread_id: string; message: InboxMessage; project?: { id: string; name: string; root: string }; replayed: boolean; launch?: { id: string; state: 'starting' | 'failed' } }>(inboxUrl('/messages', undefined, machine), { ...input }, 'launch' in input.to ? {} : WITHIN),
+    post<{ thread_id: string; message: InboxMessage; project?: { id: string; name: string; root: string }; replayed: boolean; launch?: { id: string; state: 'starting' | 'failed' } }>(inboxUrl('/messages', undefined, machine), { ...input }, withinUnlessLaunch(input.to)),
   // Launch (behind `inboxLaunch.enabled`, on unless false): the run line's buttons and Settings → Agents' switches.
   launchStop: (launchId: string, machine?: string | null) => post<{ run: InboxRun | null }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/stop`, undefined, machine), {}),
   launchOpen: (launchId: string) => post<{ ok: true; command: string }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/open`), {}),

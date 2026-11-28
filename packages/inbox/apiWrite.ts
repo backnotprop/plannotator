@@ -44,6 +44,14 @@ export class InboxWriteTimeout extends Error {
 /** What a write passes to `post` to be given up this way. */
 export const WITHIN = { within: true } as const;
 
+/**
+ * A write that starts an agent session (`to: { launch }`: New message's start, a reply to "New … session") goes with
+ * no limit: the Inbox checks and prepares the launch before it answers (the agent's version and sign-in checks, the
+ * login shell, the folder's git: up to about 25 s before the first byte), so a limit would give up on a healthy start.
+ * The same on a linked computer: its Inbox prepares, and this one holds the write when that computer is away.
+ */
+export const withinUnlessLaunch = (to: object | undefined): { within?: boolean } => (to && 'launch' in to ? {} : WITHIN);
+
 /** Statuses whose Response may carry no body. */
 const NO_BODY = new Set([101, 204, 205, 304]);
 
