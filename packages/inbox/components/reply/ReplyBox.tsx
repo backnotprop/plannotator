@@ -27,6 +27,7 @@ import { ReplySummary, type FootComments } from '../ReplySummary';
 import { Tip } from '../Tip';
 import { ReplyBoxRecipientControl } from './ReplyBoxRecipients';
 import type { ReplyBoxRecipients, ReplyBoxSkills, ReplyBoxVoice } from './replyBoxSeams';
+import type { ThreadMentions } from '../../threadMentions';
 
 type FieldProps = ComponentProps<typeof ReplyTextField>;
 type ReplyQuote = ReturnType<typeof useReplyQuote>;
@@ -35,6 +36,8 @@ export interface ReplyBoxProps {
   phone: boolean;
   /** The thread the reply answers: its mentions (a dragged row, a pasted link) are taken by its field. */
   threadId: string;
+  /** Where the field keeps those mentions (threadMentions.ts `createThreadMentions`, one per box). Absent: the Inbox's own. */
+  mentions?: ThreadMentions;
   // Above the box.
   /** A saved draft is offered (Restore draft). */
   offerShown: boolean;
@@ -107,8 +110,8 @@ export interface ReplyBoxProps {
   sendAria: string | undefined;
   /** Send pressed with nothing still uploading. */
   onSend: () => void;
-  /** Send pressed while a file still uploads: the box does not send (the host says why). */
-  onSendWhileUploading?: () => void;
+  /** Send pressed while a file still uploads: the box does not send, and the host says why (required: never silent). */
+  onSendWhileUploading: () => void;
   onDiscardDraft: () => void;
   errorLine: ReactNode;
 }
@@ -116,6 +119,7 @@ export interface ReplyBoxProps {
 export function ReplyBox({
   phone,
   threadId,
+  mentions,
   offerShown,
   onRestoreDraft,
   conflict,
@@ -172,7 +176,7 @@ export function ReplyBox({
 }: ReplyBoxProps) {
   const recipientPill = recipients ? <ReplyBoxRecipientControl phone={phone} recipients={recipients} /> : null;
   // A file still uploading holds the Send back, whatever the host's own Send does.
-  const pressSend = () => (files.some((file) => file.state === 'uploading') ? onSendWhileUploading?.() : onSend());
+  const pressSend = () => (files.some((file) => file.state === 'uploading') ? onSendWhileUploading() : onSend());
   return (
     <>
       {/* Above the box (approval "inbox-reply-recipient"): after a conflict its line and choice, and on a phone the
@@ -215,6 +219,7 @@ export function ReplyBox({
           <ReplyTextField
             replyText={replyText}
             mentionThread={threadId}
+            mentionScope={mentions}
             sendingWords={sendingWords}
             textareaRef={textRef}
             voice={voice?.handle}

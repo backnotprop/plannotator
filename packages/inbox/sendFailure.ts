@@ -25,6 +25,8 @@ const LINE_MAX = 160;
 const TECHNICAL = /(?:^|[\s'"(])(?:\/[^\s/'"]+){2,}|[A-Za-z]:\\|\bE[A-Z]{3,}\b/;
 
 export const SEND_NOT_SENT = 'The reply was not sent. Send again to retry.';
+/** A Send pressed while a file still uploads (the reply box's controller says it; Thread.tsx says the same words). */
+export const UPLOADING_LINE = 'Wait for the files to finish uploading.';
 /** A Send whose reply may have gone: its next Send looks for it first (`unconfirmed` in data/actions/sendLanded.ts). */
 export const SEND_MAY_NOT_HAVE_GONE = 'The reply may not have gone. Send again: it looks for this one first, so it is not sent twice.';
 

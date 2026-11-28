@@ -2,6 +2,7 @@
 import type { InboxReplyDraft } from '@plannotator/core/inbox-types';
 import type { ReplyDraftFileOps, ReplyDraftStore } from '@plannotator/core/inbox-reply-draft';
 import type { ReplyDraftFiles } from './replyDraftKeys';
+import type { ThreadMentions } from './threadMentions';
 
 export interface ReplyDraftOptions {
   /** Where drafts are kept (default: this Inbox's, over HTTP). */
@@ -57,4 +58,6 @@ export interface ReplyDraftPageOptions {
    * a tab the browser ends loses none (replyWordsKept.ts). Default true (the Inbox). False: kept in the page only.
    */
   keepInBrowser?: boolean;
+  /** Where the drafts' mentions are kept: the field's scope (threadMentions.ts). Default: the Inbox's own. */
+  mentions?: ThreadMentions;
 }
