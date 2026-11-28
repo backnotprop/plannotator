@@ -5,19 +5,27 @@
  * (several tags allowed; untick takes the thread out). A typed name that is no tag offers `New tag “Billing”`, which
  * makes it and tags the thread; Enter in the field ticks the tag it names, or makes it.
  * Draw inside a Base UI `Menu.Popup` or `ContextMenu.Popup`; the tags come from `ThreadTagsContext`.
+ *
+ * A project's ⋯ draws the same item and list (`target`: the project's tags, projectTags.ts), so a project is tagged as a
+ * thread is.
  */
 import { useLayoutEffect, useRef, useState, type FocusEvent, type KeyboardEvent } from 'react';
 import { Menu } from '@base-ui/react/menu';
 import { focusAfterSwap } from '@plannotator/ui/components/inbox-thread/SnoozeMenu';
 import { Icon } from '../icons';
-import { findTags, tagNamed, useThreadTags } from '../threadTags';
+import { findTags, tagNamed, useThreadTags, type TagTarget, type ThreadTagsHost } from '../threadTags';
 import { TagIcon } from './InitiativePeek';
 
-/** The menu's Add tag item: how many tags the thread is in, and the chevron of a list that swaps in. */
-export function AddTagItem({ threadId, onOpen }: { threadId: string; onOpen: () => void }) {
+/** A thread's tags as a target: Add tag's list ticks, unticks and makes tags on it. */
+function threadTarget(host: ThreadTagsHost, threadId: string): TagTarget {
+  return { on: host.tagsOf(threadId), set: (tag, on) => host.set(threadId, tag, on), create: (name) => host.createAndSet(threadId, name) };
+}
+
+/** The menu's Add tag item: how many tags the thread (or `target`) is in, and the chevron of a list that swaps in. */
+export function AddTagItem({ threadId, target, onOpen }: { threadId?: string; target?: TagTarget | null; onOpen: () => void }) {
   const host = useThreadTags();
-  if (!host || !host.can(threadId)) return null;
-  const n = host.tagsOf(threadId).length;
+  if (!host || (target === undefined && (!threadId || !host.can(threadId))) || target === null) return null;
+  const n = (target ?? threadTarget(host, threadId!)).on.length;
   return (
     <Menu.Item className="ib-pmi" label="Add tag" closeOnClick={false} onClick={onOpen} data-add-tag-item="">
       <TagIcon size={15} />
@@ -31,20 +39,21 @@ export function AddTagItem({ threadId, onOpen }: { threadId: string; onOpen: () 
 }
 
 /** The swapped-in list; without `onBack`, the list alone (the thread header's `+`, ThreadTagLine). */
-export function AddTagList({ threadId, onBack }: { threadId: string; onBack?: () => void }) {
+export function AddTagList({ threadId, target: given, onBack }: { threadId?: string; target?: TagTarget; onBack?: () => void }) {
   const host = useThreadTags();
   const [query, setQuery] = useState('');
   const field = useRef<HTMLInputElement>(null);
   const body = useRef<HTMLDivElement>(null);
   // The menu keeps focus on an item the swap took away: the field takes it.
   useLayoutEffect(() => focusAfterSwap(() => field.current), []);
-  if (!host) return null;
-  const on = new Set(host.tagsOf(threadId));
+  if (!host || (!given && !threadId)) return null;
+  const target = given ?? threadTarget(host, threadId!);
+  const on = new Set(target.on);
   const shown = findTags(host.tags, query);
   const typed = query.trim();
   const exact = typed ? tagNamed(host.tags, typed) : null;
   const create = () => {
-    host.createAndSet(threadId, typed);
+    target.create(typed);
     setQuery('');
     field.current?.focus({ preventScroll: true });
   };
@@ -58,7 +67,7 @@ export function AddTagList({ threadId, onBack }: { threadId: string; onBack?: ()
       body.current?.querySelector<HTMLElement>('[data-tag-pick], [data-tag-new]')?.focus({ preventScroll: true });
     } else if (event.key === 'Enter') {
       event.preventDefault();
-      if (exact) host.set(threadId, exact, !on.has(exact.id));
+      if (exact) target.set(exact, !on.has(exact.id));
       else if (typed) create();
     }
   };
@@ -91,7 +100,7 @@ export function AddTagList({ threadId, onBack }: { threadId: string; onBack?: ()
         const ticked = on.has(tag.id);
         const count = host.counts.get(tag.id) ?? 0;
         return (
-          <Menu.CheckboxItem key={tag.id} className="ib-pmi" label={tag.name} checked={ticked} onCheckedChange={(next: boolean) => host.set(threadId, tag, next)} closeOnClick={false} data-tag-pick={tag.id}>
+          <Menu.CheckboxItem key={tag.id} className="ib-pmi" label={tag.name} checked={ticked} onCheckedChange={(next: boolean) => target.set(tag, next)} closeOnClick={false} data-tag-pick={tag.id}>
             <span className="ib-tagm-l" dir="auto">
               {tag.name}
             </span>

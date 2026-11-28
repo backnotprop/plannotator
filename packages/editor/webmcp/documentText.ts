@@ -4,6 +4,7 @@
  * no React, so every anchoring rule is unit-testable with parsed blocks.
  */
 import type { Annotation, Block } from '@plannotator/ui/types';
+import { footnoteKeysOf, withoutFootnoteRefs } from '@plannotator/ui/utils/footnotes';
 
 export interface OutlineEntry {
   /** Stable heading slug the tools accept as `section`. */
@@ -56,8 +57,11 @@ export function sectionRangeAt(blocks: readonly Block[], headingIndex: number): 
 export function buildOutline(blocks: readonly Block[], annotations: readonly Annotation[]): OutlineEntry[] {
   const seen = new Map<string, number>();
   const entries: OutlineEntry[] = [];
+  const notes = footnoteKeysOf(blocks);
   blocks.forEach((block, index) => {
     if (block.type !== 'heading') return;
+    // The section id stays the one from the heading as written; only the title shown leaves references out.
+    const title = withoutFootnoteRefs(block.content, notes);
     const base = slugifyHeading(block.content);
     const count = (seen.get(base) ?? 0) + 1;
     seen.set(base, count);
@@ -67,7 +71,7 @@ export function buildOutline(blocks: readonly Block[], annotations: readonly Ann
     entries.push({
       id,
       level: block.level ?? 1,
-      title: block.content,
+      title,
       line: block.startLine,
       annotations: annotations.filter((a) => a.blockId && inSection.has(a.blockId)).length,
       blockId: block.id,

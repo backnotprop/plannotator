@@ -23,5 +23,5 @@
     "allowImportingTsExtensions": true,
     "noEmit": true
   },
-  "include": ["index.tsx", "surface.tsx", "shape.tsx", "../../packages/ui/globals.d.ts"]
+  "include": ["index.tsx", "surface.tsx", "../../packages/ui/globals.d.ts"]
 }

@@ -11,6 +11,7 @@ import { TryPrototypeTab } from '../../components/PrototypeWindow';
 import { prototypePageCount } from '../../prototypes';
 import type { MessageBodyProps } from './types';
 import { useAcceptedUndo } from '../../useAcceptedUndo';
+import { ARCHIVE_CLOSED_STATUS, closedByArchive } from '../../fileQuestions';
 
 /** An unsent pick's tag on its card (statusLabel). */
 // A pick saved and not sent is part of the person's draft (approval "inbox-reply-drafts": "Draft" replaces "Not sent").
@@ -21,17 +22,19 @@ export function useQuestionCards({
   message,
   projectRoot,
   readOnly,
+  movedThread,
   footerFor,
   answers,
   renderReplacedCard,
   renderReplacesLine,
   renderActions,
+  renderRunBlock,
   onTryPrototype,
   blocks,
   noteAtLine,
   notesRef,
   refRepo,
-}: Pick<MessageBodyProps, 'message' | 'projectRoot' | 'readOnly' | 'footerFor' | 'answers' | 'renderReplacedCard' | 'renderReplacesLine' | 'renderActions' | 'onTryPrototype'> & {
+}: Pick<MessageBodyProps, 'message' | 'projectRoot' | 'readOnly' | 'movedThread' | 'footerFor' | 'answers' | 'renderReplacedCard' | 'renderReplacesLine' | 'renderActions' | 'renderRunBlock' | 'onTryPrototype'> & {
   blocks: Block[];
   noteAtLine: ReadonlyMap<number, InboxNoteBlock>;
   notesRef: { readonly current: MessageBodyProps['contextNotes'] };
@@ -60,6 +63,9 @@ export function useQuestionCards({
   // Action items: one checklist card per run of adjacent `:::action` blocks, in place of
   // the run's first block; the run's other blocks draw nothing (inbox.css hides their empty
   // wrapper). Prose between two blocks ends a run, so each stays where the agent put it.
+  // `:::run` and `:::secret` (parts/RunBlocks): the host's card in place of each block.
+  const runRef = useRef(renderRunBlock);
+  runRef.current = renderRunBlock;
   const actionsRef = useRef(renderActions);
   actionsRef.current = renderActions;
   const actionRuns = useMemo(() => {
@@ -95,6 +101,7 @@ export function useQuestionCards({
           </div>
         );
       }
+      if (block.directiveKind === 'run' || block.directiveKind === 'secret') return runRef.current?.(block);
       if (block.directiveKind !== 'action') return undefined;
       const run = actionRuns.get(block.id);
       if (!run) return undefined;
@@ -133,14 +140,16 @@ export function useQuestionCards({
   );
 
   // A pick not sent yet tags its card "Draft", not "Answered" (the footer says when it was picked);
-  // a sent answer, and a question a Mark read closed, keep the card's own tag.
+  // a sent answer, and a question a Mark read closed, keep the card's own tag. One the archive of a moved thread closed reads "Closed",
+  // never the "Open" its missing answer would give it (a pick saved before the archive does not make it "Draft").
   const statusLabel = useCallback(
     (question: IndexedQuestion, status: QuestionStatus) => {
-      if (status !== 'answered' && status !== 'skipped') return undefined;
       const wire = message.questions?.find((q) => q.key === question.question.key);
+      if (movedThread && closedByArchive(wire)) return ARCHIVE_CLOSED_STATUS;
+      if (status !== 'answered' && status !== 'skipped') return undefined;
       return wire && (wire.state === 'open' || wire.state === 'picked') ? NOT_SENT_STATUS : undefined;
     },
-    [message.questions],
+    [message.questions, movedThread],
   );
   return { renderFooter, acceptBehavior, questionCard, belowPrompt, directiveBlock, afterChoices, answerLocked, statusLabel };
 }

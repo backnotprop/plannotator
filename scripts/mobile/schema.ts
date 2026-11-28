@@ -27,6 +27,9 @@ import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { OUT, ROOT, cli, jsonText, type Output } from './lib';
 
+// The literal list of what the compiler reads, generated below: importing it lets the picker see every source.
+export { SCHEMA_SOURCES } from './schema-sources';
+
 /** The files the roots are in, and the root types of each. */
 export const ROOTS: Record<string, string[]> = {
   'packages/core/inbox-types.ts': [
@@ -40,70 +43,11 @@ export const ROOTS: Record<string, string[]> = {
   'scripts/mobile/door-shapes.ts': [
     'DoorError', 'DoorPairRequest', 'DoorPairAnswer', 'DoorRevokeAnswer', 'DoorHelloFrame', 'DoorRecordFrame', 'DoorSeenBody',
     'DoorPicksBody', 'DoorPicksAnswer', 'DoorReplyBody',
+    'DoorResolveBody', 'DoorKeyBody', 'DoorMarkUnreadAnswer', 'DoorPinBody', 'DoorPinsBody',
+    'DoorSnoozeBody', 'DoorSnoozeAnswer', 'DoorPriorityBody', 'DoorPriorityAnswer', 'DoorThreadDraftAnswer', 'DoorThreadAttachmentsAnswer', 'DoorAnnotationBody', 'DoorAnnotationAnswer', 'DoorAnnotationRemoveBody', 'DoorMarkupAnswer', 'DoorSessionsAnswer', 'DoorComposeBody', 'DoorComposeAnswer', 'DoorUploadAnswer', 'DoorAckBody', 'DoorAckAnswer', 'DoorTakeBackAnswer', 'DoorTaggableAnswer',
   ],
 };
 
-/**
- * Every repository file the compiler reads for the schema, as literals, so
- * scripts/ci-affected.ts selects the contract's test when one changes whatever
- * its import scan sees. buildSchema fails when the list and what the compiler
- * read differ.
- */
-export const SCHEMA_SOURCES = [
-  'packages/core/annotatable.ts',
-  'packages/core/code-file.ts',
-  'packages/core/diff-files.ts',
-  'packages/core/diff-paths.ts',
-  'packages/core/forge-ref-card.ts',
-  'packages/core/forge-refs.ts',
-  'packages/core/guide-notes.ts',
-  'packages/core/guide.ts',
-  'packages/core/inbox-answers.ts',
-  'packages/core/inbox-antigravity.ts',
-  'packages/core/inbox-attachments.ts',
-  'packages/core/inbox-branch-reports.ts',
-  'packages/core/inbox-cards.ts',
-  'packages/core/inbox-cloud.ts',
-  'packages/core/inbox-codex.ts',
-  'packages/core/inbox-combine.ts',
-  'packages/core/inbox-delivery.ts',
-  'packages/core/inbox-door-version.ts',
-  'packages/core/inbox-git-url.ts',
-  'packages/core/inbox-initiatives.ts',
-  'packages/core/inbox-launch-choice.ts',
-  'packages/core/inbox-muse.ts',
-  'packages/core/inbox-open-in.ts',
-  'packages/core/inbox-pull-risk.ts',
-  'packages/core/inbox-pulls.ts',
-  'packages/core/inbox-qwen.ts',
-  'packages/core/inbox-review.ts',
-  'packages/core/inbox-reviews.ts',
-  'packages/core/inbox-rows-words.ts',
-  'packages/core/inbox-scheduled-types.ts',
-  'packages/core/inbox-snooze.ts',
-  'packages/core/inbox-steps.ts',
-  'packages/core/inbox-surface-bridge.ts',
-  'packages/core/inbox-t3.ts',
-  'packages/core/inbox-tag-colours.ts',
-  'packages/core/inbox-thread-pulls.ts',
-  'packages/core/inbox-tidy.ts',
-  'packages/core/inbox-types.ts',
-  'packages/core/inbox-wire-models.ts',
-  'packages/core/inline-markdown.ts',
-  'packages/core/line-anchor.ts',
-  'packages/core/markdown-structure.ts',
-  'packages/core/open-in-apps.ts',
-  'packages/core/problem.ts',
-  'packages/core/question-block.ts',
-  'packages/core/review-threads.ts',
-  'packages/core/shape-scene.ts',
-  'packages/core/shape.ts',
-  'packages/core/text-cut.ts',
-  'packages/core/ulid.ts',
-  'packages/shared/inbox/devices.ts',
-  'packages/shared/inbox/schema.ts',
-  'scripts/mobile/door-shapes.ts',
-] as const;
 
 /** A number field whose name says it counts or orders: an `integer` (Int64 in Swift). */
 export const INTEGER_NAME = /(^|_)(seq|cursor|revision|rev|ms|bytes|size|count|position|total|offset|limit)$/;
@@ -122,6 +66,8 @@ function compiler(): Any {
 }
 
 let built: Schema | undefined;
+/** The repository files the compiler read for the last schema made. */
+let reads: string[] = [];
 
 /** The schema (made once per process: door, surface and vectors all read it). */
 export function buildSchema(): Schema {
@@ -169,12 +115,7 @@ function makeSchema(overrides: Record<string, string> = {}): Schema {
     .filter((f) => f.startsWith(`${ROOT}/`) && !f.includes('/node_modules/'))
     .map((f) => f.slice(ROOT.length + 1))
     .sort();
-  const listed = [...SCHEMA_SOURCES].sort();
-  if (read.join('\n') !== listed.join('\n')) {
-    const add = read.filter((f) => !listed.includes(f as (typeof SCHEMA_SOURCES)[number]));
-    const drop = listed.filter((f) => !read.includes(f));
-    throw new Error(`schema.ts: SCHEMA_SOURCES must list exactly the files the compiler reads.${add.length ? `\n  add: ${add.join(', ')}` : ''}${drop.length ? `\n  remove: ${drop.join(', ')}` : ''}`);
-  }
+  if (Object.keys(overrides).length === 0) reads = read;
   const checker = program.getTypeChecker();
   const defs = new Map<string, Schema>();
   const sources = new Map<string, string>();
@@ -331,8 +272,27 @@ function makeSchema(overrides: Record<string, string> = {}): Schema {
   };
 }
 
+export const SOURCES_FILE = 'scripts/mobile/schema-sources.ts';
+
+/**
+ * The schema, and SCHEMA_SOURCES (schema-sources.ts): every repository file the compiler reads for it, as literals,
+ * so scripts/ci-affected.ts selects the contract's test when one changes, whatever its import scan sees. A wire type
+ * that starts importing a new file leaves schema-sources.ts stale, and the one command writes it.
+ */
 export function generateSchema(): Output[] {
-  return [{ path: OUT.schema, text: jsonText(buildSchema()) }];
+  const schema = buildSchema();
+  const sources = [
+    '/**',
+    ' * GENERATED by scripts/mobile/schema.ts (bun scripts/mobile/all.ts). Do not edit.',
+    ' * Every repository file the compiler reads for the wire schema, as literals, so',
+    ' * scripts/ci-affected.ts selects the contract\'s test when one changes.',
+    ' */',
+    'export const SCHEMA_SOURCES = [',
+    ...reads.map((f) => `  '${f}',`),
+    '] as const;',
+    '',
+  ].join('\n');
+  return [{ path: OUT.schema, text: jsonText(schema) }, { path: SOURCES_FILE, text: sources }];
 }
 
 if (import.meta.main) cli('schema', generateSchema);

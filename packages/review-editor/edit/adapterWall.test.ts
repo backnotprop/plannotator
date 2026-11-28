@@ -29,7 +29,7 @@ describe('pierre edit adapter wall', () => {
     const offenders: string[] = [];
     for (const root of SCAN_ROOTS) {
       for (const file of walk(join(REPO_ROOT, root))) {
-        const rel = relative(REPO_ROOT, file);
+        const rel = relative(REPO_ROOT, file).replaceAll('\\', '/');
         if (rel === ALLOWED || rel.endsWith('adapterWall.test.ts')) continue;
         const content = readFileSync(file, 'utf8');
         if (content.includes('@pierre/diffs/edit')) offenders.push(rel);

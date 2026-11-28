@@ -91,8 +91,8 @@ export function doorSecretMatches(expected: string, given: string | null): boole
   return timingSafeEqual(a, b);
 }
 
-const INBOX_EXACT = new Set(["/", "/favicon.ico", "/favicon.png", "/favicon.svg", "/manifest.webmanifest", "/apple-touch-icon.png", "/mcp", "/api/shapes"]);
-const INBOX_PREFIXES = ["/assets/", "/api/inbox/", "/api/ai/", "/api/shapes/", "/api/html-assets/"];
+const INBOX_EXACT = new Set(["/", "/favicon.ico", "/favicon.png", "/favicon.svg", "/manifest.webmanifest", "/apple-touch-icon.png", "/mcp"]);
+const INBOX_PREFIXES = ["/assets/", "/api/inbox/", "/api/ai/", "/api/html-assets/"];
 
 export function isInboxRoute(path: string): boolean {
   return INBOX_EXACT.has(path) || INBOX_PREFIXES.some((prefix) => path.startsWith(prefix));

@@ -21,6 +21,19 @@ describe('compact Plan completion', () => {
     expect(html).toContain('--pn-safe-bottom');
   });
 
+  test('follows the document: capped like it, or uncapped when Wide fills the space', () => {
+    const capped = renderToStaticMarkup(
+      <CompactPlanCompletion feedbackSummary="" maxWidth={1040} onOpenReview={() => {}} />,
+    );
+    const filling = renderToStaticMarkup(
+      <CompactPlanCompletion feedbackSummary="" maxWidth={null} onOpenReview={() => {}} />,
+    );
+
+    expect(capped).toContain('max-width:1040px');
+    expect(filling).not.toContain('max-width');
+    expect(filling).toContain('w-full');
+  });
+
   test('promotes one incumbent decision without duplicating decision logic', () => {
     const html = renderToStaticMarkup(
       <CompactPlanReview

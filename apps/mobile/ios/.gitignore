@@ -1,0 +1,4 @@
+# Swift package and Xcode build output, and each person's own signing settings.
+.build/
+*.xcresult
+Config/Local.xcconfig

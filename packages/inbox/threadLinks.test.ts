@@ -73,6 +73,27 @@ describe('what the message draws as a link', () => {
     expect(hostOf()).toEqual(['github.com']);
     expect(hostOf('gitlab.example.com')).toEqual(['gitlab.example.com']);
   });
+  test("a GitLab project's !12 and group/sub/project!12 are its merge requests, on its own host; nowhere else", () => {
+    const gitlab = { display: 'harbor-group/harbor', host: 'gitlab.harbor.dev' };
+    const body = 'Merged !12 and harbor-group/infra/fern-api!6 (!13). Not wow!14, `!15`, !important, ![!16](a.png).';
+    expect(hrefs(body, gitlab)).toEqual([
+      'https://gitlab.harbor.dev/harbor-group/harbor/-/merge_requests/12',
+      'https://gitlab.harbor.dev/harbor-group/infra/fern-api/-/merge_requests/6',
+      'https://gitlab.harbor.dev/harbor-group/harbor/-/merge_requests/13',
+    ]);
+    expect(hrefs(body, repo)).toEqual([]);
+    expect(hrefs(body)).toEqual([]);
+    // No repo, even with most projects on a GitLab (defaultRefHost.ts): the `!` forms need a real GitLab project.
+    const noRepo = 'Merged !12 and harbor-group/harbor!45, see harbor-group/harbor#7.';
+    expect(linksOfBody(noRepo, null, 'gitlab.harbor.dev').map((l) => l.href)).toEqual(['https://gitlab.harbor.dev/harbor-group/harbor/-/issues/7']);
+    expect(threadLinks([{ id: 'nr', body: noRepo }], null, 'gitlab.harbor.dev').repos.map((r) => r.links.map((l) => l.text))).toEqual([['#7']]);
+    // The list names them as GitLab does, in their own projects.
+    const { repos } = threadLinks([{ id: 'mr', body }], gitlab);
+    expect(repos.map((r) => [r.host, r.path, r.links.map((l) => [l.kind, l.text])])).toEqual([
+      ['gitlab.harbor.dev', 'harbor-group/harbor', [['pull', '!12'], ['pull', '!13']]],
+      ['gitlab.harbor.dev', 'harbor-group/infra/fern-api', [['pull', '!6']]],
+    ]);
+  });
 });
 
 describe('the list', () => {

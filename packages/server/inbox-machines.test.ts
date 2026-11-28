@@ -824,8 +824,11 @@ describe("the tailnet door with Phones off, in process", () => {
     const tailscale = scriptedTailscale();
     const theirs = "http://127.0.0.1:62440";
     tailscale.serve.set(8443, theirs);
-    // The other machine: it pairs, answers health, and keeps the code it is handed to link back.
+    // The other machine: it pairs, answers health, and keeps the code it is handed to link back. Like a real Inbox's
+    // link-back, it redeems that code at this Inbox's door (the listener 8444 maps to: the handed address is not
+    // reachable here) before it answers, so the link is saved with the device its way back made.
     const handed: string[] = [];
+    let doorListener = "";
     const peer = Bun.serve({
       hostname: "127.0.0.1",
       port: 0,
@@ -835,8 +838,11 @@ describe("the tailnet door with Phones off, in process", () => {
         if (route === "pair") return Response.json({ token: "tok_peer", computer: { name: "Mini" } }, { status: 201 });
         if (route === "health") return Response.json({ ok: true, inbox_id: OTHER, machine_links: 1, version: "peer" });
         if (route === "link-back") {
-          handed.push(String(((await req.json()) as Json).link));
-          return Response.json({ machine: { id: OTHER, name: "Mini" } }, { status: 201 });
+          const link = String(((await req.json()) as Json).link);
+          handed.push(link);
+          const secret = new URL(link).searchParams.get("secret");
+          const paired = await fetch(`${doorListener}/api/inbox/device/pair`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "Mini", platform: "machine", secret }) });
+          return Response.json({ machine: { id: OTHER, name: "Mini" } }, { status: paired.status });
         }
         return Response.json({ code: "device_route_not_found" }, { status: 404 });
       },
@@ -852,6 +858,7 @@ describe("the tailnet door with Phones off, in process", () => {
       const door = tailscale.serve.get(8444)!;
       expect(door).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
       expect(door).not.toBe(`http://127.0.0.1:${inbox.port}`);
+      doorListener = door;
       expect(tailscale.serve.get(8443)).toBe(theirs);
       expect(tailscale.doorCalls()).toEqual([]);
       // What the Inbox made is recorded: port, target, and that the mapping may exist.
@@ -862,6 +869,7 @@ describe("the tailnet door with Phones off, in process", () => {
       expect(linked.status).toBe(201);
       expect(handed).toHaveLength(1);
       expect(handed[0]).toContain(`tailnet=${encodeURIComponent("https://laptop.tail0000.ts.net:8444")}`);
+      expect(InboxLinks.open(dataDir).get(OTHER)?.device_id).toMatch(/^dev_/);
 
       // A clean stop takes down 8444 only; the record keeps the port.
       inbox.stop();

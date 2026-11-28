@@ -4,11 +4,15 @@
  *  - a machine that doesn't take `branches` asked anyway, or one with Branch reviews off still listed;
  *  - a far answer's malformed row taken as a report, or its remote kept as typed (a password, a query, another
  *    scheme) where the words here would show it;
- *  - the read repeated on every list read (it is never on a timer, and a fresh read is reused).
+ *  - the read repeated on every list read (it is never on a timer, and a fresh read is reused);
+ *  - a restart here while that machine sleeps losing its rows until it wakes, or rows kept after its link went.
  */
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { PeerLink } from "./inbox-peer-link";
-import { createMachineBranches, farBranchRow } from "./inbox-machine-branches";
+import { createMachineBranches, farBranchRow, MACHINE_BRANCHES_FILE } from "./inbox-machine-branches";
 
 const B = "ibx_01JD000000000000000000000B";
 const C = "ibx_01JD000000000000000000000C";
@@ -83,6 +87,72 @@ describe("a linked machine's reported branches", () => {
     await stale;
     await branches.settled();
     expect(snapshot().rows.map((row) => row.branch)).toEqual(["fresh-branch"]);
+  });
+
+  test("a restart while that machine sleeps keeps its rows; its link going takes them", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "plannotator-machine-branches-"));
+    try {
+      const awake = peer(B, ["branches"], () => Response.json({ reports: [far] }), []);
+      const first = createMachineBranches({ peers: () => [awake], dir });
+      first.start(() => null);
+      await first.settled();
+      expect(first.start(() => null)().rows).toHaveLength(1);
+      // This Inbox restarts; B is asleep: no list read from it yet, and its door does not answer.
+      const asleep = { ...peer(B, [], () => Response.json({}, { status: 502 }), []), state: "offline", list: null } as unknown as PeerLink;
+      const again = createMachineBranches({ peers: () => [asleep], dir });
+      const rows = again.start(() => "Mac mini")().rows;
+      expect(rows.map((row) => [row.branch, row.machine.id, row.machine.name])).toEqual([["retry-jitter", B, "Mac mini"]]);
+      expect(statSync(join(dir, MACHINE_BRANCHES_FILE)).mode & 0o777).toBe(0o600);
+      // The link goes: nothing of it stays, after another restart too.
+      again.forget(B);
+      expect(createMachineBranches({ peers: () => [asleep], dir }).start(() => null)().rows).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a machine unlinked while this Inbox was down leaves nothing behind: linked again later, its old rows never come back", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "plannotator-machine-branches-"));
+    try {
+      const awake = peer(B, ["branches"], () => Response.json({ reports: [far] }), []);
+      const first = createMachineBranches({ peers: () => [awake], dir, linked: () => [B] });
+      first.start(() => null);
+      await first.settled();
+      expect(first.start(() => null)().rows).toHaveLength(1);
+      // B was unlinked while this Inbox was down: the restart reads the file with B no longer linked.
+      createMachineBranches({ peers: () => [], dir, linked: () => [] });
+      // B is linked again and sleeps (no list read from it yet): none of its rows from before the unlink.
+      const asleep = { ...peer(B, [], () => Response.json({}, { status: 502 }), []), state: "offline", list: null } as unknown as PeerLink;
+      expect(createMachineBranches({ peers: () => [asleep], dir, linked: () => [B] }).start(() => null)().rows).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("the file is written only when a read changes it, and a machine that stops taking branches leaves it", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "plannotator-machine-branches-"));
+    try {
+      let clock = 0;
+      let marks = ["branches"];
+      const b = { ...peer(B, [], () => Response.json({ reports: [far] }), []), get list() { return { marks }; } } as unknown as PeerLink;
+      const branches = createMachineBranches({ now: () => clock, peers: () => [b], dir });
+      branches.start(() => null);
+      await branches.settled();
+      const path = join(dir, MACHINE_BRANCHES_FILE);
+      const first = statSync(path).mtimeMs;
+      await Bun.sleep(20);
+      clock = 60_000;
+      branches.start(() => null);
+      await branches.settled();
+      expect(statSync(path).mtimeMs).toBe(first);
+      // Branch reviews turned off there: its list no longer takes `branches`; nothing of it after a restart either.
+      marks = ["pulls"];
+      expect(branches.start(() => null)().rows).toEqual([]);
+      const asleep = { ...peer(B, [], () => Response.json({}, { status: 502 }), []), state: "offline", list: null } as unknown as PeerLink;
+      expect(createMachineBranches({ peers: () => [asleep], dir }).start(() => null)().rows).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test("a far row is taken by its shape only", () => {

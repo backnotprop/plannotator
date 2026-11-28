@@ -140,6 +140,17 @@ async function settle() {
   });
 }
 
+/** Waits for what reads the disk (the icon sets' manifests), which no count of ticks bounds. */
+async function until(check: () => boolean, what: string) {
+  for (let i = 0; i < 300; i++) {
+    if (check()) return;
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+  }
+  throw new Error(`timed out waiting for ${what}`);
+}
+
 function mount(marks: string[] | undefined) {
   const host = document.createElement('div');
   host.className = 'pn-inbox';
@@ -290,7 +301,10 @@ test.skipIf(!hasDom)('Sets on a linked machine\'s agent: the grid, no switch; it
     await openFan(id);
     await act(async () => document.querySelector<HTMLButtonElement>('[data-face-choice="sets"]')!.click());
     await settle();
-    return document.querySelector<HTMLElement>('dialog[data-dialog="agent-icon"][open]')!;
+    const dialog = document.querySelector<HTMLElement>('dialog[data-dialog="agent-icon"][open]')!;
+    // The grid draws after two reads (the sets, then the open set's icons), each reading manifests from disk.
+    await until(() => dialog.querySelector('.am-sets-i') !== null, 'the Sets grid');
+    return dialog;
   };
   const dialog = await sets('ses_m');
   expect(dialog.querySelector('[data-agi-place]')?.tagName).toBeUndefined();

@@ -1,0 +1,55 @@
+/*
+ * The lit look (GlowStars.tsx): the Swarm badge's "on" look as a shared piece. A soft glow around one control, its face
+ * in the badge's gradient, and a few small stars drifting behind it. The stars sit behind the face, so they never
+ * cover its label; their layer reaches 20 px past the top, right and bottom edges and never past the left one (where
+ * a neighbouring button sits), and clips them there, so they never cause a scrollbar or a layout shift.
+ *
+ * Cost at rest: six stars, each a drift layer and a twinkle layer, animating transform and opacity only (the
+ * compositor runs them), and one static glow. Reduced motion: nothing moves; the glow and the stars are simply there.
+ * A hidden tab: every loop pauses (`data-paused`, set from visibilitychange; no timer).
+ *
+ * `--pn-glow-radius`: the control's corner radius (default 10px; a pill passes 999px).
+ */
+.pn-glow { --pn-glow-radius: 10px; position: relative; display: inline-flex; isolation: isolate; }
+
+/* The glow leans right and is cut 11 px left of the control, so it never reaches a neighbour 12 px to its left. */
+.pn-glow-halo, .pn-glow-halo::after { position: absolute; inset: 0; z-index: 0; border-radius: var(--pn-glow-radius); pointer-events: none; }
+.pn-glow-halo { clip-path: inset(-60px -60px -60px -11px); box-shadow: 0 0 0 5px rgb(165 160 255 / 0.2), 6px 0 28px 3px rgb(112 159 255 / 0.5), 0 1px 2px rgb(70 33 172 / 0.2); }
+/* The pointer brightens the glow: a second glow, faded in (opacity only). */
+.pn-glow-halo::after { content: ''; box-shadow: 0 0 0 6px rgb(165 160 255 / 0.26), 6px 0 36px 6px rgb(112 159 255 / 0.55); opacity: 0;
+  transition: opacity 180ms cubic-bezier(0.23, 1, 0.32, 1); }
+@media (hover: hover) and (pointer: fine) {
+  .pn-glow:hover .pn-glow-halo::after { opacity: 1; }
+}
+
+/* The control's face: the badge's gradient, its indigo label (about 10:1 on the gradient, in light and dark) and ring. */
+.pn-glow-face { position: relative; z-index: 1; border-radius: var(--pn-glow-radius);
+  background: linear-gradient(115deg, oklch(0.90 0.085 305), oklch(0.92 0.07 255) 38%, oklch(0.94 0.075 185) 68%, oklch(0.95 0.09 100));
+  color: oklch(0.30 0.16 285); box-shadow: 0 0 0 1px rgb(126 114 231 / 0.45); outline: none;
+  -webkit-tap-highlight-color: transparent; transition: transform 140ms cubic-bezier(0.23, 1, 0.32, 1); }
+.pn-glow-face:active { transform: scale(0.97); }
+/* Keyboard focus only: one 2 px line in the brand violet, 2 px out; the face's own ring steps aside, so it is one line. */
+.pn-glow-face:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; box-shadow: none; }
+
+.pn-glow-stars { position: absolute; inset: -20px -20px -20px 0; z-index: 0; overflow: hidden; pointer-events: none; }
+.pn-glow-star { position: absolute; display: block; }
+.pn-glow-star > i, .pn-glow-star > i > i { display: block; width: 100%; height: 100%; }
+.pn-glow-star > i > i { clip-path: polygon(50% 0, 62% 38%, 100% 50%, 62% 62%, 50% 100%, 38% 62%, 0 50%, 38% 38%); }
+.pn-glow-star[data-hue="0"] > i > i { background: rgb(126 114 231); }
+.pn-glow-star[data-hue="1"] > i > i { background: rgb(82 148 230); }
+.pn-glow-star[data-hue="2"] > i > i { background: rgb(29 188 181); }
+.pn-glow-star[data-hue="3"] > i > i { background: rgb(218 188 67); }
+
+@media (prefers-reduced-motion: no-preference) {
+  .pn-glow-star > i { animation: var(--pn-glow-path) var(--pn-glow-drift) cubic-bezier(0.45, 0, 0.55, 1) infinite alternate; }
+  .pn-glow-star > i > i { animation: pn-glow-twinkle var(--pn-glow-twinkle) cubic-bezier(0.45, 0, 0.55, 1) var(--pn-glow-phase) infinite; }
+  .pn-glow[data-paused] .pn-glow-star i { animation-play-state: paused; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pn-glow-face, .pn-glow-halo::after { transition: none; }
+  .pn-glow-face:active { transform: none; }
+}
+@keyframes pn-glow-a { 0% { transform: translate(0, 0); } 50% { transform: translate(2px, -3px); } 100% { transform: translate(-1.5px, -1px); } }
+@keyframes pn-glow-b { 0% { transform: translate(0, 0); } 50% { transform: translate(-2.5px, 1.5px); } 100% { transform: translate(1px, 3px); } }
+@keyframes pn-glow-c { 0% { transform: translate(0, 0); } 50% { transform: translate(1.5px, 2.5px); } 100% { transform: translate(3px, -1px); } }
+@keyframes pn-glow-twinkle { 0%, 100% { opacity: 1; transform: scale(1) rotate(0deg); } 50% { opacity: 0.35; transform: scale(0.72) rotate(18deg); } }

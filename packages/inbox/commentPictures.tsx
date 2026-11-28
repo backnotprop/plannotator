@@ -8,6 +8,7 @@ import { uploadFile } from './api';
 import { machineOf, rememberMachine } from './inboxUrl';
 import type { InboxAnnotationRecord } from '@plannotator/core/inbox-types';
 import { pictureFileNames } from './commentPictureFiles';
+import { CommentFilesContext, commentFilesHost } from './commentFiles';
 
 const named = new Set<string>();
 
@@ -46,12 +47,16 @@ export function CommentPictures({ thread, records, children }: { thread: string;
   recordsRef.current = records;
   const transport = useMemo(() => commentPictureTransport(machine, () => pictureFileNames(recordsRef.current)), [machine]);
   const drafts = useMemo(() => (machine ? null : commentDraftHost(thread)), [machine, thread]);
+  // A file's own comment row (an image's, a film's, an HTML page's) takes files through the reply box's parts (commentFiles.tsx).
+  const files = useMemo(() => commentFilesHost(machine, (name) => freshName(name, pictureFileNames(recordsRef.current)), (name) => named.delete(name)), [machine]);
   return (
+    <CommentFilesContext.Provider value={files}>
     <CommentUploadContext.Provider value={transport}>
       <CommentCardToolsContext.Provider value={CardVoice}>
         <CommentDraftHostContext.Provider value={drafts}>{children}</CommentDraftHostContext.Provider>
       </CommentCardToolsContext.Provider>
     </CommentUploadContext.Provider>
+    </CommentFilesContext.Provider>
   );
 }
 

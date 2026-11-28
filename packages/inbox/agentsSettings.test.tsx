@@ -13,6 +13,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { inboxToolCostText, type InboxAgentRow, type InboxAgentsModel } from '@plannotator/core/inbox-types';
 import type { InboxLaunchSettings } from './api';
+import { INBOX_REX_SERVER_AWAY_SETTINGS, INBOX_REX_SHARED_AGAIN } from '@plannotator/core/inbox-run-line';
 
 const hasDom = typeof document !== 'undefined';
 const { AgentsSettings, repliesOf, offWords } = (hasDom ? await import('./components/AgentsSettings') : {}) as typeof import('./components/AgentsSettings');
@@ -243,6 +244,36 @@ test.skipIf(!hasDom)('"Start new agents in": only while Rex is open here or chos
   host?.remove();
   const away = mount(model(), { ...base, rex_here: false, start_in: 'rex' });
   expect(away.querySelector('[data-launch-rex-away]')).not.toBeNull();
+});
+
+test.skipIf(!hasDom)('"Start new agents in", Rex chosen and not here: the reason the read gives (a shared server is running, so never "isn\'t running"), kept across a save', async () => {
+  const base: InboxLaunchSettings = { enabled: true, full_permissions: false, rex_agents: ['claude-code', 'pi'], start_in: 'rex', rex_here: false, rex_headless: true };
+  const settle = () => act(async () => void (await new Promise((resolve) => setTimeout(resolve, 0))));
+  const awayText = (el: HTMLElement) => el.querySelector('[data-launch-rex-away]')?.textContent ?? null;
+  for (const [read, words] of [
+    [{ ...base, rex_shared: true }, INBOX_REX_SHARED_AGAIN],
+    [base, INBOX_REX_SERVER_AWAY_SETTINGS],
+  ] as const) {
+    const state: InboxLaunchSettings = read;
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      // A save's answer never asks Rex: no `rex_here`, no `rex_shared`.
+      if ((init?.method ?? 'GET') === 'POST') {
+        const { rex_here: _here, rex_shared: _shared, ...saved } = state;
+        return new Response(JSON.stringify({ launch: { ...saved, ...JSON.parse(String(init!.body)) } }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      return new Response(JSON.stringify({ launch: state }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }) as typeof fetch;
+    const el = mount(model(), read);
+    await settle();
+    expect(awayText(el)).toBe(words);
+    // A save (the full-permissions switch): its answer never says, so the read's reason stays.
+    await act(async () => (el.querySelector('[data-launch-full-row] [role="switch"]') as HTMLButtonElement).click());
+    await settle();
+    expect(el.querySelector('[data-launch-full-row] [role="switch"]')!.getAttribute('aria-checked')).toBe('true');
+    expect(awayText(el)).toBe(words);
+    act(() => root?.unmount());
+    host?.remove();
+  }
 });
 
 test.skipIf(!hasDom)('"Start new agents in" goes by its own read: the window\'s settings model never says whether Rex is here (it never asks Rex)', async () => {

@@ -204,7 +204,7 @@ test.skipIf(!hasDom)("a press on a far message's ⋯ opens its menu at once", as
   await press(more(id));
   await until(() => !!document.querySelector(`[data-message-menu="${id}"]`), 'the message menu');
   const items = [...document.querySelectorAll(`[data-message-menu="${id}"] [role="menuitem"]`)].map((el) => el.textContent?.trim());
-  expect(items).toEqual(['Copy message', 'Copy link to message', 'Copy thread']);
+  expect(items).toEqual(['Reply', 'New thread from this message', 'Copy message', 'Copy link to message', 'Copy thread']);
 });
 
 // The window's styles are scoped to its root (`.pn-inbox svg.ib-ic` draws the icons as outlines): a menu drawn on

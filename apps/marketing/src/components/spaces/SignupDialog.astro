@@ -1,0 +1,347 @@
+---
+// The waitlist dialog every "Join the waitlist" button on a Spaces page opens ([data-signup]).
+// One form, posting to the waitlist worker; scripts/spaces/signup-dialog.js opens and closes it.
+const waitlistUrl =
+  import.meta.env.PUBLIC_WAITLIST_URL ||
+  'https://plannotator-waitlist.plannotator.workers.dev';
+
+// Cloudflare Turnstile sitekey. Public by design — embedded in the rendered
+// HTML on every visit. Override at build time via PUBLIC_TURNSTILE_SITEKEY
+// if you spin up a separate widget. Set to '' to disable the widget locally.
+const turnstileSitekey =
+  import.meta.env.PUBLIC_TURNSTILE_SITEKEY ?? '0x4AAAAAADUgxk47fMzTYOZp';
+
+// Display strings shown in the UI; the slug is what we send to the worker.
+const teamSizes = [
+  { slug: 'solo',    label: 'Just me' },
+  { slug: '2-5',     label: '2–5' },
+  { slug: '6-20',    label: '6–20' },
+  { slug: '21-50',   label: '21–50' },
+  { slug: '50+',     label: '50+' },
+];
+---
+<dialog class="sg" id="signup-dialog" aria-labelledby="sg-title">
+  <div class="sg-in">
+    <button type="button" class="sg-x" data-signup-close aria-label="Close"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M3 3l10 10M13 3L3 13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="square"/></svg></button>
+    <form class="ws-form-card" id="signup-form" novalidate>
+      <header class="ws-form-head">
+        <h2 class="ws-form-title" id="sg-title">Join the waitlist</h2>
+      </header>
+      <div class="ws-form-body">
+        <div class="ws-honeypot" aria-hidden="true">
+          <label>
+            Website
+            <input type="text" name="website" tabindex="-1" autocomplete="off" />
+          </label>
+        </div>
+        <div class="ws-row-2">
+          <div class="ws-field">
+            <label class="ws-label" for="sg-email">Email</label>
+            <input id="sg-email" type="email" name="email" placeholder="jane@company.com" autocomplete="email" maxlength="320" />
+          </div>
+          <div class="ws-field">
+            <label class="ws-label" for="sg-company">Company <span class="ws-opt">optional</span></label>
+            <input id="sg-company" type="text" name="company" placeholder="Acme Inc." autocomplete="organization" maxlength="160" />
+          </div>
+        </div>
+        <div class="ws-field">
+          <span class="ws-label" id="sg-team">Team size <span class="ws-opt">engineers + adjacent</span></span>
+          <div class="ws-pills" data-field="teamSize" data-single="1" role="group" aria-labelledby="sg-team">
+            {teamSizes.map((t) => (
+              <button type="button" class="ws-pill" data-v={t.slug} aria-pressed="false">{t.label}</button>
+            ))}
+          </div>
+        </div>
+        <div class="ws-field">
+          <label class="ws-label" for="sg-note">Anything else? <span class="ws-opt">optional</span></label>
+          <textarea id="sg-note" name="note" placeholder="What breaks today when your team reviews plans, code, or agent work?" maxlength="1000"></textarea>
+        </div>
+        <div class="ws-check-row" id="contributor-toggle" role="checkbox" aria-checked="false" aria-labelledby="sg-contrib" tabindex="0">
+          <span class="ws-box" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path stroke-linecap="square" d="M5 13l4 4L19 7" /></svg></span>
+          <span id="sg-contrib">I've contributed to or maintain the Plannotator OSS core.</span>
+        </div>
+        <p class="ws-contrib-note">Early contributors and meaningful early supporters receive <span class="ws-accent">lifetime free access</span> to Spaces.</p>
+        <div class="sg-form-err" id="sg-form-err"></div>
+        <div class="ws-form-foot">
+          <button type="submit" class="ws-submit">
+            <span class="ws-submit-idle"><span>Join the waitlist</span></span>
+            <span class="ws-submit-busy" aria-hidden="true"><span class="ws-submit-busy-label">Submitting…</span></span>
+          </button>
+        </div>
+            {turnstileSitekey && (
+              <div
+                id="ws-turnstile"
+                class="cf-turnstile ws-turnstile"
+                data-sitekey={turnstileSitekey}
+                data-callback="onWsTurnstile"
+                data-expired-callback="onWsTurnstileExpired"
+                data-error-callback="onWsTurnstileError"
+                data-theme="auto"
+                data-retry="auto"
+              />
+            )}
+      </div>
+      <div class="ws-success" role="status" tabindex="-1">
+        <div class="ws-ok"><span id="ok-stamp">SIGNUP CONFIRMED</span></div>
+        <h3 class="ws-success-title">You're on the list.</h3>
+        <p>We'll email <strong id="ok-email">your address</strong> when the next cohort opens. Expect a real note from a human, not a marketing sequence.</p>
+        <p id="ok-contrib-note"></p>
+      </div>
+    </form>
+  </div>
+</dialog>
+
+  {turnstileSitekey && (
+    <script
+      is:inline
+      src="https://challenges.cloudflare.com/turnstile/v0/api.js"
+      async
+      defer
+    />
+  )}
+
+  <script
+    is:inline
+    define:vars={{ waitlistUrl, turnstileEnabled: !!turnstileSitekey }}
+  >
+    (function () {
+      var form = document.getElementById('signup-form');
+      if (!form) return;
+
+      var turnstileEl = document.getElementById('ws-turnstile');
+      var turnstileToken = null;
+      var turnstileWaiters = [];
+      var isSubmitting = false;
+      var fields = { teamSize: '' };
+      var contributor = false;
+
+      window.onWsTurnstile = function (token) {
+        // Useful breadcrumb when debugging signup failures from devtools.
+        console.info('[waitlist] turnstile token received');
+        turnstileToken = token;
+        var waiters = turnstileWaiters;
+        turnstileWaiters = [];
+        waiters.forEach(function (resolve) { resolve(token); });
+      };
+      window.onWsTurnstileExpired = function () {
+        console.info('[waitlist] turnstile token expired');
+        turnstileToken = null;
+        if (window.turnstile && turnstileEl) {
+          try { window.turnstile.reset(turnstileEl); } catch (_) {}
+        }
+      };
+      window.onWsTurnstileError = function (err) {
+        console.warn('[waitlist] turnstile error:', err);
+        turnstileToken = null;
+      };
+
+      // Resolves with `{ token, reason }`. `reason` is null on success,
+      // 'no-script' if the Turnstile API never loaded (usually a content
+      // blocker), 'timeout' if it loaded but didn't issue a token in time.
+      function awaitTurnstileToken() {
+        if (!turnstileEnabled) return Promise.resolve({ token: null, reason: null });
+        if (turnstileToken) return Promise.resolve({ token: turnstileToken, reason: null });
+
+        if (!window.turnstile) {
+          // Script never executed — extension blocked it, or the user is
+          // offline. Surface a clear, actionable error instead of a generic
+          // "couldn't verify" 400 from the worker.
+          return Promise.resolve({ token: null, reason: 'no-script' });
+        }
+        if (turnstileEl) {
+          try { window.turnstile.execute(turnstileEl); } catch (_) {}
+        }
+        return new Promise(function (resolve) {
+          var done = false;
+          turnstileWaiters.push(function (token) {
+            if (done) return;
+            done = true;
+            resolve({ token: token, reason: null });
+          });
+          // 10s gives Turnstile plenty of time on slow networks. Most
+          // legit visitors get a token in well under 1s.
+          setTimeout(function () {
+            if (done) return;
+            done = true;
+            resolve({ token: null, reason: 'timeout' });
+          }, 10000);
+        });
+      }
+
+      // Pill picker
+      document.querySelectorAll('.ws-pills').forEach(function (group) {
+        var key = group.dataset.field;
+        var single = group.dataset.single === '1';
+        group.addEventListener('click', function (e) {
+          var p = e.target.closest('.ws-pill');
+          if (!p) return;
+          var v = p.dataset.v;
+          if (single) {
+            group.querySelectorAll('.ws-pill').forEach(function (x) {
+              x.classList.remove('on');
+              x.setAttribute('aria-pressed', 'false');
+            });
+            p.classList.add('on');
+            p.setAttribute('aria-pressed', 'true');
+            fields[key] = v;
+          }
+          clearErr(group);
+        });
+      });
+
+      // Contributor toggle (click + keyboard)
+      var contribEl = document.getElementById('contributor-toggle');
+      function toggleContributor() {
+        contributor = !contributor;
+        contribEl.classList.toggle('on', contributor);
+        contribEl.setAttribute('aria-checked', contributor ? 'true' : 'false');
+      }
+      if (contribEl) {
+        contribEl.addEventListener('click', toggleContributor);
+        contribEl.addEventListener('keydown', function (e) {
+          if (e.key === ' ' || e.key === 'Enter') {
+            e.preventDefault();
+            toggleContributor();
+          }
+        });
+      }
+
+      function clearErr(el) {
+        var f = el.closest('.ws-field');
+        if (!f) return;
+        var existing = f.querySelector('.ws-err');
+        if (existing) existing.remove();
+      }
+      function showErr(el, msg) {
+        clearErr(el);
+        var f = el.closest('.ws-field');
+        if (!f) return;
+        var e = document.createElement('div');
+        e.className = 'ws-err';
+        e.textContent = '↳ ' + msg;
+        f.appendChild(e);
+      }
+      function clearAllFormErrors() {
+        form.querySelectorAll('.ws-err').forEach(function (n) { n.remove(); });
+      }
+
+      form.querySelectorAll('input, textarea').forEach(function (el) {
+        el.addEventListener('input', function () { clearErr(el); });
+      });
+
+      function setBusy(busy, label) {
+        var btn = form.querySelector('.ws-submit');
+        if (!btn) return;
+        btn.disabled = busy;
+        btn.classList.toggle('is-loading', busy);
+        if (busy) {
+          var labelEl = btn.querySelector('.ws-submit-busy-label');
+          if (labelEl && label) labelEl.textContent = label;
+        }
+      }
+
+      // The success screen: the stamp with today's date, the address, and the
+      // contributor line when that box was ticked.
+      function renderSuccess(data) {
+        document.getElementById('ok-email').textContent = data.email;
+        document.getElementById('ok-stamp').textContent =
+          'SIGNUP CONFIRMED · ' + new Date().toISOString().slice(0, 10);
+        if (data.is_contributor) {
+          document.getElementById('ok-contrib-note').textContent =
+            "Since you contribute to the core, you'll hear from us about lifetime access shortly.";
+        }
+      }
+
+      form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        if (isSubmitting) return;
+        clearAllFormErrors();
+
+        var get = function (n) { return form.querySelector('[name="' + n + '"]'); };
+        var email = (get('email').value || '').trim();
+        var company = (get('company').value || '').trim();
+        var note = (get('note').value || '').trim();
+        var team_size = fields.teamSize;
+
+        var ok = true;
+        if (!email) { showErr(get('email'), 'Required'); ok = false; }
+        else if (!/^[^\s@]+@[^\s@.]+\.[^\s@]+$/.test(email)) {
+          showErr(get('email'), 'Looks invalid'); ok = false;
+        }
+        // Company is presented as optional in the UI. The worker still
+        // requires a non-empty value, so stub one here when the user
+        // leaves it blank — keeps the server contract untouched.
+        if (!company) company = '(not provided)';
+        if (!team_size) {
+          showErr(form.querySelector('[data-field="teamSize"]'), 'Pick one');
+          ok = false;
+        }
+        if (!ok) return;
+
+        var payload = {
+          email: email,
+          company: company,
+          team_size: team_size,
+          note: note || undefined,
+          is_contributor: contributor,
+          website: (get('website') && get('website').value) || '',
+        };
+
+        isSubmitting = true;
+        setBusy(true, turnstileEnabled ? 'Verifying…' : 'Submitting…');
+
+        awaitTurnstileToken()
+          .then(function (result) {
+            if (result.reason === 'no-script') {
+              showErr(get('email'),
+                "Couldn't load Cloudflare's verification. Try disabling your ad/content blocker for this site, then retry.");
+              return null;
+            }
+            if (result.reason === 'timeout') {
+              showErr(get('email'),
+                'Verification timed out. Refresh the page and try again.');
+              if (window.turnstile && turnstileEl) {
+                try { window.turnstile.reset(turnstileEl); } catch (_) {}
+              }
+              return null;
+            }
+            // Token may be null when Turnstile is disabled entirely; that's
+            // fine — the worker won't enforce verification in that mode.
+            if (result.token) payload.turnstile_token = result.token;
+            setBusy(true, 'Submitting…');
+            return fetch(waitlistUrl + '/signup', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+          })
+          .then(function (res) {
+            if (!res) return null; // Turnstile failure — already surfaced.
+            return res.json().then(function (body) { return { res: res, body: body }; });
+          })
+          .then(function (result) {
+            if (!result) return; // Turnstile failure path.
+            if (!result.res.ok) {
+              var msg = (result.body && result.body.error) || 'Something went wrong. Please try again.';
+              showErr(get('email'), msg);
+              if (turnstileEnabled && window.turnstile && turnstileEl) {
+                turnstileToken = null;
+                try { window.turnstile.reset(turnstileEl); } catch (_) {}
+              }
+              return;
+            }
+            renderSuccess(payload);
+            form.classList.add('ws-submitted');
+          })
+          .catch(function () {
+            showErr(get('email'), "Couldn't reach the waitlist server. Try again.");
+          })
+          .finally(function () {
+            isSubmitting = false;
+            setBusy(false);
+          });
+      });
+    })();
+  </script>
+
+  <script src="../../scripts/spaces/signup-dialog.js"></script>

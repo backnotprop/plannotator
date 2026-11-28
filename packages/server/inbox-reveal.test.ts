@@ -13,8 +13,13 @@
  * "inbox-checklist-reveal", 2026-11-04): its claim writing `inboxSteps` or touching a Checklist the person set; agent
  * text after Not now not byte-equal to a Checklist off, or not the steps text after Turn it on; its
  * 5 days or 5 threads moving; it needing the Board on. Code review's day-0 offer (approval "code-review-offer-card"):
- * shown or claimed at all (the owner chose the switch without the offer, 2026-11-17: `CODE_REVIEW_OFFER_SHOWN`), with
- * or without PLANNOTATOR_INBOX_PREVIEW; asked of someone who switched Code review off or on.
+ * while shown (`CODE_REVIEW_OFFER_SHOWN`; the `codeReviewOffer` option shows it whichever way the release has it), not next
+ * for someone who used an earlier Inbox and never decided Code review (approval "inbox-code-review-offer"), or offered
+ * to a new user (a fresh install); its claim turning anything on, changing a word agents read, being spent twice or letting
+ * another dialog follow inside the gap; Not now turning it on or letting it come back; asked of someone who switched
+ * Code review off or on. Switched off (as from 0.29.6): offered, holding the next dialog back, writing a record for
+ * someone who never saw it, or touching the record of someone who did. The view choice
+ * (`view_choice`): closed by List view's retired `list_view` stamp, holding the line, or claimed twice.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -103,6 +108,14 @@ interface Options {
   sends?: readonly Date[];
   /** A routine was made here and deleted again (inbox/scheduled.jsonl keeps its record). */
   routineMade?: boolean;
+  /**
+   * "open": the view choice (reveals.ts `view_choice`, five threads, `ahead`) never shown. Default: shown 3 days ago
+   * (`inboxReveals.view_choice`, merged into any `inboxReveals` the case brings), as the update-day dialogs are settled
+   * below, so the other offers are what these cases see.
+   */
+  viewChoice?: "open";
+  /** Code review's one-time offer shown or not (the Inbox's `codeReviewOffer` test option). Absent: `CODE_REVIEW_OFFER.enabled` decides. */
+  codeReviewOffer?: boolean;
 }
 
 /** A cloud agent of `preset` in the data dir's inbox/cloud-agents.json, as Settings → Cloud agents pairs one. */
@@ -136,9 +149,13 @@ async function world(options: Options = {}) {
     favicon: "glass",
     // The "themes" dialog (after the tab icon dialog, ahead of the offers): settled, as for someone on another theme.
     inboxThemeChooser: { notNeededAt: "2026-10-01T10:00:00.000Z" },
+    // Code review's offer (first in the line while `CODE_REVIEW_OFFER_SHOWN`): decided here, so the other dialogs are
+    // what these cases see. Its own cases unset it.
+    inboxCodeReview: false,
     ...(options.priorityUsed === false ? {} : { inboxPriorityIntro: { usedAt: new Date(Date.now() - 3 * DAY).toISOString() } }),
     ...options.config,
   };
+  if (options.viewChoice !== "open") config.inboxReveals = { view_choice: { shownAt: new Date(Date.now() - 3 * DAY).toISOString() }, ...(options.config?.inboxReveals as Record<string, unknown> | undefined) };
   if (options.tailnet === "owner") Object.assign(config, { inboxTailscale: true });
   // A tagged machine names no owner: the owner reaches it with a login they allowed.
   if (options.tailnet === "tagged") Object.assign(config, { inboxTailscale: true, inboxTailscaleAllow: [OWNER] });
@@ -198,6 +215,7 @@ async function world(options: Options = {}) {
     binaryPath: null,
     phones: false,
     version: options.version ?? RELEASE,
+    ...(options.codeReviewOffer === undefined ? {} : { codeReviewOffer: options.codeReviewOffer }),
     ...(options.tailnet ? { tailscale: fakeTailscale(options.tailnet === "tagged") } : {}),
     agentEnvironment: createAgentEnvironmentFor({ platform: "linux", homeDir: home, env: {} }),
   });
@@ -390,7 +408,7 @@ describe("the Board reveal at day 4", () => {
   });
 
   test("a dev build decides nothing", async () => {
-    const w = await world({ version: "0.0.0-dev" });
+    const w = await world({ version: "0.0.0-dev", viewChoice: "open" });
     expect(await w.next()).toBeNull();
     expect((await w.claim()).show).toBe(false);
     expect(w.saved().inboxBoard).toBeUndefined();
@@ -410,6 +428,7 @@ describe("the Board reveal at day 4", () => {
         inboxSnoozeIntro: { firstUseAt: new Date(Date.now() - 4 * DAY).toISOString(), shownAt: hourAgo },
         inboxVoiceIntro: { dueAt: new Date(Date.now() - 2 * DAY).toISOString(), shownAt: hourAgo },
       },
+      viewChoice: "open",
     });
     expect(w.saved().inboxReveals).toBeUndefined();
     expect(await w.next()).toBeNull();
@@ -451,7 +470,7 @@ describe("the Board reveal at day 4", () => {
   });
 
   test("a dev build's list options claim does not stamp the spacing clock", async () => {
-    const w = await world({ version: "0.0.0-dev", config: { inboxListIntro: { dueAt: new Date(Date.now() - DAY).toISOString() } } });
+    const w = await world({ version: "0.0.0-dev", viewChoice: "open", config: { inboxListIntro: { dueAt: new Date(Date.now() - DAY).toISOString() } } });
     expect(((await (await w.post("/api/inbox/list-intro")).json()) as Json).show).toBe(true);
     expect(w.saved().inboxListIntro.shownAt).toMatch(/^\d{4}-/);
     expect(w.saved().inboxReveals).toBeUndefined();
@@ -585,8 +604,47 @@ describe("the Checklist reveal at day 6", () => {
   });
 });
 
+describe('"Which view do you prefer?" (view_choice): offered once, again to whoever saw List view\'s dialog', () => {
+  const longAgo = new Date(Date.now() - 20 * DAY).toISOString();
+
+  test("an old list_view stamp does not close it: armed ahead beside the next offer, claimed once, the old stamp kept", async () => {
+    const w = await world({ viewChoice: "open", config: { inboxReveals: { list_view: { shownAt: longAgo, key: "old-page" } } } });
+    const reveal = (await w.settings()).reveal;
+    // It never holds the line (only the page sees the view): the Board stays next, the view choice beside it.
+    expect(reveal.next).toBe("board");
+    expect(reveal.ahead).toEqual(["view_choice"]);
+    expect((await w.claim("view_choice", "vc-key-1")).show).toBe(true);
+    expect(w.saved().inboxReveals.view_choice.shownAt).toMatch(/^\d{4}-/);
+    expect(w.saved().inboxReveals.list_view.shownAt).toBe(longAgo);
+    // Spent: never armed or claimed again, by another page.
+    expect((await w.settings()).reveal.ahead).toEqual([]);
+    expect((await w.claim("view_choice", "vc-key-2")).show).toBe(false);
+  });
+
+  test("alone in the line it is next; Escape's Not now holds the next offer back three days", async () => {
+    const w = await world({ viewChoice: "open", config: { inboxBoard: false, inboxSteps: false, inboxBro: false, inboxCodeReview: false } });
+    expect(await w.next()).toBe("view_choice");
+    expect((await w.claim("view_choice", "vc-key-3")).show).toBe(true);
+    expect((await w.post("/api/inbox/reveal", { id: "view_choice", answer: "not_now" })).status).toBe(200);
+    expect(w.saved().inboxReveals.notNowAt).toMatch(/^\d{4}-/);
+  });
+
+  test("under five threads: not offered", async () => {
+    const w = await world({ viewChoice: "open", threads: 4, config: { inboxBoard: false } });
+    const reveal = (await w.settings()).reveal;
+    expect(reveal.next).toBeNull();
+    expect(reveal.ahead).toEqual([]);
+    expect((await w.claim("view_choice")).show).toBe(false);
+  });
+
+  test("List view's retired id is refused", async () => {
+    const answer = await (await world({ viewChoice: "open" })).post("/api/inbox/reveal", { id: "list_view" });
+    expect(((await answer.json()) as Json).code).toBe("validation_error");
+  });
+});
+
 describe('"Set the rules" (Rules for your agents): last of the later group', () => {
-  const decided = { inboxBoard: false, inboxSteps: false, inboxBro: false, inboxCodeReview: false, inboxReveals: { list_view: { shownAt: new Date(Date.now() - 3 * DAY).toISOString() } } };
+  const decided = { inboxBoard: false, inboxSteps: false, inboxBro: false, inboxCodeReview: false, inboxReveals: { view_choice: { shownAt: new Date(Date.now() - 3 * DAY).toISOString() } } };
 
   test("two days' use and ten threads: next, shown once (a second tab gets no), and Not now is final and holds the next dialog back", async () => {
     const w = await world({ threads: 10, config: decided });
@@ -706,7 +764,7 @@ describe("Priority: after personal agents, only while the person never added a t
 });
 
 describe("Routines: after three good days of sends, once, opt-in", () => {
-  const decided = { inboxBoard: false, inboxSteps: false, inboxBro: false, inboxCodeReview: false, inboxReveals: { list_view: { shownAt: new Date(Date.now() - 3 * DAY).toISOString() } } };
+  const decided = { inboxBoard: false, inboxSteps: false, inboxBro: false, inboxCodeReview: false, inboxReveals: { view_choice: { shownAt: new Date(Date.now() - 3 * DAY).toISOString() } } };
   /**
    * The process (and the in-process Inbox) in a fixed-offset zone where it is about noon now (restored after the test),
    * so these cases never depend on the time of day: "earlier today, past the 40-minute gap" always exists.
@@ -1096,25 +1154,75 @@ describe("the \"themes\" dialog (approval inbox-theme-chooser): after the tab ic
 
 describe("Code review's day-0 offer (approval code-review-offer-card)", () => {
   const KEY = "page-key-aaaa";
-  /** A fresh install on day 0: first use not known yet, no threads in the store. */
-  const freshDay0 = (config: Record<string, unknown> = {}) => world({ days: 0, threads: 0, config: { inboxSnoozeIntro: {}, ...config } });
+  /** A fresh install on day 0 (no Inbox ran here before): first use not known yet, nothing in the store, Code review never decided. */
+  const freshDay0 = (config: Record<string, unknown> = {}) => world({ fresh: true, days: 0, threads: 0, codeReviewOffer: true, config: { inboxSnoozeIntro: {}, inboxCodeReview: undefined, ...config } });
+  /** Someone who already uses the Inbox (day 4, six threads, Snooze seen 3 days ago), Code review never decided. */
+  const existing = (config: Record<string, unknown> = {}, version?: string) => world({ ...(version ? { version } : {}), codeReviewOffer: true, config: { inboxCodeReview: undefined, ...config } });
 
-  // The owner chose the switch without the offer (2026-11-17; `CODE_REVIEW_OFFER_SHOWN` in shared/inbox/reveals.ts).
-  test("never shown: on day 0 of a fresh install, Code review undecided, the switch is there and off, the offer is never next and never claimed, nothing written", async () => {
-    for (const preview of [undefined, "1"]) {
-      setEnv("PLANNOTATOR_INBOX_PREVIEW", preview);
-      const w = await freshDay0();
-      const read = await w.settings();
-      expect(read.reveal.next).toBeNull();
-      expect(read.code_review).toEqual({ on: false });
-      const config = savedBytes(w.dataDir);
-      expect((await w.claim("code_review", KEY)).show).toBe(false);
-      expect(savedBytes(w.dataDir)).toBe(config);
-    }
+  // While shown (`CODE_REVIEW_OFFER_SHOWN`, approval "inbox-code-review-offer"; off since 0.29.6): these cases show it
+  // with the `codeReviewOffer` option, so they test it whichever way the release has it.
+  test("someone who already uses the Inbox, Code review never decided: next, ahead of the offers that are due; the claim stamps it once, turns nothing on and starts the gap", async () => {
+    const w = await existing({ inboxBoard: undefined });
+    const before = await w.settings();
+    expect(before.reveal.next).toBe("code_review");
+    expect(before.code_review).toEqual({ on: false });
+    const agentsBefore = await w.agentText();
+    expect((await w.claim("code_review", KEY)).show).toBe(true);
+    const saved = w.saved();
+    expect(saved.inboxReveals.code_review).toMatchObject({ shownAt: saved.inboxReveals.lastShownAt, key: KEY });
+    // Showing it turns nothing on: the switch is still unset and agents read what they read before.
+    expect(saved.inboxCodeReview).toBeUndefined();
+    expect(await w.agentText()).toBe(agentsBefore);
+    // Once: another tab's claim is refused, and the Board (due here) waits out the gap, so no dialog stacks on it.
+    expect((await w.claim("code_review", "another-key-22")).show).toBe(false);
+    expect(await w.next()).toBeNull();
+    expect((await w.claim("board")).show).toBe(false);
+  });
+
+  test("Not now: Code review stays off, agents read what they read before, it is never next again, and the next offer waits three days", async () => {
+    const w = await existing({ inboxBoard: undefined });
+    const agentsBefore = await w.agentText();
+    expect((await w.claim("code_review", KEY)).show).toBe(true);
+    const answered = (await (await w.post("/api/inbox/reveal", { id: "code_review", answer: "not_now" })).json()) as Json;
+    expect(answered.show).toBe(false);
+    const saved = w.saved();
+    expect(saved.inboxCodeReview).toBeUndefined();
+    expect(saved.inboxReveals.notNowAt).toMatch(/^\d{4}-/);
+    expect(await w.agentText()).toBe(agentsBefore);
+    expect(await w.next()).toBeNull();
+    expect((await w.claim("code_review", "another-key-22")).show).toBe(false);
+  });
+
+  test("Turn on code review (Settings' own save after the claim): on, as Settings → Capabilities turns it on, and never offered again", async () => {
+    const w = await existing();
+    expect((await w.claim("code_review", KEY)).show).toBe(true);
+    const saved = (await (await w.post("/api/inbox/settings", { code_review: { on: true } })).json()) as Json;
+    expect(saved.code_review).toEqual({ on: true });
+    expect(w.saved().inboxCodeReview).toBe(true);
+    expect((await w.settings()).code_review).toEqual({ on: true });
+    expect((await w.claim("code_review", "another-key-22")).show).toBe(false);
+  });
+
+  test("someone who used an earlier Inbox is marked due at the release start; a dev build decides nothing", async () => {
+    const w = await existing();
+    expect(typeof w.saved().inboxReveals.code_review.dueAt).toBe("string");
+    expect(w.saved().inboxReveals.code_review.freshAt).toBeUndefined();
+    const dev = await existing({}, "dev");
+    expect(dev.saved().inboxReveals?.code_review).toBeUndefined();
+    expect((await dev.claim("code_review", KEY)).show).toBe(false);
+  });
+
+  // A later start keeping the first start's mark: inbox-code-review-offer.test.ts.
+  test("a new user (a fresh install) on day 0: marked fresh at the release start and never offered", async () => {
+    const w = await freshDay0();
+    expect(w.saved().inboxReveals.code_review).toEqual({ freshAt: expect.any(String) });
+    expect((await w.settings()).reveal.next).not.toBe("code_review");
+    expect((await w.claim("code_review", KEY)).show).toBe(false);
+    expect(w.saved().inboxReveals.code_review.shownAt).toBeUndefined();
+    expect(w.saved().inboxCodeReview).toBeUndefined();
   });
 
   test("decided by the person (switched off, or on): never asked, and the switch is never touched", async () => {
-    setEnv("PLANNOTATOR_INBOX_PREVIEW", "1");
     for (const decided of [false, true]) {
       const w = await freshDay0({ inboxCodeReview: decided });
       expect(await w.next()).toBeNull();
@@ -1122,6 +1230,50 @@ describe("Code review's day-0 offer (approval code-review-offer-card)", () => {
       expect(w.saved().inboxCodeReview).toBe(decided);
       expect(w.saved().inboxReveals?.code_review).toBeUndefined();
     }
+  });
+});
+
+describe("Code review's offer switched off (as from 0.29.6: the owner, \"I will eventually, just not yet\")", () => {
+  const KEY = "page-key-aaaa";
+  /** Someone who already uses the Inbox (day 4, six threads), Code review never decided, the Board due, the offer off. */
+  const existingOff = (config: Record<string, unknown> = {}) => world({ codeReviewOffer: false, config: { inboxCodeReview: undefined, inboxBoard: undefined, ...config } });
+
+  test("someone who already uses the Inbox, Code review never decided: never offered, nothing written for it, and the Board (next behind it) is next at once", async () => {
+    const w = await existingOff();
+    const read = await w.settings();
+    expect(read.reveal.next).toBe("board");
+    expect(read.code_review).toEqual({ on: false });
+    // No mark at the release start: switched on again later, it is still asked of them once.
+    expect(w.saved().inboxReveals?.code_review).toBeUndefined();
+    expect((await w.claim("code_review", KEY)).show).toBe(false);
+    expect(w.saved().inboxReveals?.code_review).toBeUndefined();
+    expect(w.saved().inboxCodeReview).toBeUndefined();
+    // The Board is claimed at once: nothing waits for an offer that never comes.
+    expect((await w.claim("board")).show).toBe(true);
+  });
+
+  test("a fresh install on day 0: nothing written for it either", async () => {
+    const w = await world({ fresh: true, days: 0, threads: 0, codeReviewOffer: false, config: { inboxSnoozeIntro: {}, inboxCodeReview: undefined } });
+    expect(await w.next()).not.toBe("code_review");
+    expect(w.saved().inboxReveals?.code_review).toBeUndefined();
+  });
+
+  test("someone it was already marked for, shown or not: the record stays as it is, and it is never next", async () => {
+    const records = [{ dueAt: "2026-11-24T09:00:00.000Z" }, { dueAt: "2026-11-24T09:00:00.000Z", shownAt: "2026-11-24T09:00:05.000Z", key: KEY }];
+    for (const record of records) {
+      const w = await existingOff({ inboxReveals: { code_review: record } });
+      expect(await w.next()).toBe("board");
+      expect((await w.claim("code_review", KEY)).show).toBe(false);
+      expect(w.saved().inboxReveals.code_review).toEqual(record);
+    }
+  });
+
+  test("Code review is still turned on as Settings → Capabilities turns it on", async () => {
+    const w = await existingOff();
+    const saved = (await (await w.post("/api/inbox/settings", { code_review: { on: true } })).json()) as Json;
+    expect(saved.code_review).toEqual({ on: true });
+    expect(w.saved().inboxCodeReview).toBe(true);
+    expect((await w.settings()).code_review).toEqual({ on: true });
   });
 });
 
@@ -1163,7 +1315,7 @@ describe("the schedule's wiring (approval inbox-one-time-dialogs)", () => {
     expect(patience).toBeGreaterThan(3 * DAY - 60_000);
     expect(patience).toBeLessThanOrEqual(3 * DAY);
     // Everything decided and nothing shown lately: no date ahead, so a page schedules nothing.
-    const quiet = await world({ config: { inboxBoard: true, inboxSteps: true, inboxBro: true, inboxCodeReview: true, starAsk: { answer: "already", at: ago(DAY) }, inboxReveals: { grill_me_tip: { shownAt: ago(DAY) }, list_view: { shownAt: ago(DAY) } } } });
+    const quiet = await world({ config: { inboxBoard: true, inboxSteps: true, inboxBro: true, inboxCodeReview: true, starAsk: { answer: "already", at: ago(DAY) }, inboxReveals: { grill_me_tip: { shownAt: ago(DAY) }, view_choice: { shownAt: ago(DAY) } } } });
     expect((await quiet.settings()).reveal).toMatchObject({ next: null, again_in: null });
     const dev = await world({ version: "0.0.0-dev", config: { inboxReveals: { lastShownAt: ago(60_000) } } });
     expect((await dev.settings()).reveal.again_in).toBeNull();
@@ -1344,5 +1496,96 @@ describe("the Sidebar tip: outside the line, stamped once when shown, never for 
     expect(tailnet.saved().inboxReveals.sidebar_tip.shownAt).toMatch(/^\d{4}-/);
 
     expect((await tailnet.post("/api/inbox/reveal", { id: "sidebar_tip", answer: "not_now" })).status).toBe(422);
+  });
+});
+
+describe("the Group tip: a band's one-time tooltip, outside the line, stamped once, never on a first-run day", () => {
+  const KEY = "band-tip-key-1";
+
+  test("due a day or more after first use; the claim stamps only inboxReveals.band_tip and starts no gap; another window gets no; the same key again yes", async () => {
+    const w = await world();
+    expect((await w.settings()).reveal.band_tip).toBe(true);
+    const lineBefore = (await w.settings()).reveal.next;
+    expect((await w.claim("band_tip", KEY)).show).toBe(true);
+    const saved = w.saved().inboxReveals;
+    expect(saved.band_tip).toEqual({ shownAt: expect.stringMatching(/^\d{4}-/), key: KEY });
+    // A tooltip the person's own pointer called up: none of the line's stamps move and the line's next stays next.
+    expect(saved.lastShownAt).toBeUndefined();
+    expect(saved.dayShownAt).toBeUndefined();
+    expect((await w.settings()).reveal.next).toBe(lineBefore);
+    expect((await w.settings()).reveal.band_tip).toBe(false);
+    expect((await w.claim("band_tip", "another-key-22")).show).toBe(false);
+    expect((await w.claim("band_tip", KEY)).show).toBe(true);
+    expect(w.saved().inboxReveals.band_tip.shownAt).toBe(saved.band_tip.shownAt);
+  });
+
+  test("not on a first-run day; not reported due within a dialog's gap", async () => {
+    const fresh = await world({ days: 0 });
+    expect((await fresh.settings()).reveal.band_tip).toBe(false);
+    expect((await fresh.claim("band_tip", KEY)).show).toBe(false);
+    const dialogFirst = await world();
+    expect((await dialogFirst.claim("board")).show).toBe(true);
+    expect((await dialogFirst.settings()).reveal.band_tip).toBe(false);
+  });
+
+  test("a band's menu opened (`used`) retires it on a first-run day and inside a dialog's gap: stamped, never shown, the next day too", async () => {
+    const fresh = await world({ days: 0 });
+    const used = await fresh.post("/api/inbox/reveal", { id: "band_tip", used: true });
+    expect(((await used.json()) as Json).show).toBe(false);
+    expect(fresh.saved().inboxReveals.band_tip).toEqual({ shownAt: expect.stringMatching(/^\d{4}-/), usedAt: expect.stringMatching(/^\d{4}-/) });
+    expect((await fresh.claim("band_tip", KEY)).show).toBe(false);
+    const inGap = await world();
+    expect((await inGap.claim("board")).show).toBe(true);
+    expect(((await (await inGap.post("/api/inbox/reveal", { id: "band_tip", used: true })).json()) as Json).show).toBe(false);
+    expect(inGap.saved().inboxReveals.band_tip.usedAt).toMatch(/^\d{4}-/);
+    // Stamped already (shown once): nothing moves.
+    const shown = await world();
+    expect((await shown.claim("band_tip", KEY)).show).toBe(true);
+    const stamp = shown.saved().inboxReveals.band_tip;
+    await shown.post("/api/inbox/reveal", { id: "band_tip", used: true });
+    expect(shown.saved().inboxReveals.band_tip).toEqual(stamp);
+    // `used` is the Group tip's alone.
+    expect((await shown.post("/api/inbox/reveal", { id: "sidebar_tip", used: true })).status).toBe(422);
+  });
+});
+
+describe("the Search tip: outside the line, stamped once when shown, never for someone who already searched with quotes", () => {
+  const KEY = "search-tip-key-1";
+
+  test("due a day or more after first use; the claim stamps only inboxReveals.search_tip and starts the gap; another window gets no; the same key again yes", async () => {
+    const w = await world();
+    expect((await w.settings()).reveal.search_tip).toBe(true);
+    expect((await w.claim("search_tip", KEY)).show).toBe(true);
+    const saved = w.saved().inboxReveals;
+    expect(saved.search_tip).toEqual({ shownAt: expect.stringMatching(/^\d{4}-/), key: KEY });
+    expect(saved.lastShownAt).toBeUndefined();
+    // It starts the 40-minute gap, as the Sidebar tip does: nothing of the line, and no other tip, follows it at once.
+    const after = (await w.settings()).reveal;
+    expect(after).toMatchObject({ next: null, search_tip: false, sidebar_tip: false });
+    expect((await w.claim("board")).show).toBe(false);
+    expect((await w.claim("sidebar_tip", "sidebar-key-2")).show).toBe(false);
+    expect((await w.claim("search_tip", "another-key-22")).show).toBe(false);
+    expect((await w.claim("search_tip", KEY)).show).toBe(true);
+    expect(w.saved().inboxReveals.search_tip.shownAt).toBe(saved.search_tip.shownAt);
+  });
+
+  test("not on a first-run day, nor within a dialog's gap (unspent); never once a recent search holds a quote", async () => {
+    const fresh = await world({ days: 0 });
+    expect((await fresh.settings()).reveal.search_tip).toBe(false);
+    expect((await fresh.claim("search_tip", KEY)).show).toBe(false);
+    expect(fresh.saved().inboxReveals?.search_tip).toBeUndefined();
+
+    const dialogFirst = await world();
+    expect((await dialogFirst.claim("board")).show).toBe(true);
+    expect((await dialogFirst.settings()).reveal.search_tip).toBe(false);
+    expect((await dialogFirst.claim("search_tip", KEY)).show).toBe(false);
+    expect(dialogFirst.saved().inboxReveals?.search_tip).toBeUndefined();
+
+    const quoted = await world();
+    expect((await quoted.settings()).reveal.search_tip).toBe(true);
+    expect((await quoted.post("/api/inbox/search/recent", { q: "“rate limit” totals" })).status).toBe(200);
+    expect((await quoted.settings()).reveal.search_tip).toBe(false);
+    expect((await quoted.claim("search_tip", KEY)).show).toBe(false);
+    expect(quoted.saved().inboxReveals?.search_tip).toBeUndefined();
   });
 });

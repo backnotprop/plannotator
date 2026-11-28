@@ -229,8 +229,9 @@ test.skipIf(!hasDom)('the count opens the same tiles in a band under the sender;
   expect(new Set(described).size).toBe(described.length);
   for (const id of described) expect(document.querySelectorAll(`[id="${id}"]`).length).toBe(1);
   // The band sits above the message body, under the sender row.
+  // Node identity as a boolean: a failing toBe on happy-dom nodes prints the whole page and ran the CI job out of time.
   const msg = article(el, ids.files.first).querySelector('.ib-msg')!;
-  expect(msg.firstElementChild).toBe(band);
+  expect(msg.firstElementChild === band).toBe(true);
 
   // Escape from a tile in the band closes it and puts focus on the count.
   const tile = band.querySelector<HTMLButtonElement>('[data-attachment-name="spec.md"]')!;

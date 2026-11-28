@@ -21,7 +21,7 @@ const hasDom = typeof document !== 'undefined';
 // Viewer pulls in web-highlighter, which reads `window` at module-eval time.
 const { ThreadPane, MessageBody } = (hasDom ? await import('./components/Thread') : {}) as typeof import('./components/Thread');
 const { AnnotationsChip } = (hasDom ? await import('./components/AnnotationsChip') : {}) as typeof import('./components/AnnotationsChip');
-const { REPLY_DRAFT_SAVE_MS } = (hasDom ? await import('./replyDraft') : {}) as typeof import('./replyDraft');
+const { REPLY_DRAFT_SAVE_MS, replyDraftUnsaved } = (hasDom ? await import('./replyDraft') : {}) as typeof import('./replyDraft');
 
 const PROJECT: InboxProject = { id: 'prj_1', key: 'ledger-abcdef', name: 'ledger', root: '/work/ledger', created_at: '2026-11-02T09:00:00.000Z' };
 const A: Extract<InboxAuthor, { kind: 'agent' }> = { kind: 'agent', host: 'claude-code', session: 'ses_a', name: null };
@@ -122,13 +122,18 @@ beforeEach(() => {
   }) as typeof fetch;
 });
 
-afterEach(() => {
+afterEach(async () => {
   if (!hasDom) return;
   act(() => root?.unmount());
   host?.remove();
   root = null;
   host = null;
+  // The box's last save (sent as it unmounts) is answered by this test's fetch: one failing on the real fetch would
+  // be kept for the thread and show in the next test's box.
+  for (let i = 0; i < 100 && replyDraftUnsaved(); i += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+  const left = replyDraftUnsaved();
   globalThis.fetch = savedFetch;
+  if (left) throw new Error('the test left a reply draft save on its way, or words not saved');
 });
 
 async function settle(turns = 4, ms = 20) {

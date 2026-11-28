@@ -1,0 +1,227 @@
+{
+  "about": "Invented files for the words a file's tile and viewer say and for how a file is drawn. scripts/mobile/vectors-files.ts runs the window's own functions over these (packages/core/inbox-attachments.ts, packages/core/inbox-format.ts, packages/inbox/attachments.ts, packages/inbox/components/AttachmentTiles.tsx) and scripts/mobile/vectors.ts writes vectors/files.json.",
+  "sizes": [
+    0,
+    1,
+    512,
+    1023,
+    1024,
+    1025,
+    1280,
+    1536,
+    1996,
+    79000,
+    133120,
+    1048575,
+    1048576,
+    1572864,
+    48234496,
+    16777216,
+    16777217,
+    209715200,
+    1073741824,
+    3221225472,
+    1099511627776,
+    5497558138880000
+  ],
+  "moments": [
+    0,
+    0.4,
+    1,
+    59.9,
+    60,
+    61,
+    599,
+    3599,
+    3600,
+    3661,
+    86399,
+    -3
+  ],
+  "files": [
+    {
+      "kind": "markdown",
+      "name": "retry-plan.md",
+      "size": 921
+    },
+    {
+      "kind": "markdown",
+      "name": "NOTES.MDX",
+      "size": 12000
+    },
+    {
+      "kind": "markdown",
+      "name": "huge.md",
+      "size": 16777217
+    },
+    {
+      "kind": "html",
+      "name": "canary.html",
+      "size": 48211
+    },
+    {
+      "kind": "mermaid",
+      "name": "flow.mmd",
+      "size": 300
+    },
+    {
+      "kind": "graphviz",
+      "name": "deps.dot",
+      "size": 1200
+    },
+    {
+      "kind": "text",
+      "name": "notes.txt",
+      "size": 40
+    },
+    {
+      "kind": "text",
+      "name": "README",
+      "size": 900
+    },
+    {
+      "kind": "text",
+      "name": "build.log",
+      "size": 133120
+    },
+    {
+      "kind": "text",
+      "name": "config.YAML",
+      "size": 77
+    },
+    {
+      "kind": "text",
+      "name": "data.csv",
+      "size": 5000
+    },
+    {
+      "kind": "text",
+      "name": "settings.env.example",
+      "size": 64
+    },
+    {
+      "kind": "text",
+      "name": "app.properties",
+      "size": 64
+    },
+    {
+      "kind": "text",
+      "name": "notes.rst",
+      "size": 64
+    },
+    {
+      "kind": "code",
+      "name": "migrate.sql",
+      "size": 331
+    },
+    {
+      "kind": "code",
+      "name": "Dockerfile",
+      "size": 210
+    },
+    {
+      "kind": "code",
+      "name": "main.RS",
+      "size": 99999
+    },
+    {
+      "kind": "image",
+      "name": "ingest-flamegraph.png",
+      "size": 133120,
+      "media_type": "image/png",
+      "width": 2400,
+      "height": 576
+    },
+    {
+      "kind": "image",
+      "name": "shot.jpg",
+      "size": 79000,
+      "media_type": "image/jpeg",
+      "width": 1280,
+      "height": 800
+    },
+    {
+      "kind": "image",
+      "name": "mark.svg",
+      "size": 900,
+      "media_type": "image/svg+xml"
+    },
+    {
+      "kind": "image",
+      "name": "picture",
+      "size": 900
+    },
+    {
+      "kind": "image",
+      "name": "anim.webp",
+      "size": 2048,
+      "media_type": "image/webp",
+      "width": 64,
+      "height": 64,
+      "current_size": 4096
+    },
+    {
+      "kind": "video",
+      "name": "demo.mp4",
+      "size": 48234496,
+      "media_type": "video/mp4",
+      "width": 1920,
+      "height": 1080,
+      "duration_ms": 461000
+    },
+    {
+      "kind": "video",
+      "name": "clip.webm",
+      "size": 49357,
+      "media_type": "video/webm",
+      "duration_ms": 3200
+    },
+    {
+      "kind": "video",
+      "name": "screen.mov",
+      "size": 1024,
+      "media_type": "video/quicktime"
+    },
+    {
+      "kind": "audio",
+      "name": "standup.mp3",
+      "size": 1996000,
+      "media_type": "audio/mpeg",
+      "duration_ms": 83000
+    },
+    {
+      "kind": "audio",
+      "name": "voice.opus",
+      "size": 40000,
+      "media_type": "audio/ogg",
+      "duration_ms": 5000
+    },
+    {
+      "kind": "audio",
+      "name": "tone.wav",
+      "size": 88244,
+      "media_type": "audio/wav",
+      "duration_ms": 0
+    },
+    {
+      "kind": "pdf",
+      "name": "invoice.pdf",
+      "size": 2411724
+    },
+    {
+      "kind": "file",
+      "name": "bundle.zip",
+      "size": 1048576
+    },
+    {
+      "kind": "file",
+      "name": "core",
+      "size": 4096
+    },
+    {
+      "kind": "hologram",
+      "name": "scene.holo",
+      "size": 10
+    }
+  ]
+}

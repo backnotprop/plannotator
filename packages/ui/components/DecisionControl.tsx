@@ -8,7 +8,7 @@ import { ConfirmDialog, type ConfirmDialogProps } from './ConfirmDialog';
 import { useDismissablePopover } from '../hooks/useDismissablePopover';
 import { useCompactTouchLayout } from '../hooks/useIsMobile';
 import { cn } from '../lib/utils';
-import { isCommentSubmitKey } from '../utils/commentSubmitKey';
+import { isCommentSubmitKey, isImeCompositionKey } from '../utils/commentSubmitKey';
 import type {
   DecisionActionId,
   DecisionComposer,
@@ -156,6 +156,10 @@ export const DecisionNoteField: React.FC<DecisionNoteFieldProps> = ({
 
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (event.key === 'Escape' && isImeCompositionKey(event)) {
+        event.stopPropagation();
+        return;
+      }
       if (event.key === 'Escape') {
         // A consuming rung of the Esc ladder: the host apps run their own
         // Escape ladders and must not also see this event.

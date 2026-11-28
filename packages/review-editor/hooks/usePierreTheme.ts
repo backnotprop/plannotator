@@ -11,9 +11,11 @@ import { buildPierreFontCSS } from '../utils/pierreFontCss';
  * resolve the same theme this diff pane does. Re-exported here because it is
  * the import path the review editor has always used.
  */
-import { resolveSyntaxTheme } from '@plannotator/ui/utils/syntaxTheme';
+import { resolvePierreSyntaxTheme as resolveSyntaxTheme } from '../utils/pierreSyntaxTheme';
 import { tokenHoverUnderlineCss } from '../components/tokenHoverStyles';
-export { SHIKI_THEME_MAP, resolveSyntaxTheme } from '@plannotator/ui/utils/syntaxTheme';
+export { SHIKI_THEME_MAP } from '@plannotator/ui/utils/syntaxTheme';
+// The theme pair for Pierre's diff views, a custom theme's code colours registered first.
+export { resolveSyntaxTheme };
 
 export interface PierreTheme {
   type: 'dark' | 'light';
@@ -318,6 +320,14 @@ export function usePierreTheme(options?: {
           [data-diff-type='split'][data-overflow='scroll'] > [data-code][data-deletions] [data-content],
           [data-diff-type='split'][data-overflow='scroll'] > [data-code][data-additions] [data-content] {
             min-width: 0 !important;
+          }
+          /* In wrap mode the code column is 1fr, whose minimum is its items'
+             min-content: an inline comment with an unbreakable line (a long
+             code suggestion) widened its column and crushed the other split
+             pane (issue #3772). Only the annotation row opts out; the
+             suggestion scrolls inside its card instead. */
+          [data-overflow='wrap'] [data-line-annotation] {
+            min-width: 0;
           }
           /* Pierre's own horizontal scrollbar, at the bottom of each file's
              code (theme.css lets it keep its own size). Its thumb is

@@ -122,14 +122,16 @@ afterEach(() => {
   globalThis.fetch = savedFetch;
 });
 
-async function render(props: { currentProject?: string | null; phone?: boolean; tintOf?: SearchPaletteProps['tintOf'] } = {}): Promise<void> {
+async function render(props: { currentProject?: string | null; phone?: boolean; tintOf?: SearchPaletteProps['tintOf']; projects?: { id: string; name: string; root: string }[]; projectLabels?: ReadonlyMap<string, string> } = {}): Promise<void> {
   await act(async () => {
     root!.render(
       <SearchPalette
         open
+        searchTip={false}
         phone={props.phone ?? false}
         currentProject={props.currentProject ?? null}
-        projects={[{ ...project, root: '/src/plannotator' }, { id: 'prj_01M4V7JERHR0Y3XQERK1MR604B', name: 'api', root: '/w/api' }]}
+        projects={props.projects ?? [{ ...project, root: '/src/plannotator' }, { id: 'prj_01M4V7JERHR0Y3XQERK1MR604B', name: 'api', root: '/w/api' }]}
+        projectLabels={props.projectLabels}
         onClose={(reason) => closed.push(reason)}
         onOpenResult={(hash, land) => opened.push({ hash, land })}
         tintOf={props.tintOf}
@@ -456,6 +458,24 @@ test.skipIf(!hasDom)('the landing highlight finds the words in the text, not in 
   expect(ranges.map((r) => r.toString())).toEqual(['retry', 'retry', 'budget', 'Résumé']);
 });
 
+test.skipIf(!hasDom)('the landing highlight: a quoted phrase is one range where it stands, across markup, never each word everywhere', () => {
+  const article = document.createElement('article');
+  article.innerHTML =
+    '<div data-open-head=""><span>file viewer</span></div>' +
+    '<div class="ib-msg"><p>The file is big. Open the file <b>viewer</b>; the page stays blank.</p><p>Viewer opens.</p>' +
+    '<h2>Step one</h2><p>Viewer next.</p><ul><li>stays open</li><li>viewer two</li></ul><p>Do step 10, then step 1.</p></div>';
+  expect(searchHitRanges(article, ['"file viewer"', 'blank']).map((r) => r.toString())).toEqual(['file viewer', 'blank']);
+  // Without quotes, every word as before.
+  expect(searchHitRanges(article, ['file', 'viewer']).map((r) => r.toString())).toEqual(['file', 'file', 'viewer', 'Viewer', 'Viewer', 'viewer']);
+  // A phrase never runs from one block into the next: two paragraphs, a heading and its paragraph, two list items.
+  expect(searchHitRanges(article, ['"blank viewer"']).map((r) => r.toString())).toEqual([]);
+  expect(searchHitRanges(article, ['"one viewer"']).map((r) => r.toString())).toEqual([]);
+  expect(searchHitRanges(article, ['"open viewer"']).map((r) => r.toString())).toEqual([]);
+  expect(searchHitRanges(article, ['"stays blank"']).map((r) => r.toString())).toEqual(['stays blank']);
+  // A one-letter word in a phrase is marked, and must be there whole: step 1, not step 10.
+  expect(searchHitRanges(article, ['"step 1"']).map((r) => r.toString())).toEqual(['step 1']);
+});
+
 test.skipIf(!hasDom)("compose's Actions: below real results unless the words name an action; shown while the index builds", async () => {
   const { composeActions } = await import('./compose/model');
   const headings = () => [...host!.querySelectorAll('[role="group"]')].map((g) => host!.querySelector(`#${g.getAttribute('aria-labelledby')}`)!.textContent);
@@ -467,6 +487,7 @@ test.skipIf(!hasDom)("compose's Actions: below real results unless the words nam
     root!.render(
       <SearchPalette
         open
+        searchTip={false}
         phone={false}
         currentProject={null}
         projects={[{ ...project, root: '/src/plannotator' }]}
@@ -621,6 +642,7 @@ test.skipIf(!hasDom)('a renamed project: a thread row marks the indexed name onl
     root!.render(
       <SearchPalette
         open
+        searchTip={false}
         phone={false}
         currentProject={null}
         projects={[
@@ -821,6 +843,7 @@ async function renderTyped(open: boolean, currentProject: string | null = null):
     root!.render(
       <SearchPalette
         open={open}
+        searchTip={false}
         phone={false}
         currentProject={currentProject}
         projects={[{ ...project, root: '/src/plannotator' }]}
@@ -1133,4 +1156,22 @@ test.skipIf(!hasDom)('a phone: the order is pinned at the end of the filter line
   expect([...bar().children].map((el) => el.className)).toEqual(['ib-sp-filters', 'ib-sp-pin']);
   expect(bar().querySelector('.ib-sp-pin [data-search-sort]')).not.toBeNull();
   expect(host!.querySelector('.ib-sp-sortrow')).toBeNull();
+});
+
+test.skipIf(!hasDom)("linked machines: another machine's project reads as the list reads it, in its rows and the Project chip", async () => {
+  const far = { id: 'prj_01M4V7JERHR0Y3XQERK1MR604C', name: 'web', root: '/src/web' };
+  const labels = new Map([[project.id, 'plannotator'], [far.id, 'web · MacBook']]);
+  respond = async (call) =>
+    call.url.searchParams.get('q')
+      ? answer({ q: 'deploy', terms: ['deploy'], totals: totals({ threads: 2 }), groups: { threads: [threadRow('msg_far', 'Deploy web', { project: { ...far, machine: 'ibx_01K0000000000000000000000M' } }), threadRow('msg_here', 'Deploy relay')] }, recent: null })
+      : answer({});
+  await render({ projects: [{ ...project, root: '/src/plannotator' }, far], projectLabels: labels });
+  await type('deploy');
+  await waitFor(() => options().length >= 2);
+  expect(host!.querySelector('[data-result-id="msg_far"]')!.textContent).toContain('web · MacBook');
+  expect(host!.querySelector('[data-result-id="msg_here"]')!.textContent).not.toContain('MacBook');
+  await act(async () => {
+    host!.querySelector<HTMLElement>('[data-chip="project"]')!.click();
+  });
+  expect([...host!.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].map((item) => item.textContent)).toEqual(['All projects', 'plannotator', 'web · MacBook']);
 });

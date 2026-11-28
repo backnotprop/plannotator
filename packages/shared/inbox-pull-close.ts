@@ -11,6 +11,7 @@
  * No Bun or Node API: a `RefRunner` runs the CLI. Inbox-only (the Pi server has no Inbox).
  */
 
+import { INBOX_PULL_REOPEN_WINDOW_MS } from "@plannotator/core/inbox-types";
 import type { RefCli, RefRunner } from "./ref-cards";
 import { forgeMessage, splitRepo, type PullMergeTarget } from "./inbox-pull-merge";
 
@@ -19,8 +20,8 @@ const obj = (v: unknown): Json => (v && typeof v === "object" && !Array.isArray(
 
 export type PullForgeState = "open" | "closed" | "merged";
 
-/** A reopen is taken only for a PR this Inbox closed this recently (Close's Undo); any other is refused. */
-export const PULL_REOPEN_WINDOW_MS = 5 * 60_000;
+/** A reopen is taken only for a PR this Inbox closed this recently (Close's Undo); any other is refused. The board's Undo line reads the same one. */
+export const PULL_REOPEN_WINDOW_MS = INBOX_PULL_REOPEN_WINDOW_MS;
 
 /** Whether a reopen may go: this Inbox closed the PR (`closedAt`, ms) no longer than `PULL_REOPEN_WINDOW_MS` ago. */
 export function reopenAllowed(closedAt: number | undefined, now: number): boolean {

@@ -11,6 +11,7 @@ import type { ProjectAction } from '../projectMenu';
 import { ProjectTipText, Tip } from './Tip';
 import { ProjectMark, showsProjects, useRowMarks } from '../letterMarks';
 import { hasSetPicture, useKnownProjects } from '../projectPictures';
+import { useProjectTagSwap } from './ProjectTagMenu';
 
 export interface ProjectRowProps {
   project: ProjectFolder;
@@ -115,6 +116,7 @@ export function ProjectRow(props: ProjectRowProps) {
   );
   const items = (
     <ProjectMenuItems
+      projectId={project.id}
       name={project.name}
       readable={props.readable}
       rename={onRename !== undefined}
@@ -237,10 +239,12 @@ export function ProjectRow(props: ProjectRowProps) {
 type ProjectMenuAction = ProjectAction | 'rename' | 'reset' | 'picture' | 'unpicture';
 
 /**
- * The items, no descriptions: the two batches, then (this machine's projects) Rename… and, once a name is
- * set, Reset name. The phone's sheet draws its title (the project) above them.
+ * The items, no descriptions: the two batches, then Add tag (ProjectTagMenu.tsx: the tags swap in place), then (this
+ * machine's projects) Rename… and, once a name is set, Reset name. The phone's sheet draws its title (the project)
+ * above them.
  */
 function ProjectMenuItems(props: {
+  projectId: string;
   name: string;
   readable: boolean;
   rename: boolean;
@@ -250,12 +254,24 @@ function ProjectMenuItems(props: {
   onAction: (action: ProjectMenuAction) => void;
 }) {
   const { name, readable, onAction } = props;
+  const tags = useProjectTagSwap(props.projectId);
+  // The popup is named by the project already (aria-label): the title is for the eye only.
+  const title = (
+    <div className="ib-pm-title" dir="auto" aria-hidden="true">
+      {name}
+    </div>
+  );
+  if (tags.list) {
+    return (
+      <>
+        {title}
+        {tags.list}
+      </>
+    );
+  }
   return (
     <>
-      {/* The popup is named by the project already (aria-label): the title is for the eye only. */}
-      <div className="ib-pm-title" dir="auto" aria-hidden="true">
-        {name}
-      </div>
+      {title}
       <Menu.Item className="ib-pmi" label="Mark all as read" disabled={!readable} onClick={() => onAction('read')} data-project-action="read">
         <Icon name="checkCircle" size={15} />
         Mark all as read
@@ -264,6 +280,7 @@ function ProjectMenuItems(props: {
         <Icon name="archive" size={15} />
         Archive all
       </Menu.Item>
+      {tags.item}
       {/* Only while project marks show (Settings → Rows), so it is not there by default. */}
       {props.picture && (
         <>

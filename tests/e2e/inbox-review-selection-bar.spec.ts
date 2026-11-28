@@ -1,5 +1,5 @@
 /**
- * The bar selected lines open in the Inbox's code review (Comment · Ask · Show me),
+ * The bar selected lines open in the Inbox's code review (Comment · Ask),
  * in a real browser against the compiled binary. What regresses if these fail: the
  * bar lands on the lines it is about, drifts off them, falls off the screen, or
  * the diff's + mark sits against it.
@@ -102,8 +102,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const dataDir = join(root, 'data');
   markTourDecided(dataDir);
   const config = JSON.parse(readFileSync(join(dataDir, 'config.json'), 'utf8')) as Record<string, unknown>;
-  // Show me in the bar rides Shape's own switch too (approval "code-review-029-shape-off").
-  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ ...config, inboxCodeReview: true, inboxShape: true }));
+  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ ...config, inboxCodeReview: true }));
   // Nothing here may reach the real gh, glab or tailscale.
   const trap = join(root, 'trap');
   mkdirSync(trap);
@@ -140,7 +139,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const { path, patch } = project(join(root, 'src'));
   const client = new Client({ name: 'selection-bar', version: '1.0.0' });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${registry.port}/mcp`)));
-  // A connected agent that can take a question: Ask and Show me are offered.
+  // A connected agent that can take a question: Ask is offered.
   const agent = startScriptedAskAgent({ port: registry.port, token: registry.token, session: 'ses-bar', project: path, reply: async () => 'An answer.' });
   const sent = (await client.callTool({ name: 'submit_guide', arguments: { project_path: path, guide, patch, review: true, subject: 'A long worker', body: 'Ready for review.', agent_session: 'ses-bar', agent_host: 'claude-code', agent_name: 'Claude Code' } })) as { isError?: boolean; content?: { text: string }[]; structuredContent: { thread_id: string } };
   if (sent.isError) throw new Error(sent.content?.map((c) => c.text).join(' '));
@@ -320,22 +319,22 @@ test('Unified: words only, under the last line at the start of its code, whereve
   await select(page, LONG, 17, 19);
 
   const words = bar(page).getByRole('button');
-  await expect(words).toHaveText(['Comment', 'Ask', 'Show me']);
+  await expect(words).toHaveText(['Comment', 'Ask']);
   await expect(bar(page).locator('svg')).toHaveCount(0);
-  // The accent is Show me's text; nothing is filled. Hairlines split the words.
+  // Words only: none in the accent, nothing is filled. A hairline splits the words.
   const look = await bar(page).evaluate((el) => {
-    const [comment, ask, show] = [...el.querySelectorAll('button')].map((b) => getComputedStyle(b));
+    const [comment, ask] = [...el.querySelectorAll('button')].map((b) => getComputedStyle(b));
     const probe = document.createElement('i');
     probe.style.color = 'var(--primary)';
     document.body.appendChild(probe);
     const primary = getComputedStyle(probe).color;
     probe.remove();
-    return { showColor: show!.color, primary, commentColor: comment!.color, showFill: show!.backgroundColor, commentLine: comment!.borderLeftWidth, askLine: ask!.borderLeftWidth, showLine: show!.borderLeftWidth };
+    return { primary, commentColor: comment!.color, askColor: ask!.color, askFill: ask!.backgroundColor, commentLine: comment!.borderLeftWidth, askLine: ask!.borderLeftWidth };
   });
-  expect(look.showColor).toBe(look.primary);
   expect(look.commentColor).not.toBe(look.primary);
-  expect(look.showFill).toBe('rgba(0, 0, 0, 0)');
-  expect([look.commentLine, look.askLine, look.showLine]).toEqual(['0px', '1px', '1px']);
+  expect(look.askColor).not.toBe(look.primary);
+  expect(look.askFill).toBe('rgba(0, 0, 0, 0)');
+  expect([look.commentLine, look.askLine]).toEqual(['0px', '1px']);
 
   const g = await geometry(page);
   const box = clearOfLines(g);
@@ -417,7 +416,7 @@ test('the bottom of a card: under the file\'s last line, on screen, nothing clip
       return null;
     });
     expect(clippedBy, 'clipped by').toBeNull();
-    for (const word of ['comment', 'ask', 'show-me']) {
+    for (const word of ['comment', 'ask']) {
       const button = bar(page).locator(`[data-selection-action="${word}"]`);
       const b = (await button.boundingBox())!;
       const at = await page.evaluate(([x, y]) => (document.elementFromPoint(x!, y!) as HTMLElement | null)?.dataset.selectionAction ?? null, [b.x + b.width / 2, b.y + b.height / 2]);
@@ -569,7 +568,7 @@ test('All files: the same bar, the same place', async () => {
   await settled(page);
   const g = await geometry(page);
   const box = clearOfLines(g);
-  await expect(bar(page).getByRole('button')).toHaveText(['Comment', 'Ask', 'Show me']);
+  await expect(bar(page).getByRole('button')).toHaveText(['Comment', 'Ask']);
   expect(Math.min(Math.abs(box.top - g.bottom), Math.abs(g.top - box.bottom))).toBeLessThan(12);
   await closeBar(page);
 });
@@ -588,7 +587,7 @@ test('a phone at 390 px: touch-sized, on screen, not on the lines, at the bottom
     // A real tap on one line; the range below uses clicks, as a touch has no shift key.
     await line(page, LONG, 17).tap();
     await settled(page);
-    await expect(bar(page).getByRole('button')).toHaveText(['Comment', 'Ask', 'Show me']);
+    await expect(bar(page).getByRole('button')).toHaveText(['Comment', 'Ask']);
     const heights = await bar(page).getByRole('button').evaluateAll((all) => all.map((b) => b.getBoundingClientRect().height));
     for (const height of heights) expect(height).toBeGreaterThanOrEqual(44);
     const g = await geometry(page);

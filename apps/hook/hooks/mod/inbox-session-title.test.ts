@@ -376,7 +376,8 @@ async function freshHooks(name: string) {
 }
 
 function engineOn(configDir: string, folder: string) {
-  const files = new Map<string, string>([['/bin/sh', ''], [inboxRegistryPathOf(DATA), REGISTRY]])
+  // The person turned the Inbox on here (inbox-turned-on.ts).
+  const files = new Map<string, string>([['/bin/sh', ''], [inboxRegistryPathOf(DATA), REGISTRY], [`${DATA}/inbox/turned-on`, '{"on":true,"by":"command"}']])
   const store = new Map<string, unknown>()
   const timers = new Set<() => void>()
   const polls: unknown[] = []

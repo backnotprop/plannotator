@@ -63,6 +63,7 @@ interface World {
   files: string[];
   /** The agent's message, opened in the window. */
   thread: string;
+  threadId: string;
 }
 
 let world: World;
@@ -140,7 +141,7 @@ test.beforeAll(async () => {
     writeFileSync(file, `# ${name}\n\nA file to attach.\n`);
     return file;
   });
-  world = { root, dataDir, url, agent, stopPolling: liveSession(dataDir, project), files, thread: String(sent.url) };
+  world = { root, dataDir, url, agent, stopPolling: liveSession(dataDir, project), files, thread: String(sent.url), threadId: String(sent.thread_id) };
 });
 
 test.afterAll(async () => {
@@ -258,7 +259,7 @@ for (const size of [
       await expectPickerAtCaret(page, { firstLine: true, minRows: 6 });
       // A query filters in place and the picker stays at the caret.
       await page.keyboard.type('an');
-      await expect(page.locator('dialog[data-compose] [data-skill-item]').first()).toHaveAttribute('data-skill-item', /an/);
+      await expect(page.locator('dialog[data-compose] [data-skill-item]:not([data-skill-item-host])').first()).toHaveAttribute('data-skill-item', /an/);
       await expectEscapeClosesPickerFirst(page);
     } finally {
       await context.close();
@@ -472,6 +473,30 @@ test('the reply box: undo after a skill pick steps back through the pick, the ty
     for (let i = 0; i < 6; i++) forward.push(await press(REDO));
     expect(forward[0]).toBe(FIRST);
     expect(forward.every(real), `every redo is a state the box had: ${JSON.stringify(forward)}`).toBe(true);
+  } finally {
+    await context.close();
+  }
+});
+
+test('a plain thread: "/" lists picture-it, and a pick sent carries its instructions once', async ({ browser }: { browser: Browser }) => {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' });
+  const page = await context.newPage();
+  try {
+    await page.goto(world.thread);
+    const pane = page.locator('section.ib-pane');
+    await pane.getByRole('button', { name: 'Reply', exact: true }).last().click();
+    const field = pane.locator('.ib-rbox').getByRole('textbox');
+    await expect(field).toBeFocused();
+    await page.keyboard.type('Draw the export for me /');
+    const row = page.locator('[data-skill-item="picture-it"]');
+    await expect(row).toBeVisible();
+    await row.click();
+    await expect(field).toHaveValue('Draw the export for me /picture-it ');
+    await pane.locator('.ib-rbox [data-reply-send]').click();
+    const reply = (await world.agent.nextReply(world.threadId)) as { body: string };
+    expect(reply.body.startsWith('Draw the export for me /picture-it')).toBe(true);
+    expect(reply.body.split('--- BEGIN SKILL INSTRUCTIONS: picture-it ---')).toHaveLength(2);
+    expect(reply.body).toContain('--- END SKILL INSTRUCTIONS: picture-it ---');
   } finally {
     await context.close();
   }

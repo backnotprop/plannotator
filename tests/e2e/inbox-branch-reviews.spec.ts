@@ -6,12 +6,13 @@
  * and the system's own folders, so no agent CLI (and no stub of one) can be found, the risk dialog's included.
  *
  * What is proved, in order:
- *  1. Off: send_message refuses `branch`, and Reviews has no safety net.
+ *  1. Off: send_message refuses `branch`, and the branches route refuses.
  *  2. On: an agent's report is one review thread, listed in Reviews as a local branch, On you; the thread says what
  *     it is and offers the person's own "Ask for a guided review".
  *  3. The same head again sends nothing; a new head goes into the same thread.
  *  4. The ask is a reply in that thread carrying /review-curate.
- *  5. The project's "Branches nobody reported" is read only when opened, and Start a review opens New review.
+ *  5. Reviews' "On this computer" leaves the reported branch to its row and lists the other; that branch's diff opens
+ *     beside the list and its Review with an agent opens New review.
  *  6. The risk rules dialog shows the branch switch with what is sent where.
  *
  * Shots land in PLANNOTATOR_E2E_PROOF_DIR/branch-reviews, light and dark at 1440.
@@ -24,7 +25,7 @@ import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { markTourDecided } from '../helpers/tour-decided';
-import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
+import { E2E_GROUP_TIP_SEEN, inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -98,7 +99,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   markTourDecided(dataDir);
   const configFile = join(dataDir, 'config.json');
   const config = JSON.parse(readFileSync(configFile, 'utf8')) as Record<string, unknown>;
-  writeFileSync(configFile, JSON.stringify({ ...config, inboxCodeReview: true, inboxReveals: { code_review: { shownAt: '2026-10-24T00:00:00.000Z' } } }));
+  writeFileSync(configFile, JSON.stringify({ ...config, inboxCodeReview: true, inboxReveals: { ...E2E_GROUP_TIP_SEEN, code_review: { shownAt: '2026-10-24T00:00:00.000Z' } } }));
   for (const dir of ['claude', 'codex', 'xdg', 'fakes']) mkdirSync(join(root, dir), { recursive: true });
   const fakes = join(root, 'fakes');
   // Signed out: no forge is ever asked, and Reviews lists no PRs.
@@ -143,13 +144,10 @@ test.afterAll(async () => {
 
 const report = (body: string) => world.claude.send({ project_path: world.project, subject: 'retry-jitter', body, branch: { name: 'retry-jitter', summary: 'Jitter on payout retries' } } as never);
 
-test('off: the field is refused and Reviews has no safety net', async () => {
+test('off: the field is refused and the branches route refuses', async () => {
   await expect(report('retry-jitter is ready for review.')).rejects.toThrow();
   const refused = await world.page.request.get(`${world.url}api/inbox/reviews/branches`);
   expect(refused.status()).toBe(409);
-  await world.page.goto(`${world.url}#reviews`);
-  await expect(world.page.locator('[data-pulls-heading]')).toBeVisible();
-  await expect(world.page.locator('[data-reviews-unreported]')).toHaveCount(0);
 });
 
 test('on: a report is one review thread, a local branch On you, with the person\'s own ask', async () => {
@@ -163,10 +161,12 @@ test('on: a report is one review thread, a local branch On you, with the person\
   await page.goto(`${world.url}#reviews`);
   const row = page.locator(`[data-reviews-row="${threadId}"]`);
   await expect(row).toBeVisible();
-  await expect(row.locator('.ib-pr-l3')).toHaveText('retry-jitter · Ready for review');
+  // Closed, the row is one line; open, its second line says where the branch is, its project and why it waits.
+  await expect(row.locator('.ib-pr-l3')).toHaveCount(0);
   await expect(page.locator('[data-pulls-group="on_you"]')).toContainText('retry-jitter');
   await shot(page, '1-reported-row');
   await row.click();
+  await expect(row.locator('.ib-pr-l3')).toHaveText(/^retry-jitter · .+ · (?:.+, )?Ready for review$/); // the agent's name, for a screen reader, before the status
   await expect(page.locator('.ib-rvctx')).toContainText('Local branch: retry-jitter, against main');
   await expect(page.locator('[data-review-branch-ask]')).toBeVisible();
   await shot(page, '2-reported-thread');
@@ -193,22 +193,23 @@ test('the ask is a reply in the same thread, asking for /review-curate', async (
   expect(String(reply.body)).toContain('/review-curate');
 });
 
-test('the safety net is read when opened, and Start a review opens New review', async () => {
+test('"On this computer" leaves the reported branch to its row; another branch\'s diff offers New review', async () => {
   const { page } = world;
   const projects = (await (await page.request.get(`${world.url}api/inbox/projects`)).json()) as { projects?: { id: string; root: string }[] };
   const id = projects.projects?.find((p) => p.root === world.project)?.id;
   expect(id).toBeTruthy();
-  await page.goto(`${world.url}#reviews&project=${id}`);
-  const fold = page.locator(`[data-reviews-unreported="${id}"]`);
-  await expect(fold).toBeVisible();
-  await expect(fold.locator('[data-reviews-unreported-branch]')).toHaveCount(0);
-  await fold.locator('[data-reviews-unreported-toggle]').click();
-  const idea = fold.locator('[data-reviews-unreported-branch="old-idea"]');
+  await page.goto(`${world.url}#reviews`);
+  const group = page.locator('[data-pulls-group="local"]');
+  await expect(group).toBeVisible();
+  await group.locator('[data-reviews-fold="local"]').click();
+  const idea = group.locator(`[data-local-row="${id}:old-idea"]`);
   await expect(idea).toBeVisible();
   // The reported branch is the report's row, never listed here.
-  await expect(fold.locator('[data-reviews-unreported-branch="retry-jitter"]')).toHaveCount(0);
-  await shot(page, '3-unreported');
-  await idea.locator('[data-reviews-unreported-start]').click();
+  await expect(group.locator(`[data-local-row="${id}:retry-jitter"]`)).toHaveCount(0);
+  await shot(page, '3-on-this-computer');
+  await idea.click();
+  await expect(page.locator('[data-local-diff="branch"]')).toBeVisible();
+  await page.locator('[data-local-review]').click();
   await expect(page.locator('[data-review-box]')).toBeVisible();
   await page.keyboard.press('Escape');
 });

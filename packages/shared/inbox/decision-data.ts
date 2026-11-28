@@ -9,30 +9,12 @@
  */
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { INBOX_HOST_NAMES, isInboxActionReport, isInboxNote, type DecisionDataSummary, type DecisionGroup, type DecisionTrend, type InboxMessage, type InboxQuestionRecord } from "@plannotator/core/inbox-types";
+import { INBOX_HOST_NAMES, isInboxActionReport, type DecisionDataSummary, type DecisionGroup, type DecisionTrend, type InboxMessage, type InboxQuestionRecord } from "@plannotator/core/inbox-types";
+// A question's row and the person's own words are pure and the decision export's builder runs on them, so they are
+// core's (internal, not in core's `exports`: one definition, reached here by path).
+import { DAY_MS, decisionRowOf, ownWordsTime, readableTime, type DecisionFate, type DecisionRow } from "../../core/inbox-decision-rules";
 
-export type DecisionFate = "answered" | "skipped" | "set_aside" | "replaced" | "archived" | "open" | "picked_unsent";
-
-/** One question an agent asked; action items are not decisions. */
-export interface DecisionRow {
-  id: string;
-  thread_id: string;
-  project_id: string;
-  agent: string;
-  kind: string;
-  asked_at: number;
-  /** The last pick's moment, or the Send's when the Send carried the answer. */
-  answered_at: number | null;
-  sent_at: number | null;
-  fate: DecisionFate;
-  /** Whether the answer took the recommendation: null unless the question named one and was answered. */
-  took: boolean | null;
-  offered: boolean;
-  stopped: boolean;
-  holds_up: boolean;
-  files: boolean;
-  revisions: number;
-}
+export { decisionRowOf, type DecisionRow } from "../../core/inbox-decision-rules";
 
 export interface DecisionDataInput {
   /** A project's id -> the head of its combined group (a project no longer stored: itself). */
@@ -59,67 +41,6 @@ export interface DecisionQuery {
   now: number;
 }
 
-const ms = (iso: string | null | undefined): number | null => {
-  if (!iso) return null;
-  const at = Date.parse(iso);
-  return Number.isFinite(at) ? at : null;
-};
-
-/** An agent as the person sees it: its host's name ("Claude Code"), never a session or machine. */
-export function agentLabel(author: { host?: string | null; name?: string | null }): string {
-  if (author.host) return INBOX_HOST_NAMES[author.host] ?? author.host;
-  if (author.name) return author.name;
-  return "An agent";
-}
-
-function tookRecommendation(question: InboxQuestionRecord): { offered: boolean; took: boolean | null } {
-  const recommended = question.parsed.choices.filter((choice) => choice.recommended).map((choice) => choice.label);
-  if (recommended.length === 0) return { offered: false, took: null };
-  const answer = question.answer;
-  if (!answer || answer.skipped) return { offered: true, took: null };
-  if (answer.other) return { offered: true, took: false };
-  const picked = new Set(answer.selected);
-  return { offered: true, took: picked.size === recommended.length && recommended.every((label) => picked.has(label)) };
-}
-
-/** The row of one stored question, or null when it is not a question an agent asked. */
-export function decisionRowOf(question: InboxQuestionRecord, byId: ReadonlyMap<string, InboxMessage>, headOf: (projectId: string) => string, closedByArchive: (message: InboxMessage) => boolean): DecisionRow | null {
-  if (question.kind === "action") return null;
-  const message = byId.get(question.message_id);
-  if (!message || message.author.kind !== "agent") return null;
-  const asked = ms(message.created_at);
-  if (asked === null) return null;
-  const sent = question.sent_reply_id ? ms(byId.get(question.sent_reply_id)?.created_at) : null;
-  let fate: DecisionFate;
-  if (question.superseded_by) fate = "replaced";
-  else if (question.set_aside) fate = "set_aside";
-  else if (question.answer && question.revision > 0 && question.sent_revision === question.revision) fate = question.answer.skipped ? "skipped" : "answered";
-  else if (closedByArchive(message)) fate = "archived";
-  else fate = question.answer ? "picked_unsent" : "open";
-  const decided = fate === "answered" || fate === "skipped";
-  const { offered, took } = tookRecommendation(question);
-  return {
-    id: question.id,
-    thread_id: message.thread_id,
-    project_id: headOf(question.project_id),
-    agent: agentLabel(message.author),
-    kind: question.kind,
-    asked_at: asked,
-    answered_at: decided ? (ms(question.picked_at) ?? sent) : null,
-    sent_at: decided ? sent : null,
-    fate,
-    took: fate === "answered" ? took : null,
-    offered,
-    stopped: question.stopped !== null,
-    holds_up: question.holds_up.length > 0,
-    files: (message.attachments?.length ?? 0) + (message.inline_images?.length ?? 0) > 0,
-    revisions: question.revision,
-  };
-}
-
-const DAY_MS = 86_400_000;
-/** A time every later step can use, even moved into the reader's zone: `new Date(...).toISOString()` throws past this. */
-const readableTime = (at: unknown): at is number => typeof at === "number" && Number.isFinite(at) && Math.abs(at) <= 8.64e15 - 2 * DAY_MS;
 const readableTimeOrNull = (at: unknown): at is number | null => at === null || readableTime(at);
 const FATES: ReadonlySet<unknown> = new Set<DecisionFate>(["answered", "skipped", "set_aside", "replaced", "archived", "open", "picked_unsent"]);
 
@@ -248,19 +169,6 @@ export async function runInSlices<T>(steps: Generator<void, T>, signal?: AbortSi
       begun = performance.now();
     }
   }
-}
-
-/**
- * When the person wrote this message in their own words, or null when it is not such a message: an agent's, a note the
- * Inbox wrote, a Re-ask press (the Inbox writes its words, the person typed none), or a reply that carried answers
- * (`carried`: the questions' `sent_reply_id`s). Decision data's "settled in words" and the decision export's
- * "Answered in words" both read it.
- */
-export function ownWordsTime(message: InboxMessage, carried: ReadonlySet<string>): number | null {
-  if (message.author.kind !== "person" || isInboxNote(message) || (message.reask?.length ?? 0) > 0) return null;
-  const at = ms(message.created_at);
-  if (!readableTime(at) || carried.has(message.id)) return null;
-  return at;
 }
 
 // ── Trends: the last 30 days against the 30 before. Two periods, no series, nothing stored. ──

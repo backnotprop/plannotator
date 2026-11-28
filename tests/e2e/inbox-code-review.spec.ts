@@ -36,7 +36,7 @@ import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { expectNoBlankFiles } from './on-screen-files';
 import { markTourDecided } from '../helpers/tour-decided';
-import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
+import { E2E_GROUP_TIP_SEEN, inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 import { diffRowBox } from './diff-row-box';
 
 const repo = resolve(__dirname, '../..');
@@ -213,12 +213,11 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const root = inboxScratch('plannotator-inbox-code-review-e2e-');
   const dataDir = join(root, 'data');
   markTourDecided(dataDir);
-  // Code review's one-time offer (approval "code-review-offer-card") was already answered: it is never shown for now
-  // (CODE_REVIEW_OFFER_SHOWN), and should that change it must not open over this spec's flow. Its own test is
-  // packages/inbox/codeReviewOffer.test.tsx.
+  // Code review's one-time offer (approval "inbox-code-review-offer") was already answered: it must not open over this
+  // spec's flow. Its own tests are packages/inbox/codeReviewOffer.test.tsx and inbox-code-review-offer.spec.ts.
   const configFile = join(dataDir, 'config.json');
   const config = JSON.parse(readFileSync(configFile, 'utf8')) as Record<string, unknown>;
-  writeFileSync(configFile, JSON.stringify({ ...config, inboxReveals: { code_review: { shownAt: '2026-10-24T00:00:00.000Z' } } }));
+  writeFileSync(configFile, JSON.stringify({ ...config, inboxReveals: { ...E2E_GROUP_TIP_SEEN, code_review: { shownAt: '2026-10-24T00:00:00.000Z' } } }));
   // The skill roots (review-skill-loader.ts) in scratch folders, like HOME.
   for (const dir of ['claude', 'codex', 'xdg']) mkdirSync(join(root, dir), { recursive: true });
   const env: Record<string, string> = {
@@ -632,9 +631,9 @@ test('the top bar holds what the rail held: chapters, the count, files, Overview
   const controlsBox = (await controls.boundingBox())!;
   expect(controlsBox.x + controlsBox.width).toBeLessThanOrEqual(approveAt);
   expect(controlsBox.y + controlsBox.height).toBeLessThanOrEqual((await body.boundingBox())!.y);
-  // The gear: code review's popover, without Whole file and Hide whitespace.
+  // The gear: code review's popover, with its Whole file (the diffs obey it) and without Hide whitespace.
   await controls.getByRole('button', { name: 'Diff display options' }).click();
-  await expect(page.locator('[data-diff-display-popup]').getByRole('switch')).toHaveText(['Wrap long lines', 'Line numbers', 'Backgrounds', 'Show moved & renamed code']);
+  await expect(page.locator('[data-diff-display-popup]').getByRole('switch')).toHaveText(['Wrap long lines', 'Line numbers', 'Backgrounds', 'Whole file', 'Show moved & renamed code']);
   await page.keyboard.press('Escape');
   await expect(page.locator('[data-diff-display-popup]')).toHaveCount(0);
   await expect(pane).toBeVisible();
@@ -817,9 +816,13 @@ test('a phone at 390 px: one row of one height, and the same menu as a desktop h
     await page.goto(`${world.url}#thread=${review.thread_id}&guide=${review.message_id}`);
     const pane = page.locator('[data-review-message]');
     await expect(pane.locator('[data-guide-file-shell]').first()).toBeVisible({ timeout: 30_000 });
-    // A phone reads Unified only: no layout to choose, in the bar or on a card.
+    // A phone reads Unified only: no layout to choose, in the bar or on a card. The Diff display gear alone stays, in
+    // the heading's row of the review's own actions, not the bar.
     await expect(pane.locator('[data-diff-style-switch]')).toHaveCount(0);
-    await expect(pane.locator('[data-diff-controls]')).toHaveCount(0);
+    await expect(pane.locator('[data-diff-layout-toggle]')).toHaveCount(0);
+    await expect(pane.locator('[data-diff-controls] button')).toHaveCount(1);
+    await expect(pane.locator('.ib-vhead [data-diff-controls]')).toHaveCount(0);
+    await expect(pane.locator('[data-guide-heading] .gv-tools [data-diff-display-options]')).toBeVisible();
     await expect(pane.locator('select')).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 

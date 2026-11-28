@@ -1,7 +1,7 @@
 /**
  * The world and the window states for inbox-window-controls.spec.ts: an Inbox
  * under a scratch HOME and data folder, a scripted `gh` and `glab` first on
- * PATH, and one thread with a picture, a guided review and a Shape board.
+ * PATH, and one thread with a picture and a guided review.
  */
 import { type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
@@ -23,7 +23,6 @@ export interface ControlsWorld {
   /** The thread and message of the guided review. */
   thread: string;
   guide: string;
-  board: string;
   /** The thread with two open questions: Decision mode's way in. */
   questions: string;
   /** A message with a table: the table's toolbar. */
@@ -41,7 +40,8 @@ export async function seedControlsWorld(binary: string, prefix: string): Promise
   markTourDecided(dataDir);
   const configPath = join(dataDir, 'config.json');
   const config = JSON.parse(readFileSync(configPath, 'utf8')) as Record<string, unknown>;
-  writeFileSync(configPath, JSON.stringify({ ...config, inboxShape: true, inboxBoard: true, inboxCodeReview: true, experimental: { decisionMode: true } }));
+  // The Board and code review on; Decision mode is on by default.
+  writeFileSync(configPath, JSON.stringify({ ...config, inboxBoard: true, inboxCodeReview: true }));
   const forge = fakeForge(join(root, 'forge'));
   const env: Record<string, string> = {
     PATH: `${forge.dir}:${process.env.PATH ?? ''}`,
@@ -64,7 +64,7 @@ export async function seedControlsWorld(binary: string, prefix: string): Promise
 
   const project = scratchProject(join(root, 'src'), 'ledger');
   const picture = join(project, 'shot.png');
-  copyFileSync(join(repo, 'tests/manual/shape-harness/public/refs/built-desktop-light.png'), picture);
+  copyFileSync(join(repo, 'packages/review-editor/assets/edit-mode-demo-poster.png'), picture);
   const claude = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
   const pi = await SimAgent.connect({ binary, env, name: 'Pi', host: 'pi' });
   const sent = await claude.send({ project_path: project, subject: 'The ledger export is ready', thread: 'export', body: 'The ledger export is ready. The picture shows the new page.', attachments: ['shot.png'] });
@@ -76,11 +76,6 @@ export async function seedControlsWorld(binary: string, prefix: string): Promise
   const askedForReview = await pi.send({ project_path: project, subject: 'A review of the token refresh', thread: 'review', body: 'Asking for the review.' });
   const reviewed = await pi.submitGuide({ project_path: project, ...example, reply_to: askedForReview.message_id, body: 'The review.', review: true } as never);
 
-  const boardFile = join(root, 'board.json');
-  writeFileSync(boardFile, JSON.stringify({ title: 'Ledger export', claim: 'One page.', views: { picture: { html: '<p>The page.</p>', css: 'p { margin: 40px; }' } } }));
-  const shaped = spawnSync(binary, ['shape', 'update', '--file', boardFile, '--project', project, '--thread', sent.thread_id as string], { env, cwd: project, encoding: 'utf8', timeout: 30_000 });
-  if (shaped.status !== 0) throw new Error(`shape update: ${shaped.stderr}`);
-
   return {
     url: started.stdout.trim(),
     picture: sent.thread_id as string,
@@ -89,7 +84,6 @@ export async function seedControlsWorld(binary: string, prefix: string): Promise
     review: { thread: reviewed.thread_id as string, message: reviewed.message_id as string },
     thread: guided.thread_id as string,
     guide: guided.message_id as string,
-    board: (JSON.parse(shaped.stdout) as { id: string }).id,
     agents: [claude, pi],
   };
 }

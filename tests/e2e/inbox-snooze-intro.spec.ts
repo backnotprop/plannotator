@@ -27,7 +27,7 @@ import { expect, test, type Browser, type BrowserContext, type Page } from './in
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
+import { E2E_GROUP_TIP_SEEN, inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { savedConfig } from '../helpers/saved-config';
 
@@ -90,7 +90,7 @@ async function world(): Promise<World> {
       inboxThemeChooser: { notNeededAt: '2026-10-01T10:00:00.000Z' },
       // The Sidebar tip: shown long ago. Since the tips keep the line's 40-minute gap both ways, a tip claimed by a tab
       // left idle (the second tab here, a minute into the page) would hold Snooze's dialog back for the gap.
-      inboxReveals: { sidebar_tip: { shownAt: past } },
+      inboxReveals: { ...E2E_GROUP_TIP_SEEN, sidebar_tip: { shownAt: past } },
     }),
   );
   const env = {

@@ -17,6 +17,7 @@ import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { INBOX_THREAD_PULLS_MAX, parseInboxThreadPullRefs } from "@plannotator/core/inbox-types";
+import { inboxToolResultText } from "@plannotator/shared/inbox/connection";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { createInboxMcpServer, type InboxMcpContext } from "./inbox-mcp";
 import { createInboxPullLookups } from "./inbox-pull-lookups";
@@ -29,7 +30,7 @@ afterEach(() => {
 
 const PR = "https://github.com/acme/api/pull/12";
 const ask = (kind: string, ...lines: string[]) => [`:::${kind}`, "Which retry policy?", "", ...lines, ":::"].join("\n");
-const BARE = ask("question", "- [ ] Fixed delay", "- [ ] Backoff");
+const BARE = ask("question", "- [ ] Fixed delay", "- [ ] Backoff", "- [ ] Backoff with jitter");
 const keys = (body: string, known?: InboxKnownPulls) => pullsNamedInBody(body, null, known).map((ref) => ref.key);
 /** The approved line, word for word. */
 const nudge = (label: string, add: string) => `You named ${label}, which is on no thread's row. If it is this work's PR, attach it: thread_pulls with add ["${add}"].`;
@@ -59,6 +60,15 @@ function world(options: { projectHost?: InboxMcpContext["projectHost"]; known?: 
   return { store, project, send };
 }
 
+test("a #N only in a picture's alt text or caption, or in a URL, names no PR; the same #N in prose does, and the agent reads that line once", async () => {
+  const w = world({ known: knowing("github.com/acme/api#411") });
+  const quiet = await w.send("ses_a", { body: 'Before and after:\n\n![Header after #411](shots/after.png "the fix for #411")\n\nSee https://example.com/notes#411.', thread: "pictures" });
+  expect(quiet.lines).toHaveLength(1);
+  const named = await w.send("ses_a", { body: "This lands #411.", thread: "prose" });
+  expect(named.last).toBe(nudge("#411", "acme/api#411"));
+  expect(inboxToolResultText(named.result).text.split(named.last)).toHaveLength(2);
+});
+
 test("a PR's URL or a GitLab short ref in the agent's words is read; code, quotes, issues and unknown numbers are not", () => {
   expect(keys(`Opened ${PR} for this.`)).toEqual(["github.com/acme/api#12"]);
   expect(keys(`See [the PR](${PR}/files) and acme/web!7.`)).toEqual(["github.com/acme/api#12", "gitlab.com/acme/web#7:pull"]);
@@ -77,16 +87,25 @@ test("a PR's URL or a GitLab short ref in the agent's words is read; code, quote
   expect(keys("PR#13 is up.", knowing("github.com/acme/api#13"))).toEqual(["github.com/acme/api#13"]);
 });
 
-test("a question counts with two or more choices and no pros, cons or prototype anywhere", () => {
+test("a question counts with three or more choices and no pros, cons, prototype or scenario table anywhere", () => {
+  const three = ["- [ ] Fixed delay", "- [ ] Backoff", "- [ ] Backoff with jitter"];
   expect(questionWithBareOptions(BARE)).toBe(true);
-  expect(questionWithBareOptions(ask("question-multi", "- [ ] Yes", "- [ ] No"))).toBe(true);
-  expect(questionWithBareOptions(ask("question", "- [ ] Fixed delay", "    Pros: simple", "- [ ] Backoff"))).toBe(false);
-  expect(questionWithBareOptions(ask("question", "- [ ] Fixed delay", "    Cons: thundering herd", "- [ ] Backoff"))).toBe(false);
-  expect(questionWithBareOptions(ask("question", "- [ ] Fixed delay", "    Prototype: proto/a.html", "- [ ] Backoff"))).toBe(false);
-  expect(questionWithBareOptions(ask("question", "- [ ] Fixed delay", "- [ ] Backoff", "Prototype: proto/both.html"))).toBe(false);
+  expect(questionWithBareOptions(ask("question-multi", "- [ ] Yes", "- [ ] No", "- [ ] Later"))).toBe(true);
+  // Two choices (a yes/no) no longer count (approval "question-scenario-table", 2026-11-23).
+  expect(questionWithBareOptions(ask("question", "- [ ] Fixed delay", "- [ ] Backoff"))).toBe(false);
+  expect(questionWithBareOptions(ask("question-multi", "- [ ] Yes", "- [ ] No"))).toBe(false);
+  expect(questionWithBareOptions(ask("question", three[0]!, "    Pros: simple", three[1]!, three[2]!))).toBe(false);
+  expect(questionWithBareOptions(ask("question", three[0]!, "    Cons: thundering herd", three[1]!, three[2]!))).toBe(false);
+  expect(questionWithBareOptions(ask("question", three[0]!, "    Prototype: proto/a.html", three[1]!, three[2]!))).toBe(false);
+  expect(questionWithBareOptions(ask("question", ...three, "Prototype: proto/both.html"))).toBe(false);
+  // A scenario table already compares the options.
+  const table = ["", "| Situation | Fixed delay | Backoff | Backoff with jitter |", "| --- | --- | --- | --- |", "| The API is down an hour | Hammers it — every 5 s | Backs off — fewer calls | Backs off — spread out |"];
+  expect(questionWithBareOptions(ask("question", ...three, ...table))).toBe(false);
+  // A table that names no choice is context: the question still counts.
+  expect(questionWithBareOptions(ask("question", ...three, ...table.map((l) => l.replace("Fixed delay", "Something else"))))).toBe(true);
   expect(questionWithBareOptions(ask("question", "- [ ] Only this"))).toBe(false);
   expect(questionWithBareOptions(ask("question-text"))).toBe(false);
-  expect(questionWithBareOptions([":::action", "Rotate the key", "- [ ] In the console", "- [ ] With the CLI", ":::"].join("\n"))).toBe(false);
+  expect(questionWithBareOptions([":::action", "Rotate the key", "- [ ] In the console", "- [ ] With the CLI", "- [ ] Both", ":::"].join("\n"))).toBe(false);
 });
 
 test("a bare #N the Inbox knows as the project's PR is named once per thread; the same thread again is quiet, another thread hears it; an issue's number never", async () => {
@@ -186,7 +205,8 @@ test("one kind a send: the PR line first, the question line on a later send that
   const next = await w.send("ses_a", { body: `${PR}\n\n${BARE.replace("Which", "And which")}`, reply_to: both.id });
   expect(next.last).toBe(QUESTION_OPTIONS_HINT);
   const third = await w.send("ses_a", { body: `${PR}\n\n${BARE.replace("Which", "Then which")}`, reply_to: next.id });
-  expect(third.lines).toHaveLength(1);
+  expect(third.lines).toHaveLength(2);
+  expect(third.last).toStartWith(`- ${third.id}/q-`);
 });
 
 test("no hint on a refused send or a replay; a refused send does not use up the thread's line", async () => {
@@ -199,7 +219,9 @@ test("no hint on a refused send or a replay; a refused send does not use up the 
   const replay = await w.send("ses_c", { body: `Opened ${PR}.`, idempotency_key: "k1" });
   expect(replay.lines[0]).toStartWith("Already sent");
   expect(replay.lines).toHaveLength(1);
-  expect((await w.send("", { body: BARE, thread: "anon" })).lines).toHaveLength(1);
+  const anon = await w.send("", { body: BARE, thread: "anon" });
+  expect(anon.lines).toHaveLength(2);
+  expect(anon.last).toStartWith(`- ${anon.id}/q-`);
 });
 
 test("the picture-choices advice is said on every send it holds for, in any session", async () => {
@@ -306,6 +328,14 @@ test("a body naming 50,000 numbers: the send's lines and the lookup's pick stay 
   expect(picked.map((ref) => ref.number)).toEqual([1, 2, 3]);
   await forge.settled();
   expect(forge.reads).toEqual([1, 2, 3]);
+});
+
+test("an unknown number only in a picture's alt text or a URL is never looked up", async () => {
+  const forge = lookingUp({});
+  const w = world({ known: forge.known });
+  await w.send("ses_a", { body: "Before and after:\n\n![Header after #411](shots/after.png)\n\nSee https://example.com/notes#412.", thread: "one" });
+  await forge.settled();
+  expect(forge.reads).toEqual([]);
 });
 
 test("a number past GitHub's 32 bits is never a PR: never named, never looked up", async () => {

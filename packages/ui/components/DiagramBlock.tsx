@@ -7,12 +7,14 @@ import type { DiagramTheme } from '../utils/diagram-render';
 import { diagramShadowAmount } from '../utils/diagramShadow';
 import { getIdentity } from '../utils/identity';
 import { createRuntimeRetryEpoch } from '../utils/runtimeRetry';
+import { copyTextToClipboard } from '../utils/clipboard';
+import { DiagramSourceVerdictContext, useDiagramSourceVerdict } from './diagramSourceAccept';
 import { DiagramAnchorClaims, DiagramAnchorClaimsContext } from './diagram/anchorClaims';
 import { DiagramPending, DiagramInlineSource } from './diagram/DiagramPending';
 import { DiagramViewer, type DiagramAskAI } from './diagram/DiagramViewer';
 import type { CommentAskAIHandler } from './CommentPopover';
 import { diagramAskAIContext } from '../utils/diagramAskAI';
-import { svgContentSize } from './diagram/svgContentSize';
+import { inlineFitMaxScale, svgContentSize } from './diagram/svgContentSize';
 import type { DiagramComment, DiagramCreateComment } from './diagram/useDiagramComments';
 import type { DiagramRenderState } from './diagram/useDiagramRender';
 import type { DiagramReopenRequest } from './diagram/reopen';
@@ -40,7 +42,9 @@ const RETRY_EPOCHS: Record<DiagramKind, ReturnType<typeof createRuntimeRetryEpoc
   graphviz: createRuntimeRetryEpoch(),
 };
 
-const LABELS: Record<DiagramKind, string> = { mermaid: 'Mermaid', graphviz: 'Graphviz' };
+/** The pop-out's title and the heading of the panel shown when a diagram cannot be drawn (a Mermaid fence may be drawn by Pele, so it names no engine). */
+const POPOUT_TITLES: Record<DiagramKind, string> = { mermaid: 'Diagram', graphviz: 'Graphviz diagram' };
+const ERROR_TITLES: Record<DiagramKind, string> = { mermaid: 'Diagram error', graphviz: 'Graphviz Error' };
 
 /** The full-size popout is only ever reached by pressing Expand, so it loads
  * then and not with the document. Its fallback is null: the overlay simply
@@ -57,10 +61,42 @@ const MAX_HEIGHT_PX = 36 * 16;
 
 function inlineHeight(state: DiagramRenderState | null): string {
   const size = state?.svgNode ? svgContentSize(state.svgNode) : null;
-  if (size === null) return 'min(65vh, 24rem)';
-  const px = Math.round(size.height * (NOMINAL_WIDTH_PX / size.width)) + 48;
+  if (size === null || !state?.svgNode) return 'min(65vh, 24rem)';
+  // At the scale Fit will use, so a diagram held at its own size is not centred in a box sized for a blown-up one.
+  const px = Math.round(size.height * Math.min(inlineFitMaxScale(state.svgNode), NOMINAL_WIDTH_PX / size.width)) + 48;
   return `min(65vh, ${Math.min(MAX_HEIGHT_PX, Math.max(MIN_HEIGHT_PX, px))}px)`;
 }
+
+const ICON_BUTTON = 'p-1.5 rounded-md bg-muted/85 hover:bg-muted text-muted-foreground hover:text-foreground';
+
+const CopySourceButton: React.FC<{ source: string }> = ({ source }) => {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(timer);
+  }, [copied]);
+  const label = copied ? 'Copied' : 'Copy source';
+  return (
+    <button
+      type="button"
+      onClick={() => void copyTextToClipboard(source).then((ok) => ok && setCopied(true))}
+      className={ICON_BUTTON}
+      title={label}
+      aria-label="Copy source"
+    >
+      {copied ? (
+        <svg className="w-4 h-4 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+        </svg>
+      ) : (
+        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+        </svg>
+      )}
+    </button>
+  );
+};
 
 function newAnnotationId(): string {
   const c = globalThis.crypto;
@@ -120,7 +156,6 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
   reopenComment,
   onComposerAnchor,
 }) => {
-  const label = LABELS[kind];
   const onComposerAnchorRef = useRef(onComposerAnchor);
   onComposerAnchorRef.current = onComposerAnchor;
   const inlineComposerAnchor = useCallback((anchor: DiagramAnchor | null) => onComposerAnchorRef.current?.(block.id, 'inline', anchor), [block.id]);
@@ -130,6 +165,9 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
   const [isExpanded, setIsExpanded] = useState(false);
   const [retryToken, setRetryToken] = useState(0);
   const [renderState, setRenderState] = useState<DiagramRenderState | null>(null);
+  // Room under the drawing for the zoom strip, which the canvas asks for when the fitted drawing would reach the strip.
+  const [controlsReservePx, setControlsReservePx] = useState(0);
+  const controlsReserve = useMemo(() => ({ px: controlsReservePx, onChange: setControlsReservePx }), [controlsReservePx]);
 
   // The (palette, mode) the diagram must follow: the same resolution the
   // code fences use (see useFenceTheme). Outside a ThemeProvider the default
@@ -168,6 +206,18 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
   useEffect(() => {
     setIsExpanded(false);
   }, [block.content]);
+
+  // A fence the host's source check refuses shows what a fresh refusal shows, whatever was there before: no
+  // controls, no "Show source" view, no pop-out (it closes, as when the fence's content changes). Read here, in the
+  // same render as the viewers' answer (they get this one through DiagramSourceVerdictContext, so the host is asked
+  // once per mounted block), so no frame keeps the old controls.
+  const sourceVerdict = useDiagramSourceVerdict(kind, block.content);
+  const sourceAccepted = sourceVerdict.accepted;
+  useEffect(() => {
+    if (sourceAccepted) return;
+    setIsExpanded(false);
+    setShowSource(false);
+  }, [sourceAccepted]);
 
   // Comments that name no diagram block of the document (an external POST
   // carries `blockId: "external"`; a deleted fence leaves a dead id) belong
@@ -273,7 +323,7 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
   }, [handleAskAI]);
 
   const [resolution, setResolution] = useState<ReadonlyMap<string, boolean> | null>(null);
-  const svgReady = renderState?.svgNode != null;
+  const svgReady = sourceAccepted && renderState?.svgNode != null;
   const renderFailed = renderState !== null && renderState.error !== null && !svgReady;
 
   // This block's verdicts for the unowned comments. A diagram that failed
@@ -291,8 +341,15 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
 
   // The restore verdict the panel's "Unanchored" chip runs on: this block's
   // own comments, the unowned ones it shows, and (from the first diagram
-  // block only, so it is said once) the unowned ones nobody resolved.
+  // block only, so it is said once) the unowned ones nobody resolved. The
+  // host's callback is read through a ref, as the highlighter reads it: a host
+  // passing a new function each render that stores the report as state would
+  // otherwise re-run this effect on every render it causes, without end.
+  const onRestoreReportRef = useRef(onRestoreReport);
+  onRestoreReportRef.current = onRestoreReport;
+  const reportsRestore = onRestoreReport !== undefined;
   useEffect(() => {
+    const onRestoreReport = onRestoreReportRef.current;
     if (onRestoreReport === undefined || (resolution === null && !renderFailed)) return;
     const attempted: string[] = [];
     const unanchored: string[] = [];
@@ -309,7 +366,7 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
       }
     }
     if (attempted.length > 0) onRestoreReport({ attempted, unanchored });
-  }, [block.id, claims, claimsVersion, onRestoreReport, ownAnnotations, renderFailed, resolution, unownedAnnotations]);
+  }, [block.id, claims, claimsVersion, ownAnnotations, renderFailed, reportsRestore, resolution, unownedAnnotations]);
 
   const renderFallback = useCallback(
     (state: DiagramRenderState) => {
@@ -335,7 +392,7 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
               <svg className="w-4 h-4 text-destructive" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
               </svg>
-              <span className="text-xs text-destructive font-medium">{label} Error</span>
+              <span className="text-xs text-destructive font-medium">{ERROR_TITLES[kind]}</span>
               {state.error.runtimeUnavailable && (
                 <button
                   type="button"
@@ -360,7 +417,7 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
       // so this shows only before the first diagram lands.
       return <DiagramPending block={block} kind={kind} />;
     },
-    [block, kind, label, sourceOnError],
+    [block, kind, sourceOnError],
   );
 
   const viewerProps = {
@@ -376,17 +433,18 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
   };
 
   return (
-    <>
+    <DiagramSourceVerdictContext.Provider value={sourceVerdict}>
       {/* `annotation-exclude`: the text highlighter never enters a diagram,
           so a text restore (a reply that lost its anchor, a quote that also
           appears in a node label) can never wrap a <mark> inside the svg. */}
       <div ref={rootRef} className="annotation-exclude my-5 group relative" data-block-id={block.id} data-pinpoint-ignore="" data-diagram-block={kind} {...sourceLineAttrs(block)}>
         {svgReady && !showSource && (
           <div data-print-hide="" className="absolute top-2 right-2 z-10 flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity">
+            <CopySourceButton source={block.content} />
             <button
               type="button"
               onClick={() => setShowSource(true)}
-              className="p-1.5 rounded-md bg-muted/85 hover:bg-muted text-muted-foreground hover:text-foreground"
+              className={ICON_BUTTON}
               title="Show source"
               aria-label="Show source"
             >
@@ -397,7 +455,7 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
             <button
               type="button"
               onClick={() => setIsExpanded(true)}
-              className="p-1.5 rounded-md bg-muted/85 hover:bg-muted text-muted-foreground hover:text-foreground"
+              className={ICON_BUTTON}
               title="Expand diagram"
               aria-label="Expand diagram"
               data-diagram-expand=""
@@ -408,30 +466,43 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
             </button>
           </div>
         )}
-        {showSource ? (
+        {showSource && sourceAccepted ? (
           <div className="relative">
-            <button
-              type="button"
-              onClick={() => setShowSource(false)}
-              className="absolute top-2 right-2 z-10 p-1.5 rounded-md bg-muted/85 hover:bg-muted text-muted-foreground hover:text-foreground"
-              title="Show diagram"
-              aria-label="Show diagram"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-              </svg>
-            </button>
+            <div data-print-hide="" className="absolute top-2 right-2 z-10 flex items-center gap-1">
+              <CopySourceButton source={block.content} />
+              <button
+                type="button"
+                onClick={() => setShowSource(false)}
+                className={ICON_BUTTON}
+                title="Show diagram"
+                aria-label="Show diagram"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+              </button>
+            </div>
             <DiagramInlineSource block={block} kind={kind} />
           </div>
         ) : (
           <div
             data-diagram-inline=""
             className={svgReady ? 'rounded-xl bg-muted/30 border border-border/30 overflow-hidden' : undefined}
-            style={svgReady ? { height: inlineHeight(renderState) } : undefined}
+            style={
+              svgReady
+                ? { height: controlsReservePx > 0 ? `calc(${inlineHeight(renderState)} + ${controlsReservePx}px)` : inlineHeight(renderState) }
+                : undefined
+            }
           >
             <DiagramViewer
               {...viewerProps}
               renderId={`${kind}-${block.id}`}
+              // In the document a plain wheel scrolls the page past the
+              // diagram; Ctrl/Cmd+wheel and a pinch zoom it. The popout
+              // (below) zooms on a plain wheel.
+              wheelZoom="modifier"
+              fitAtMostNaturalSize
+              controlsReserve={controlsReserve}
               onAskAI={handleAskAI}
               onResolutionChange={setResolution}
               onRenderState={setRenderState}
@@ -451,7 +522,7 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
               {...viewerProps}
               open
               onClose={() => setIsExpanded(false)}
-              title={`${label} diagram`}
+              title={POPOUT_TITLES[kind]}
               renderId={`${kind}-${block.id}-popout`}
               onAskAI={handlePopoutAskAI}
               onComposerAnchor={popoutComposerAnchor}
@@ -460,6 +531,6 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
           </Suspense>
         </LazyBlockBoundary>
       )}
-    </>
+    </DiagramSourceVerdictContext.Provider>
   );
 };

@@ -40,7 +40,7 @@ export const CommentMeta: React.FC<CommentMetaProps> = ({
         <ConventionalLabelBadge label={conventionalLabel} decorations={decorations} />
       )}
       {reviewProfileLabel ? (
-        <span className="flex-none text-xs px-1.5 py-0.5 rounded bg-accent/10 text-accent/90 truncate max-w-[45%]" title={reviewProfileLabel}>
+        <span className="flex-none text-xs px-1.5 py-0.5 rounded bg-accent/10 text-accent-text/90 truncate max-w-[45%]" title={reviewProfileLabel}>
           {reviewProfileLabel}
         </span>
       ) : source ? (

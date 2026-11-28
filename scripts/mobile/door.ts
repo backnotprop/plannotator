@@ -14,8 +14,17 @@
  * the door does not have.
  */
 import { doorRouteOf, doorRouteTable } from '../../packages/server/inbox-devices';
+import { DOOR_CONTRACT } from '../../packages/server/inbox-door-version';
 import { DOOR_WRITES } from '../../packages/server/inbox-outbox';
-import { OUT, VERSION_FILE, cli, contractVersion, jsonText, type Output } from './lib';
+import { OUT, VERSION_FILE, cli, jsonText, type Output } from './lib';
+
+/**
+ * The contract's number: the door's own (packages/server/inbox-door-version.ts DOOR_CONTRACT), which rises only for
+ * a breaking wire change. generateDoor writes it to VERSION; Wire.swift compiles it in as `wireContract`.
+ */
+export function contractVersion(): number {
+  return DOOR_CONTRACT;
+}
 
 /** The name a collection's id takes in a path (`threads/:id` -> `{thread}`), and its word in a call's name. */
 const COLLECTIONS: Record<string, { word: string; param: string }> = {
@@ -32,6 +41,7 @@ const COLLECTIONS: Record<string, { word: string; param: string }> = {
   cards: { word: 'card', param: 'card' },
   combine: { word: 'combine', param: 'combine' },
   actions: { word: 'action', param: 'action' },
+  scheduled: { word: 'routine', param: 'routine' },
 };
 
 /**
@@ -42,8 +52,9 @@ const BYTES = new Set([
   'GET whats-new/image', 'GET projects/:id/picture', 'GET threads/:id/decisions', 'GET attachments/:id/image', 'GET attachments/:id/video',
   'GET attachments/:id/audio', 'GET attachments/:id/download', 'GET attachments/:id/markdown-image', 'GET attachments/:id/linked-page',
   'GET markups/:id', 'GET messages/:id/image', 'GET html-assets/:id/:path', 'GET uploads/:id/image', 'GET open-in/file/raw',
+  'GET messages/:id/guide/review-image', 'GET messages/:id/guide/review-markdown-image',
 ]);
-const RANGE = new Set(['GET attachments/:id/video', 'GET attachments/:id/audio', 'GET attachments/:id/download', 'GET open-in/file/raw']);
+const RANGE = new Set(['GET attachments/:id/video', 'GET attachments/:id/audio', 'GET attachments/:id/download', 'GET messages/:id/image', 'GET open-in/file/raw']);
 const STREAM = new Set(['GET events']);
 
 export type DoorEntry = {
@@ -90,7 +101,7 @@ function writeKind(path: string): string | null {
 }
 
 /** A sample a parameter accepts, from the door's own pattern: asks the door which window route a path reaches. */
-const SAMPLES = ['id_SAMPLE', 'crd_SAMPLE', 'cmb_SAMPLE', 'a-0123abcd', 'path/SAMPLE'];
+const SAMPLES = ['id_SAMPLE', 'crd_SAMPLE', 'cmb_SAMPLE', 'sch_SAMPLE', 'a-0123abcd', 'path/SAMPLE'];
 
 export function doorEntries(): DoorEntry[] {
   const entries = doorRouteTable().map((row): DoorEntry => {

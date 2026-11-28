@@ -348,7 +348,7 @@ describe("the lease", () => {
     });
   });
 
-  test("the hook is gone and the host says the session went on: withdrawn at once, without waiting out the lease", async () => {
+  test("the hook is gone and the host says the session went on: withdrawn after the grace, without waiting out the lease", async () => {
     const { store, clock, host, permissions, call } = setup();
     const { body } = await call({ key: KEY, request_id: "req-00000011", event: EVENT });
     clock.now += 2_000;
@@ -401,6 +401,35 @@ describe("the lease", () => {
     expect(((await response.json()) as { choice: string }).choice).toBe("deny");
   });
 
+  test("an Inbox restart with the session busy: the adopted question waits for the hook to come back, and is withdrawn only if it does not", async () => {
+    const first = setup();
+    const { body } = await first.call({ key: KEY, request_id: "req-00000013", event: EVENT });
+    first.clock.now += 30_000;
+    // The restarted Inbox's first host read says busy (a background worker is blocked on the prompt) before the hook's retry lands.
+    const host = { state: { status: "busy", state: "running", waitingFor: null } as InboxRunHostState, readAt: first.clock.now + 1_000 };
+    const restarted = createLaunchPermissions({
+      store: first.store,
+      launchDir: () => first.launchDir,
+      rootOf: () => first.store.message(first.root.id),
+      roots: () => [first.store.message(first.root.id)!],
+      displayFolder: (path) => path.replace("/work", "~"),
+      host: { stateOf: () => host.state, readAt: () => host.readAt },
+      onChange: () => {},
+      now: () => first.clock.now,
+      holdMs: 0,
+      leaseMs: LEASE,
+    });
+    restarted.sweep();
+    first.clock.now += 1_000;
+    restarted.sweep();
+    expect(first.store.questionsOf(body.message_id!)[0]!.state).toBe("open");
+    // The hook never came back: Claude Code ended it, so the person answered in Terminal.
+    first.clock.now += 5_000;
+    host.readAt = first.clock.now;
+    restarted.sweep();
+    expect(first.store.message(first.store.threadMessageIds(first.root.id).at(-1)!)!.body).toBe("Answered in Terminal.");
+  });
+
   test("Stop withdraws at once", async () => {
     const { store, root, permissions, call } = setup();
     const { body } = await call({ key: KEY, request_id: "req-00000009", event: EVENT });
@@ -421,6 +450,31 @@ describe("the lease", () => {
     permissions.sweep();
     expect(store.questionsOf(asked.body.message_id!)[0]!.state).toBe("open");
     expect((await held).body.status).toBe("waiting");
+    host.readAt = Date.now();
+    permissions.sweep();
+    expect(store.questionsOf(asked.body.message_id!)[0]!.state).toBe("open");
+  });
+
+  test("between calls, a fresh busy host read keeps the card open until the hook stops polling", async () => {
+    const { store, clock, host, permissions, call } = setup();
+    const { body } = await call({ key: KEY, request_id: "req-00000012", event: EVENT });
+    host.state = { status: "busy", state: "running", waitingFor: null };
+    for (let i = 0; i < 3; i++) {
+      clock.now += 25_000;
+      expect((await call({ key: KEY, request_id: "req-00000012", event: EVENT, message_id: body.message_id })).body.status).toBe("waiting");
+      host.readAt = clock.now;
+      permissions.sweep();
+      expect(store.questionsOf(body.message_id!)[0]!.state).toBe("open");
+      clock.now += 2_000;
+      host.readAt = clock.now;
+      permissions.sweep();
+      expect(store.questionsOf(body.message_id!)[0]!.state).toBe("open");
+    }
+    clock.now += 3_000;
+    host.readAt = clock.now;
+    permissions.sweep();
+    expect(store.questionsOf(body.message_id!)[0]!.state).toBe("superseded");
+    expect(store.message(store.threadMessageIds(store.message(body.message_id!)!.thread_id).at(-1)!)!.body).toBe("Answered in Terminal.");
   });
 });
 

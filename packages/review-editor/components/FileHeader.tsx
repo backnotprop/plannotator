@@ -1,4 +1,4 @@
-import { SemanticFileBadge } from './SemanticFileBadge';
+import { SemanticFileBadge, type SemanticFileSwitch } from './SemanticFileBadge';
 import { COMPACT_FILE_HEADER_HEIGHT } from '../utils/diffChromeMetrics';
 import { EllipsisName } from './EllipsisName';
 import React, { useRef } from 'react';
@@ -71,7 +71,7 @@ interface FileHeaderProps {
   renderMarkdownView?: (fit: { iconOnly: boolean; touch: boolean }) => React.ReactNode;
   /** A host control drawn before the view menu (code review's Changes | Whole file switch). */
   accessory?: React.ReactNode;
-  semanticNote?: React.ReactNode;
+  semantic?: SemanticFileSwitch;
   /** A host's own "Open in" (the Inbox's, where a read-only header has none), in the place the app's sits. */
   openIn?: React.ReactNode;
   /**
@@ -143,7 +143,7 @@ const FileHeaderView: React.FC<FileHeaderProps> = ({
   isTest = false,
   renderMarkdownView,
   accessory,
-  semanticNote,
+  semantic,
   openIn,
   keepsFolder = false,
   openInLine,
@@ -236,8 +236,7 @@ const FileHeaderView: React.FC<FileHeaderProps> = ({
       </div>
       {!isCompactTouchLayout && <div className={`flex flex-shrink-0 items-center pl-2 gap-1`}>
         <CallFlowFileBadge filePath={filePath} oldPath={oldPath} />
-        <SemanticFileBadge filePath={filePath} />
-        {semanticNote}
+        <SemanticFileBadge filePath={filePath} semantic={semantic} />
         {openIn}
         {!readOnly && <OpenInAppButton
           quiet
@@ -361,7 +360,7 @@ const FileHeaderView: React.FC<FileHeaderProps> = ({
           </button>
         )}
       </div>}
-      {isCompactTouchLayout && semanticNote}
+      {isCompactTouchLayout && semantic && <SemanticFileBadge filePath={filePath} semantic={semantic} touch />}
       {isCompactTouchLayout && readOnly && renderMarkdownView?.({ iconOnly: false, touch: true })}
       {isCompactTouchLayout && !readOnly && (
         <CompactFileActions

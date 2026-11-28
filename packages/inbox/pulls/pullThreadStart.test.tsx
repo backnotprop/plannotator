@@ -423,8 +423,8 @@ test.skipIf(!hasDom)("a thread that started but isn't tied is never started agai
   expect(field().value).toBe('And the tests?');
   // Left and opened again: the PR's page offers the thread, and the empty thread says so at once.
   await escape();
-  expect($('[data-launch-door="thread"] .ib-lp-sub')!.textContent).toBe('A thread started here, but it isn’t tied to this pull request yet.');
-  await click('[data-launch-go="untied-thread"]');
+  expect($('[data-launch-line="untied-thread"] .ib-lp-line-t')!.textContent).toBe('A thread started here, but it isn’t tied to this pull request yet.');
+  await click('[data-launch-line="untied-thread"]');
   expect(went).toEqual(['thread thr_new']);
   act(() => root!.unmount());
   host!.remove();

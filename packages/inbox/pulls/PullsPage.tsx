@@ -14,9 +14,9 @@
  *   chip only when the Board is on and a card links it; Reply at the foot goes
  *   into the review thread. No merge button.
  * - A single open PR opens its launchpad instead (PullLaunchpad.tsx, approval
- *   "pr-launchpad"): the ways into it (guided review, the diff, the review
- *   thread; its Shape board and System only while those are on), then its
- *   details. Starting a review is this view's: the New review box, filled in
+ *   "pr-launchpad"): one row of buttons (Open the diff, Guided review, Picture
+ *   it, Start a thread), a line for each
+ *   thing made for it, then its details. Starting a review is this view's: the New review box, filled in
  *   with the PR. A Reviews row about one open PR opens it, also once an agent
  *   reviewed that PR (`reviewRowLaunchpad`, the owner's answer, 2026-11-09).
  *
@@ -27,11 +27,17 @@
  *
  * Read only while the page is open (usePulls). No new keyboard shortcuts.
  */
-import { reviewBoxPull, type ReviewBoxBranch, type ReviewBoxPull } from '../compose/reviewBox';
-import { forwardRef, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { type InboxPull, type InboxPullItem, type InboxPullLink, type InboxPullRiskJudgment, type InboxPullsAnswer, type InboxPullStack, type InboxReviewRow } from '@plannotator/core/inbox-types';
+import { reviewBoxPull, type ReviewBoxPull, type ReviewBoxRequest } from '../compose/reviewBox';
+import { OnThisComputer } from './OnThisComputer';
+import { LocalDiffPane } from './LocalDiffPane';
+import { closeLocal, openLocal } from './localNav';
+import { localOpenKey, type LocalOpen } from './localRoute';
+/** App's Reviews list reads PullsPage's address props through here (localRoute.ts). */
+export { pullsPageAddress } from './localRoute';
+import { forwardRef, useContext, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { inboxPullIsOpen, type InboxPull, type InboxPullItem, type InboxPullLink, type InboxPullRiskJudgment, type InboxPullsAnswer, type InboxPullStack, type InboxReviewRow } from '@plannotator/core/inbox-types';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
-import { InboxApiError, inboxApi, type InboxShapeSummary, type ProjectFolder } from '../api';
+import { InboxApiError, inboxApi, type ProjectFolder } from '../api';
 import { Icon } from '../icons';
 import { RefMarkIcon } from '../board/RefMark';
 import { RowAgentTiles } from '../components/RowAgents';
@@ -60,6 +66,8 @@ import {
 } from './model';
 import { PullFilterControl, PullScopeLine, useFilterTrigger } from './PullFilter';
 import { ReviewsList, ReviewsMenu, reviewLinksOf } from './ReviewsList';
+import { PageShipLog, ShipsContext, useShipping } from './useShipping';
+import { selectedLayerOf } from './selectedLayer';
 import { reviewRowLaunchpad, reviewRowProjects, reviewRowsIn } from './reviewsModel';
 import { forgeName } from './labels';
 import { answeredClis } from './notices';
@@ -75,6 +83,7 @@ import { RiskFilter } from './RiskFilter';
 import { COULD_NOT_RANK, RiskMark } from './RiskMark';
 import { RiskRulesDialog } from './RiskRulesDialog';
 import { usePullRisk } from './usePullRisk';
+import { RiskWaitingDialog } from './RiskWaitingDialog';
 import { landsNextLayer, layerBaseWords, stackLink, startLayer } from './topology';
 import type { PullsState } from './usePulls';
 import type { SystemProjectRow } from '@plannotator/core/inbox-system';
@@ -83,6 +92,8 @@ import { SystemPane } from '../system/SystemPane';
 import type { ReactNode } from 'react';
 import type { InboxToastModel } from '../components/Toast';
 import { focusWhenGone, hiddenLabel, hideWithUndo, itemsBy, showRepoWithToast, showWithToast } from './hiddenPulls';
+import { useKeptStack } from './keptStack';
+import { withShipState } from './routePull';
 
 /** System in Reviews: present only while System shows (`systemShown`). */
 export interface PullsSystem {
@@ -104,6 +115,8 @@ export interface PullsPageProps {
   state: PullsState;
   /** The stack open beside the list (its id, or any layer's key), or null. */
   stackId: string | null;
+  /** The layer the list shows selected: the one open, or the one whose diff closed back to its stack or to the list (`Route.backLayer`). */
+  layerId?: string | null;
   project: string | null;
   /** The list's view (`&view=`): All, Mine, To review or Others. */
   filter: PullFilter;
@@ -135,14 +148,14 @@ export interface PullsPageProps {
   /** Absent while the Board is off (no card chip shows then: the answer has no cards). */
   onOpenCard?: (cardId: string) => void;
   /** A PR nobody is reviewing: the New review box, filled in with it. */
-  onNewReview: (pick: ReviewBoxPull, opener: HTMLElement) => void;
-  /** Branch reviews' "Branches nobody reported": New review with that branch, in its project. */
-  onReviewBranch?: (branch: ReviewBoxBranch, opener: HTMLElement) => void;
+  onNewReview: (pick: ReviewBoxPull, opener: HTMLElement, ask?: 'picture_it') => void;
+  /** "On this computer": the row whose diff is open beside the list (`&local=`), or null. */
+  local?: LocalOpen | null;
+  /** An "On this computer" diff's Review with an agent: New review on that branch, or on that project's uncommitted changes. */
+  onReviewLocal?: (review: ReviewBoxRequest, opener: HTMLElement) => void;
   /** The launchpad's Guided review: that message's guide in its thread. Absent: the thread. */
   onOpenGuide?: (threadId: string, messageId: string) => void;
-  /** Shape boards by thread (`useInboxShapes` `byThread`); absent or null while Shape is off: the launchpad has no Shape door. */
-  shapes?: ReadonlyMap<string, InboxShapeSummary> | null;
-  onOpenShape?: (shape: InboxShapeSummary) => void;
+  onOpenPicture?: (threadId: string, attachmentId: string | null, messageId: string) => void;
   /** System's button and drawing; absent while System does not show. */
   system?: PullsSystem | null;
   /**
@@ -177,10 +190,14 @@ export function PullsPage(given: PullsPageProps) {
   const { state, phone } = props;
   const groups = useMemo(() => (model ? pullGroups(model, props.project, props.filter) : null), [model, props.project, props.filter]);
   // A stack the address names opens even when the view leaves it out (a link like `view=mine&stack=…`): never a blank pane.
-  const open = useMemo(() => {
+  const found = useMemo(() => {
     if (!groups || !model || !props.stackId) return null;
     return findStack(groups, props.stackId) ?? (props.filter === 'all' ? null : findStack(pullGroups(model, props.project), props.stackId));
   }, [groups, model, props.stackId, props.filter, props.project]);
+  // The list no longer naming the open stack leaves its pane as it is, its draft too (keptStack.ts).
+  const open = useKeptStack(found, props.stackId, model);
+  // The list a layer's diff closed back to (`#reviews&back=`, no stack open): that layer's stack is the open row.
+  const listed = open ?? (groups && !props.stackId && props.layerId ? findStack(groups, props.layerId) : null);
   const rows = useMemo(() => (answer ? reviewRowsIn(answer, props.project, props.filter) : null), [answer, props.project, props.filter]);
   // Risk ranking (inbox-pull-risk.ts). The filter acts only once rules exist, and never closes the stack open beside the list.
   const risk = usePullRisk(model);
@@ -189,6 +206,7 @@ export function PullsPage(given: PullsPageProps) {
   const riskFailed: RiskFailures = risk.answer?.failed ?? NO_FAILURES;
   const [riskFilter, setRiskFilter] = useState<RiskFilterValue>(readRiskFilter);
   const [rulesOpen, setRulesOpen] = useState(false);
+  const riskAsked = useRef(new Set<string>());
   /** The Reviews row whose menu is open (ReviewsMenu). */
   const [menuRow, setMenuRow] = useState<string | null>(null);
   const activeRisk = rulesSet ? riskFilter : 'all';
@@ -198,6 +216,8 @@ export function PullsPage(given: PullsPageProps) {
   const system = props.system ?? null;
   // The drawing shows while no PR's pane does: a PR opened from it closes back to it.
   const systemOpen = system?.open && !open ? system.open : null;
+  // An "On this computer" diff, while no PR's pane is open.
+  const localOpen = !open ? (props.local ?? null) : null;
   // The drawing closed (its ×, Escape, a phone's "Reviews"): the focus it held returns to the System button.
   const drawingWas = useRef(system?.open ?? null);
   useEffect(() => {
@@ -210,6 +230,7 @@ export function PullsPage(given: PullsPageProps) {
     });
   }, [system?.open]);
   const projectName = props.project ? (props.projectNames.get(props.project) ?? offered.find((p) => p.id === props.project)?.name ?? null) : null;
+  const shipping = useShipping(answer, phone, props.onToast, state.reload);
 
   const list = (
     <section className={`ib-listcol${phone ? '' : ' ib-narrow ib-resizable'} ib-prlist`} aria-label="Reviews" data-pulls-list="">
@@ -262,6 +283,7 @@ export function PullsPage(given: PullsPageProps) {
         links={model && answer ? reviewLinksOf(model, answer) : NO_LINKS}
         phone={phone}
         onTarget={setMenuRow}
+        ship={shipping.handlers}
         onHide={(pulls) => {
           // The PR open beside the list leaves with its row.
           if (open && pulls.some((pull) => open.stack.layers.some((layer) => layer.key === pull.key))) props.onOpenStack(null);
@@ -298,8 +320,10 @@ export function PullsPage(given: PullsPageProps) {
             notRanked={ranked.notRanked}
             judgments={judgments}
             riskFailed={riskFailed}
+            autoRuns={risk.answer?.auto_runs}
             projectNames={props.projectNames}
-            selected={props.threadId ?? open?.stack.id ?? null}
+            selected={props.threadId ?? listed?.stack.id ?? null}
+            selectedLayer={selectedLayerOf(listed?.stack.id ?? null, props)}
             phone={phone}
             onOpen={(row) => {
               // One open PR opens its launchpad, reviewed or not; else a review its thread, a listed stack its page.
@@ -308,22 +332,27 @@ export function PullsPage(given: PullsPageProps) {
               else if (row.reviewed && row.thread_id) props.onOpenThread(row.thread_id);
               else props.onOpenStack(row.stacks[0]?.id ?? null);
             }}
+            // A layer's row opens that layer's diff, as the stack's page and the board open one.
+            onOpenLayer={(row, layer) => props.onReview(row.stacks[0]!.id, layer.key, 'layer')}
             onNew={props.onNew}
             menuRow={menuRow}
+            ships={shipping.ships}
             onShowAgain={(hidden) => void showWithToast([hidden.key], [hiddenLabel(hidden)], props.onToast)}
             onShowRepo={(repo) => void showRepoWithToast(repo, props.onToast)}
             onOpenThread={props.onOpenThread}
             project={props.project}
-            onReviewBranch={props.onReviewBranch ? (branch, opener) => props.onReviewBranch!({ name: branch.branch, projectId: branch.project_id }, opener) : undefined}
+            localGroup={(fold) => <OnThisComputer project={props.project} projectNames={props.projectNames} openKey={localOpenKey(localOpen)} phone={phone} readAgain={answer} fold={fold} onOpen={(what) => openLocal(what, phone)} />}
           />
         )}
       </ReviewsMenu>
+      {shipping.log}
       <PullsFoot model={model} loading={state.loading} error={model ? state.error : null} onRefresh={state.refresh} />
       {!phone && <ListColumnEdge onCollapse={props.threadId ? props.onHide : undefined} />}
       {rulesOpen && risk.answer && (
         <RiskRulesDialog
           answer={risk.answer}
           onClose={() => setRulesOpen(false)}
+          onAsked={(keys) => keys.forEach((key) => riskAsked.current.add(key))}
           onSaved={(next) => {
             risk.setAnswer(next);
             setRulesOpen(false);
@@ -332,6 +361,7 @@ export function PullsPage(given: PullsPageProps) {
           }}
         />
       )}
+      <RiskWaitingDialog answer={risk.answer} pulls={model?.pulls ?? null} blocked={rulesOpen || !!props.threadId} asked={riskAsked.current} onAnswer={risk.setAnswer} />
     </section>
   );
 
@@ -351,16 +381,37 @@ export function PullsPage(given: PullsPageProps) {
         onOpenStack={(key) => props.onOpenStack(key)}
       />
     ) : null;
+  const localPane = localOpen ? (
+    <LocalDiffPane
+      key={localOpenKey(localOpen)}
+      open={localOpen}
+      projectName={props.projectNames.get(localOpen.project) ?? null}
+      phone={phone}
+      stacked={!!props.stacked}
+      onClose={closeLocal}
+      // A folder's whole work is no project's uncommitted changes nor a branch's diff: New review has no such work, so no button.
+      onReview={props.onReviewLocal && !localOpen.folder ? (opener) => props.onReviewLocal!(localOpen.branch ? { branch: { name: localOpen.branch, projectId: localOpen.project } } : { project: localOpen.project }, opener) : undefined}
+    />
+  ) : null;
   if (phone && open && model) {
-    return <StackView key={open.stack.id} {...props} item={open} model={model} judgments={judgments} riskFailed={riskFailed} phone onClose={() => props.onOpenStack(null)} />;
+    return (
+      <ShipsContext.Provider value={shipping.handlers}>
+        <StackView key={open.stack.id} {...props} item={open} model={model} judgments={judgments} riskFailed={riskFailed} phone onClose={() => props.onOpenStack(null)} />
+      </ShipsContext.Provider>
+    );
   }
+  if (phone && localPane) return localPane;
   if (phone && drawing) return drawing;
   return (
     <>
       {list}
       {!phone &&
         (open && model ? (
-          <StackView key={open.stack.id} {...props} item={open} model={model} judgments={judgments} riskFailed={riskFailed} phone={false} onClose={() => props.onOpenStack(null)} />
+          <ShipsContext.Provider value={shipping.handlers}>
+            <StackView key={open.stack.id} {...props} item={open} model={model} judgments={judgments} riskFailed={riskFailed} phone={false} onClose={() => props.onOpenStack(null)} />
+          </ShipsContext.Provider>
+        ) : localPane ? (
+          localPane
         ) : drawing ? (
           drawing
         ) : (
@@ -444,7 +495,9 @@ function PullsFoot({ model, loading, error, onRefresh }: { model: InboxPullsAnsw
 
 function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPullsAnswer; judgments: RiskJudgments; riskFailed: RiskFailures; phone: boolean; onClose: () => void }) {
   const { item, model, phone, judgments, riskFailed } = props;
-  const stack = item.stack;
+  // A layer whose ship merged says merged here, as its Reviews row's "Merged <time>" does (the launchpad reads no forge).
+  const ships = useContext(ShipsContext)?.ships;
+  const stack = useMemo(() => withShipState(item.stack, ships), [item.stack, ships]);
   // The stack's one review thread: its lowest open linked layer's (`stackLink`), whoever else linked a layer above.
   const link = stackLink(stack, model.links);
   const agent = linkAgentName(link);
@@ -552,22 +605,24 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
         )}
       </>
     ) : null;
-  // One open PR opens its launchpad; a stack of several keeps this page.
-  if (stack.layers.length === 1 && start) {
-    const newReview = (opener: HTMLElement) => props.onNewReview(reviewBoxPull(stack, { reviewed: false, thread_id: null, link, review: null }, model.links, projects), opener);
+  // One open PR opens its launchpad; a stack of several keeps this page. One that merged or closed while its page was
+  // open (held: keptStack.ts) keeps its launchpad, its state mark the forge's, and a thread being started stays.
+  const lone = stack.layers.length === 1 ? (start ?? (open.length === 0 ? stack.layers[0]! : null)) : null;
+  if (lone) {
+    const newReview = (opener: HTMLElement, ask?: 'picture_it') => props.onNewReview(reviewBoxPull(stack, { reviewed: false, thread_id: null, link, review: null }, model.links, projects), opener, ask);
     const hide = () => {
       // The pane closes onto a row that leaves with it: focus goes to the Reviews row now in its place.
       const list = () => document.querySelector('.pn-inbox .ib-lbody');
       const gone = list()?.querySelector(`[data-pulls-row="${CSS.escape(props.item.stack.id)}"]`)?.getAttribute('data-reviews-row');
       if (gone) focusWhenGone(itemsBy(list, 'data-reviews-row'), gone, () => document.querySelector<HTMLElement>('[data-pulls-heading]'));
       props.onClose();
-      void hideWithUndo([start], props.onToast);
+      void hideWithUndo([lone], props.onToast);
     };
-    if (drafting && canStartPullThread(start, link, projects)) {
+    if (drafting && (canStartPullThread(lone, link, projects) || !inboxPullIsOpen(lone))) {
       return (
         <PullThreadStart
           stack={stack}
-          pr={start}
+          pr={lone}
           projects={projects}
           phone={phone}
           stacked={!phone && !!props.stacked}
@@ -578,8 +633,8 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
             // Back on the PR's page, on the button that left it.
             requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-pulls-stack="${CSS.escape(stack.id)}"] [data-launch-go="start-thread"]`)?.focus());
           }}
-          onGuide={canStart ? newReview : null}
-          onDiff={() => props.onReview(stack.id, start.key, 'layer')}
+          onGuide={canStart ? (opener) => newReview(opener) : null}
+          onDiff={() => props.onReview(stack.id, lone.key, 'layer')}
           onStarted={(threadId, carried) => {
             props.state.reload();
             props.onOpenThread(threadId, true, carried || true);
@@ -595,24 +650,24 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
     return (
       <PullLaunchpad
         stack={stack}
-        pr={start}
+        pr={lone}
         link={link}
         mentioned={mentioned}
         phone={phone}
         stacked={!phone && !!props.stacked}
         now={now}
         heading={heading}
-        start={canStart ? { kind: link && !mentioned ? 'again' : 'review', onStart: newReview } : null}
-        startThread={canStartPullThread(start, link, projects) ? () => setDrafting(true) : null}
-        untiedThread={link ? null : untiedPullThread(start.key)}
-        shapes={props.shapes ?? null}
-        system={!!props.system}
+        start={canStart ? { onStart: (opener) => newReview(opener), onPictureIt: (opener) => newReview(opener, 'picture_it') } : null}
+        startThread={canStartPullThread(lone, link, projects) ? () => setDrafting(true) : null}
+        untiedThread={link ? null : untiedPullThread(lone.key)}
         risk={riskLines}
+        ship={<PageShipLog pullKey={lone.key} />}
         onClose={props.onClose}
-        onDiff={() => props.onReview(stack.id, start.key, 'layer')}
+        onDiff={() => props.onReview(stack.id, lone.key, 'layer')}
         onThread={props.onOpenThread}
         onGuide={(thread, message) => (props.onOpenGuide ? props.onOpenGuide(thread, message) : props.onOpenThread(thread))}
-        onShape={(shape) => props.onOpenShape?.(shape)}
+        onPicture={(thread, page) => (props.onOpenPicture ? props.onOpenPicture(thread, page.attachment_id, page.message_id) : props.onOpenThread(thread))}
+        onAsked={props.state.reload}
         onHide={hide}
         foot={link?.last && !ended ? <StackReply key={link.thread_id} link={link} agent={agent ?? 'the agent'} onOpenThread={() => props.onOpenThread(link.thread_id)} /> : null}
       />

@@ -310,7 +310,7 @@ test('one project everywhere: its list, the thread, search, the menu and a reloa
   // The ⋯ menu of a combined project is any project's: undoing later is the agent's, not the window's.
   await page.goto(world.url);
   await row(page, 'docs').locator('.ib-pmore').click({ force: true });
-  await expect(menu(page).getByRole('menuitem')).toHaveText(['Mark all as read', 'Archive all', 'Rename…']);
+  await expect(menu(page).getByRole('menuitem')).toHaveText(['Mark all as read', 'Archive all', 'Add tag', 'Rename…']);
   await page.keyboard.press('Escape');
   await expect.poll(() => rowProject(page, threads.docs)).toBe('docs');
 });

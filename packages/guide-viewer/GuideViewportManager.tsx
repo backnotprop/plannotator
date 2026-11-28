@@ -6,6 +6,7 @@ import React, {
   useState,
   useSyncExternalStore,
   type ReactNode,
+  type RefObject,
 } from 'react';
 
 const INITIAL_MOUNTED_CODE_VIEWS = 2;
@@ -620,19 +621,29 @@ export function GuideViewportProvider({
   children,
   className,
   eager = false,
+  rootRef,
 }: {
   children: ReactNode;
   className?: string;
   /** Mount every registered shell immediately and keep it mounted (small guides). */
   eager?: boolean;
+  /** Also given the host element, for a host's own listeners on the guide. */
+  rootRef?: RefObject<HTMLDivElement | null>;
 }) {
   const [manager] = useState(() => new GuideViewportManager(eager));
   useEffect(() => {
     manager.setEager(eager);
   }, [manager, eager]);
+  const attach = useCallback(
+    (host: HTMLDivElement | null) => {
+      manager.attachHost(host);
+      if (rootRef) rootRef.current = host;
+    },
+    [manager, rootRef],
+  );
   return (
     <GuideViewportContext.Provider value={manager}>
-      <div ref={manager.attachHost} className={className}>
+      <div ref={attach} className={className}>
         {children}
       </div>
     </GuideViewportContext.Provider>

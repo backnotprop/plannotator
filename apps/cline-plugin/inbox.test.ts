@@ -33,7 +33,8 @@ afterEach(() => {
 });
 
 const TICK = 40;
-const ON = { PLANNOTATOR_INBOX_TOOL: "1" } as NodeJS.ProcessEnv;
+// The switch on, and the scratch data dir counted as one the person turned the Inbox on in (packages/shared/inbox/turned-on.ts).
+const ON = { PLANNOTATOR_INBOX_TOOL: "1", PLANNOTATOR_TEST_INBOX_ON: "1" } as NodeJS.ProcessEnv;
 
 /** One fake Cline session as a plugin sees it: what it emits, what it registered, and its cleanups. */
 class FakeCline {

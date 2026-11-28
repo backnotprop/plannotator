@@ -7,6 +7,13 @@ const isElement = (node: unknown): node is { type: string; props: { children?: u
 const types = (nodes: unknown[]) => nodes.map((node) => (isElement(node) ? node.type : typeof node));
 
 describe("renderInlineMarkdown", () => {
+  it("marks a bare URL as a ref written in prose, never a labelled link (a click on a pasted PR URL opens its card)", () => {
+    const anchors = renderInlineMarkdown("See https://github.com/acme/widgets/pull/12 and [the PR](https://github.com/acme/widgets/pull/12).")
+      .filter(isElement)
+      .filter((node) => node.type === "a") as { props: Record<string, unknown> }[];
+    expect(anchors.map((a) => "data-ref-card-prose" in a.props)).toEqual([true, false]);
+  });
+
   it("renders underscore emphasis", () => {
     const nodes = renderInlineMarkdown("_text_");
     expect(nodes).toHaveLength(1);

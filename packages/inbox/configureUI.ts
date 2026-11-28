@@ -50,6 +50,8 @@ configurePlannotatorUI({
   // Hover cards for issue, PR and MR links: the server fetches with this computer's gh or glab, and Bitbucket Cloud
   // pull requests with the review app's Bitbucket token (ref-cards.ts). Given up after REF_CARD_READ_MS (the card then shows what the Inbox knows), so no read holds a connection for good.
   refCardBitbucket: true,
+  // A click on a #12, an owner/repo#12 or a pasted PR / issue URL in the words opens its card pinned (utils/refCardClick).
+  refCardClick: true,
   refCardTransport: inboxRefTransport((href, signal) => {
     const within = signalWithin(REF_CARD_READ_MS, signal);
     return fetch(inboxUrl(`/ref?url=${encodeURIComponent(href)}`), { signal: within.signal, headers: { accept: 'application/json' } }).finally(within.done);

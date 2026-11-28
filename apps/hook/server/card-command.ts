@@ -16,6 +16,11 @@
  * one; otherwise it is nobody's in particular, the project is the shell's
  * folder, and `list` lists every card in the project.
  *
+ * A paired cloud agent (`PLANNOTATOR_PAIRING`) has no Inbox on its machine: its
+ * card call goes through the agent door, as `plannotator inbox call card` does,
+ * and `--project` names a project as the door takes it (its name, id or git
+ * address), not a folder.
+ *
  * stdout: the tool's text (or its structured result with --json). A refusal
  * goes to stderr as `<code>: <message>` and exits 1; bad usage exits 2.
  */
@@ -24,6 +29,7 @@ import { resolve } from "node:path";
 import { mcpAnswerOf } from "@plannotator/shared/inbox/connection";
 import { inboxEnsureFailedWords, type InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
 import { CARD_COMMAND_USAGE } from "./cli";
+import { runInboxCallCommand, type CallCommandDeps } from "./inbox-call-command";
 import { writeWholeToStdout } from "./write-whole-stdout";
 import { inboxHostSessionFromEnv, inboxProjectFolderFor, inboxSessionProjectFromEnv } from "./inbox-mcp-shim";
 
@@ -107,6 +113,8 @@ export interface CardCommandDeps {
   ensureRunning: () => Promise<InboxRegistryEntry>;
   out?: (text: string) => void | Promise<void>;
   err?: (text: string) => void;
+  /** Tests: the paired call's transport (`CallCommandDeps.pairedTransport`). */
+  pairedTransport?: CallCommandDeps["pairedTransport"];
 }
 
 /** Run `plannotator card …`; resolves to the exit code. */
@@ -121,6 +129,10 @@ export async function runCardCommand(argv: readonly string[], deps: CardCommandD
   if (!parsed.ok) {
     err(`${parsed.error}\n${CARD_COMMAND_USAGE}\n`);
     return 2;
+  }
+  if (deps.env.PLANNOTATOR_PAIRING) {
+    const call = { ...parsed.args, ...(parsed.project !== null ? { project: parsed.project } : {}) };
+    return runInboxCallCommand(["card", JSON.stringify(call)], { cwd: deps.cwd, env: deps.env, ensureRunning: deps.ensureRunning, out, err, text: !parsed.json, ...(deps.pairedTransport ? { pairedTransport: deps.pairedTransport } : {}) });
   }
   // Inside an agent host session the card is that session's, as its plannotator_inbox tool would make it, in that
   // session's project when --project names none (PLANNOTATOR_SESSION_PROJECT), wherever the shell stands.

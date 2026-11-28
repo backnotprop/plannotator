@@ -1,0 +1,53 @@
+/* The Spaces page (src/pages/workspaces/index.astro) was designed as its own
+   page; Base.astro still loads the site's global sheet (Tailwind's reset and
+   the app theme) on it. These rules undo the parts of that sheet that would
+   change the approved design. */
+
+/* Tailwind's reset sets line-height 1.5 on <html>; the design uses the browser's. */
+html {
+  line-height: normal;
+}
+
+/* theme.css turns on Inter's alternate glyphs (ss01, ss02, cv01) for the app,
+   and its Linux variant through font-variant-alternates. */
+html body {
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-feature-settings: normal;
+}
+html:root.pn-os-linux body {
+  font-feature-settings: normal;
+  font-variant-alternates: normal;
+}
+
+/* theme.css holds every transition at 0s (with !important) until the app's
+   ThemeProvider adds .transitions-ready, which this page never loads. Give the
+   page its own motion back; the properties and reduced-motion rules stay in
+   page.css. */
+html:not(.transitions-ready) body .shf-face {
+  transition-duration: 240ms, 240ms !important;
+}
+html:not(.transitions-ready) body .fan-pen {
+  transition-duration: 240ms !important;
+}
+html:not(.transitions-ready) body .proof {
+  transition-duration: 0.5s !important;
+}
+html:not(.transitions-ready) body .pf-at,
+html:not(.transitions-ready) body .pf-chip {
+  transition-duration: 0.2s !important;
+}
+html:not(.transitions-ready) body .pf-quote,
+html:not(.transitions-ready) body .pf-contrib,
+html:not(.transitions-ready) body .pf-foot,
+html:not(.transitions-ready) body .pf-note,
+html:not(.transitions-ready) body .pf-item {
+  transition-duration: 0.4s !important;
+}
+html:not(.transitions-ready) body .lk-p[data-state="closed"] {
+  transition-duration: 110ms, 110ms, 0s !important;
+}
+html:not(.transitions-ready) body .lk-p[data-state="open"] {
+  transition-duration: 150ms, 200ms, 0s !important;
+}

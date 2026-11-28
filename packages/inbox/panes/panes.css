@@ -27,11 +27,13 @@
 /* A pane is moved by its header. */
 .ib-layout .ib-phead { cursor: grab; }
 .ib-layout > .pierre-layout-pane[data-pane-dragging] { opacity: 0.55; }
-/* The pane the person is not in: its header quieter, so the active one reads as the one keys and typing go to. */
-[data-pane-quiet] > .pierre-layout-pane-inner .ib-phead { background: color-mix(in oklch, var(--muted) 55%, var(--card)); }
+/* The pane the person is not in: its header tinted and its title in the secondary text colour and weight, so the
+   active one (the card's own header, its title in the text colour) reads as the one keys and typing go to. No border
+   or ring marks either. */
+[data-pane-quiet] > .pierre-layout-pane-inner .ib-phead { background: var(--muted); }
 /* Dark themes put --muted barely above --card: the quiet header sinks toward the window's background instead. */
-.dark [data-pane-quiet] > .pierre-layout-pane-inner .ib-phead { background: color-mix(in oklch, var(--background) 70%, var(--card)); }
-[data-pane-quiet] > .pierre-layout-pane-inner .ib-phead :is(.ib-subject, .ib-phsubj) { color: var(--muted-foreground); }
+.dark [data-pane-quiet] > .pierre-layout-pane-inner .ib-phead { background: color-mix(in oklch, var(--background) 88%, var(--card)); }
+[data-pane-quiet] > .pierre-layout-pane-inner .ib-phead :is(.ib-subject, .ib-phsubj) { color: var(--muted-foreground); font-weight: 500; }
 
 /* A pane carried by its header (paneDrag.ts): its pill; and where letting go puts a pane or a row's thread (paneDrop.ts). */
 :root[data-ib-dragging], :root[data-ib-dragging] * { cursor: grabbing !important; user-select: none !important; }

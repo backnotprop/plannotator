@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { InboxMessage, InboxProject, InboxTag } from "@plannotator/core/inbox-types";
+import type { InboxMessage, InboxProject, InboxSentFrom, InboxTag } from "@plannotator/core/inbox-types";
 import { checkReviewAnchor, checkReviewLive, ReviewAnchorError, type InboxReviewAnchor, type InboxReviewLive } from "@plannotator/core/review-threads";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { InboxError } from "@plannotator/shared/inbox/schema";
@@ -77,7 +77,8 @@ export function createInboxLiveReview(options: {
 
   const tagsOf = (value: unknown): InboxTag[] | undefined => (value === undefined || value === null ? undefined : live.tagTargets(value));
 
-  const send = async (body: Record<string, unknown>): Promise<Response> => {
+  /** `sentFrom`: where the person wrote these comments, as the server told it from the request (inbox-sent-from.ts). */
+  const send = async (body: Record<string, unknown>, sentFrom: InboxSentFrom | null = null): Promise<Response> => {
     const key = typeof body.idempotency_key === "string" ? body.idempotency_key.trim() : "";
     if (!key) throw new InboxError("validation_error", "idempotency_key: required on a Send.", { field: "idempotency_key" });
     if (typeof body.project_path !== "string" || !body.project_path.trim()) throw new InboxError("validation_error", "project_path: the review's repository.", { field: "project_path" });
@@ -108,6 +109,7 @@ export function createInboxLiveReview(options: {
           review_live: review,
           ...(single ? { review_anchor: single.anchor } : {}),
           ...(batch ? { review_batch: { id: batch, lead: true } } : {}),
+          sent_from: sentFrom,
         }).message;
       const name = `Review: ${review.title}`;
       try {
@@ -119,17 +121,17 @@ export function createInboxLiveReview(options: {
       written.push(root);
       if (single) return json({ ...answer(root), sent: written.map((m) => m.id) });
       for (const [i, comment] of comments.entries()) {
-        written.push(store.sendReply(root.id, { words: comment.words, idempotency_key: `${key}:${i}`, review_anchor: comment.anchor, ...(batch ? { review_batch: { id: batch, lead: false } } : {}) }).reply);
+        written.push(store.sendReply(root.id, { words: comment.words, idempotency_key: `${key}:${i}`, review_anchor: comment.anchor, ...(batch ? { review_batch: { id: batch, lead: false } } : {}), sent_from: sentFrom }).reply);
       }
       return json({ ...answer(root), sent: written.map((m) => m.id) });
     }
     const replyTo = typeof body.reply_to === "string" && store.message(body.reply_to)?.thread_id === root.thread_id ? body.reply_to : root.thread_id;
     if (comments.length === 1 && !words) {
-      const reply = store.sendReply(replyTo, { words: comments[0]!.words, idempotency_key: `${key}:0`, review_anchor: comments[0]!.anchor, ...(tags && tags.length > 0 ? { tags } : {}) }).reply;
+      const reply = store.sendReply(replyTo, { words: comments[0]!.words, idempotency_key: `${key}:0`, review_anchor: comments[0]!.anchor, ...(tags && tags.length > 0 ? { tags } : {}), sent_from: sentFrom }).reply;
       return json({ ...answer(root), sent: [reply.id] });
     }
     for (const [i, comment] of comments.entries()) {
-      written.push(store.sendReply(replyTo, { words: comment.words, idempotency_key: `${key}:${i}`, review_anchor: comment.anchor, review_batch: { id: batch ?? `rb_${key}`, lead: false } }).reply);
+      written.push(store.sendReply(replyTo, { words: comment.words, idempotency_key: `${key}:${i}`, review_anchor: comment.anchor, review_batch: { id: batch ?? `rb_${key}`, lead: false }, sent_from: sentFrom }).reply);
     }
     written.push(
       store.sendReply(replyTo, {
@@ -137,6 +139,7 @@ export function createInboxLiveReview(options: {
         idempotency_key: `${key}:lead`,
         review_batch: { id: batch ?? `rb_${key}`, lead: true },
         ...(tags && tags.length > 0 ? { tags } : {}),
+        sent_from: sentFrom,
       }).reply,
     );
     return json({ ...answer(root), sent: written.map((m) => m.id) });
@@ -211,7 +214,8 @@ export function createInboxLiveReview(options: {
     return taken;
   };
 
-  const route = async (req: Request, url: URL, onThisComputer = true): Promise<Response | null> => {
+  /** `sentFrom`: where the person wrote a Send, as the server told it from the request (inbox-sent-from.ts). */
+  const route = async (req: Request, url: URL, onThisComputer = true, sentFrom: (body: Record<string, unknown>) => InboxSentFrom | null = () => null): Promise<Response | null> => {
     const path = url.pathname;
     if (path === REVIEW_THREADS_PATH) {
       if (req.method !== "GET") return json({ error: "Use GET." }, 405);
@@ -224,7 +228,7 @@ export function createInboxLiveReview(options: {
       if (req.method !== "POST") return json({ error: "Use POST." }, 405);
       const body = await options.readBody(req);
       if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
-      return send(body);
+      return send(body, sentFrom(body));
     }
     const open = /^\/api\/inbox\/review-threads\/([A-Za-z0-9_]+)\/open$/.exec(path);
     if (open) {

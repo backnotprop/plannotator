@@ -34,7 +34,7 @@ function fakeCloudflared(): string {
   return path;
 }
 
-function standIn() {
+function standIn(existing?: { host: string; sessionHost: string }) {
   const calls: string[] = [];
   const ok = (result: unknown) => Response.json({ success: true, result });
   const fetch: CfFetch = async (url, init) => {
@@ -45,13 +45,19 @@ function standIn() {
     if (key === "GET /zones") return ok([{ id: ZONE, name: "example.test" }]);
     if (key.endsWith("/access/organizations")) return ok({ auth_domain: TEAM });
     if (key.endsWith("/access/identity_providers") && init.method === "GET") return ok([{ id: "idp", type: "onetimepin" }]);
-    if (key.endsWith("/cfd_tunnel") && init.method === "GET") return ok([]);
+    if (key.endsWith("/cfd_tunnel") && init.method === "GET") return ok(existing ? [{ id: TUNNEL, name: `plannotator-${existing.host.split(".")[0]}` }] : []);
     if (key.endsWith("/cfd_tunnel")) return ok({ id: TUNNEL, name: "plannotator-x" });
     if (key.endsWith("/token")) return ok("run-token-from-stand-in");
-    if (key.endsWith("/access/apps") && init.method === "GET") return ok([]);
-    if (key.endsWith("/access/apps")) return ok({ id: "app-1", aud: "aud0123456789abcdef" });
-    if (key.endsWith("/dns_records") && init.method === "GET") return ok([]);
-    if (key.endsWith("/dns_records")) return ok({ id: `dns-${JSON.parse(String(init.body)).name.split(".")[0]}` });
+    if (key.endsWith("/access/apps") && init.method === "GET") {
+      return ok(existing ? [{ id: "app-1", name: "Plannotator", domain: existing.host, destinations: [existing.host, existing.sessionHost].map((uri) => ({ type: "public", uri })) }] : []);
+    }
+    if (key.endsWith("/access/apps") || key.endsWith("/access/apps/app-1")) return ok({ id: "app-1", aud: "aud0123456789abcdef" });
+    if (key.endsWith("/dns_records") && init.method === "GET") {
+      const name = new URL(url).searchParams.get("name") ?? "";
+      const owned = existing && [existing.host, existing.sessionHost].includes(name);
+      return ok(owned ? [{ id: `dns-${name.split(".")[0]}`, type: "CNAME", content: `${TUNNEL}.cfargotunnel.com` }] : []);
+    }
+    if (key.endsWith("/dns_records") || (init.method === "PUT" && key.includes("/dns_records/"))) return ok({ id: `dns-${JSON.parse(String(init.body)).name.split(".")[0]}` });
     return ok({});
   };
   return { calls, api: (token: string) => createCfApi(token, { base: "http://stand-in.test", fetch }) };
@@ -101,6 +107,40 @@ describe("plannotator inbox cloudflare-access setup", () => {
     expect(run.out).toEqual(["https://plannotator.example.test/"]);
   });
 
+  test("checks, saves and reuses a custom sessions hostname", async () => {
+    const edgeHosts = new Set<string>();
+    const run = deps({
+      api: standIn().api,
+      binary: fakeCloudflared(),
+      pickPort: freePort,
+      edgeFetch: async (url) => {
+        edgeHosts.add(new URL(url).hostname);
+        return loginRedirect();
+      },
+    });
+    const args = ["setup", "--email", "me@example.com", "--hostname", "inbox.example.test"];
+    expect(await runCfAccessCommand([...args, "--session-hostname", "reviews.example.test"], run.deps)).toBe(0);
+    expect(config()).toMatchObject({ on: true, sessionHost: "reviews.example.test", sessionDnsRecord: "dns-reviews" });
+    expect(edgeHosts).toEqual(new Set(["inbox.example.test", "reviews.example.test"]));
+
+    const existing = standIn({ host: "inbox.example.test", sessionHost: "reviews.example.test" });
+    edgeHosts.clear();
+    expect(await runCfAccessCommand(["setup", "--email", "me@example.com", "--hostname", " Inbox.Example.Test. "], { ...run.deps, api: existing.api })).toBe(0);
+    expect(config()).toMatchObject({ on: true, sessionHost: "reviews.example.test", app: "app-1", sessionDnsRecord: "dns-reviews" });
+    expect(edgeHosts).toEqual(new Set(["inbox.example.test", "reviews.example.test"]));
+    expect(existing.calls.filter((call) => !call.startsWith("GET "))).toEqual([
+      `PUT /accounts/${ACCOUNT}/cfd_tunnel/${TUNNEL}/configurations`,
+      `PUT /accounts/${ACCOUNT}/access/apps/app-1`,
+      `PUT /zones/${ZONE}/dns_records/dns-inbox`,
+      `PUT /zones/${ZONE}/dns_records/dns-reviews`,
+    ]);
+
+    const conflict = standIn();
+    expect(await runCfAccessCommand([...args, "--session-hostname", "changed.example.test"], { ...run.deps, api: conflict.api })).toBe(2);
+    expect(conflict.calls).toEqual([]);
+    expect(config()).toMatchObject({ on: true, sessionHost: "reviews.example.test" });
+  });
+
   test("stays off when anything without a login gets through", async () => {
     const port = freePort();
     const leaky = async () => {
@@ -142,6 +182,8 @@ describe("plannotator inbox cloudflare-access setup", () => {
     const stand = standIn();
     const noEmail = deps({ api: stand.api, binary: fakeCloudflared() });
     expect(await runCfAccessCommand(["setup"], noEmail.deps)).toBe(2);
+    expect(await runCfAccessCommand(["setup", "--email", "me@example.com", "--session-hostname"], noEmail.deps)).toBe(2);
+    expect(noEmail.err.join("\n")).toContain("--session-hostname needs a hostname");
     const noBinary = deps({ api: stand.api, binary: null });
     expect(await runCfAccessCommand(["setup", "--email", "me@example.com"], noBinary.deps)).toBe(1);
     expect(noBinary.err.join("\n")).toContain("cloudflared is not installed");

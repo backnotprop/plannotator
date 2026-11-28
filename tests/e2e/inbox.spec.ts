@@ -24,6 +24,7 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSy
 import { join, resolve } from 'node:path';
 import { DEMO_MESSAGES, SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { inboxScratch, removeInboxScratch } from './inbox-scratch';
+import { turnedOnCases } from './inbox-turned-on.cases';
 
 const repo = resolve(__dirname, '../..');
 const builtBinary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -534,7 +535,7 @@ test('"N new" waits behind the notice, and the list moves only on an action', as
   const before = await rowOrder(page);
   const codex = await agent('Codex', 'codex');
   const news = await codex.send({ project_path: world.docs, body: DEMO_MESSAGES.news });
-  await expect(page.locator('[data-inbox-notice]')).toContainText('1 new in docs-site');
+  await expect(page.locator('[data-inbox-notice]')).toContainText(/^New from Codex: “/);
   // Held: nothing moved, and the new thread is not on screen yet.
   await page.waitForTimeout(500);
   expect(await rowOrder(page)).toEqual(before);
@@ -958,3 +959,6 @@ test('the Update button follows health ("ready"), and pressing it brings the new
   await expect(page.locator(`[data-thread-id="${world.threads.holding}"]`)).toBeVisible({ timeout: 30_000 });
   await expect(page.locator('.ib-upd')).toHaveCount(0);
 });
+
+// The Inbox turns on only when the person runs it, with the real rule (inbox-turned-on.cases.ts).
+turnedOnCases(builtBinary);

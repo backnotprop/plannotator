@@ -1,8 +1,10 @@
 /**
  * The Rex status mark on an agent's icon (the owner's "jelly" marks, approved 2026-11-17: "Yes, build it"; design
- * and motion are the approved "Final: jelly"; drawing in rexMarkArt.tsx, motion in rexMark.css). Only for an
- * agent the Inbox started in Rex while "Start new agents in" is Rex: the server puts its pane's fresh status record on
- * the agent (`rex_mark`); with none (another agent, no Rex, a stale or missing record) the icon is exactly today's.
+ * and motion are the approved "Final: jelly"; drawing in rexMarkArt.tsx, motion in rexMark.css). For an agent in a
+ * Rex pane the server puts its pane's fresh status record on the agent (`rex_mark`), drawn always. For every agent
+ * (owner, 2026-11-18), while the person's "Agent status" setting is on (agentStatus.ts), the same marks from what the
+ * Inbox knows (`status_mark`: working, or waiting on you in the Inbox or in the agent); a fresh Rex record wins. With
+ * neither the icon is exactly today's.
  *
  * One component for every icon of an agent: `HostMark` (icons.tsx) draws it inside the icon's own box, and the
  * sidebar's animated mark (AgentMark.tsx) beside its face. No words are shown: the state's words are the mark's
@@ -18,9 +20,10 @@
  * and every waiting mark moves to the pile's outer corner, the first at the last tile's, each next one a step to its
  * left, clear of a "+N" chip. Done, idle and error marks stay on their own tile. Status never changes layout.
  */
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
-import type { InboxAgentsGroup, InboxRexMark } from '@plannotator/core/inbox-types';
-import { inboxAgentsNow, subscribeInboxAgents } from '../agentsList';
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import type { InboxAgent, InboxAgentsGroup, InboxRexMark } from '@plannotator/core/inbox-types';
+import { inboxAgentsNow } from '../agentsList';
+import { agentStatusOn, subscribeAgentStatus } from './agentStatus';
 import { RexMarkArc, RexMarkGlyph, RexMarkShape, rexMarkDiameter, rexMarkKey, rexMarkOffsets, rexMarkSeed, rexMarkWaits, type RexMarkKey, type RexMarkSize } from './rexMarkArt';
 
 /** The state's words, for the mark's text alternative only (never shown). */
@@ -35,48 +38,124 @@ export const REX_MARK_WORDS: Record<Exclude<RexMarkKey, 'answered'>, string> = {
   error: 'Stopped on an error',
 };
 
-/** The state's words for a mark (a row's spoken name carries them too: the icon's own label is not always reached). */
-export const rexMarkWords = (mark: InboxRexMark): string => REX_MARK_WORDS[rexMarkKey(mark)];
+/**
+ * A mark as an icon draws it: Rex's pane record (`rex_mark`), or the mark the Inbox worked out for any agent
+ * (`status_mark`, owner 2026-11-18), whose `where` says where a waiting agent waits: here, or in its own terminal.
+ */
+export type ShownMark = InboxRexMark & { where?: 'inbox' | 'terminal' };
 
-const marksOf = new WeakMap<readonly InboxAgentsGroup[], Map<string, InboxRexMark>>();
+/** A mark of an agent that waits on the person in its own terminal (its connection said so): words that say where. */
+export const TERMINAL_MARK_WORDS: Record<'permission' | 'question', string> = {
+  permission: 'Waiting for your permission in the agent',
+  question: 'Waiting for your answer in the agent',
+};
+
+/**
+ * What a mark draws. A thread waiting on the person in the Inbox (`where: 'inbox'`, no kind) draws Rex's question
+ * jelly (the "?"), never the bare waiting disc; its words stay "Waiting on you".
+ */
+export const shownMarkKey = (mark: ShownMark): ReturnType<typeof rexMarkKey> => (mark.where === 'inbox' ? 'question' : rexMarkKey(mark));
+
+/** The state's words for a mark (a row's spoken name carries them too: the icon's own label is not always reached). */
+export const rexMarkWords = (mark: ShownMark): string =>
+  mark.where === 'terminal' && (mark.kind === 'permission' || mark.kind === 'question') ? TERMINAL_MARK_WORDS[mark.kind] : REX_MARK_WORDS[rexMarkKey(mark)];
+
+/**
+ * The mark an agent's icon carries: a fresh Rex record always (shipped 2026-11-17, whatever the setting says), else,
+ * while "Agent status" is on (`statusOn`), the one the Inbox worked out; null: today's icon.
+ */
+export function shownMarkOf(agent: InboxAgent, statusOn: boolean): ShownMark | null {
+  return agent.rex_mark ?? (statusOn ? (agent.status_mark ?? null) : null);
+}
+
+const marksOf = new WeakMap<readonly InboxAgentsGroup[], { on: boolean; marks: Map<string, ShownMark> }>();
 
 /** Every listed agent's mark, by its id, its session and the sessions it goes on from. */
-function marksNow(groups: readonly InboxAgentsGroup[] | null): Map<string, InboxRexMark> | null {
+function marksNow(groups: readonly InboxAgentsGroup[] | null, on: boolean): Map<string, ShownMark> | null {
   if (!groups) return null;
-  let out = marksOf.get(groups);
-  if (!out) {
-    out = new Map();
-    for (const group of groups) {
-      for (const agent of group.agents) {
-        if (!agent.rex_mark) continue;
-        out.set(agent.id, agent.rex_mark);
-        out.set(agent.session, agent.rex_mark);
-        for (const old of agent.continues ?? []) if (!out.has(old)) out.set(old, agent.rex_mark);
-      }
+  const kept = marksOf.get(groups);
+  if (kept && kept.on === on) return kept.marks;
+  const out = new Map<string, ShownMark>();
+  for (const group of groups) {
+    for (const agent of group.agents) {
+      const mark = shownMarkOf(agent, on);
+      if (!mark) continue;
+      out.set(agent.id, mark);
+      out.set(agent.session, mark);
+      for (const old of agent.continues ?? []) if (!out.has(old)) out.set(old, mark);
     }
-    marksOf.set(groups, out);
   }
+  marksOf.set(groups, { on, marks: out });
   return out;
 }
 
-/** One shared mark per state and kind: an icon re-renders only when its own agent's mark changes, not on every list. */
-const sharedMarks = new Map<string, InboxRexMark>();
-const markKey = (mark: InboxRexMark | null | undefined) => (mark ? `${mark.state}|${mark.kind ?? ''}` : '');
-function sharedMark(key: string): InboxRexMark | null {
+/** One shared mark per state, kind and place: an icon re-renders only when its own agent's mark changes, not on every list. */
+const sharedMarks = new Map<string, ShownMark>();
+const markKey = (mark: ShownMark | null | undefined) => (mark ? `${mark.state}|${mark.kind ?? ''}|${mark.where ?? ''}` : '');
+function sharedMark(key: string): ShownMark | null {
   if (!key) return null;
   let mark = sharedMarks.get(key);
   if (!mark) {
-    const [state, kind] = key.split('|') as [InboxRexMark['state'], InboxRexMark['kind'] | ''];
-    mark = kind ? { state, kind } : { state };
+    const [state, kind, where] = key.split('|') as [InboxRexMark['state'], InboxRexMark['kind'] | '', ShownMark['where'] | ''];
+    mark = { state, ...(kind ? { kind } : {}), ...(where ? { where } : {}) };
     sharedMarks.set(key, mark);
   }
   return mark;
 }
 
-/** The mark an agent's icon carries now (an agent's id or one of its sessions), or null: today's icon. */
-export function useRexMarkOf(agent: string | null | undefined): InboxRexMark | null {
-  const read = () => (agent ? markKey(marksNow(inboxAgentsNow())?.get(agent)) : '');
-  return sharedMark(useSyncExternalStore(subscribeInboxAgents, read, read));
+/**
+ * The mark an agent's icon carries now (an agent's id or one of its sessions), or null: today's icon. `statusMarks`:
+ * this icon shows an agent as an agent (the sidebar's Agents list), so it carries the "Agent status" marks too while
+ * the setting is on. Every other icon of an agent (a thread row, the Board, a thread's header, the sender line) carries
+ * Rex's marks only: a per-agent mark there would speak for threads it is not true of (owner ruling, 2026-11-18).
+ */
+export function useRexMarkOf(agent: string | null | undefined, statusMarks = false): ShownMark | null {
+  const read = () => (agent ? markKey(marksNow(inboxAgentsNow(), statusMarks && agentStatusOn())?.get(agent)) : '');
+  return sharedMark(useSyncExternalStore(subscribeAgentStatus, read, read));
+}
+
+const NO_MARKS: ReadonlyMap<string, string> = new Map();
+let rowMarks: { from: Map<string, ShownMark>; keys: ReadonlyMap<string, string>; said: string } | null = null;
+
+/**
+ * Every listed agent's mark as a row's icon shows it (`useRexMarkOf` with no status marks), by id and session: the
+ * mark's key (`markKey`). The same map while no mark changed, and one empty map while no agent has one (nobody using
+ * Rex), so a list's icons draw again only when a mark they could show changed.
+ */
+function rowRexMarks(): ReadonlyMap<string, string> {
+  const marks = marksNow(inboxAgentsNow(), false);
+  if (!marks || marks.size === 0) return NO_MARKS;
+  if (rowMarks?.from === marks) return rowMarks.keys;
+  const keys = new Map<string, string>();
+  for (const [id, mark] of marks) keys.set(id, markKey(mark));
+  const said = [...keys].join('\n');
+  if (rowMarks?.said === said) {
+    rowMarks.from = marks;
+    return rowMarks.keys;
+  }
+  rowMarks = { from: marks, keys, said };
+  return keys;
+}
+
+const ListRexMarks = createContext<ReadonlyMap<string, string> | null>(null);
+
+/**
+ * Around a list's rows (rowParts.tsx `ListRows`): the agents' marks read once for every row's icon. A list mounts every
+ * row of its open groups (about 2,200 on a large Inbox); each icon's own subscription was two listeners per row.
+ */
+export function ListRexMarksScope({ children }: { children: ReactNode }) {
+  const keys = useSyncExternalStore(subscribeAgentStatus, rowRexMarks, rowRexMarks);
+  return <ListRexMarks.Provider value={keys}>{children}</ListRexMarks.Provider>;
+}
+
+/** The list's marks (`ListRexMarksScope`); null outside a list's rows, where an icon reads its own (`useRexMarkOf`). */
+export function useListRexMarks(): ReadonlyMap<string, string> | null {
+  return useContext(ListRexMarks);
+}
+
+/** An icon's mark from the list's marks: what `useRexMarkOf(agent)` reads. */
+export function listedRexMark(marks: ReadonlyMap<string, string>, agent: string | null | undefined): ShownMark | null {
+  return agent ? sharedMark(marks.get(agent) ?? '') : null;
 }
 
 const reducedMotion = () => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -169,9 +248,9 @@ type Shown = { key: RexMarkKey; arrive: '' | 'now' | 'late'; out: RexMarkKey | n
  * The mark. `seed`: the agent's id (its tempo and phase). `size`: its icon's box before layout (then measured).
  * `side`: the sidebar's mark (its own offsets and halo).
  */
-export function RexMark({ mark, seed, size = 16, side = false }: { mark: InboxRexMark; seed: string; size?: RexMarkSize; side?: boolean }) {
+export function RexMark({ mark, seed, size = 16, side = false }: { mark: ShownMark; seed: string; size?: RexMarkSize; side?: boolean }) {
   const ref = useRef<HTMLSpanElement>(null);
-  const key = rexMarkKey(mark);
+  const key = shownMarkKey(mark);
   const [shown, setShown] = useState<Shown>({ key, arrive: '', out: null, outHow: null, n: 0 });
   const [measured, setMeasured] = useState<RexMarkSize>(size);
   // In a row's 20 px tile the icon is its 13 px glyph, centred: the mark is placed from the tile's corner.
@@ -266,7 +345,7 @@ export function RexMark({ mark, seed, size = 16, side = false }: { mark: InboxRe
   const inset = inTile ? TILE_GLYPH_INSET : side ? -2 : 0;
   const bottom = corner.bottom - inset;
   const right = corner.right - inset;
-  const words = REX_MARK_WORDS[key as Exclude<RexMarkKey, 'answered'>];
+  const words = rexMarkWords(mark);
   const layer = (layerKey: RexMarkKey, how: { arrive?: Shown['arrive']; out?: Shown['outHow'] }) => {
     const ld = rexMarkDiameter(measured, layerKey);
     const glyph = how.out === 'answered' ? 'answered' : layerKey;
@@ -310,6 +389,7 @@ export function RexMark({ mark, seed, size = 16, side = false }: { mark: InboxRe
       aria-label={words}
       title={words}
       data-rx-state={key}
+      data-rx-where={mark.where}
       data-rx-wait={waits ? '' : undefined}
       data-rx-size={measured}
       data-rx-side={side ? '' : undefined}

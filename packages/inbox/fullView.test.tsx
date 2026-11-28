@@ -557,8 +557,8 @@ test.skipIf(!hasDom)('⋯ holds Download and the other version (the changed chip
   await render(<Pane start={changed} harness={harness} steps={attachmentSequence([message(M1, '2026-10-10T10:42:00.000Z')], [changed])} />);
   const chip = host!.querySelector<HTMLElement>('[data-full-view-changed]')!;
   expect(chip.querySelector('.ib-fvver-t')!.textContent).toBe('Changed since sent');
-  expect(chip.querySelector('button')!.textContent).toBe('Open the version it sent');
-  expect(await tooltipOf(chip)).toMatch(/^Changed since Claude Code sent it at /);
+  expect(chip.querySelector('button')!.textContent).toBe('View sent version');
+  expect(await tooltipOf(chip)).toMatch(/^Viewing the current file \(edited [^)]*\)\. Claude Code sent an earlier version at /);
 
   const more = host!.querySelector<HTMLButtonElement>('[data-full-view-more]')!;
   expect(more.getAttribute('aria-label')).toBe('More: download, versions');

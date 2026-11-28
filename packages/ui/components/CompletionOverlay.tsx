@@ -37,8 +37,10 @@ interface CompletionOverlayProps {
    * Optional destinations shown under the subtitle as ordinary links (opened
    * in a new tab by a real click, so no popup blocker applies) — e.g. the PR
    * a platform review was just posted to. Omitted or empty renders nothing.
+   * `sameTab` opens the link in this tab instead (a shared plan's way back to
+   * the issue its bot posted it on).
    */
-  links?: ReadonlyArray<{ href: string; label: string }>;
+  links?: ReadonlyArray<{ href: string; label: string; sameTab?: boolean }>;
   /**
    * Optional content in place under the done message (Plannotator's "Star the repo" card, `useStarAskDoneScreen`).
    * With it, the done block moves to the top of the screen (480 px wide) to make room, and the screen scrolls. Omitted
@@ -69,7 +71,7 @@ export function CompletionOverlay({ submitted, title, subtitle, agentLabel, link
           className={`mx-auto w-16 h-16 rounded-full flex items-center justify-center ${
             isApproved ? 'bg-success/20 text-success'
             : isDone ? 'bg-muted text-muted-foreground'
-            : 'bg-accent/20 text-accent'
+            : 'bg-accent/20 text-accent-text'
           }`}
         >
           {isApproved || isDone ? <CheckIcon /> : <ChatBubbleIcon />}
@@ -84,7 +86,7 @@ export function CompletionOverlay({ submitted, title, subtitle, agentLabel, link
                 <a
                   key={link.href}
                   href={link.href}
-                  target="_blank"
+                  target={link.sameTab ? undefined : '_blank'}
                   rel="noopener noreferrer"
                   data-completion-link
                   className="text-sm font-medium text-primary underline-offset-4 hover:underline break-all"

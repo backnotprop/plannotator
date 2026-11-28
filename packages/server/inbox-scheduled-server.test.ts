@@ -114,6 +114,25 @@ describe("the switch", () => {
   });
 });
 
+describe("plannotator inbox capability (inbox-capability-agent.ts)", () => {
+  test("with Routines off, an agent the person asked turns them on: one line in its thread, and the routine tool is listed", async () => {
+    const w = await world();
+    expect(await w.tools()).not.toContain("routine");
+    // The agent tool never lists a capability action: turning one is the command's.
+    expect(await w.tools()).not.toContain("capability");
+    const turn = async () => (await (await fetch(`${w.base}/api/inbox/capability`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ by: { session: "ses_maya", host: "claude-code", name: "Claude Code" }, project_path: w.folder, capability: "routines", on: true, thread_id: w.thread }) })).json()) as { text: string };
+    const shellNow = "Agents get the routine action in their next session (a session's tools are listed once, at its start); from a shell it works now: `plannotator routine --help`.";
+    expect((await turn()).text).toBe(`Turned on Routines. The person sees it in thread ${w.thread}. ${shellNow}`);
+    expect((await (await fetch(`${w.base}/api/inbox/settings`)).json()).scheduled_threads.on).toBe(true);
+    expect(await w.tools()).toContain("routine");
+    const said = () => w.server.store.threadMessageIds(w.thread).map((m) => w.server.store.message(m)!).filter((m) => m.body === "Turned on Routines.");
+    expect(said().map((m) => m.author.kind === "agent" && m.author.name)).toEqual(["Claude Code"]);
+    // Again: nothing changes and no second line.
+    expect((await turn()).text).toBe(`Routines was already on (this computer). Nothing changed. ${shellNow}`);
+    expect(said()).toHaveLength(1);
+  });
+});
+
 describe("agents", () => {
   test("an agent's routine arrives off; the person turns it on the first time", async () => {
     const w = await world();

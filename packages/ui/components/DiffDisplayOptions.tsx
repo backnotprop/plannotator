@@ -8,7 +8,9 @@
  *
  * Code review draws it in its dock strip (review-editor DiffOptionsPopover);
  * the Inbox in its review bars, without the two rows that need the local
- * repository (`repositoryOptions={false}`: Whole file, Hide whitespace).
+ * repository (`repositoryOptions={false}`: Whole file, Hide whitespace), and
+ * with Whole file alone again where its diffs can read whole files
+ * (`wholeFileOption`).
  *
  * The option lists are this file's own, not Settings.tsx's, so a host that
  * draws only this popover does not load the settings dialog.
@@ -19,6 +21,7 @@ import { configStore, useConfigValue } from '../config';
 import type { SettingName } from '../config/settings';
 import type { SettingValue } from '../config/configStore';
 import { HostTitle } from './HostTitle';
+import { DIFF_DISPLAY_LABELS as L, DIFF_TAB_SIZE_MAX, DIFF_TAB_SIZE_MIN, clampDiffTabSize, offersBackgroundStrength } from './diffDisplayModel';
 
 /** The settings this popover writes. */
 export type DiffDisplaySetting =
@@ -87,6 +90,12 @@ const INDICATORS = [
   },
 ];
 
+/** The gear's option lists, also drawn by Settings → Reviews (settings/ReviewSettingsPage) so both say the same. */
+export const DIFF_BACKGROUND_STRENGTH_OPTIONS = INTENSITY;
+export const DIFF_CHANGED_WORDS_OPTIONS = LINE_DIFF;
+export const DIFF_MINIMAP_OPTIONS = MINIMAP;
+export const DIFF_CHANGE_MARK_OPTIONS = INDICATORS;
+
 function Segmented<T extends string>({ options, value, onChange, label, stretch = false }: {
   options: { value: T; label: string; icon?: React.ReactNode }[];
   value: T;
@@ -152,6 +161,8 @@ export interface DiffDisplayOptionsPopoverProps {
   /** The Minimap switch, for a host that draws the diff overview strip. Default: hidden. */
   minimapOption?: boolean;
   semanticOption?: boolean;
+  /** The Whole file switch on its own, for a host without `repositoryOptions` whose diffs still read whole files (the Inbox). Default: hidden. */
+  wholeFileOption?: boolean;
 }
 
 const GEAR = (
@@ -167,7 +178,8 @@ export const DiffDisplayOptionsBody: React.FC<{
   actions?: React.ReactNode;
   minimapOption?: boolean;
   semanticOption?: boolean;
-}> = ({ repositoryOptions = true, onChange, actions, minimapOption = false, semanticOption = false }) => {
+  wholeFileOption?: boolean;
+}> = ({ repositoryOptions = true, onChange, actions, minimapOption = false, semanticOption = false, wholeFileOption = false }) => {
   const set: DiffDisplayChange = onChange ?? ((key, value) => configStore.set(key, value));
   const overflow = useConfigValue('diffOverflow');
   const indicators = useConfigValue('diffIndicators');
@@ -181,7 +193,7 @@ export const DiffDisplayOptionsBody: React.FC<{
   const semantic = useConfigValue('diffSemantic');
   const semanticDiffEnabled = useConfigValue('semanticDiffEnabled');
   const minimap = useConfigValue('diffMinimap');
-  const stepTab = (n: number) => set('diffTabSize', Math.max(1, Math.min(8, n)));
+  const stepTab = (n: number) => set('diffTabSize', clampDiffTabSize(n));
   return (
     <>
       {actions && (
@@ -190,46 +202,47 @@ export const DiffDisplayOptionsBody: React.FC<{
           <div className="border-t border-border/60 my-2 -mx-2" />
         </>
       )}
-      <Switch label="Wrap long lines" checked={overflow === 'wrap'} onChange={(v) => set('diffOverflow', v ? 'wrap' : 'scroll')} />
-      <Switch label="Line numbers" checked={showLineNumbers} onChange={(v) => set('diffShowLineNumbers', v)} />
-      <Switch label="Backgrounds" checked={showBackground} onChange={(v) => set('diffShowBackground', v)} />
-      {showBackground && (
+      <Switch label={L.wrap} checked={overflow === 'wrap'} onChange={(v) => set('diffOverflow', v ? 'wrap' : 'scroll')} />
+      <Switch label={L.lineNumbers} checked={showLineNumbers} onChange={(v) => set('diffShowLineNumbers', v)} />
+      <Switch label={L.backgrounds} checked={showBackground} onChange={(v) => set('diffShowBackground', v)} />
+      {offersBackgroundStrength(showBackground) && (
         <div className="flex justify-end pb-1">
-          <Segmented label="Background strength" options={INTENSITY} value={intensity} onChange={(v) => set('diffLineBgIntensity', v)} />
+          <Segmented label={L.backgroundStrength} options={INTENSITY} value={intensity} onChange={(v) => set('diffLineBgIntensity', v)} />
         </div>
       )}
       {minimapOption && (
-        <Row label="Minimap">
-          <Segmented label="Minimap" options={MINIMAP} value={minimap} onChange={(v) => set('diffMinimap', v)} />
+        <Row label={L.minimap}>
+          <Segmented label={L.minimap} options={MINIMAP} value={minimap} onChange={(v) => set('diffMinimap', v)} />
         </Row>
       )}
       <div className="border-t border-border/60 my-2 -mx-2" />
-      <Row label="Change marks">
-        <Segmented label="Change marks" options={INDICATORS} value={indicators} onChange={(v) => set('diffIndicators', v)} />
+      <Row label={L.changeMarks}>
+        <Segmented label={L.changeMarks} options={INDICATORS} value={indicators} onChange={(v) => set('diffIndicators', v)} />
       </Row>
       <div className="pt-1">
-        <div className="text-xs text-muted-foreground mb-1">Changed words</div>
-        <Segmented stretch label="Changed words" options={LINE_DIFF} value={lineDiffType} onChange={(v) => set('diffLineDiffType', v)} />
+        <div className="text-xs text-muted-foreground mb-1">{L.changedWords}</div>
+        <Segmented stretch label={L.changedWords} options={LINE_DIFF} value={lineDiffType} onChange={(v) => set('diffLineDiffType', v)} />
       </div>
-      <Row label="Tab size">
+      <Row label={L.tabSize}>
         <div className="inline-flex items-center gap-px bg-muted/60 rounded-md p-px">
-          <button type="button" onClick={() => stepTab(tabSize - 1)} disabled={tabSize <= 1} aria-label="Decrease tab size" className="px-1.5 py-0.5 text-[12px] rounded-[5px] text-muted-foreground hover:text-foreground hover:bg-background disabled:opacity-40 disabled:hover:bg-transparent">−</button>
+          <button type="button" onClick={() => stepTab(tabSize - 1)} disabled={tabSize <= DIFF_TAB_SIZE_MIN} aria-label={L.decreaseTabSize} className="px-1.5 py-0.5 text-[12px] rounded-[5px] text-muted-foreground hover:text-foreground hover:bg-background disabled:opacity-40 disabled:hover:bg-transparent">−</button>
           <span className="px-2 text-[12px] tabular-nums w-5 text-center" data-diff-tab-size={tabSize}>{tabSize}</span>
-          <button type="button" onClick={() => stepTab(tabSize + 1)} disabled={tabSize >= 8} aria-label="Increase tab size" className="px-1.5 py-0.5 text-[12px] rounded-[5px] text-muted-foreground hover:text-foreground hover:bg-background disabled:opacity-40 disabled:hover:bg-transparent">+</button>
+          <button type="button" onClick={() => stepTab(tabSize + 1)} disabled={tabSize >= DIFF_TAB_SIZE_MAX} aria-label={L.increaseTabSize} className="px-1.5 py-0.5 text-[12px] rounded-[5px] text-muted-foreground hover:text-foreground hover:bg-background disabled:opacity-40 disabled:hover:bg-transparent">+</button>
         </div>
       </Row>
       {repositoryOptions && (
         <>
           <div className="border-t border-border/60 my-2 -mx-2" />
-          <Switch label="Whole file" checked={expandUnchanged} onChange={(v) => set('diffExpandUnchanged', v)} />
-          <Switch label="Hide whitespace" checked={hideWhitespace} onChange={(v) => set('diffHideWhitespace', v)} />
-          {semanticDiffEnabled && <Switch label="Show moved & renamed code" checked={semantic} onChange={(v) => set('diffSemantic', v)} />}
+          <Switch label={L.wholeFile} checked={expandUnchanged} onChange={(v) => set('diffExpandUnchanged', v)} />
+          <Switch label={L.hideWhitespace} checked={hideWhitespace} onChange={(v) => set('diffHideWhitespace', v)} />
+          {semanticDiffEnabled && <Switch label={L.moved} checked={semantic} onChange={(v) => set('diffSemantic', v)} />}
         </>
       )}
-      {!repositoryOptions && semanticOption && semanticDiffEnabled && (
+      {!repositoryOptions && (wholeFileOption || (semanticOption && semanticDiffEnabled)) && (
         <>
           <div className="border-t border-border/60 my-2 -mx-2" />
-          <Switch label="Show moved & renamed code" checked={semantic} onChange={(v) => set('diffSemantic', v)} />
+          {wholeFileOption && <Switch label={L.wholeFile} checked={expandUnchanged} onChange={(v) => set('diffExpandUnchanged', v)} />}
+          {semanticOption && semanticDiffEnabled && <Switch label={L.moved} checked={semantic} onChange={(v) => set('diffSemantic', v)} />}
         </>
       )}
     </>
@@ -246,6 +259,7 @@ export const DiffDisplayOptionsPopover: React.FC<DiffDisplayOptionsPopoverProps>
   actions,
   minimapOption = false,
   semanticOption = false,
+  wholeFileOption = false,
 }) => {
   return (
     <Popover.Root>
@@ -275,7 +289,7 @@ export const DiffDisplayOptionsPopover: React.FC<DiffDisplayOptionsPopoverProps>
             className="w-[min(18rem,calc(100vw-1rem))] max-h-[calc(var(--pn-viewport-height,100vh)-2rem-var(--pn-safe-top)-var(--pn-safe-bottom))] overflow-y-auto bg-popover text-popover-foreground border border-transparent rounded-lg shadow-[var(--float-shadow)] origin-[var(--transform-origin)] transition-opacity data-starting-style:opacity-0 data-ending-style:opacity-0"
           >
             <div className="p-2">
-              <DiffDisplayOptionsBody repositoryOptions={repositoryOptions} onChange={onChange} actions={actions} minimapOption={minimapOption} semanticOption={semanticOption} />
+              <DiffDisplayOptionsBody repositoryOptions={repositoryOptions} onChange={onChange} actions={actions} minimapOption={minimapOption} semanticOption={semanticOption} wholeFileOption={wholeFileOption} />
             </div>
           </Popover.Popup>
         </Popover.Positioner>

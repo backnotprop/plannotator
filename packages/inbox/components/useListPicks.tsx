@@ -3,10 +3,11 @@
  * while picking any click on a row picks it instead of opening its thread (the row's own click never runs); the boxes
  * on the groups' headers; the bar in the header's place and a phone's sheet; Escape. Picking ends when the list shows
  * another scope (a project, a tag, a machine). Tidy… opens Tidy's popover on the picks (PickTidy.tsx), Combine… its
- * dialog (CombineDialog.tsx); a started Combine ends picking, its rows saying "Combining…" (useCombines.ts).
+ * dialog (CombineDialog.tsx); a started Combine ends picking, its rows saying "Combining…" (useCombines.ts). The open
+ * Archived group's rows are picked too, though Select all takes only the list's, and Tidy… only the picks not archived.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type RefObject } from 'react';
-import type { InboxListGroupId, InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
+import { inboxRowArchived, type InboxListGroupId, type InboxListRow, type InboxListSection } from '@plannotator/core/inbox-types';
 import { useShortcutScope } from '@plannotator/ui/shortcuts';
 import { boxState, useRowPicks, type PickRules } from '../rowPicks';
 import type { BulkWrites } from '../bulkWrites';
@@ -17,10 +18,14 @@ import { PickBar, PickBox, PickSheet, type PickActions } from './PickBar';
 import { PickTidy } from './PickTidy';
 import { CombineDialog } from './CombineDialog';
 
+const NONE: readonly InboxListRow[] = [];
+
 export interface ListPicksInput {
   sections: readonly InboxListSection[];
   /** A group's rows are drawn (open, or in List every group's but a folded Snoozed band). */
   isOpen: (group: InboxListGroupId) => boolean;
+  /** The rows a view draws besides the open groups' (the Agents view: an open agent's shown rows); Select all picks these too. */
+  drawn?: readonly string[] | null;
   body: RefObject<HTMLElement | null>;
   bulk?: BulkWrites;
   phone: boolean;
@@ -32,12 +37,14 @@ export interface ListPicksInput {
   snoozes: boolean;
   snoozesOf?: (row: InboxListRow) => boolean;
   sectionOf: (threadId: string) => InboxListGroupId | null;
+  /** The open Archived group's rows: picked like the list's, though Select all takes only the list's. */
+  archived?: readonly InboxListRow[];
 }
 
 /** What a picked row's right-click menu needs (RowMenu.tsx). */
 export interface MenuPicks {
   has: (threadId: string) => boolean;
-  /** A row that can be picked: the live list's, never an Archived group's (it has no Select). */
+  /** A row that can be picked: the live list's, or the open Archived group's. */
   takes: (threadId: string) => boolean;
   start: (threadId: string) => void;
   act: PickActions;
@@ -51,7 +58,9 @@ export interface MenuPicks {
 
 export function useListPicks(input: ListPicksInput) {
   const { sections, isOpen, body, bulk, phone, machines, pinned, snoozesOf, sectionOf } = input;
-  const listed = useMemo(() => new Set(sections.flatMap((section) => section.threads.map((row) => row.thread_id))), [sections]);
+  const archived = input.archived ?? NONE;
+  const archivedIds = useMemo(() => new Set(archived.map((row) => row.thread_id)), [archived]);
+  const listed = useMemo(() => new Set([...sections.flatMap((section) => section.threads.map((row) => row.thread_id)), ...archivedIds]), [sections, archivedIds]);
   const picks = useRowPicks(useCallback((id: string) => listed.has(id), [listed]));
   const { leave: leavePicks } = picks;
   /**
@@ -77,12 +86,12 @@ export function useListPicks(input: ListPicksInput) {
     scope.current = input.scope;
     leave();
   }, [input.scope, leave]);
-  /** The rows as drawn that can be picked, for a Shift press's range (an Archived group's are not). */
+  /** The rows as drawn that can be picked, for a Shift press's range. */
   const order = () => [...(body.current?.querySelectorAll('[data-thread-id]') ?? [])].map((el) => el.getAttribute('data-thread-id')!).filter((id) => listed.has(id));
-  const drawnIds = sections.filter((section) => isOpen(section.id)).flatMap((section) => section.threads.map((row) => row.thread_id));
-  const rows = sections.flatMap((section) => section.threads).filter((row, i, all) => picks.picked.has(row.thread_id) && all.findIndex((r) => r.thread_id === row.thread_id) === i);
+  const drawnIds = [...(input.drawn ?? []), ...sections.filter((section) => isOpen(section.id)).flatMap((section) => section.threads.map((row) => row.thread_id))];
+  const rows = [...sections.flatMap((section) => section.threads), ...archived].filter((row, i, all) => picks.picked.has(row.thread_id) && all.findIndex((r) => r.thread_id === row.thread_id) === i);
   const rules: PickRules = {
-    drawn: (row) => sectionOf(row.thread_id),
+    drawn: (row) => sectionOf(row.thread_id) ?? (archivedIds.has(row.thread_id) ? 'archived' : null),
     snoozes: (row) => snoozesOf?.(row) ?? true,
     starred: (row) => (pinned && (!machines || machineTakes(row, machines, 'star')) ? pinned.has(row.thread_id) : null),
     prioritizes: (row) => !machines || machineTakes(row, machines, 'priority'),
@@ -93,6 +102,7 @@ export function useListPicks(input: ListPicksInput) {
   // (drag-system.html clears them after any drop); until it closes, the drop's own end leaves them for the dialog.
   const dropOpened = useRef(false);
   const combines = bulk?.combines;
+  const tidyRows = rows.filter((row) => !inboxRowArchived(row));
   const act: PickActions | null = bulk
     ? {
         rows,
@@ -102,7 +112,7 @@ export function useListPicks(input: ListPicksInput) {
         snoozes: input.snoozes,
         narrow: input.narrow,
         // From a menu, the popover sits on the bar's ⋯ (the menu has closed), else on the bar.
-        tidy: (anchor) => setTidyAt(anchor ?? body.current?.closest('.pn-inbox')?.querySelector<HTMLElement>('[data-pick-bar] [data-pick-menu="more"], [data-pick-sheet] [data-pick-menu="more"], [data-pick-bar]') ?? null),
+        ...(tidyRows.length > 0 ? { tidy: (anchor: HTMLElement | null) => setTidyAt(anchor ?? body.current?.closest('.pn-inbox')?.querySelector<HTMLElement>('[data-pick-bar] [data-pick-menu="more"], [data-pick-sheet] [data-pick-menu="more"], [data-pick-bar]') ?? null) } : {}),
         ...(combines ? { combine: () => setCombining(true) } : {}),
       }
     : null;
@@ -112,7 +122,6 @@ export function useListPicks(input: ListPicksInput) {
     if (!bulk || !(event.target instanceof Element)) return;
     const row = event.target.closest<HTMLElement>('[data-thread-id]');
     if (!row || !body.current?.contains(row) || event.target.closest('[data-pick-box]')) return;
-    // An Archived group's row is never picked: its click opens it, while picking or with a key held.
     if (!listed.has(row.getAttribute('data-thread-id')!)) return;
     const toggle = event.metaKey || event.ctrlKey;
     if (!picks.on && !toggle && !event.shiftKey) return;
@@ -150,7 +159,7 @@ export function useListPicks(input: ListPicksInput) {
     picks.on && act ? (
       <>
         <PickBar act={act} all={boxState(drawnIds, picks.picked)} onAll={() => picks.all(drawnIds)} onDone={leave} phone={phone} />
-        <PickTidy rows={rows} machines={machines} anchor={tidyAt} phone={phone} onClose={() => setTidyAt(null)} />
+        <PickTidy rows={tidyRows} machines={machines} anchor={tidyAt} phone={phone} onClose={() => setTidyAt(null)} />
         {combining && combines && (
           <CombineDialog
             rows={rows}
@@ -160,7 +169,7 @@ export function useListPicks(input: ListPicksInput) {
               if (dropOpened.current) leave();
               dropOpened.current = false;
             }}
-            onStarted={(record, machine) => (combines.begin(record, machine, rows), leave())}
+            onStarted={(record, machine, label) => (combines.begin(record, machine, rows, label), leave())}
           />
         )}
       </>

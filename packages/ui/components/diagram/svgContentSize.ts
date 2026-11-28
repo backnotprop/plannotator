@@ -11,6 +11,16 @@ import type { ContentSize } from './useDiagramViewport';
  * erased, so this file's runtime dependencies are none.
  */
 
+/**
+ * The largest scale an inline diagram is fitted at. A Pele drawing is laid
+ * out at the page's text size, so an inline one is never fitted above it (a
+ * two-node flowchart would otherwise be blown up to fill the box, its words
+ * three times the size of the page's). Unlimited for other drawings, as before.
+ */
+export function inlineFitMaxScale(svg: SVGSVGElement): number {
+  return svg.classList.contains('pele') ? 1 : Number.POSITIVE_INFINITY;
+}
+
 /** A numeric svg length: `206`, `206pt`, `206px`. */
 function svgLength(value: string | null): number {
   if (value === null) return Number.NaN;

@@ -37,8 +37,11 @@ import { claimAutoUpdateNotice, describeAutoUpdateNotice, parseAutoUpdateNotice,
 import { storage } from '@plannotator/ui/utils/storage';
 import { RefHoverCards } from '@plannotator/ui/components/RefHoverCard';
 import { refCardRouteTransport, setRefCardTransport } from '@plannotator/ui/utils/refCard';
+import { registerRefCardProvider } from '@plannotator/ui/utils/refCardProviders';
+import { linearLinkCardProvider } from '@plannotator/ui/utils/linearLinkCards';
 import { CompletionOverlay } from '@plannotator/ui/components/CompletionOverlay';
 import { useStarAskDoneScreen } from '@plannotator/ui/components/StarAskDoneScreen';
+import { useLaunchAnnouncement } from '@plannotator/ui/components/LaunchAnnouncement';
 import {
   closePendingTab,
   openPendingTab,
@@ -55,9 +58,11 @@ import { repoLabel } from '@plannotator/ui/utils/repoLabel';
 import { loadDiffFont } from '@plannotator/ui/utils/diffFonts';
 import { monoFontStack, normalizeCssFontSize } from '@plannotator/ui/utils/cssFontFamily';
 import { getAgentSwitchSettings, getEffectiveAgentName } from '@plannotator/ui/utils/agentSwitch';
-import { adoptServerSession, noteServerSessionMismatch, withServerSession, withServerSessionQuery } from '@plannotator/ui/utils/serverSession';
-import { assertSendOk, throwUnreachable } from '@plannotator/ui/utils/sendFailure';
+import { adoptServerSession, currentServerSession, noteServerSessionMismatch, withServerSession, withServerSessionQuery } from '@plannotator/ui/utils/serverSession';
+import { aiChatStorageKey } from '@plannotator/ui/utils/aiChatPersistence';
+import { assertSendOk, sendErrorAfterAgentGone, throwUnreachable } from '@plannotator/ui/utils/sendFailure';
 import { dismissSendFailureToast, sendSettled, sendStarted, showSendFailureToast } from '@plannotator/ui/components/SendFailureToast';
+import { agentGoneReasonFor, dismissAgentGoneNotice, noteSendFailureForAgentGone, showAgentGoneNotice } from './components/AgentGoneNotice';
 import { ServerSessionReplacedBanner } from '@plannotator/ui/components/ServerSessionReplacedBanner';
 import { useAIProviderConfig } from '@plannotator/ui/hooks/useAIProviderConfig';
 import { useAIProviderActivation } from '@plannotator/ui/hooks/useAIProviderActivation';
@@ -81,7 +86,7 @@ import { createSemDiffClient } from './semDiff/semDiffClient';
 import { loadSemDiffWorker } from './semDiff/loadSemDiffWorker';
 import { readPowerUpRejected, writePowerUpRejected, type PowerUpConfig, type PowerUpStatus } from './semDiff/powerUp';
 import { PowerUpStatusSlot } from './semDiff/PowerUpStatusSlot';
-import { POWER_UP_CHANGED_EVENT } from '@plannotator/ui/components/settings/SemanticDiffsTab';
+import { usePowerUpConfig } from './semDiff/usePowerUpConfig';
 import { computeReviewSemanticDiff, loadReviewSemanticDiff, setSemanticDiffSource, type ReadFileContents } from './semDiff/semanticDiffSource';
 import type { SemanticDiffChange, SemanticDiffResponse } from '@plannotator/shared/semantic-diff-types';
 
@@ -139,7 +144,7 @@ import {
   type NavLocation,
   type RevealTarget,
 } from './utils/explorerNavigation';
-import { changeRuns, stepChange, type ChangeStep } from './utils/explorerChangeNavigation';
+import { changeRuns, changeStepQueue, stepChange, type ChangeStep } from './utils/explorerChangeNavigation';
 import { GoToFile } from './components/GoToFile';
 import type { FileTokenHandlers } from './components/RepoFileView';
 import type { CodeNavLocation, CodeNavResponse } from '@plannotator/shared/code-nav';
@@ -176,7 +181,10 @@ import { PRSwitchOverlay } from './components/PRSwitchOverlay';
 import { usePRStack } from './hooks/usePRStack';
 import { useDiffFreshness } from './hooks/useDiffFreshness';
 import { useTreeScope } from './hooks/useTreeScope';
+import { compileReviewFileFilter } from '@plannotator/shared/review-file-filter';
 import { useRepoFiles } from './hooks/useRepoFiles';
+import { useFilteredRepoFiles } from './hooks/useFilteredRepoFiles';
+import { useReviewFileFilter } from './hooks/useReviewFileFilter';
 import { useAutoViewed } from './hooks/useAutoViewed';
 import { useGroupByKind } from './hooks/useGroupByKind';
 import type { AllFilesLineTarget, AllFilesOrder } from './components/AllFilesCodeView';
@@ -191,6 +199,7 @@ import { DEMO_DIFF } from './demoData';
 import { ReviewLoadError } from './components/ReviewLoadError';
 import { diffLoadFailureFromResponse, diffLoadFailureInfo, diffLoadUnreachable, type DiffLoadFailureInfo } from './utils/diffLoadFailure';
 import { exportReviewFeedback, buildProseFeedback, commitShaFromMode } from './utils/exportFeedback';
+import { newFileComment } from './utils/fileComment';
 import { parseDiffToFiles } from './utils/diffParser';
 import {
   ReviewSubmissionDialog,
@@ -285,7 +294,8 @@ declare const __APP_VERSION__: string;
 // text, and on a touch screen the toolbar sits below the selection (clear of
 // iOS's edit menu), inside the screen, with thumb-sized buttons;
 // @plannotator/ui hosts keep both unchanged unless they opt in.
-configurePlannotatorUI({ richCopy: true, touchSelectionToolbar: true });
+// A click on a #12 or a pasted PR / issue URL in the text opens its card pinned (utils/refCardClick).
+configurePlannotatorUI({ richCopy: true, touchSelectionToolbar: true, refCardClick: true });
 
 function getReviewRecoveryStorage(): ReviewRecoveryStorage | null {
   try {
@@ -347,6 +357,9 @@ function orderFilesBySections(files: DiffFile[], sections?: SinceBaseSections | 
 
 /** Hint shown following the cursor while hovering a sidebar/panel resize handle. */
 const RESIZE_HANDLE_TOOLTIP = 'Click to close · Drag to resize';
+
+/** Keys that scroll a view: pressed while Next change waits to land, they skip the landing. */
+const SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ']);
 
 type ReviewHistoryAction =
   | {
@@ -469,6 +482,16 @@ const ReviewApp: React.FC = () => {
   const { resolvedMode } = useTheme();
   const [diffData, setDiffData] = useState<DiffData | null>(null);
   const [files, setFiles] = useState<DiffFile[]>([]);
+  const fileFilter = useReviewFileFilter();
+  const matchesFileFilter = useMemo(() => compileReviewFileFilter(fileFilter.applied), [fileFilter.applied]);
+  const filteredDiffFiles = useMemo(
+    () => matchesFileFilter ? files.filter((file) => matchesFileFilter(file.path)) : files,
+    [files, matchesFileFilter],
+  );
+  const visiblePaths = useMemo(
+    () => matchesFileFilter ? new Set(filteredDiffFiles.map((file) => file.path)) : undefined,
+    [matchesFileFilter, filteredDiffFiles],
+  );
   const [activeFileIndex, setActiveFileIndex] = useState(0);
   const activeFileIndexRef = useRef(activeFileIndex);
   activeFileIndexRef.current = activeFileIndex;
@@ -540,7 +563,7 @@ const ReviewApp: React.FC = () => {
     useState<LineAnnotationComposeRequest | null>(null);
   const nextLineAnnotationComposeRequestId = useRef(0);
   const [showExportModal, setShowExportModal] = useState(false);
-  const [openSettingsMenu, setOpenSettingsMenu] = useState<boolean | 'semantic'>(false);
+  const [openSettingsMenu, setOpenSettingsMenu] = useState<boolean | 'powerUp'>(false);
   const [showNoAnnotationsDialog, setShowNoAnnotationsDialog] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   // A real session whose first /api/diff failed: the load error state, never
@@ -762,11 +785,19 @@ const ReviewApp: React.FC = () => {
   const [submitted, setSubmitted] = useState<'approved' | 'feedback' | 'exited' | false>(false);
   // A decided review has nothing left to retry: take any send failure down.
   useEffect(() => {
-    if (submitted) dismissSendFailureToast();
+    if (!submitted) return;
+    dismissSendFailureToast();
+    dismissAgentGoneNotice();
   }, [submitted]);
   // The agent that opened this review closed it (POST /api/host/close); the
   // reviewer's unsent comments stay in the draft for a reopen.
   const [agentClosed, setAgentClosed] = useState<{ unsentAnnotations: number } | null>(null);
+  // The agent that asked for this local review is gone (`agent-gone`,
+  // packages/shared/review-agent-gone.ts): the review stays as it is, every
+  // comment on screen and in its draft, and a notice says nobody can receive
+  // a decision, with Copy feedback. The server refuses Send meanwhile; a send
+  // that fails while it holds says the agent is gone, whatever it ran into.
+  const agentGoneRef = useRef(false);
   const [showExitWarning, setShowExitWarning] = useState(false);
   // A committed review-level note waiting for its one-render deferred submit
   // (the payload builders close over `allAnnotations`, so the send has to wait
@@ -815,25 +846,6 @@ const ReviewApp: React.FC = () => {
   const semanticDiffUsable = semDiffClient != null;
   const diffSemanticOn = useConfigValue('diffSemantic');
   const diffPowerUpOn = useConfigValue('diffPowerUp');
-  const [powerUpConfigured, setPowerUpConfigured] = useState<{ configured: boolean; provider: 'jev' | 'clef' | null }>({ configured: false, provider: null });
-  useEffect(() => {
-    if (!semDiffClient) return;
-    let cancelled = false;
-    const load = () => {
-      fetch('/api/sem-diff/opinion/settings')
-        .then((res) => (res.ok ? res.json() : null))
-        .then((data: { configured: boolean; provider: 'jev' | 'clef' | null } | null) => {
-          if (!cancelled && data) setPowerUpConfigured(data);
-        })
-        .catch(() => {});
-    };
-    load();
-    window.addEventListener(POWER_UP_CHANGED_EVENT, load);
-    return () => {
-      cancelled = true;
-      window.removeEventListener(POWER_UP_CHANGED_EVENT, load);
-    };
-  }, [semDiffClient]);
   const [powerUpRejected, setPowerUpRejected] = useState<readonly string[]>(() => readPowerUpRejected());
   const rejectPowerUpLink = useCallback((candidateId: string) => {
     setPowerUpRejected((previous) => {
@@ -841,9 +853,12 @@ const ReviewApp: React.FC = () => {
       return next;
     });
   }, []);
-  const powerUpActive = semDiffClient != null && diffSemanticOn && diffPowerUpOn && powerUpConfigured.configured;
-  const [powerUpRetry, setPowerUpRetry] = useState(0);
-  const powerUp = useMemo(() => ({ active: powerUpActive, rejected: powerUpRejected, provider: powerUpConfigured.provider, retry: powerUpRetry }), [powerUpActive, powerUpRejected, powerUpConfigured.provider, powerUpRetry]);
+  // Power Up's settings read and config (semDiff/usePowerUpConfig.ts, shared with the Inbox's readers).
+  const { active: powerUpActive, powerUp, settings: powerUpConfigured, retry: retryPowerUp } = usePowerUpConfig({
+    client: semDiffClient,
+    on: diffSemanticOn && diffPowerUpOn,
+    rejected: powerUpRejected,
+  });
   const [powerUpStatus, setPowerUpStatus] = useState<PowerUpStatus | null>(null);
   useEffect(() => {
     const root = document.documentElement;
@@ -878,8 +893,8 @@ const ReviewApp: React.FC = () => {
     let cached: { key: string; promise: Promise<SemanticDiffResponse> } | null = null;
     setSemanticDiffSource(() => {
       const { files, base, snapshot, generated, powerUp: current } = semContentRef.current;
-      const opinion = current?.active ? { rejected: current.rejected } : undefined;
-      const key = `${base ?? ''}|${snapshot ?? ''}|${[...generated].join(',')}|${opinion ? `power:${opinion.rejected.join(',')}:${current?.retry ?? 0}` : 'plain'}|${files.map((file) => `${file.path}#${file.patch.length}`).join('|')}`;
+      const opinion = current?.active ? current : undefined;
+      const key = `${base ?? ''}|${snapshot ?? ''}|${[...generated].join(',')}|${opinion ? `power:${opinion.settingsRevision}:${opinion.rejected.join(',')}:${opinion.retry}` : 'plain'}|${files.map((file) => `${file.path}#${file.patch.length}`).join('|')}`;
       if (cached?.key === key) return cached.promise;
       const promise = computeReviewSemanticDiff(files, semDiffClient, read, new AbortController().signal, generated, opinion);
       cached = { key, promise };
@@ -898,6 +913,9 @@ const ReviewApp: React.FC = () => {
   const [sessionTitle, setSessionTitle] = useState<string | null>(null);
   /** The region the issue / PR / MR hover cards listen on (the whole app). */
   const refCardRootRef = useRef<HTMLDivElement>(null);
+  // Linear issue links get Linear's card too (ui linearLinkCards; the server reads them with the Linear API key,
+  // and without one the link stays plain). Nothing is asked until the transport below is installed.
+  useEffect(() => registerRefCardProvider(linearLinkCardProvider), []);
 
   // Settings → General → "Hide the repository owner": the tab title and the
   // header's repository label; the header's hover keeps the full owner/repo.
@@ -1098,6 +1116,18 @@ const ReviewApp: React.FC = () => {
     onSessionClosed: (event) => {
       setAgentClosed(event);
       setSubmitted((current) => current || 'exited');
+    },
+    onAgentGone: (gone) => {
+      const wasGone = agentGoneRef.current;
+      agentGoneRef.current = gone;
+      // Heard again on a reconnect: a notice the person closed stays closed.
+      if (gone) {
+        if (!wasGone) showAgentGoneNotice({ copyText: () => retryDecisionRef.current.feedbackMarkdown });
+        return;
+      }
+      dismissAgentGoneNotice();
+      // Back: a refused Send's "not sent" no longer says what Send would do.
+      if (wasGone) dismissSendFailureToast('agent-gone');
     },
   });
   const agentJobs = useAgentJobs({ enabled: !!origin && aiUIEnabled });
@@ -1358,6 +1388,7 @@ const ReviewApp: React.FC = () => {
     handleSelectSearchMatch,
   } = useReviewSearch({
     files,
+    visiblePaths,
     activeFilePath: files[activeFileIndex]?.path ?? null,
     onRevealMatch: handleRevealSearchMatch,
   });
@@ -1536,6 +1567,7 @@ const ReviewApp: React.FC = () => {
   }, [guideOpen, guideHintActive]);
   const agentTool = useAgentToolSetting();
   const aiChat = useAIChat({
+    storageKey: isLoading ? null : aiChatStorageKey(currentServerSession(), 'review'),
     patch: diffData?.rawPatch ?? '',
     diffType,
     base: committedBase,
@@ -1993,10 +2025,14 @@ const ReviewApp: React.FC = () => {
   // Stitching lives here, not in the diff views: rebuilding a fragmented
   // identifier is app-only work, and both views are compiled into the portable
   // guide viewer, which must not carry it.
+  // Returns whether the token is a symbol at all, so the views paint the hover
+  // affordance only on tokens a card can open for.
   const handleTokenHoverEnter = useCallback(
-    (props: DiffTokenEventBaseProps, filePath: string) => {
+    (props: DiffTokenEventBaseProps, filePath: string): boolean => {
       const request = buildTokenHoverRequest(props, filePath);
-      if (request) startTokenHover(request, props.tokenElement);
+      if (!request) return false;
+      startTokenHover(request, props.tokenElement);
+      return true;
     },
     [startTokenHover],
   );
@@ -2296,36 +2332,62 @@ const ReviewApp: React.FC = () => {
       : lastMainPanelIdRef.current ? dockApi.getPanel(lastMainPanelIdRef.current) : undefined;
     return (panel?.group?.element as HTMLElement | undefined) ?? null;
   }, [dockApi]);
-  const stepToChange = useCallback(async (direction: ChangeStep) => {
+  const stepToChangeNow = useCallback(async (direction: ChangeStep) => {
     const container = codeGroupElement();
     if (!container) return;
     if ((await stepChange(container, direction)) === 'moved') return;
     const location = currentNavLocation();
     const index = location?.path != null ? files.findIndex((file) => file.path === location.path) : -1;
-    const next = index === -1 ? undefined : files[index + direction];
+    let nextIndex = index + direction;
+    while (files[nextIndex] && visiblePaths && !visiblePaths.has(files[nextIndex].path)) nextIndex += direction;
+    const next = index === -1 ? undefined : files[nextIndex];
     if (!next) {
       toast(direction === 1 ? 'No more changes' : 'No earlier changes', { duration: 1800 });
       return;
     }
     openRepoFile(next.path, { pin: false });
     // Wait for the next file's rows to settle (the diff draws, then redraws
-    // with the full file), then land on its first (or last) run.
-    let previous = '';
-    let stable = 0;
-    for (let attempt = 0; attempt < 60; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      const nextContainer = codeGroupElement();
-      if (!nextContainer) return;
-      const runs = changeRuns(nextContainer);
-      const shape = runs.length > 0 ? `${runs.length}:${Math.round(runs[0].top)}` : '';
-      stable = shape && shape === previous ? stable + 1 : 0;
-      previous = shape;
-      if (stable >= 3) {
-        await stepChange(nextContainer, direction, { edge: direction === 1 ? 'first' : 'last' });
-        return;
+    // with the full file), then land on its first (or last) run. A click, a
+    // touch or a scroll by hand or by keyboard meanwhile is the person's own
+    // move, and so is leaving the file: skip the landing.
+    let touched = false;
+    const touch = () => { touched = true; };
+    const scrollKey = (event: KeyboardEvent) => {
+      if (SCROLL_KEYS.has(event.key)) touched = true;
+    };
+    const inputs = ['wheel', 'pointerdown', 'touchstart'] as const;
+    for (const type of inputs) window.addEventListener(type, touch, { capture: true, passive: true });
+    window.addEventListener('keydown', scrollKey, { capture: true });
+    try {
+      let previous = '';
+      let stable = 0;
+      for (let attempt = 0; attempt < 60; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        if (touched || currentNavLocation()?.path !== next.path) return;
+        const nextContainer = codeGroupElement();
+        if (!nextContainer) return;
+        const runs = changeRuns(nextContainer);
+        const shape = runs.length > 0 ? `${runs.length}:${Math.round(runs[0].top)}` : '';
+        stable = shape && shape === previous ? stable + 1 : 0;
+        previous = shape;
+        if (stable >= 3) {
+          await stepChange(nextContainer, direction, { edge: direction === 1 ? 'first' : 'last' });
+          return;
+        }
       }
+    } finally {
+      for (const type of inputs) window.removeEventListener(type, touch, { capture: true });
+      window.removeEventListener('keydown', scrollKey, { capture: true });
     }
-  }, [codeGroupElement, currentNavLocation, files, openRepoFile]);
+  }, [codeGroupElement, currentNavLocation, files, openRepoFile, visiblePaths]);
+  // One press at a time, and a held key's repeats only while none is under
+  // way (changeStepQueue). The queue calls the latest stepToChangeNow.
+  const stepToChangeNowRef = useRef(stepToChangeNow);
+  stepToChangeNowRef.current = stepToChangeNow;
+  const [stepToChange] = useState(() => changeStepQueue(
+    (direction) => stepToChangeNowRef.current(direction),
+    (error) => console.error('Next change failed', error),
+  ));
 
   useEffect(() => {
     if (!dockApi) return;
@@ -3180,46 +3242,19 @@ const ReviewApp: React.FC = () => {
     handleAddAnnotationForFile(files[activeFileIndex].path, type, text, suggestedCode, originalCode, conventionalLabel, decorations, tokenMeta);
   }, [files, activeFileIndex, handleAddAnnotationForFile]);
 
-  const handleAddFileComment = useCallback((text: string) => {
-    const activeFile = files[activeFileIndex];
-    const trimmed = text.trim();
-    if (!activeFile || !trimmed) return;
-
-    const newAnnotation: CodeAnnotation = {
-      id: generateId(),
-      type: 'comment',
-      scope: 'file',
-      filePath: activeFile.path,
-      lineStart: 1,
-      lineEnd: 1,
-      side: 'new',
-      text: trimmed,
-      createdAt: Date.now(),
-      author: identity,
-    };
-
-    addCodeAnnotationsWithHistory([withPRContext(newAnnotation)]);
-  }, [files, activeFileIndex, identity, withPRContext, addCodeAnnotationsWithHistory]);
-
-  const handleAddFileCommentForFile = useCallback((filePath: string, text: string) => {
-    const trimmed = text.trim();
-    if (!trimmed) return;
-
-    const newAnnotation: CodeAnnotation = {
-      id: generateId(),
-      type: 'comment',
-      scope: 'file',
-      filePath,
-      lineStart: 1,
-      lineEnd: 1,
-      side: 'new',
-      text: trimmed,
-      createdAt: Date.now(),
-      author: identity,
-    };
-
+  // A file's comment keeps what the box attached (pictures, files), as a
+  // whole-file line comment does: saved in the draft, shown on the card, sent.
+  const handleAddFileCommentForFile = useCallback((filePath: string, text: string, images?: ImageAttachment[]) => {
+    const newAnnotation = newFileComment({ id: generateId(), filePath, text, images, createdAt: Date.now(), author: identity });
+    if (!newAnnotation) return;
     addCodeAnnotationsWithHistory([withPRContext(newAnnotation)]);
   }, [identity, withPRContext, addCodeAnnotationsWithHistory]);
+
+  const handleAddFileComment = useCallback((text: string, images?: ImageAttachment[]) => {
+    const activeFile = files[activeFileIndex];
+    if (!activeFile) return;
+    handleAddFileCommentForFile(activeFile.path, text, images);
+  }, [files, activeFileIndex, handleAddFileCommentForFile]);
 
   // A comment made in a whole-file view (explorer, step 2): a changed file's
   // Whole file, or a file the review does not change. Inside a hunk it is an
@@ -3227,7 +3262,8 @@ const ReviewApp: React.FC = () => {
   // was written on, so the agent and a PR's review body get the code quoted.
   const handleAddWholeFileAnnotation = useCallback((input: CodeFileAnnotationInput, options: { inDiff: boolean }) => {
     const text = input.text.trim();
-    if (!text) return;
+    // Pictures alone are a comment too (the box saves them): never dropped.
+    if (!text && !input.images?.length) return;
     const base: CodeAnnotation = {
       id: generateId(),
       type: 'comment',
@@ -3236,7 +3272,7 @@ const ReviewApp: React.FC = () => {
       lineStart: input.lineStart,
       lineEnd: input.lineEnd,
       side: 'new',
-      text,
+      ...(text ? { text } : {}),
       ...(input.images?.length ? { images: input.images } : {}),
       originalCode: input.originalCode,
       createdAt: Date.now(),
@@ -3369,7 +3405,7 @@ const ReviewApp: React.FC = () => {
       });
     }
   }, [deleteExternalAnnotation, externalAnnotations, reviewHistory]);
-  const livePR = useMemo(() => (prMetadata ? { forge: prMetadata.platform === 'gitlab' ? 'GitLab' : prMetadata.platform === 'bitbucket' ? 'Bitbucket' : 'GitHub', platform: prMetadata.platform, threads: prContext?.reviewThreads ?? null, load: () => void fetchPRContext() } : null), [prMetadata, prContext, fetchPRContext]);
+  const livePR = useMemo(() => (prMetadata ? { forge: getPlatformLabel(prMetadata), platform: prMetadata.platform, threads: prContext?.reviewThreads ?? null, load: () => void fetchPRContext() } : null), [prMetadata, prContext, fetchPRContext]);
   const revealLiveLines = useCallback((filePath: string, start: number, end: number, side: 'old' | 'new') => {
     handleScrollToAILines(filePath, start, end, side);
     window.setTimeout(() => setPendingSelection((current) => (current && current.start === start && current.end === end ? null : current)), 900);
@@ -3497,11 +3533,18 @@ const ReviewApp: React.FC = () => {
     fileKey: isAllFilesActive ? 'all' : activeFileIndex,
   });
   const handleAutoView = autoViewedNotice.show;
+  // The launch dialog (the launch switch; LaunchAnnouncement.tsx): as the page opens, before the reader starts
+  // working; the star ask yields on that load. Never without a live session; the VS Code panel shows it too.
+  const launch = useLaunchAnnouncement({
+    ready: !isLoading,
+    eligible: !!origin,
+    firstRunWindow: true,
+  });
   // The update toast waits behind the guide takeover and every first-run
   // dialog of this load (useUpdateToast).
   useUpdateToast({
     advert: updateAdvert,
-    blocked: isLoading || guideOpen,
+    blocked: isLoading || guideOpen || launch.open,
     autoUpdateActive,
     position: 'top-right',
   });
@@ -3560,6 +3603,12 @@ const ReviewApp: React.FC = () => {
   const repoFiles = useRepoFiles({
     enabled: repoFilesSupported && ((treeScope === 'all' && effectivePanelView === 'tree' && isNavigatorOpen) || goToFileOpen),
     snapshotId,
+  });
+  const filteredRepoFiles = useFilteredRepoFiles({
+    repo: repoFiles,
+    enabled: treeScope === 'all' && effectivePanelView === 'tree' && isNavigatorOpen,
+    snapshotId,
+    filter: matchesFileFilter ? fileFilter.applied : null,
   });
   const allFilesOrder: AllFilesOrder =
     effectivePanelView === 'sections' ? 'list' : effectivePanelView === 'tree' && groupByKind ? 'kind' : 'tree';
@@ -4518,8 +4567,9 @@ const ReviewApp: React.FC = () => {
     // Outdated comments (#1590) are not drawn on the diff, so a scroll target
     // could never resolve: open the file when it is still in the diff and
     // select the card, without a dead scroll request.
+    const fileHidden = visiblePaths && !visiblePaths.has(annotation.filePath);
     if (navigation === 'select-file') {
-      if (!guideOpen && !isAllFilesActiveRef.current) {
+      if (!guideOpen && (!isAllFilesActiveRef.current || fileHidden)) {
         const fileIndex = files.findIndex(f => f.path === annotation.filePath);
         if (fileIndex !== -1) handleFileSwitch(fileIndex);
       }
@@ -4536,13 +4586,13 @@ const ReviewApp: React.FC = () => {
     if (guideOpen) {
       const targetPath = annotation.filePath;
       setGuideRevealFile(prev => ({ path: targetPath, token: (prev?.token ?? 0) + 1 }));
-    } else if (!isAllFilesActiveRef.current) {
+    } else if (!isAllFilesActiveRef.current || fileHidden) {
       const fileIndex = files.findIndex(f => f.path === annotation.filePath);
       if (fileIndex !== -1) handleFileSwitch(fileIndex);
     }
     setSelectedAnnotationId(id);
     setScrollTargetAnnotation(prev => ({ id, token: (prev?.token ?? 0) + 1 }));
-  }, [files, handleFileSwitch, prMetadata, prDiffScope, guideOpen, openCallFlowPanel, handleFileViewChange, openRepoFile]);
+  }, [files, handleFileSwitch, prMetadata, prDiffScope, guideOpen, openCallFlowPanel, handleFileViewChange, openRepoFile, visiblePaths]);
 
   const agentsPanel = useAgentsPanelSlots({
     enabled: !!origin && agentJobs.capabilities?.available === true,
@@ -4597,6 +4647,8 @@ const ReviewApp: React.FC = () => {
   };
   const reviewStateValue = useMemo<ReviewState>(() => ({
     files,
+    filteredDiffFiles: matchesFileFilter ? filteredDiffFiles : undefined,
+    onClearFileFilter: fileFilter.input.clear,
     rawPatch: diffData?.rawPatch ?? '',
     focusedFileIndex: activeFileIndex,
     // Null while the guide takeover is open — the CSS-hidden dock's DiffViewer
@@ -4775,7 +4827,7 @@ const ReviewApp: React.FC = () => {
     codeNavIsLoading: codeNav.isLoading,
     codeNavActiveSymbol: codeNav.activeSymbol,
   }), [
-    files, diffData?.rawPatch, activeFileIndex, guideOpen, isDiffPanelActive, effectiveDiffStyle, handleDiffStyleChange, isCompactTouchLayout, diffOverflow, diffIndicators,
+    files, filteredDiffFiles, matchesFileFilter, fileFilter.input, diffData?.rawPatch, activeFileIndex, guideOpen, isDiffPanelActive, effectiveDiffStyle, handleDiffStyleChange, isCompactTouchLayout, diffOverflow, diffIndicators,
     diffLineDiffType, diffShowLineNumbers, diffShowBackground,
     diffExpandUnchanged, diffFontFamily, diffFontSize, activeDiffBase, committedBase, feedbackDiffContext, prReviewScopeLabel, prDiffScope, agentCwd, canUseLiveWorkspaceActions, isStaticPatch, imagePreviewSupported, snapshotId, markdownPreview, diagramEngine, semDiffClient, revealInAllChanges, semanticChanges, allFilesLineTarget, jumpTo, powerUp, rejectPowerUpLink, handleAddMarkdownPreviewComment, handleAskAIForMarkdownPreview,
     diffAnnotations, externalAnnotations,
@@ -4913,9 +4965,12 @@ const ReviewApp: React.FC = () => {
     } catch (err) {
       console.error('Failed to send feedback:', err);
       setIsSendingFeedback(false);
+      const sendError = sendErrorAfterAgentGone(err, agentGoneRef.current);
+      noteSendFailureForAgentGone(sendError);
       showSendFailureToast({
         what: 'feedback',
-        error: err,
+        error: sendError,
+        reason: agentGoneReasonFor(sendError),
         onRetry: () => { void retryDecisionRef.current.sendFeedback(); },
         // What the Copy feedback button copies, read when clicked: what
         // Retry would send now.
@@ -4980,9 +5035,12 @@ const ReviewApp: React.FC = () => {
     } catch (err) {
       console.error('Failed to approve:', err);
       setIsApproving(false);
+      const sendError = sendErrorAfterAgentGone(err, agentGoneRef.current);
+      noteSendFailureForAgentGone(sendError);
       showSendFailureToast({
         what: 'approval',
-        error: err,
+        error: sendError,
+        reason: agentGoneReasonFor(sendError),
         onRetry: () => { void retryDecisionRef.current.approve(options); },
         // The approval's text as Retry would send it now; a bare approval
         // has none to copy.
@@ -5481,11 +5539,12 @@ const ReviewApp: React.FC = () => {
 
   // The "Star the repo" ask (approval "star-ask"): claimed once the page loads (the server stops on the decision),
   // shown on the done screen only, once a decision was sent (approved or feedback; never a closed session), never in
-  // the VS Code webview or without a live session. The server decides the rest.
+  // the VS Code webview or without a live session, and never on a load that showed the launch dialog. The server
+  // decides the rest.
   const starAskFooter = useStarAskDoneScreen({
     ready: !isLoading,
     decided: submitted === 'approved' || submitted === 'feedback',
-    eligible: !!origin && !isVSCodeWebview(),
+    eligible: !!origin && !isVSCodeWebview() && !launch.shownThisLoad,
   });
   // Explorer keys (the `review-explorer` scope): never over a dialog, the
   // guide, or while the review is settling; only Go to File works from a text
@@ -5537,11 +5596,11 @@ const ReviewApp: React.FC = () => {
       },
       nextChange: {
         when: (event) => canHandleExplorerKey(event),
-        handle: () => { void stepToChange(1); },
+        handle: (event) => stepToChange(1, event.repeat),
       },
       previousChange: {
         when: (event) => canHandleExplorerKey(event),
-        handle: () => { void stepToChange(-1); },
+        handle: (event) => stepToChange(-1, event.repeat),
       },
     },
   });
@@ -5811,6 +5870,8 @@ const ReviewApp: React.FC = () => {
       : undefined,
     onGoToFile: dockApi ? () => setGoToFileOpen(true) : undefined,
     searching: hasSearchableFiles && !!searchQuery.trim(),
+    fileFilterInput: fileFilter.input,
+    fileFilterActive: !!matchesFileFilter,
   };
   const agentsScope = reviewScopeText({
     prLabel: prMetadata ? getMRNumberLabel(prMetadata) : null,
@@ -6095,8 +6156,9 @@ const ReviewApp: React.FC = () => {
                   <PowerUpStatusSlot
                     status={powerUpStatus}
                     provider={powerUpConfigured.provider}
-                    onRetry={() => setPowerUpRetry((n) => n + 1)}
-                    onSettings={() => setOpenSettingsMenu('semantic')}
+                    endpoint={powerUpConfigured.endpoint}
+                    onRetry={retryPowerUp}
+                    onSettings={() => setOpenSettingsMenu('powerUp')}
                   />
                 )}
                 {!isCompactTouchLayout && <ReviewHeaderStatus variant="pill" {...reviewStatusProps} />}
@@ -6300,9 +6362,10 @@ const ReviewApp: React.FC = () => {
               resizeHandle={fileTreeResizeHandle}
             >
               <FileTree
+                visiblePaths={visiblePaths}
                 header={panelHeader}
                 treeScope={repoFilesSupported ? treeScope : 'changes'}
-                repoFiles={repoFiles}
+                repoFiles={filteredRepoFiles}
                 onOpenRepoFile={(path, options) => completeNavigatorSelection(() => openRepoFile(path, options))}
                 activeRepoPath={activeRepoPath}
                 groupByKind={groupByKind}
@@ -6405,6 +6468,7 @@ const ReviewApp: React.FC = () => {
                 onOpenSavedGuide={handleOpenGuide}
                 launchOff={!aiUIEnabled}
                 onMarkFilesViewed={handleGuideMarkFilesViewed}
+                viewedReady={reviewProgressStatus !== 'loading'}
                 onAddGlobalComment={submitted || busyWithDecision ? undefined : handleAddGeneralComment}
                 onShowGlobalComment={handleShowGlobalComment}
                 barSlot={guideBarSlot}
@@ -6644,10 +6708,11 @@ const ReviewApp: React.FC = () => {
             agentToolSetting={agentTool.setting}
             onAgentToolChange={agentTool.save}
             externalOpen={openSettingsMenu !== false}
-            externalTab={openSettingsMenu === 'semantic' ? 'semantic' : undefined}
+            externalTab={openSettingsMenu === 'powerUp' ? 'reviews' : undefined}
+            externalSection={openSettingsMenu === 'powerUp' ? 'powerUp' : undefined}
             onExternalClose={() => setOpenSettingsMenu(false)}
             // Local git session where since-base isn't offered (base ref
-            // unresolvable): Settings → Review → Git notes that the Git-status preference
+            // unresolvable): Settings → Reviews › Files and defaults › Git notes that the Git-status preference
             // can't take effect in THIS repo. PR/workspace/jj sessions say
             // nothing — the preference isn't about them.
             sinceBaseUnavailable={
@@ -6756,6 +6821,9 @@ const ReviewApp: React.FC = () => {
             }))
             : undefined}
         />
+
+        {/* The launch dialog: as the page opens, once per computer. */}
+        {launch.dialog}
 
         {/* GitHub general comment dialog */}
         <ReviewSubmissionDialog

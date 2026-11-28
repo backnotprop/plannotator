@@ -22,10 +22,13 @@
  * Tree-scanning tests (a test-side file that lists folders of the checkout:
  * readdir, Glob, git ls-files) can read any file, so they run on every change.
  *
- * Fail safe: the plan is `all` (every job and every test, exactly as on main) on
- * anything it cannot decide. Skipping is the risky direction. See RUN_ALL and
- * plan() for the list; a picker error, a run that is not a pull_request, or the
- * repo variable CI_AFFECTED=off also give `all`. A docs-only change (the
+ * Fail safe: the plan is `all` (every job and every test) on anything it cannot
+ * decide. Skipping is the risky direction. See RUN_ALL and plan() for the list;
+ * a picker error, a run that is neither a pull_request nor a push to main, or
+ * the repo variable CI_AFFECTED=off also give `all`. A push to main plans its
+ * commits since the last one whose Test run passed (pushChanges), and only
+ * when every path they change is the site or the docs (PUSH_LIGHT); any other
+ * push, or a base it cannot read, gives `all`. A docs-only change (the
  * allowlist of scripts/ci-docs-only.sh) gives `docs`: only the plan job and
  * Gitleaks run. The native app's files (apps/mobile/ios, apps/mobile/android:
  * nativeAppFile) are left out of every plan: only mobile-ios.yml builds them.
@@ -86,7 +89,7 @@ export const KNOWN_TOP = [
 const KNOWN_EXT = new Set([
   'ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs', 'mts', 'cts', 'md', 'mdx', 'json', 'jsonc', 'jsonl', 'ndjson', 'yaml', 'yml', 'toml', 'txt',
   'css', 'html', 'astro', 'svg', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'ico', 'icns', 'woff', 'woff2', 'mp4', 'webm',
-  'sh', 'ps1', 'cmd', 'py', 'sql', 'qnt', 'patch', 'xml', 'lock', 'bin', 'tgz',
+  'sh', 'ps1', 'cmd', 'py', 'sql', 'qnt', 'patch', 'xml', 'lock', 'bin', 'tgz', 'mmd',
 ]);
 // Package.resolved: a Swift lockfile (the native app's), data no Bun test reads; it plans like any data file.
 const KNOWN_BARE = /^(LICENSE[-\w]*|NOTICE|README|Dockerfile|_headers|xdg-open|open-in-vscode|Package\.resolved|\.gitignore|\.gitattributes|\.vscodeignore|\.semgrepignore|\.npmignore|\.adr-dir)$/;
@@ -99,9 +102,10 @@ const KNOWN_BARE = /^(LICENSE[-\w]*|NOTICE|README|Dockerfile|_headers|xdg-open|o
  * that changes only these runs no test lane and no Checks. The kinds are
  * listed, because skipping is the risky direction: anything else there (a
  * shell script, a tsconfig, a lockfile such as Package.resolved, .ts or
- * package.json) keeps the ordinary rules.
+ * package.json) keeps the ordinary rules. A `.gitignore` there is one of the
+ * kinds: it names Swift's and Xcode's own build output and no test reads it.
  */
-const NATIVE_IOS = /^apps\/mobile\/ios\/(([^/]+\/)*[^/]+\.(swift|pbxproj|plist|xcconfig|entitlements|xcstrings|strings|storyboard|xib|xcscheme|xcworkspacedata|xcsettings|xctestplan|md|png|jpe?g|pdf|svg)|([^/]+\/)*[^/]+\.xcassets\/([^/]+\/)*Contents\.json)$/;
+const NATIVE_IOS = /^apps\/mobile\/ios\/(([^/]+\/)*[^/]+\.(swift|pbxproj|plist|xcconfig|entitlements|xcstrings|strings|storyboard|xib|xcscheme|xcworkspacedata|xcsettings|xctestplan|md|png|jpe?g|pdf|svg)|([^/]+\/)*[^/]+\.xcassets\/([^/]+\/)*Contents\.json|([^/]+\/)*\.gitignore)$/;
 const NATIVE_ANDROID = /^apps\/mobile\/android\/(([^/]+\/)*[^/]+\.(kt|kts|java|gradle|pro|md|png|webp|jpe?g|svg)|([^/]+\/)*res\/([^/]+\/)*[^/]+\.xml|([^/]+\/)*AndroidManifest\.xml|gradle\.properties|gradle\/wrapper\/gradle-wrapper\.(jar|properties))$/;
 
 export function nativeAppFile(path: string): boolean {
@@ -175,8 +179,8 @@ export const SMOKE_ROOTS = [
   'apps/hook/server/index.ts',
   'apps/hook/index.tsx', 'apps/hook/vite.config.ts',
   'apps/review/index.tsx', 'apps/review/vite.config.ts', 'apps/review/diagram-engine/build.ts',
-  'apps/inbox/index.tsx', 'apps/inbox/shape.tsx', 'apps/inbox/surface.tsx',
-  'apps/inbox/vite.config.ts', 'apps/inbox/vite.shape.config.ts', 'apps/inbox/vite.surface.config.ts',
+  'apps/inbox/index.tsx', 'apps/inbox/surface.tsx',
+  'apps/inbox/vite.config.ts', 'apps/inbox/vite.surface.config.ts',
 ];
 
 const closures = new WeakMap<Graph, Map<string, Set<string>>>();
@@ -288,10 +292,11 @@ export const JOB_MAP: Record<string, Record<string, string>> = {
   'inbox-claude-code.yml': { 'inbox-claude-code': 'paths' },
   'relay.yml': { relay: 'paths' },
   'mobile-ios.yml': { ios: 'paths', 'ios-nightly': 'no-pr' },
+  'mobile-contract.yml': { contract: 'paths', ledger: 'paths' },
   'e2e-slice.yml': { plan: 'slice', slice: 'slice' },
   'inbox-e2e.yml': { head: 'label', build: 'label', plan: 'label', 'inbox-window-e2e': 'label', blame: 'label', 'full-ci': 'label' },
   'dast.yml': { 'passive-baseline': 'no-pr' },
-  'deploy.yml': { 'detect-changes': 'no-pr', 'deploy-marketing': 'no-pr', 'deploy-portal': 'no-pr', 'deploy-paste': 'no-pr', 'deploy-waitlist': 'no-pr' },
+  'deploy.yml': { 'detect-changes': 'no-pr', 'site-lane': 'no-pr', 'deploy-marketing': 'no-pr', 'deploy-portal': 'no-pr', 'deploy-paste': 'no-pr', 'deploy-waitlist': 'no-pr' },
   'guides-show-deploy.yml': { publish: 'no-pr' },
   'snapshots-sign-check.yml': { 'sign-and-notarize': 'no-pr' },
 };
@@ -1007,6 +1012,117 @@ export function ciChanges(env = process.env, repo = repoRoot): { changes: Change
 }
 
 // ---------------------------------------------------------------------------
+// A push to main
+
+/**
+ * The passed Test runs of pushes to main, newest first. deploy.yml reads the
+ * same list for its BEFORE_SHA (scripts/ci-affected-map.test.ts holds the two
+ * to it), so the plan's base is the commit the last deploy came from.
+ */
+export const PASSED_MAIN_RUNS = 'actions/workflows/test.yml/runs?branch=main&event=push&status=success&per_page=50';
+
+/**
+ * The paths a push to main may change and still plan like a PR: the marketing
+ * site and the docs, which nothing the product ships is built from (the
+ * native app's own files count too: only mobile-ios.yml builds them). Any
+ * other path in the range runs everything, as main always did: main is the
+ * backstop for what a PR's plan leaves out. A path here still gets every
+ * safety valve of the plan (a manifest, a tsconfig, deleted code...).
+ */
+export const PUSH_LIGHT = ['apps/marketing/**', 'docs/**', 'adr/**', '.github/assets/**', '*.md', 'LICENSE-*'];
+
+/**
+ * Site files the product reads from plannotator.ai at runtime, so a change
+ * there reaches people the moment the site deploys, whatever the picker
+ * missed: never light. The Inbox's icon sets (INBOX_ICON_SETS_POINTER_DEFAULT),
+ * the decision post's banner (DECISION_POST_BANNER), the hand-uploaded hosted
+ * files (PERSONAL_AGENTS_BANNER_BASE), the announcement dialogs' footage and
+ * posters (MEDIA_BASE_URL), and the pages a cloud agent is told to follow
+ * (INBOX_CLOUD_SETUP_PAGE, INBOX_CLOUD_MUSE_PAGE) with their sources.
+ */
+export const PUSH_RUNTIME_SITE: RegExp[] = [
+  /^apps\/marketing\/public\/assets\/(icon-sets|decisions|hosted)\//,
+  /^apps\/marketing\/public\/assets\/(ask-this-session|inbox-film|tui-herdr)[^/]*$/,
+  /^apps\/marketing\/src\/lib\/inbox-(cloud-agent|muse)\.md$/,
+  /^apps\/marketing\/src\/pages\/\[inbox\]\//,
+];
+
+export const pushLight = (path: string) =>
+  nativeAppFile(path) || (PUSH_LIGHT.some((g) => match(g, path)) && !PUSH_RUNTIME_SITE.some((r) => r.test(path)));
+
+const SHA = /^[0-9a-f]{40}$/;
+
+/**
+ * The commit of the newest passed Test run of a push to main that is older
+ * than this run: deploy.yml's BEFORE_SHA (`[.workflow_runs[] | select(.id <
+ * TEST_RUN_ID)] | first | .head_sha`). Null when there is none or the answer
+ * is not the shape expected.
+ */
+export function lastPassedSha(runs: unknown, runId: number): string | null {
+  const list = (runs as { workflow_runs?: unknown } | null)?.workflow_runs;
+  if (!Array.isArray(list)) return null;
+  const hit = list.find((r) => typeof r?.id === 'number' && r.id < runId);
+  return typeof hit?.head_sha === 'string' && SHA.test(hit.head_sha) ? hit.head_sha : null;
+}
+
+/** A GET on this repository's API (a path after `repos/<owner>/<repo>/`). */
+export type RepoApi = (path: string) => Promise<unknown>;
+
+function githubApi(env = process.env): RepoApi {
+  return async (path) => {
+    const token = env.GH_TOKEN;
+    if (!token) throw new Error('no GH_TOKEN');
+    const res = await fetch(`${env.GITHUB_API_URL || 'https://api.github.com'}/repos/${env.GITHUB_REPOSITORY}/${path}`, {
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' },
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!res.ok) throw new Error(`GitHub API ${res.status} on ${path.split('?')[0]}`);
+    return res.json();
+  };
+}
+
+/**
+ * In a push to main: the last main commit whose Test run passed, and the
+ * pushed commit. A run can cover several commits (a newer push replaces a
+ * waiting run), and a failed run's commits are tested again by the next one,
+ * so the base is never just the parent. Anything it cannot tell (the first
+ * run, an API error, a base that the pushed commit does not contain) is why
+ * everything runs.
+ */
+export async function pushRange(env = process.env, api: RepoApi = githubApi(env), repo = repoRoot): Promise<{ base: string; head: string } | { why: string }> {
+  if ((env.CI_AFFECTED ?? '').trim().toLowerCase() === 'off') return { why: 'the repo variable CI_AFFECTED is off' };
+  if (env.GITHUB_EVENT_NAME !== 'push' || env.GITHUB_REF !== 'refs/heads/main') return { why: `not a pull_request run or a push to main (${env.GITHUB_EVENT_NAME || 'no event'})` };
+  const runId = Number(env.GITHUB_RUN_ID);
+  if (!Number.isSafeInteger(runId) || runId <= 0) return { why: 'a push to main without a run id' };
+  try {
+    const head = git(['rev-parse', 'HEAD'], repo).trim();
+    const base = lastPassedSha(await api(PASSED_MAIN_RUNS), runId);
+    if (!base) return { why: 'a push to main with no earlier passed Test run to plan from' };
+    // "ahead": the pushed commit contains the base (history was not rewritten).
+    const order = ((await api(`compare/${base}...${head}`)) as { status?: unknown } | null)?.status;
+    if (order !== 'ahead') return { why: `a push to main that is ${String(order)} of the last passed commit ${base.slice(0, 9)}, not ahead` };
+    try { git(['cat-file', '-e', `${base}^{commit}`], repo); } catch { git(['fetch', '--no-tags', '--depth=1', 'origin', base], repo); }
+    return { base, head };
+  } catch (e) {
+    return { why: `a push to main whose last passed commit could not be read: ${(e as Error).message.split('\n')[0]}` };
+  }
+}
+
+/**
+ * The change a push to main plans for: everything since the last passed
+ * commit, when every path in it is a light one (PUSH_LIGHT); otherwise why
+ * everything runs.
+ */
+export async function pushChanges(env = process.env, api?: RepoApi, repo = repoRoot): Promise<{ changes: Change[]; docsOnly: boolean; base: string } | { why: string }> {
+  const range = await pushRange(env, api, repo);
+  if ('why' in range) return range;
+  const changes = changesBetween(range.base, range.head, repo);
+  const heavy = changes.find((c) => !pushLight(c.path));
+  if (heavy) return { why: `a push to main whose commits since ${range.base.slice(0, 9)} change more than the site and docs (${heavy.path})` };
+  return { changes, docsOnly: docsOnly(range.base, range.head, repo), base: range.base };
+}
+
+// ---------------------------------------------------------------------------
 // Reports
 
 const MAX_LIST = 400;
@@ -1108,21 +1224,27 @@ function allPlan(why: string): Plan {
   };
 }
 
-/** The Test workflow's plan job. Never fails: any error is a plan that runs everything. */
-function ciPlan() {
+/**
+ * The Test workflow's plan job. Never fails: any error is a plan that runs everything.
+ * A push to main plans its commits since the last passed one when they are all light
+ * (pushChanges); a PR its merge commit; anything else runs everything.
+ */
+async function ciPlan() {
   let p: Plan;
+  const push = process.env.GITHUB_EVENT_NAME === 'push';
   try {
-    const got = ciChanges();
+    const got = push ? await pushChanges() : ciChanges();
     if ('why' in got) p = plan({ files: [], graph: {} }, { changes: [], docsOnly: false, forceAll: got.why });
     else {
       p = plan(buildGraph(), { changes: got.changes, docsOnly: got.docsOnly });
-      if (got.preview) p.notes.push('a manual preview: planned as if a PR changed only the as_if_changed paths');
+      if ('preview' in got && got.preview) p.notes.push('a manual preview: planned as if a PR changed only the as_if_changed paths');
+      if ('base' in got) p.notes.push(`a push to main: planned for every commit since ${got.base.slice(0, 9)}, the last one whose Test run passed (only the site and docs changed)`);
     }
   } catch (e) {
     p = allPlan(`the picker failed: ${(e as Error).message.split('\n')[0]}`);
   }
   const text = report(p);
-  console.log('==== ci-affected: what this PR runs ====');
+  console.log(`==== ci-affected: what this ${push ? 'push' : 'PR'} runs ====`);
   console.log(text);
   const scanners = p.tests.filter((t) => t.why === 'scanner');
   if (scanners.length) {
@@ -1130,7 +1252,7 @@ function ciPlan() {
     for (const t of scanners) console.log(`  ${t.path}`);
   }
   console.log('==== end ====');
-  console.log(`::notice title=Tests this PR runs (${p.mode})::${esc(notice(p))}`);
+  console.log(`::notice title=Tests this ${push ? 'push' : 'PR'} runs (${p.mode})::${esc(notice(p))}`);
   if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, summaryMarkdown(p));
   setOutputs(planOutputs(p));
 }
@@ -1197,7 +1319,7 @@ function localPrint(args: string[]) {
 
 if (import.meta.main) {
   const [cmd, ...rest] = process.argv.slice(2);
-  if (cmd === 'plan') ciPlan();
+  if (cmd === 'plan') await ciPlan();
   else if (cmd === 'gate' && rest[0]) ciGate(rest[0]);
   else if (cmd === '--print' || cmd === 'print' || process.argv.includes('--print')) localPrint(process.argv.slice(2));
   else {

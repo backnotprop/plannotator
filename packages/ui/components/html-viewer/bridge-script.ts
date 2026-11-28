@@ -642,9 +642,18 @@ ${SANDBOX_SHIM_SCRIPT}
   // navigation reach the page untouched. Text drag-selection commenting stays
   // LIVE in both modes (a real drag opens the comment toolbar even in
   // Interact), committed overlay artifacts stay visible in both modes, and
-  // marker buttons keep their own clicks. BOTH surface kinds start ARMED —
-  // Esc (or the header pen) drops to Interact.
-  var annotateModeActive = true;
+  // marker buttons keep their own clicks. The page STARTS in the mode its
+  // host passed in with the bridge (live: the config prelude's startInteract;
+  // srcdoc: data-plannotator-start on this script's tag), so it is already
+  // armed, or already passive, before the parent's first set-annotate-mode.
+  // Armed unless told otherwise, on every load and navigation.
+  var startInteract = false;
+  if (LIVE) {
+    startInteract = LIVE.startInteract === true;
+  } else {
+    try { startInteract = !!document.currentScript && document.currentScript.getAttribute('data-plannotator-start') === 'interact'; } catch (ex) {}
+  }
+  var annotateModeActive = !startInteract;
   // A native host decides link navigations itself (HtmlViewer hostNavigates).
   var hostNavigates = false;
   // Forms and in-page links work as in a tab (the host's opt-in, \`pageNavigation\`).
@@ -934,7 +943,21 @@ ${SANDBOX_SHIM_SCRIPT}
       renderAnnotationOverlay();
     }
 
+    else if (type === PREFIX + 'set-structural-anchors') {
+      structuralAnchors = e.data.active === true;
+    }
+
+    else if (type === PREFIX + 'set-markers-above') {
+      var above = e.data.active === true;
+      if (above !== markersAbove) {
+        markersAbove = above;
+        renderAnnotationOverlay();
+      }
+    }
+
     else if (type === PREFIX + 'find-and-mark') {
+      // The host's word that this document is the one the comment was made on (structural anchors).
+      if (e.data.structural === true) structuralAnchors = true;
       var found = restoreAnnotation(
         e.data.id,
         e.data.annotationType || 'comment',
@@ -1791,6 +1814,11 @@ ${SANDBOX_SHIM_SCRIPT}
   var MARKER_SPREAD_STEP = 12.5;   // horizontal step for coincident markers
   var MARKER_SPREAD_EDGE = 28.5;   // effective edge clamp while spreading
   var MARKER_ASSOC_TOLERANCE = 16; // clamped point must stay this close to the visible target
+  var MARKER_ABOVE_LIFT = 13;      // markersAbove: the bubble's tail just over the element's top edge
+  // The host's opt-in (set-markers-above): an element's marker sits on its
+  // top edge, above it, at the clicked x, so it never covers a small element
+  // (a chart's bar). Where that is not shown, the clicked point, as always.
+  var markersAbove = false;
   var MAX_HIGHLIGHT_RECTS = 48;    // highlight rects drawn per range target
   var MAX_SYNC_ANNOTATIONS = 512;  // parent-synced numbering entries
 
@@ -2072,6 +2100,10 @@ ${SANDBOX_SHIM_SCRIPT}
       if (!s || !e) return false;
       if (typeof s.isConnected === 'boolean' && !s.isConnected) return false;
       if (typeof e.isConnected === 'boolean' && !e.isConnected) return false;
+      // A page that detaches and re-attaches the node (virtualized lists, e.g. Feishu docs) collapses the
+      // live Range onto the still-connected parent: connected but empty, so treat it as dead
+      // (refreshRecordTargets decides whether it comes back).
+      if (range.collapsed) return false;
       return true;
     } catch (ex) {
       return false;
@@ -2286,14 +2318,111 @@ ${SANDBOX_SHIM_SCRIPT}
     }
   }
 
+  // A text highlight that was in place and is then lost (the page removed its
+  // text node, which collapses the live Range onto the parent, or rewrote the
+  // node's data, which collapses it inside the node) comes back ONLY by
+  // identity: the very same text nodes, connected again and holding exactly
+  // the text they held while it was in place, get the very same offsets back.
+  // That covers pages that detach and re-attach the same nodes (keyed
+  // reordering, a moved subtree, show/hide by removal). Its words found
+  // anywhere else never re-anchor it: two rows can share them, and a
+  // highlight on the other row would point at words the person did not
+  // comment on. It stays unanchored and is reported so until a reload
+  // restores it from its stored text. While in place each pass notes where
+  // it is (notePlace); while lost each pass costs two isConnected reads and
+  // two string compares (rangeAtPlace). After LOST_PLACE_KEEP_MS lost, the
+  // node references are dropped so nodes the page threw away are not kept
+  // alive, and the target stays unanchored.
+  var LOST_PLACE_KEEP_MS = 300000;
+
+  // anchored: the record has an anchor; its place only marks that the
+  // highlight was in place (refreshRecordTargets then searches only inside
+  // the anchor element), so no nodes are kept for it.
+  function notePlace(target, anchored) {
+    var place = target.place || (target.place = {
+      startNode: null, startOffset: 0, startText: '', endNode: null, endOffset: 0, endText: '', lostSince: -1
+    });
+    place.lostSince = -1;
+    place.startNode = null;
+    place.endNode = null;
+    if (anchored) return;
+    try {
+      var range = target.range;
+      var s = range.startContainer;
+      var e = range.endContainer;
+      // A boundary outside a text node has no text to confirm it by: once
+      // lost, such a highlight stays unanchored.
+      if (s.nodeType !== 3 || e.nodeType !== 3) return;
+      place.startOffset = range.startOffset;
+      place.endOffset = range.endOffset;
+      place.startText = s.data;
+      place.endText = e.data;
+      place.startNode = s;
+      place.endNode = e;
+    } catch (ex) {}
+  }
+
+  function rangeAtPlace(place, quote) {
+    var now = monotonicNow();
+    if (place.lostSince < 0) place.lostSince = now;
+    if (now - place.lostSince > LOST_PLACE_KEEP_MS) {
+      place.startNode = null;
+      place.endNode = null;
+      place.startText = '';
+      place.endText = '';
+    }
+    var s = place.startNode;
+    var e = place.endNode;
+    if (!s || !e) return null;
+    try {
+      if (!s.isConnected || !e.isConnected || s.data !== place.startText || e.data !== place.endText) return null;
+      var range = document.createRange();
+      range.setStart(s, place.startOffset);
+      range.setEnd(e, place.endOffset);
+      // Nodes back in another order give an empty Range: not restored (and
+      // the lost timer keeps running, so the bound still drops them).
+      if (range.collapsed) return null;
+      // Two nodes can come back apart with other content between them: the
+      // Range must still cover exactly the quoted words.
+      if (s !== e && !sameWords(range.toString(), quote)) return null;
+      place.lostSince = -1;
+      return range;
+    } catch (ex) {
+      return null;
+    }
+  }
+
+  // A selection's text and its Range's text differ in whitespace (block
+  // breaks, trimming), so both drop it. A quote capped at MAX_SELECTION_TEXT
+  // (capSelectionText) only has to start the Range's text.
+  function sameWords(rangeText, quote) {
+    var words = String(rangeText).replace(/\\s+/g, '');
+    var quoted = String(quote || '').replace(/\\s+/g, '');
+    if (!quoted) return false;
+    // A quote at the cap was cut short, so it cannot confirm where the highlight ends: refuse.
+    if (String(quote).length >= MAX_SELECTION_TEXT - 1) return false;
+    return words === quoted;
+  }
+
+  function rangeCollapsed(range) {
+    try {
+      return range.collapsed === true;
+    } catch (ex) {
+      return false;
+    }
+  }
+
   // Re-resolve stale live targets from durable data. Element targets
   // re-acquire through their anchor; range targets re-run the text search
-  // (anchor-scoped first). Unresolvable targets stay hidden — never guessed
+  // (anchor-scoped first), except a highlight that was in place and got
+  // lost: without an anchor it comes back only by identity (rangeAtPlace),
+  // with one only from inside the anchor element. Unresolvable targets stay hidden — never guessed
   // — and each failed search is gated by the generation of its last attempt
   // PLUS the wall-clock backoff and per-pass budget above, so they retry
   // only after the document could actually have changed, and never per
   // frame.
   function refreshRecordTargets(record) {
+    var anchored = !!(record.params && record.params.anchor);
     for (var i = 0; i < record.targets.length; i++) {
       var target = record.targets[i];
       if (target.kind === 'element') {
@@ -2303,16 +2432,26 @@ ${SANDBOX_SHIM_SCRIPT}
           noteDeadSearchResult(target, !!target.element);
         }
       } else if (!rangeAlive(target.range)) {
+        // Only a collapse is the loss rangeAtPlace handles. A Range whose nodes
+        // left the document without collapsing (text in a shadow root whose
+        // host was removed) keeps the search below, as before.
+        if (target.place && target.range && !rangeCollapsed(target.range)) target.place = null;
         target.range = null;
-        if (target.text) {
+        if (target.place && !anchored) {
+          target.range = rangeAtPlace(target.place, target.text);
+        } else if (target.text) {
           if (!deadSearchAllowed(target)) continue;
           var scopeEl = record.params && record.params.anchor
             ? resolveAnchorElement(record.params.anchor)
             : null;
+          // An anchored highlight that was in place searches only inside its
+          // anchor element: never the whole document.
           target.range = (scopeEl && findTextRange(target.text, scopeEl))
-            || findTextRange(target.text, null);
+            || (target.place ? null : findTextRange(target.text, null));
           noteDeadSearchResult(target, !!target.range);
         }
+      } else {
+        notePlace(target, anchored);
       }
     }
   }
@@ -2903,11 +3042,11 @@ ${SANDBOX_SHIM_SCRIPT}
           var zeroSize = layoutActive() && !(rect.width || 0) && !(rect.height || 0);
           var styleHidden = !zeroSize && targetStyleHidden(el);
           var point = target.point || { x: 0.5, y: 0.5 };
-          var placed = zeroSize || styleHidden ? null : markerViewportPoint(
-            clippedTargetRect(el, rect),
-            rect.left + point.x * (rect.width || 0),
-            rect.top + point.y * (rect.height || 0)
-          );
+          var markerX = rect.left + point.x * (rect.width || 0);
+          var visibleRect = zeroSize || styleHidden ? null : clippedTargetRect(el, rect);
+          var placed = !visibleRect ? null
+            : (markersAbove && markerViewportPoint(visibleRect, markerX, rect.top - MARKER_ABOVE_LIFT))
+              || markerViewportPoint(visibleRect, markerX, rect.top + point.y * (rect.height || 0));
           if (placed && seenRecordElements.indexOf(el) >= 0) placed = null;
           if (placed) {
             seenRecordElements.push(el);
@@ -3259,6 +3398,107 @@ ${SANDBOX_SHIM_SCRIPT}
     return null;
   }
 
+  // --- Structural anchors (opt-in: the parent's set-structural-anchors, or
+  // the flag on its find-and-mark). The host has checked that this document
+  // is, byte for byte, the one the comments were made on (the Inbox: a live
+  // html block's source hash). Only then may an element with no text and no
+  // stable identity be anchored by where it sits: the child index at each
+  // level from the root element down, saved with a signature of the element
+  // (tag, namespace, its own attributes). Restore follows the path and takes
+  // the element ONLY when the signature is exactly the same. It never takes
+  // an element nearby, and a page that builds its DOM differently on each
+  // load fails the check: unanchored. Off (every other host), the rule above
+  // stands: no anchor.
+  var structuralAnchors = false;
+  var STRUCTURE_MAX_DEPTH = 64;
+  var STRUCTURE_MAX_ATTRS = 24;
+  var STRUCTURE_MAX_NAME = 64;
+  var STRUCTURE_MAX_VALUE = 160;
+
+  // The viewer's own overlays are not the page's: they are not counted.
+  function structureChildren(parent) {
+    var out = [];
+    var kids = parent.children || [];
+    for (var i = 0; i < kids.length; i++) {
+      if (!overlayNodes.has(kids[i])) out.push(kids[i]);
+    }
+    return out;
+  }
+
+  function structurePath(el) {
+    var path = [];
+    var current = el;
+    while (current && current !== document.documentElement) {
+      var parent = current.parentElement;
+      if (!parent || path.length >= STRUCTURE_MAX_DEPTH) return null;
+      var index = structureChildren(parent).indexOf(current);
+      if (index < 0) return null;
+      path.unshift(index);
+      current = parent;
+    }
+    return current === document.documentElement && path.length ? path : null;
+  }
+
+  // A long value (a path's d) is kept as a digest and its length.
+  function structureDigest(value) {
+    var h = 0x811c9dc5;
+    for (var i = 0; i < value.length; i++) {
+      h ^= value.charCodeAt(i);
+      h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    return h.toString(16);
+  }
+
+  // Null: an element whose attributes are past the caps gets no anchor
+  // (nothing is cut to fit: a shortened signature could match another).
+  function structureSignature(el) {
+    var list = el.attributes;
+    if (!list) return null;
+    var attrs = [];
+    for (var i = 0; i < list.length; i++) {
+      var name = list[i].name;
+      // The viewer's own marks on the page (the armed cursor on body).
+      if (name.indexOf('data-plannotator-') === 0) continue;
+      if (!name || name.length > STRUCTURE_MAX_NAME || attrs.length >= STRUCTURE_MAX_ATTRS) return null;
+      var value = String(list[i].value);
+      // The keyboard pinpoint's hover class on the element is the viewer's, not the page's.
+      if (name === 'class' && value.indexOf('plannotator-pinpoint-hover') >= 0) {
+        var own = value.split(/\\s+/).filter(function(c) { return c && c !== 'plannotator-pinpoint-hover'; });
+        if (!own.length) continue;
+        value = own.join(' ');
+      }
+      attrs.push(value.length <= STRUCTURE_MAX_VALUE ? [name, value] : [name, structureDigest(value), value.length]);
+    }
+    attrs.sort(function(a, b) { return a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0; });
+    return { ns: el.namespaceURI || '', attrs: attrs };
+  }
+
+  function buildAnchorStructure(el) {
+    if (!structuralAnchors || isViewerOverlayNode(el)) return null;
+    var path = structurePath(el);
+    var signature = path && structureSignature(el);
+    if (!signature) return null;
+    return { path: path, ns: signature.ns, attrs: signature.attrs };
+  }
+
+  function resolveAnchorStructure(anchor) {
+    var structure = anchor.structure;
+    if (!structuralAnchors || !structure || typeof structure !== 'object') return null;
+    var path = structure.path;
+    if (!Array.isArray(path) || !path.length || path.length > STRUCTURE_MAX_DEPTH || !Array.isArray(structure.attrs)) return null;
+    var current = document.documentElement;
+    for (var i = 0; i < path.length; i++) {
+      if (typeof path[i] !== 'number') return null;
+      current = structureChildren(current)[path[i]];
+      if (!current) return null;
+    }
+    if (current.tagName.toLowerCase() !== anchor.tagName.toLowerCase()) return null;
+    var signature = structureSignature(current);
+    if (!signature || signature.ns !== structure.ns) return null;
+    if (JSON.stringify(signature.attrs) !== JSON.stringify(structure.attrs)) return null;
+    return current;
+  }
+
   function buildElementAnchor(el) {
     if (!el || el.nodeType !== 1) return null;
     var selector = buildAnchorSelector(el);
@@ -3272,7 +3512,12 @@ ${SANDBOX_SHIM_SCRIPT}
     // derived signature would validate the WRONG element after a sibling is
     // inserted or removed. A wrong-binding anchor is worse than no anchor:
     // ship none and fail closed (the pin simply doesn't restore).
-    if (!snapshot && !anchorHasStableIdentity(selector, el)) return null;
+    if (!snapshot && !anchorHasStableIdentity(selector, el)) {
+      // ...unless the host vouches for the document (structural anchors):
+      // then its place and its exact signature, never the selector.
+      var structure = buildAnchorStructure(el);
+      return structure ? { selector: selector, tagName: el.tagName.toLowerCase(), structure: structure } : null;
+    }
     return {
       selector: selector,
       tagName: el.tagName.toLowerCase(),
@@ -3304,6 +3549,8 @@ ${SANDBOX_SHIM_SCRIPT}
 
   function resolveAnchorElement(anchor) {
     if (!anchor || typeof anchor.selector !== 'string' || !anchor.selector || typeof anchor.tagName !== 'string') return null;
+    // A structural anchor resolves by its path and signature or not at all.
+    if (anchor.structure) return resolveAnchorStructure(anchor);
     return resolveAnchorSelector(anchor) || relocateBySource(anchor);
   }
 
@@ -6475,9 +6722,8 @@ ${SANDBOX_SHIM_SCRIPT}
       resizeObserver.observe(document.documentElement);
     }
     watchPageMutations();
-    // Armed is the default on both surfaces, and live sessions default to
-    // pinpoint: show the cursor affordance immediately instead of waiting for
-    // the parent's first set-input-method/set-annotate-mode round trip.
+    // Show the start mode's cursor affordance now (live sessions default to
+    // pinpoint) instead of waiting for the parent's first round trip.
     updatePinpointCursor();
     var readyMsg = { type: PREFIX + 'ready', protocolVersion: ${BRIDGE_PROTOCOL_VERSION} };
     if (LIVE) readyMsg.pageUrl = currentPageUrl();

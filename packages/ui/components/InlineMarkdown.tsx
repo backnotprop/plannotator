@@ -1,12 +1,14 @@
-import React, { createContext, useContext, useState, useMemo, useSyncExternalStore } from "react";
+import React, { createContext, useContext, useEffect, useState, useMemo, useSyncExternalStore } from "react";
 import { isCodeFilePath, isCodeFilePathStrict, CODE_PATH_BARE_REGEX, parseCodePath } from "@plannotator/core/code-file";
-import { findCrossRepoRef, forgeRefLinks, gitlabHostsSnapshot, matchCrossRepoRef, subscribeGitlabHosts, type CrossRepoRef } from "@plannotator/core/forge-refs";
+import { BARE_MR_REF, findCrossRepoRef, forgeRefLinks, gitlabHostsSnapshot, matchCrossRepoRef, subscribeGitlabHosts, type CrossRepoRef } from "@plannotator/core/forge-refs";
 import { CodeSnippetPreview } from "./CodeSnippetPreview";
 import { useHoverPreview } from "../hooks/useHoverPreview";
+import { matchInlineHtml } from '../utils/inlineHtmlTags';
 import { transformPlainText } from "../utils/inlineTransforms";
 import { hasLinkedDocExtension } from "../utils/markdownExtensions";
 import { getImageSrc } from "./ImageThumbnail";
-import { InlineImageTagsContext, UNAVAILABLE_IMAGE_CLASS, useImageResolver } from "./ImageResolverContext";
+import { ImageRetryContext, InlineImageTagsContext, UNAVAILABLE_IMAGE_CLASS, useImageResolver } from "./ImageResolverContext";
+import { probeImage } from "./imageRetryProbe";
 import { useCodePathValidation, type CodePathValidationContextValue } from "./CodePathValidationContext";
 import { BarePathContext, CodeSpan, isNewTabClick, useLocalLinkMatch, useLocalLinkResolver, type BarePathWrap } from "./LocalLinkContext";
 import type { ValidationEntry } from "../hooks/useValidatedCodePaths";
@@ -17,6 +19,10 @@ import { HostTitle } from "./HostTitle";
 import { AuthorColorText } from "./AuthorColorText";
 import { matchAuthorColor } from "../utils/authorColor";
 import { plainTextLinkSpans, usePlainTextLinkers } from "../utils/refCardProviders";
+import { proseRefLinkProps } from "../utils/refCardClick";
+import { autolinkMayFollow, autolinkRunningPast, emailMayFollow, findWwwAutolinks, matchEmailAutolink, matchHtmlEntity, matchWwwAutolink, wwwAutolinkHref } from "../utils/inlineAutolinks";
+import { FOOTNOTE_REF_RE, footnoteKey } from "../utils/footnotes";
+import { FootnoteRef, useFootnoteScope } from "./footnotes/footnoteScope";
 
 export interface DocPreviewResult {
   contents?: string;
@@ -326,10 +332,11 @@ function emitPlainTextWithBareUrls(
   validation?: CodePathValidationContextValue | null,
   baseDir?: string,
   barePaths?: BarePathWrap | null,
+  sourceLike = false,
 ): void {
   if (text.length === 0) return;
 
-  type Span = { start: number; end: number; kind: 'url'; value: string }
+  type Span = { start: number; end: number; kind: 'url'; value: string; href?: string }
     | { start: number; end: number; kind: 'path'; value: string }
     | { start: number; end: number; kind: 'host'; value: string }
     | { start: number; end: number; kind: 'node'; value: string; node: (key: number) => React.ReactNode };
@@ -346,6 +353,14 @@ function emitPlainTextWithBareUrls(
     if (!safe) continue;
     spans.push({ start: m.index, end: m.index + url.length, kind: 'url', value: url });
     urlRe.lastIndex = m.index + url.length;
+  }
+
+  // Bare `www.` addresses (GFM extended autolinks), where no URL above took them.
+  if (!sourceLike && text.includes('www.')) {
+    for (const found of findWwwAutolinks(text, previousChar)) {
+      if (spans.some(s => found.start < s.end && found.end > s.start)) continue;
+      spans.push({ start: found.start, end: found.end, kind: 'url', value: found.shown, href: wwwAutolinkHref(found.shown) });
+    }
   }
 
   // Collect bare code file paths (require /)
@@ -396,9 +411,10 @@ function emitPlainTextWithBareUrls(
       parts.push(
         <a
           key={nextKey()}
-          href={span.value}
+          href={span.href ?? span.value}
           target="_blank"
           rel="noopener noreferrer"
+          {...proseRefLinkProps(span.href ?? span.value)}
           className="text-primary underline underline-offset-2 hover:text-primary/80"
         >
           {span.value}
@@ -463,8 +479,25 @@ const HostResolvedImage: React.FC<{
   writtenSrc?: string;
   onImageClick?: (src: string, alt: string) => void;
 }> = ({ src, alt, width, height, writtenSrc, onImageClick }) => {
-  const [failedSrc, setFailedSrc] = useState<string | null>(null);
-  const failed = failedSrc === src;
+  const retry = useContext(ImageRetryContext);
+  /** The src that failed, and the host's retry key then (`ImageRetryContext`). */
+  const [failure, setFailure] = useState<{ src: string; key: string | number | undefined } | null>(null);
+  const failed = failure?.src === src;
+  /** A src that failed, then loaded off the page: the element loads it again under a new fragment (not sent). */
+  const [reloaded, setReloaded] = useState<{ src: string; n: number } | null>(null);
+  const retryKey = retry?.key;
+  const retrying = failed && retry !== null && failure.key !== retryKey && retry.retries(src);
+  useEffect(() => {
+    if (!retrying) return;
+    // Off the page first (a few at a time in the window): the placeholder stays until the picture is there.
+    return probeImage(src, (loaded) => {
+      if (!loaded) return setFailure({ src, key: retryKey });
+      // The same element, a new URL string: WebKit does not load again a URL that failed for it when it is set again.
+      setReloaded((last) => ({ src, n: last?.src === src ? last.n + 1 : 1 }));
+      setFailure(null);
+    });
+  }, [retrying, src, retryKey]);
+  const shownSrc = reloaded?.src === src && !src.includes('#') ? `${src}#retry-${reloaded.n}` : src;
   return (
     <>
       {failed && (
@@ -474,7 +507,7 @@ const HostResolvedImage: React.FC<{
       )}
       <img
         key="image"
-        src={src}
+        src={shownSrc}
         alt={failed ? '' : alt}
         width={width}
         height={height}
@@ -486,12 +519,40 @@ const HostResolvedImage: React.FC<{
         loading="lazy"
         // Only for a host's smaller copy (`width`): the default stays as it was for every other host.
         decoding={width ? 'async' : undefined}
-        onError={() => setFailedSrc(src)}
+        onError={() => setFailure({ src, key: retryKey })}
         onClick={(e) => {
           e.stopPropagation();
           if (!failed) onImageClick?.(src, alt);
         }}
       />
+    </>
+  );
+};
+
+const HostResolvedMedia: React.FC<{ src: string; alt: string; writtenSrc: string; media: 'audio' | 'video' }> = ({ src, alt, writtenSrc, media }) => {
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  const failed = failedSrc === src;
+  const noun = media === 'audio' ? 'Sound' : 'Video';
+  const props = {
+    src,
+    controls: true,
+    preload: 'metadata',
+    'aria-label': failed ? undefined : alt || writtenSrc.replace(/[?#].*$/, '').split(/[\\/]/).pop() || noun,
+    title: alt || undefined,
+    hidden: failed || undefined,
+    'aria-hidden': failed || undefined,
+    'data-inline-media': media,
+    className: failed ? undefined : media === 'video' ? 'annotation-exclude block max-w-full max-h-[70vh] rounded my-2' : 'annotation-exclude block max-w-full my-2',
+    onError: () => setFailedSrc(src),
+  } as const;
+  return (
+    <>
+      {failed && (
+        <span key="unavailable" className={`${UNAVAILABLE_IMAGE_CLASS} annotation-exclude`} title={`${noun} could not be loaded`} data-image-unavailable="">
+          {alt || noun}
+        </span>
+      )}
+      {media === 'audio' ? <audio key="media" {...props} /> : <video key="media" {...props} playsInline />}
     </>
   );
 };
@@ -510,6 +571,13 @@ let digitHexIssueRefs = false;
  * absent (false), a bare newline stays a soft break (a space), as in files.
  */
 export const SoftLineBreaksContext = createContext<boolean>(false);
+
+/**
+ * A view of the source (the plan diff): GFM's `www.` and e-mail autolinks
+ * and HTML character references stay as written, as `[^1]` does there.
+ * Default false: every other surface draws them.
+ */
+export const SourceLikeInlineContext = createContext<boolean>(false);
 
 export function setDigitHexIssueRefs(on: boolean): void {
   digitHexIssueRefs = on;
@@ -537,11 +605,12 @@ export function getDigitHexIssueRefs(): boolean {
  * every mounted `InlineMarkdown`.
  */
 export type CrossRepoRefsWithoutRepo = boolean | { host: string };
-let crossRepoDefault: { host?: string } | null = null;
+// `withoutRepo`: the host is a guess, so GitLab's `group/project!45` stays plain (it needs a real GitLab project).
+let crossRepoDefault: { host?: string; withoutRepo: true } | null = null;
 const crossRepoListeners = new Set<() => void>();
 
 export function setCrossRepoRefsWithoutRepo(on: CrossRepoRefsWithoutRepo): void {
-  const next = on === false ? null : on === true ? {} : { host: on.host };
+  const next = on === false ? null : on === true ? { withoutRepo: true as const } : { host: on.host, withoutRepo: true as const };
   if (next?.host === crossRepoDefault?.host && (next === null) === (crossRepoDefault === null)) return;
   crossRepoDefault = next;
   for (const listener of crossRepoListeners) listener();
@@ -609,6 +678,8 @@ export const InlineMarkdown: React.FC<{
   const matchLocalLink = useLocalLinkMatch();
   const barePaths = useContext(BarePathContext);
   const softLineBreaks = useContext(SoftLineBreaksContext);
+  const sourceLike = useContext(SourceLikeInlineContext);
+  const footnotes = useFootnoteScope();
   const resolveImage = useImageResolver();
   const inlineImageTags = useContext(InlineImageTagsContext);
   useSyncExternalStore(subscribeGitlabHosts, gitlabHostsSnapshot, gitlabHostsSnapshot);
@@ -624,6 +695,29 @@ export const InlineMarkdown: React.FC<{
   const crossRepoProject = githubRepo ? { host: repoHost } : crossRepoFallback;
   const crossRepoAccept = (ref: CrossRepoRef): boolean =>
     !(onOpenCodeFile && isCodeFilePathStrict(ref.path) && gateCodePath(ref.path, validation ?? null).render !== 'plain');
+  // A mail link. A host whose test takes `mailto:` (LocalLinkMatchContext) and answers `unavailable` gets inert text.
+  // Absent, `isLocalLinkTarget` never takes a scheme, so the mail link draws as always.
+  const renderMailLink = (email: string, k: number): React.ReactNode => {
+    const mailLink = resolveLocalLink && matchLocalLink(`mailto:${email}`) ? resolveLocalLink(`mailto:${email}`) : null;
+    if (mailLink?.kind === 'unavailable') {
+      return (
+        <HostTitle key={k} title={mailLink.title}>
+          <span className="text-muted-foreground underline decoration-dotted underline-offset-2" data-local-link="unavailable">
+            {email}
+          </span>
+        </HostTitle>
+      );
+    }
+    return (
+      <a
+        key={k}
+        href={`mailto:${email}`}
+        className="text-primary underline underline-offset-2 hover:text-primary/80"
+      >
+        {email}
+      </a>
+    );
+  };
   const parts: React.ReactNode[] = [];
   let remaining = text;
   let key = 0;
@@ -665,6 +759,40 @@ export const InlineMarkdown: React.FC<{
       continue;
     }
 
+    // Raw HTML tags (utils/inlineHtmlTags): `<sub>` `<sup>` `<kbd>` `<mark>`
+    // draw as elements; a tag the sanitizer drops (`<iframe …>`, `<script>`)
+    // draws nothing, its words kept where they are prose. A bare `<iframe>`
+    // mention stays text. Never markup: React elements and text only.
+    const html = remaining[0] === '<' && !sourceLike ? matchInlineHtml(remaining) : null;
+    if (html) {
+      if (html.kind !== 'drop') {
+        const inner = (
+          <InlineMarkdown
+            text={html.inner}
+            onOpenLinkedDoc={onOpenLinkedDoc}
+            resolveLinkedDoc={resolveLinkedDoc}
+            onOpenCodeFile={onOpenCodeFile}
+            onNavigateAnchor={onNavigateAnchor}
+            imageBaseDir={imageBaseDir}
+            onImageClick={onImageClick}
+            githubRepo={githubRepo}
+            repoHost={repoHost}
+            linkLabel={linkLabel}
+          />
+        );
+        parts.push(
+          html.kind === 'unwrap' ? <React.Fragment key={key++}>{inner}</React.Fragment>
+            : html.tag === 'kbd' ? <kbd key={key++} className="rounded border border-border bg-muted px-1 py-px font-mono text-[0.85em]">{inner}</kbd>
+              : html.tag === 'mark' ? <span key={key++} data-html-mark="" className="rounded-sm bg-warning/25 px-0.5 text-foreground">{inner}</span>
+                : html.tag === 'sub' ? <sub key={key++}>{inner}</sub>
+                  : <sup key={key++}>{inner}</sup>,
+        );
+      }
+      remaining = remaining.slice(html.length);
+      previousChar = ">";
+      continue;
+    }
+
     // Inline math: \( ... \) or $...$ — require non-space content and avoid
     // display fences.
     if (remaining.startsWith('\\(')) {
@@ -693,6 +821,16 @@ export const InlineMarkdown: React.FC<{
       parts.push(match[1]);
       remaining = remaining.slice(2);
       previousChar = match[1];
+      continue;
+    }
+
+    // HTML character reference (`&amp;`, `&copy;`, `&#8212;`): the character,
+    // as React text. An unknown name stays as written.
+    const entity = remaining[0] === '&' && !sourceLike ? matchHtmlEntity(remaining) : null;
+    if (entity) {
+      parts.push(entity.text);
+      remaining = remaining.slice(entity.length);
+      previousChar = entity.text[entity.text.length - 1] ?? ';';
       continue;
     }
 
@@ -743,6 +881,7 @@ export const InlineMarkdown: React.FC<{
               href={safe}
               target="_blank"
               rel="noopener noreferrer"
+              {...proseRefLinkProps(safe)}
               className="text-primary underline underline-offset-2 hover:text-primary/80"
             >
               {url}
@@ -752,6 +891,36 @@ export const InlineMarkdown: React.FC<{
           previousChar = url[url.length - 1];
           continue;
         }
+      }
+    }
+
+    // Bare `www.` and e-mail addresses (GFM extended autolinks,
+    // utils/inlineAutolinks). A `www.` link opens like a bare URL; an
+    // e-mail address like `<a@b.co>` (the host's mailto rule included).
+    if (!linkLabel && !sourceLike) {
+      const www = remaining[0] === 'w' && autolinkMayFollow(previousChar) ? matchWwwAutolink(remaining) : null;
+      if (www) {
+        parts.push(
+          <a
+            key={key++}
+            href={wwwAutolinkHref(www)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-primary underline underline-offset-2 hover:text-primary/80"
+          >
+            {www}
+          </a>,
+        );
+        remaining = remaining.slice(www.length);
+        previousChar = www[www.length - 1];
+        continue;
+      }
+      const email = emailMayFollow(previousChar) ? matchEmailAutolink(remaining) : null;
+      if (email) {
+        parts.push(renderMailLink(email, key++));
+        remaining = remaining.slice(email.length);
+        previousChar = email[email.length - 1];
+        continue;
       }
     }
 
@@ -768,6 +937,7 @@ export const InlineMarkdown: React.FC<{
             href={crossRepoRef.href}
             target="_blank"
             rel="noopener noreferrer"
+            {...proseRefLinkProps(crossRepoRef.href)}
             className="text-primary font-medium hover:underline"
           >
             {crossRepoRef.label}
@@ -809,6 +979,7 @@ export const InlineMarkdown: React.FC<{
           href={url}
           target="_blank"
           rel="noopener noreferrer"
+          {...proseRefLinkProps(url)}
           className="text-primary underline underline-offset-2 hover:text-primary/80"
         >
           {url}
@@ -820,31 +991,7 @@ export const InlineMarkdown: React.FC<{
     }
     match = remaining.match(/^<([^@>\s]+@[^>\s]+)>/);
     if (match && !linkLabel) {
-      const email = match[1];
-      // A host whose test takes `mailto:` (LocalLinkMatchContext) and answers `unavailable` gets inert text. Absent,
-      // `isLocalLinkTarget` never takes a scheme, so the mail link draws as always.
-      const mailLink = resolveLocalLink && matchLocalLink(`mailto:${email}`) ? resolveLocalLink(`mailto:${email}`) : null;
-      if (mailLink?.kind === 'unavailable') {
-        parts.push(
-          <HostTitle key={key++} title={mailLink.title}>
-            <span className="text-muted-foreground underline decoration-dotted underline-offset-2" data-local-link="unavailable">
-              {email}
-            </span>
-          </HostTitle>,
-        );
-        remaining = remaining.slice(match[0].length);
-        previousChar = ">";
-        continue;
-      }
-      parts.push(
-        <a
-          key={key++}
-          href={`mailto:${email}`}
-          className="text-primary underline underline-offset-2 hover:text-primary/80"
-        >
-          {email}
-        </a>,
-      );
+      parts.push(renderMailLink(match[1], key++));
       remaining = remaining.slice(match[0].length);
       previousChar = ">";
       continue;
@@ -1069,6 +1216,7 @@ export const InlineMarkdown: React.FC<{
               href={href}
               target="_blank"
               rel="noopener noreferrer"
+              {...proseRefLinkProps(href)}
               className="text-primary font-medium hover:underline"
             >
               {label}
@@ -1081,6 +1229,21 @@ export const InlineMarkdown: React.FC<{
         previousChar = match[0][match[0].length - 1];
         continue;
       }
+    }
+
+    // GitLab merge request: !123, on a GitLab project only, with `#123`'s boundary.
+    // An image's `![` never matches (a digit must follow the `!`) and is read below; GitHub's `!123` stays plain text.
+    const mergeRequest = !linkLabel && refLinks?.mergeRequest && !/\w/.test(previousChar) ? remaining.match(BARE_MR_REF) : null;
+    if (mergeRequest) {
+      const href = refLinks!.mergeRequest!(mergeRequest[1]);
+      parts.push(
+        <a key={key++} href={href} target="_blank" rel="noopener noreferrer" {...proseRefLinkProps(href)} className="text-primary font-medium hover:underline">
+          {mergeRequest[0]}
+        </a>,
+      );
+      remaining = remaining.slice(mergeRequest[0].length);
+      previousChar = mergeRequest[0][mergeRequest[0].length - 1];
+      continue;
     }
 
     // @mention — only at word boundary. GitHub-style handle pattern.
@@ -1182,7 +1345,9 @@ export const InlineMarkdown: React.FC<{
       const tag = imgTagAttributes(match[0]);
       const resolved = tag.src ? resolveImage!(tag.src) : null;
       const shown = resolved?.kind === 'src' ? resolved.src : !resolved && /^https?:\/\//i.test(tag.src) ? tag.src : null;
-      if (shown) {
+      if (shown && resolved?.kind === 'src' && resolved.media) {
+        parts.push(<HostResolvedMedia key={key++} src={shown} alt={tag.alt} writtenSrc={tag.src} media={resolved.media} />);
+      } else if (shown) {
         parts.push(<HostResolvedImage key={key++} src={shown} alt={tag.alt} width={tag.width ?? (resolved?.kind === 'src' ? resolved.width : undefined)} height={tag.height} writtenSrc={tag.src} onImageClick={onImageClick} />);
       } else if (tag.src) {
         parts.push(
@@ -1225,7 +1390,9 @@ export const InlineMarkdown: React.FC<{
           ? src
           : getImageSrc(src, imageBaseDir);
       parts.push(
-        resolveImage ? (
+        resolvedImage?.kind === 'src' && resolvedImage.media ? (
+          <HostResolvedMedia key={key++} src={imgSrc} alt={alt} writtenSrc={src} media={resolvedImage.media} />
+        ) : resolveImage ? (
           // With a host resolver, an image that fails to load becomes the
           // same placeholder instead of a broken-image icon.
           <HostResolvedImage key={key++} src={imgSrc} alt={alt} width={resolvedImage?.kind === 'src' ? resolvedImage.width : undefined} writtenSrc={src} onImageClick={onImageClick} />
@@ -1246,6 +1413,17 @@ export const InlineMarkdown: React.FC<{
       );
       remaining = remaining.slice(match[0].length);
       previousChar = match[0][match[0].length - 1] || previousChar;
+      continue;
+    }
+
+    // Footnote reference `[^label]` to a note this document defines
+    // (components/footnotes); any other `[^…]` stays literal.
+    const footnoteRef = footnotes && !linkLabel && remaining[1] === '^' ? FOOTNOTE_REF_RE.exec(remaining) : null;
+    const footnoteNumber = footnoteRef ? footnotes!.numbers.get(footnoteKey(footnoteRef[1])) : undefined;
+    if (footnoteRef && footnoteNumber !== undefined) {
+      parts.push(<FootnoteRef key={key++} scope={footnotes!} label={footnoteRef[1]} number={footnoteNumber} />);
+      remaining = remaining.slice(footnoteRef[0].length);
+      previousChar = ']';
       continue;
     }
 
@@ -1490,7 +1668,7 @@ export const InlineMarkdown: React.FC<{
     // `h` mid-word (e.g. ":heart:", "hello"), and splitting on it breaks
     // multi-char patterns like emoji shortcodes. Bare URLs are instead
     // detected inline via emitPlainTextWithBareUrls() below.
-    const nextSpecial = remaining.slice(1).search(softLineBreaks ? /[\*_`\[!~\\<#@$\n]/ : /[\*_`\[!~\\<#@$]/);
+    const nextSpecial = remaining.slice(1).search(softLineBreaks ? /[\*_`\[!~\\<#@$&\n]/ : /[\*_`\[!~\\<#@$&]/);
     // A bare URL that starts inside this plain-text chunk and runs past its
     // end would be cut there, and `_`, `~`, `#`, `@`, `$` and `!` all end a
     // chunk (`…/w/ws_01…` rendered a link to `…/w/ws`). Stop the chunk where
@@ -1499,7 +1677,10 @@ export const InlineMarkdown: React.FC<{
     // Same for an owner/repo#123 ref: `#` (and `_` in a name) ends a chunk, so
     // stop before the ref and let the cross-repo branch above take it whole.
     // A ref inside a URL never splits it: the URL starts first and wins.
-    const urlAt = linkLabel ? -1 : bareUrlRunningPast(remaining, chunkEnd);
+    let urlAt = linkLabel ? -1 : bareUrlRunningPast(remaining, chunkEnd);
+    // Likewise a `www.` or e-mail address (an e-mail address always holds the `@` that ends its chunk).
+    const autolinkAt = linkLabel || sourceLike ? -1 : autolinkRunningPast(remaining, chunkEnd);
+    if (autolinkAt > 0 && (urlAt === -1 || autolinkAt < urlAt)) urlAt = autolinkAt;
     const refAt = crossRepoProject && !linkLabel ? findCrossRepoRef(remaining, urlAt === -1 ? chunkEnd : urlAt, crossRepoProject, crossRepoAccept) : -1;
     let splitAt = refAt !== -1 ? refAt : urlAt;
     // A host-found path running past the chunk (BarePathContext): split where it starts. Never inside a link's label.
@@ -1508,14 +1689,14 @@ export const InlineMarkdown: React.FC<{
     if (splitAt !== -1) {
       const before = remaining.slice(0, splitAt);
       if (linkLabel) parts.push(transformPlainText(before));
-      else emitPlainTextWithBareUrls(before, previousChar, parts, () => key++, onOpenCodeFile, validation, imageBaseDir, barePaths);
+      else emitPlainTextWithBareUrls(before, previousChar, parts, () => key++, onOpenCodeFile, validation, imageBaseDir, barePaths, sourceLike);
       previousChar = before[before.length - 1] || previousChar;
       remaining = remaining.slice(splitAt);
       continue;
     }
     const plainText = nextSpecial === -1 ? remaining : remaining.slice(0, nextSpecial + 1);
     if (linkLabel) parts.push(transformPlainText(plainText));
-    else emitPlainTextWithBareUrls(plainText, previousChar, parts, () => key++, onOpenCodeFile, validation, imageBaseDir, barePaths);
+    else emitPlainTextWithBareUrls(plainText, previousChar, parts, () => key++, onOpenCodeFile, validation, imageBaseDir, barePaths, sourceLike);
     previousChar = plainText[plainText.length - 1] || previousChar;
     if (nextSpecial === -1) {
       break;

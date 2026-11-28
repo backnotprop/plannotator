@@ -2,9 +2,10 @@
  * Projects whose rows name their sessions: two or more live. Held so a row never flips back while someone looks; it
  * is let go only after SEVERAL_HOLD_MS with fewer than two, and only while the window is hidden or freshly shown.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { InboxAgent, InboxAgentsGroup } from '@plannotator/core/inbox-types';
 import { inboxAgentsNow, onInboxAgentsSet } from './agentsList';
+import { usePictureWorld } from './pictureWorld';
 
 export const SEVERAL_HOLD_MS = 10 * 60_000;
 
@@ -97,14 +98,28 @@ function subscribe(listener: () => void): () => void {
 
 const snapshot = () => current;
 
+/** How many draws watch the rows' sessions (a list watches once, not once per row: RowSlot.tsx). */
+export function rowSessionsWatchersForTests(): number {
+  return listeners.size;
+}
+
 /** Plain state, not `useSyncExternalStore`: agents are set mid list read, and a store hook would draw before the read's own changes. */
 export function useRowSessions(): RowSessions {
+  // In a picture (pictureWorld.ts): its own agents, nothing held, the person's never read.
+  const world = usePictureWorld();
   const [sessions, setSessions] = useState(snapshot);
   useEffect(() => {
+    if (world) return;
     const read = () => setSessions(snapshot());
     const stop = subscribe(read);
     read();
     return stop;
-  }, []);
-  return sessions;
+  }, [world]);
+  const pictured = useMemo(() => (world ? worldSessions(world.agents) : null), [world]);
+  return pictured ?? sessions;
+}
+
+function worldSessions(groups: readonly InboxAgentsGroup[]): RowSessions {
+  const { live, agents, heirs } = sessionsByProject(groups);
+  return { several: new Set([...live].filter(([, count]) => count >= 2).map(([key]) => key)), agents, heirs };
 }

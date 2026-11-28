@@ -6,7 +6,7 @@
 import type React from 'react';
 import type { ForgeRefCardError } from '@plannotator/core/forge-ref-card';
 import { parseLinearRefUrl, type LinearCardData, type LinearCardFields } from '@plannotator/core/linear-ref-card';
-import { codeFenceFor, HTML_BLOCK_OPEN_RE, HTML_BLOCK_TAGS } from '@plannotator/core/markdown-structure';
+import { codeFenceFor, DROPPED_HTML_BLOCK_TAGS, HTML_BLOCK_OPEN_RE, HTML_BLOCK_TAGS, isHtmlTagSpelling } from '@plannotator/core/markdown-structure';
 import { parseMarkdownToBlocks } from '../utils/parser';
 import { RefCardAvatar, RefCardMarkdown, RefCardStateIcon, refCardTimeAgo, type RefCardViewProps } from './RefHoverCard';
 
@@ -54,7 +54,7 @@ function codeOpeners(markdown: string, skipFences: boolean): string {
       const prefix = LINE_PREFIX.exec(trimmed)![0];
       const body = trimmed.slice(prefix.length);
       const tag = HTML_BLOCK_OPEN_RE.exec(body)?.[1];
-      if (!body.startsWith(':::') && !(tag && HTML_BLOCK_TAGS.has(tag.toLowerCase()))) return line;
+      if (!body.startsWith(':::') && !(tag && (HTML_BLOCK_TAGS.has(tag.toLowerCase()) || (DROPPED_HTML_BLOCK_TAGS.has(tag.toLowerCase()) && isHtmlTagSpelling(tag))))) return line;
       const ticks = '`'.repeat(Math.max(0, ...(body.match(/`+/g) ?? []).map((run) => run.length)) + 1);
       return `${prefix}${ticks} ${body} ${ticks}`;
     })

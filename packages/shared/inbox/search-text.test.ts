@@ -59,6 +59,15 @@ describe('tokens', () => {
     expect(foldInboxSearchText('デプロイ')).toBe('デプロイ');
   });
 
+  test('a soft hyphen inside a word keeps it one word; outer ones stay outside its span', () => {
+    expect(tokenizeInboxSearchText('fi\u00adnance')).toEqual([{ token: 'finance', start: 0, end: 8 }]);
+    expect(tokenizeInboxSearchText('fi\u00ad\u00adnance')).toEqual([{ token: 'finance', start: 0, end: 9 }]);
+    expect(tokenizeInboxSearchText('\u00adfinance\u00ad')).toEqual([{ token: 'finance', start: 1, end: 8 }]);
+    expect(tokenizeInboxSearchText('支付fi\u00adnance网关').filter((t) => t.token === 'finance')).toEqual([{ token: 'finance', start: 2, end: 10 }]);
+    expect(tokens('\u00ad\u00ad')).toEqual([]);
+    expect(inboxSearchTerms('fi\u00adnance')).toEqual(inboxSearchTerms('finance'));
+  });
+
   test('query terms: at most 8, duplicates once, empty for words under 2 characters', () => {
     expect(inboxSearchTerms('Rate rate LIMIT')).toEqual(['rate', 'limit']);
     expect(inboxSearchTerms('a b c')).toEqual([]);
@@ -82,6 +91,32 @@ describe('ranges', () => {
   test('a prefix inside a folded word ends in the original', () => {
     const text = 'Écoles';
     expect(inboxSearchRanges(text, ['eco']).map(([a, b]) => text.slice(a, b))).toEqual(['Éco']);
+  });
+
+  test('a word with soft hyphens inside is marked in the original, whole or up to the typed prefix', () => {
+    const cases: [text: string, start: number, end: number, prefixEnd: number][] = [
+      ['finance', 0, 7, 3],
+      ['fi\u00adnance', 0, 8, 4],
+      ['fi\u00ad\u00adnance', 0, 9, 5],
+      ['😀 fi\u00adnance', 3, 11, 7],
+      ['支付fi\u00adnance网关', 2, 10, 6],
+      ['\u00adfinance\u00ad', 1, 8, 4],
+    ];
+    for (const [text, start, end, prefixEnd] of cases) {
+      expect(inboxSearchRanges(text, ['finance'])).toEqual([[start, end]]);
+      expect(inboxSearchRanges(text, ['fin'])).toEqual([[start, prefixEnd]]);
+    }
+    expect(inboxSearchRanges('fi\u00adnance', ['fi'])).toEqual([[0, 2]]);
+    const snippet = inboxSearchSnippet('😀 fi\u00adnance', inboxSearchRanges('😀 fi\u00adnance', ['finance']));
+    expect(snippet.marks).toEqual([[3, 8]]);
+    expect(marked(snippet)).toEqual(['fi\u00adnance']);
+  });
+
+  test('a visible hyphen or a space between the parts is not the whole word', () => {
+    for (const text of ['fi-nance', 'fi nance']) {
+      expect(inboxSearchMatchesAll(text, ['finance'])).toBe(false);
+      expect(inboxSearchRanges(text, ['finance'])).toEqual([]);
+    }
   });
 
   test('matchesAll needs every term', () => {

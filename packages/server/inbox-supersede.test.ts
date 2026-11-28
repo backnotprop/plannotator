@@ -118,7 +118,7 @@ describe("send_message supersedes earlier questions", () => {
     expect(states).toEqual(["open", "superseded"]);
   });
 
-  test("an id that names no open question of the thread refuses the whole send with invalid_supersedes, listing the open keys", async () => {
+  test("an id that names no question of the thread refuses the whole send with invalid_supersedes, listing the open keys", async () => {
     const w = await world();
     const first = structured<Sent>(await w.call("send_message", { body: WORKER }));
     const [q1, q2] = first.questions;
@@ -130,6 +130,39 @@ describe("send_message supersedes earlier questions", () => {
     expect(lines.startsWith("invalid_supersedes:")).toBe(true);
     // Nothing landed.
     expect((await w.thread(first.thread_id)).messages.length).toBe(1);
+  });
+
+  test("naming an answered question sends anyway: the result says it was left as it is, before the new refs, with any hint last", async () => {
+    const w = await world();
+    const first = structured<Sent>(await w.call("send_message", { body: WORKER }));
+    const q2 = (await w.thread(first.thread_id)).messages[0]!.questions![1]!;
+    const ref = `${first.message_id}/${q2.key}`;
+    await w.post(`/api/inbox/messages/${first.message_id}/picks`, { questions: [{ key: q2.key, revision: 0, answer: { v: 1, key: q2.key, kind: q2.kind, prompt: q2.prompt, selected: ["Yes"] } }] });
+    expect((await w.post(`/api/inbox/messages/${first.message_id}/reply`, { idempotency_key: "s1", questions: [{ key: q2.key, revision: 1 }] })).status).toBe(200);
+
+    const bodies = [{ body: QUEUE, supersedes: [ref] }, { body: QUEUE.replace(":::question\n", `:::question\nReplaces: ${ref}\n`) }];
+    for (const [i, args] of bodies.entries()) {
+      const result = await w.call("send_message", { ...args, reply_to: first.message_id, idempotency_key: `k${i}` });
+      const sent = structured<Sent & { skipped: { id: string; was: string; new_question: string | null }[]; hint?: string }>(result);
+      const newRef = `${sent.message_id}/${sent.questions[0]!.key}`;
+      expect(sent.superseded).toEqual([]);
+      expect(sent.skipped).toEqual([{ ref, id: ref, was: "answered", new_question: newRef }]);
+      const lines = (result as { content: { text: string }[] }).content[0]!.text.split("\n");
+      const skipLine = lines.indexOf(`${ref} was already answered, so it was left as it is. Your new question ${newRef} is open on its own.`);
+      const refLine = lines.findIndex((line) => line.startsWith(`- ${newRef}: `));
+      expect(skipLine).toBeGreaterThan(0);
+      expect(refLine).toBeGreaterThan(skipLine);
+      expect(lines.at(-1)).toBe(sent.hint ?? lines[refLine]);
+      const retry = await w.call("send_message", { ...args, reply_to: first.message_id, idempotency_key: `k${i}` });
+      const replayed = structured<{ replayed: boolean; message_id: string; skipped: unknown }>(retry);
+      expect(replayed.replayed).toBe(true);
+      expect(replayed.message_id).toBe(sent.message_id);
+      expect(replayed.skipped).toEqual(sent.skipped);
+      expect((retry as { content: { text: string }[] }).content[0]!.text.split("\n")).toContain(lines[skipLine]!);
+    }
+    const old = (await w.thread(first.thread_id)).messages[0]!.questions![1]!;
+    expect(old.state).toBe("sent");
+    expect(old.answer?.selected).toEqual(["Yes"]);
   });
 
   test("submit_guide and the agent tool built from tools/list take supersedes", async () => {

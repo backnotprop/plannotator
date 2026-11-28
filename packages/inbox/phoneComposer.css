@@ -129,7 +129,7 @@
 .ib-cp-startlineb:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
 /* Wraps whole onto the next line rather than shrink to its chevron. */
 .ib-cp-startline:has(> .ib-cp-lchbtn) { flex-wrap: wrap; row-gap: 0; }
-.ib-cp-startlineb.ib-cp-lchbtn { flex: none; background: transparent; color: var(--muted-foreground); font-weight: 400; }
+.ib-cp-startlineb.ib-cp-lchbtn { flex: none; max-width: 100%; background: transparent; color: var(--muted-foreground); font-weight: 400; }
 .ib-cp-picker[data-phone].ib-cp-lch { right: 0; }
 .ib-cp-picker[data-phone] .ib-cp-lchcols { grid-auto-flow: row; overflow-y: auto; }
 .ib-cp-picker[data-phone] .ib-cp-lchcols > .ib-cp-lchcol + .ib-cp-lchcol { border-left: 0; border-top: 1px solid var(--ib-line); }

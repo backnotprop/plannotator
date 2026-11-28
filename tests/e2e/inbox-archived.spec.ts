@@ -31,7 +31,8 @@ import { NO_BROWSER } from '../helpers/no-browser';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
-const proofDir = join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo, '.local/proof')), 'archived');
+const proofRoot = resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo, '.local/proof'));
+const proofDir = join(proofRoot, 'archived');
 
 const SEARCH = ['Search for the docs site.', '', ':::question', 'Which search index should the docs use?', '', '- [ ] Pagefind', '- [ ] Orama', ':::'].join('\n');
 
@@ -263,5 +264,30 @@ test("an agent's reply into an archived thread brings it back to the list and ou
   expect(thread.thread.resolved_at).not.toBeNull();
   expect(thread.thread.messages.at(-1)).toMatchObject({ author: { kind: 'person' } });
   expect(thread.thread.messages.at(-1)!.body).toContain('Yes');
+  expect(world.errors).toEqual([]);
+});
+
+// resolve_message's moved_to (the owner, 2026-11-22: one picture of it): Codex asked in its own thread, Claude Code
+// asked it again in its brief and archived the old thread pointing there. The old thread's foot names the brief, and
+// its question reads Closed. The picture: moved-thread/01-closed-card-light.png.
+test("a thread whose questions moved: its foot names the brief, and its question reads Closed", async () => {
+  const { page } = world;
+  const [claude, codex] = world.agents as [SimAgent, SimAgent];
+  const ask = (prompt: string) => [':::question', prompt, '', '- [ ] Yes, for Ada Novak', '- [ ] No, email Charlie Dunn', ':::'].join('\n');
+  const old = await codex.send({ project_path: world.billing, subject: 'Refund for Ada Novak', thread: 'Refund for Ada Novak', body: `Overnight work on refunds.\n\n${ask('Refund the double charge?')}` });
+  const brief = await claude.send({ project_path: world.billing, subject: 'Morning brief', thread: 'Morning brief', body: `Three things from last night.\n\n${ask('Refund the double charge? (from Refund for Ada Novak)')}` });
+  await claude.resolve(old.thread_id as string, brief.thread_id as string);
+  await page.goto(new URL(`#thread=${old.thread_id as string}`, world.url).href);
+  const pane = page.locator('section.ib-pane');
+  await expect(page.locator('[data-moved-to]')).toContainText('Its questions moved to');
+  await expect(page.locator('[data-moved-to]')).toContainText('Morning brief');
+  await expect(pane.locator('[data-question-status]').first()).toContainText('Closed');
+  await expect(pane.locator('[data-question-status]').first()).toContainText('Closed when the thread was archived.');
+  const dir = join(proofRoot, 'moved-thread');
+  mkdirSync(dir, { recursive: true });
+  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
+  await page.waitForTimeout(200);
+  await page.screenshot({ path: join(dir, '01-closed-card-light.png') });
+  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
   expect(world.errors).toEqual([]);
 });

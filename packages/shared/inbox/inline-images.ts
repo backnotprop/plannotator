@@ -28,15 +28,23 @@
  * the person's own messages) are captured on a later read of the thread, in
  * the background (packages/server/inbox-message-images.ts), marked
  * `captured: "on_open"`.
+ *
+ * That later read also captures the sounds and videos the body plays in place
+ * (inline-media-capture.ts; never at send, so a send never waits on a film's
+ * copy and its warnings stay `media_not_shown`'s): their records go in the
+ * same `inline_images` list, kind `video` or `audio`, so they are artifacts of
+ * the thread as its pictures are.
  */
 
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
 import { rename, unlink, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
-import { inboxAttachmentId, type InboxInlineImage } from "@plannotator/core/inbox-types";
+import { inboxInlineMediaKind } from "@plannotator/core/inbox-inline-media";
+import { inboxAttachmentId, type InboxAttachment, type InboxInlineImage } from "@plannotator/core/inbox-types";
 import { inboxBlobPath, inboxBlobsDir } from "./attachments";
-import { inboxMessageImageRefsInOrder, readInboxMessageImageAsync } from "./message-images";
+import { captureInboxInlineMedia } from "./inline-media-capture";
+import { inboxMessageImageRefsInOrder, readInboxMessageImageAsync, readInboxPictureAsync } from "./message-images";
 
 /** The most images one message's capture at send takes (the rest are captured on a later read). */
 export const INBOX_INLINE_IMAGES_MAX = 64;
@@ -59,6 +67,15 @@ export interface CaptureInlineImagesInput {
   max?: number;
   /** Stage the blobs as temp files until `commit` (a send the store may still refuse). */
   stage?: boolean;
+  /**
+   * Pictures sent as bytes in the same send (a paired cloud agent's, inbox-agent-door.ts), by the src as written: read
+   * from where the Inbox keeps those bytes, before any file of that name on disk. Every other src is read as usual.
+   */
+  files?: ReadonlyMap<string, { path: string; name: string }>;
+  /** The message's attached files: a sound or video attached as well is not copied again (inline-media-capture.ts). */
+  attached?: readonly InboxAttachment[] | null;
+  /** The caller stopped: a sound or video being copied ends at its next chunk. */
+  stopped?: () => boolean;
 }
 
 export interface InlineImageFailure {
@@ -114,7 +131,43 @@ export async function captureInboxInlineImages(inboxDirPath: string, input: Capt
   const refs = (input.refs ?? inboxMessageImageRefsInOrder(input.body)).slice(0, input.max ?? INBOX_INLINE_IMAGES_MAX);
   for (const [index, ref] of refs.entries()) {
     if (index > 0) await yieldToLoop();
-    const read = await readInboxMessageImageAsync({ body: input.body, root: input.root, base: input.base ?? null, path: ref, anywhere: input.anywhere === true }).catch(() => null);
+    const file = input.files?.get(ref);
+    if (!file && inboxInlineMediaKind(ref)) {
+      // A sound or a video (only when asked for by `refs`: the send's default list is pictures).
+      const media = await captureInboxInlineMedia(inboxDirPath, {
+        body: input.body,
+        root: input.root,
+        base: input.base ?? null,
+        path: ref,
+        anywhere: input.anywhere === true,
+        sentAt: input.sentAt,
+        capturedOnOpenAt: input.capturedOnOpenAt,
+        attached: input.attached,
+        stopped: input.stopped,
+      });
+      if (!media.ok) {
+        failures.push({ ref, code: media.code, ...(media.notYet ? { notYet: true as const } : {}) });
+        continue;
+      }
+      const path = inboxBlobPath(inboxDirPath, media.sha256);
+      const temp = media.temp;
+      try {
+        // No temp: the record names the attached twin's blob (the message's own record keeps it).
+        if (temp !== null) {
+          if (input.stage) staged.push({ temp, path });
+          else await place(temp, path);
+        }
+      } catch {
+        if (temp !== null) await unlink(temp).catch(() => {});
+        failures.push({ ref, code: "write_failed" });
+        continue;
+      }
+      bytes += media.bytes;
+      images.push(media.record);
+      continue;
+    }
+    // The Inbox's own copy of an attached file: no hidden-folder rule (it lives under the data folder), the same image checks.
+    const read = await (file ? readInboxPictureAsync(file.path, () => false) : readInboxMessageImageAsync({ body: input.body, root: input.root, base: input.base ?? null, path: ref, anywhere: input.anywhere === true })).catch(() => null);
     if (!read || !read.ok) {
       if (!read) failures.push({ ref, code: "image_read_failed" });
       else failures.push({ ref, code: read.code, ...(read.notYet ? { notYet: true as const } : {}) });
@@ -136,7 +189,7 @@ export async function captureInboxInlineImages(inboxDirPath: string, input: Capt
       id: inboxAttachmentId(),
       path: read.real,
       named_path: read.named === read.real ? null : read.named,
-      name: basename(read.named) || basename(read.real),
+      name: file?.name ?? (basename(read.named) || basename(read.real)),
       kind: "image",
       sent_sha256: sha256,
       size: read.bytes.length,

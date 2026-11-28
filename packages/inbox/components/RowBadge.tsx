@@ -286,6 +286,12 @@ export function actionMarkWords(n: number, step: WaitStep): string {
   return head ? `${head}: ${plural(n, 'action item')}` : actionCountWords(n);
 }
 
+/**
+ * A mark's props: a row's (its marks read from it), or marks with no row (the Agents view's folded agent: its rows'
+ * marks added up, so no one thread's details).
+ */
+type MarkProps = ({ row: InboxListRow; marks?: RowMarks } | { row?: undefined; marks: RowMarks }) & { tip?: boolean; card?: ReactNode; open?: boolean };
+
 /** A mark's tooltip: the card on a filled mark (`card`; it opens with the row's keyboard focus through `open`), else its words. */
 function markTip(mark: ReactElement, words: string, step: WaitStep, tip: boolean, card: ReactNode | undefined, open: boolean): ReactNode {
   if (!tip) return mark;
@@ -305,7 +311,8 @@ function markTip(mark: ReactElement, words: string, step: WaitStep, tip: boolean
  * before; holding up work or stopped, the same face in today's amber or red tint pill. Its words for a screen reader
  * and in the tooltip; a filled mark's tooltip is the row's card. Nothing under one open question.
  */
-export function QuestionMark({ row, marks = rowMarks(row), tip = false, card, open = false }: { row: InboxListRow; marks?: RowMarks; tip?: boolean; card?: ReactNode; open?: boolean }) {
+export function QuestionMark({ row, marks: given, tip = false, card, open = false }: MarkProps) {
+  const marks = given ?? rowMarks(row!);
   const n = marks.questions;
   if (n < 1) return null;
   const step = marks.question;
@@ -331,7 +338,8 @@ export function QuestionMark({ row, marks = rowMarks(row), tip = false, card, op
  * action item") are visually hidden text and, with `tip`, the tooltip (a filled box's is the row's card; a phone has
  * none). Nothing when no action item is open.
  */
-export function ActionBadge({ row, marks = rowMarks(row), tip = false, card, open = false }: { row: InboxListRow; marks?: RowMarks; tip?: boolean; card?: ReactNode; open?: boolean }) {
+export function ActionBadge({ row, marks: given, tip = false, card, open = false }: MarkProps) {
+  const marks = given ?? rowMarks(row!);
   const n = marks.actions;
   if (n < 1) return null;
   const step = marks.action;

@@ -27,6 +27,7 @@ import {
 } from "@plannotator/shared/inbox/connection";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { InboxAgentConnection, InboxWake } from "@plannotator/shared/inbox/agent-link";
+import { sendTargetsOf } from "../inbox/sendTargets";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { createInboxLiveSessions, INBOX_ASKER_GRACE_MS, INBOX_ASKER_RESTART_GRACE_MS } from "./inbox-sessions";
 
@@ -895,5 +896,57 @@ describe("a session that has ended: the row's mark, moving a saved reply, and wh
     await poll(server, "ses-other", project);
     const taken = ((await (await reply(server, asked.message_id, { idempotency_key: "k2", words: "Two.", to: { session: "ses-other" } })).json()) as { reply: { took_over?: boolean } }).reply;
     expect(taken.took_over).toBe(true);
+  });
+});
+
+describe("a script's post does not steal the thread (a sessionless send: no session, no host, no wake)", () => {
+  /** The window's plain Send, words only: to the message its own rule picks (`sendTargetsOf`), with nothing aimed. */
+  async function windowReply(server: InboxServer, threadId: string, words: string, key: string) {
+    const target = sendTargetsOf(await thread(server, threadId)).at(-1)!.message;
+    const response = await reply(server, target.id, { idempotency_key: key, words });
+    expect(response.status).toBe(200);
+    return ((await response.json()) as { reply: { id: string; reply_to: string; to?: unknown } }).reply;
+  }
+  const waking = { _meta: { [INBOX_WAKES_META_KEY]: true } };
+
+  test("the owner's sequence: the session wrote with its tool, a script posted after it, the person replies: the idle session's poll hands it as a reply to its own message, and its delivery names it", async () => {
+    const { server, client, project } = await setup();
+    const first = (
+      await client.callTool({ name: "send_message", arguments: { body: "The nightly sync is green.", project_path: project, agent_session: "ses-ops", agent_host: "claude-code", agent_name: "Claude Code" }, ...waking })
+    ).structuredContent as { message_id: string; thread_id: string };
+    // `plannotator inbox call send_message` from a shell that names no session.
+    await client.callTool({ name: "send_message", arguments: { body: "Disk at 91% on node 3.", project_path: project, reply_to: first.message_id } });
+    await poll(server, "ses-ops", project);
+    const sent = await windowReply(server, first.thread_id, "Clear the old snapshots.", "k1");
+    expect(sent.reply_to).toBe(first.message_id);
+    expect(sent.to ?? null).toBeNull();
+    // The Claude Code mod's poll (the wake): the reply, as one to its own message.
+    const commands = await poll(server, "ses-ops", project);
+    expect(commands.map((c) => c.id)).toEqual([sent.id]);
+    const text = inboxWakeText(commands[0]!);
+    expect(text).not.toContain("another agent session");
+    expect(text).not.toContain("has ended");
+    expect((await bridge(server, INBOX_BRIDGE_EVENT_PATH, { session: "ses-ops", host: "claude-code", type: "delivered", id: sent.id })).status).toBe(200);
+    expect((await thread(server, first.thread_id)).messages.find((m) => m.id === sent.id)?.delivery).toMatchObject({ state: "delivered", host: "claude-code", session: "ses-ops" });
+  });
+
+  test("a stdio shim's agent (a ses_ id, no host) asks and goes quiet two minutes while a Claude Code session that wrote is live: the reply stays the agent's, unread for it, and Claude Code is not woken", async () => {
+    let now = 1_000_000;
+    const { server, client, project } = await setup({ sessionsNow: () => now });
+    const first = (
+      await client.callTool({ name: "send_message", arguments: { body: "Started.", project_path: project, agent_session: "ses-ops", agent_host: "claude-code", agent_name: "Claude Code" }, ...waking })
+    ).structuredContent as { message_id: string; thread_id: string };
+    await poll(server, "ses-ops", project);
+    const asked = (await client.callTool({ name: "send_message", arguments: { body: "Which queue should I drain first?", project_path: project, reply_to: first.message_id, agent_session: "ses_shim1" } })).structuredContent as { message_id: string };
+    now += 2 * 60_000;
+    await poll(server, "ses-ops", project);
+    const sent = await windowReply(server, first.thread_id, "The billing queue.", "k1");
+    expect(sent.reply_to).toBe(asked.message_id);
+    expect(sent.to ?? null).toBeNull();
+    expect((await poll(server, "ses-ops", project)).map((c) => c.id)).toEqual([]);
+    // Claude Code reads the thread: still the agent's to read.
+    await client.callTool({ name: "read_thread", arguments: { thread_id: first.thread_id, agent_session: "ses-ops" } });
+    const list = await client.callTool({ name: "read_thread", arguments: { project_path: project, asked_by: "anyone", agent_session: "ses_shim1" } });
+    expect((list.structuredContent as { threads: { thread_id: string; unread: boolean }[] }).threads.find((t) => t.thread_id === first.thread_id)?.unread).toBe(true);
   });
 });

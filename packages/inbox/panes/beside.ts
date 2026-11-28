@@ -9,7 +9,7 @@ import { measureRoom, paneRects } from './paneDrop';
 import type { WindowPanes } from './useRoutePanes';
 
 /**
- * "Open to the side" (config.json `inboxSplitView`, off unless turned on; no Settings row): a thread opens in a new
+ * "Open to the side" (config.json `inboxSplitView`, Settings → General → Appearance, off by default): a thread opens in a new
  * pane, placed by the room (layoutRoom.ts `placeToSide`: right of the active pane, else below it, else the largest
  * pane split). The rows' menu reads it from here, so no list or menu takes a prop for it. Dragging the row onto a
  * pane does the same with a place of the person's choosing (paneDrop.ts).
@@ -24,8 +24,16 @@ export const BesideContext = createContext<Beside | null>(null);
 
 export const useBeside = (): Beside | null => useContext(BesideContext);
 
-/** The switch as the settings read sends it (server: inbox.ts, present only while on). */
-export const splitViewOn = (settings: SettingsModel | null): boolean => (settings as { split_view?: { on?: unknown } } | null)?.split_view?.on === true;
+/**
+ * The switch as the settings read sends it (server: inbox.ts `split_view`; Settings → General → Appearance, and
+ * `event: capabilities` when it changes). Null from a settings model without it: no Settings row.
+ */
+export function splitViewSetting(settings: SettingsModel | null): { on: boolean } | null {
+  const on = (settings as { split_view?: { on?: unknown } } | null)?.split_view?.on;
+  return typeof on === 'boolean' ? { on } : null;
+}
+
+export const splitViewOn = (settings: SettingsModel | null): boolean => splitViewSetting(settings)?.on === true;
 
 /**
  * Where "Open to the side" opens `threadId` in the room beside the list now, a docked sidebar counted as room (it
@@ -56,6 +64,17 @@ export function steppedAsideToast(threads: readonly string[], rowOf: BesideNotic
   const lead = names.length === 1 ? 'No room for another pane' : 'No room for more panes';
   const detail = names.length === 1 ? `“${names[0]}” stepped aside` : `${names.length} panes stepped aside`;
   return { icon: 'check', lead, detail, speech: `${lead}: ${detail}.`, onUndo: undo };
+}
+
+/**
+ * The toast for panes that stepped aside because the room shrank (the window narrowed, the sidebar opened): the same
+ * words, with nothing to undo. They come back in place once the room is there again (layoutRoom.ts).
+ */
+export function roomShrankToast(threads: readonly string[], rowOf: BesideNotice['rowOf']): Omit<InboxToastModel, 'id'> {
+  const names = threads.map((thread) => rowOf(thread)?.subject || 'A thread');
+  const lead = 'No room for more panes';
+  const detail = names.length === 1 ? `“${names[0]}” stepped aside` : `${names.length} panes stepped aside`;
+  return { icon: 'check', lead, detail, speech: `${lead}: ${detail}.` };
 }
 
 /** What a layout places, its sizes left out: its rows and columns, each pane's thread, the active pane. */

@@ -1,0 +1,61 @@
+/* Settings → Reviews in the Inbox (reviewSettings/InboxReviewControls.tsx): code review's own page in the Inbox's
+   settings look. Every colour is the theme's. */
+
+/* The page spaces its sections itself (16px); with a group's own 8px they sit 24px apart, as every Settings group does. */
+.ib-rs .ib-sgroup { margin-top: 8px; }
+.ib-rs .ib-sgroup-first { margin-top: 20px; }
+
+/* A section that is one feature: its title is the heading and the switch's name, in the row's own size. */
+.ib-rs .ib-rs-head .ib-l { margin: 0; font-size: var(--ib-fs-14, 14px); font-weight: 600; }
+
+/* A row's control sits at its end, or under the words when both do not fit (a phone, a long choice). */
+.ib-rs .ib-rs-row { flex-wrap: wrap; row-gap: 10px; }
+.ib-rs .ib-rs-row > .ib-txt { flex: 1 1 220px; }
+.ib-rs .ib-rs-row > .ib-ctl { max-width: 100%; }
+/* A form or a full-width field: always under the words, at full width. */
+.ib-rs .ib-rs-wide { flex-direction: column; align-items: stretch; }
+.ib-rs .ib-rs-wide > .ib-txt { flex: none; }
+.ib-rs .ib-rs-full { width: 100%; min-width: 0; }
+
+/* A group inside a card (Git, Jujutsu). */
+.ib-rs .ib-rs-group { border-bottom: 1px solid var(--ib-hair); }
+.ib-rs .ib-rs-group:last-child { border-bottom: 0; }
+.ib-rs .ib-rs-group > h3 { margin: 0; padding: 12px 16px 0; font-size: var(--ib-fs-13-5, 13.5px); font-weight: 600; }
+
+/* Choices: many of them wrap onto a second line rather than run out of the card. */
+.ib-rs .ib-rs-seg { flex-wrap: wrap; max-width: 100%; }
+.ib-rs .ib-rs-seg[data-off] { opacity: 0.5; }
+.ib-rs .ib-rs-seg[data-off] .ib-seg-o, .ib-rs .ib-rs-seg[data-off] input { cursor: not-allowed; }
+.ib-rs .ib-seg-o svg { flex: none; }
+
+/* Tab size: − 2 + in the segmented control's frame. */
+.ib-rs .ib-rs-step { align-items: center; }
+.ib-rs .ib-rs-step button.ib-seg-o { min-width: 28px; justify-content: center; padding: 0 8px; }
+.ib-rs .ib-rs-step button.ib-seg-o:disabled { opacity: 0.4; cursor: default; }
+.ib-rs .ib-rs-stepv { min-width: 22px; text-align: center; font-size: var(--ib-fs-13, 13px); font-variant-numeric: tabular-nums; }
+
+/* Code font size. */
+.ib-rs .ib-rs-slider { display: flex; align-items: center; gap: 12px; width: 100%; }
+.ib-rs .ib-rs-range { flex: 1; min-width: 0; accent-color: var(--primary); cursor: pointer; }
+.ib-rs .ib-rs-val { min-width: 4ch; text-align: right; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+
+/* Fields: the Inbox's key field, at full width. */
+.pn-inbox .ib-rs .ib-rs-text { width: 100%; }
+.pn-inbox .ib-rs .ib-rs-sans { font-family: inherit; }
+.pn-inbox .ib-rs .ib-rs-text[aria-invalid="true"] { border-color: var(--warning, var(--destructive)); }
+/* A long list of choices: the Inbox's button naming the choice, opening its menu. */
+.pn-inbox .ib-rs .ib-rs-pick { align-self: flex-start; justify-content: space-between; gap: 8px; min-width: 200px; max-width: 100%; }
+.ib-rs .ib-rs-pick-l { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-rs .ib-rs-pick .ib-ic { flex: none; color: var(--muted-foreground); }
+.ib-rs-pick-menu { max-height: min(360px, var(--available-height, 360px)); overflow-y: auto; }
+.ib-rs .ib-rs-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+/* The key field grows along a row (`flex: 1`); in a field's column that would squash it to its text's height. */
+.pn-inbox .ib-rs .ib-rs-field > .ib-rs-text { flex: none; }
+.ib-rs .ib-rs-cap { font-size: var(--ib-fs-12, 12px); font-weight: 500; color: var(--foreground); }
+
+/* A line of small text: in a row's words, or on its own in a card (Power Up's last line). */
+.ib-rs .ib-rs-note { display: block; font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.45; color: var(--muted-foreground); }
+.ib-rs .ib-rs-note[data-tone="warning"] { color: var(--warning, var(--destructive)); }
+.ib-rs .ib-rs-note[data-tone="success"] { color: var(--success, var(--primary)); }
+.ib-rs .ib-card > .ib-rs-note { padding: 11px 16px; border-bottom: 1px solid var(--ib-hair); }
+.ib-rs .ib-card > .ib-rs-note:last-child { border-bottom: 0; }

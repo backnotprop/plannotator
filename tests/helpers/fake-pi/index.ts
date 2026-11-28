@@ -123,6 +123,8 @@ export function installFakePi(input: { bin: string; state: string; home: string;
     existsSync(join(state, name))
       ? readFileSync(join(state, name), "utf8")
           .split("\n")
+          // A line is whole only once its newline is written: the last piece is "" or a line still being appended.
+          .slice(0, -1)
           .filter(Boolean)
           .map((line) => JSON.parse(line) as T)
       : [];
