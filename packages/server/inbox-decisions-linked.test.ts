@@ -213,6 +213,63 @@ describe("decision mode on a linked computer's thread", () => {
     }
   }, 180_000);
 
+  test("a held Send whose held pick is refused there is refused with it: the agent never reads an answer made there instead", async () => {
+    const dataStudio = dataDir("studio-collide");
+    const dataLaptop = dataDir("laptop-collide");
+    const studio = await start(dataStudio);
+    let laptop = await start(dataLaptop);
+    try {
+      const offered = (await (await fetch(`${at(laptop.port)}/api/inbox/machines/offer`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json()) as Json;
+      const linked = await fetch(`${at(studio.port)}/api/inbox/machines/link`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ link: offered.link, address: at(laptop.port), back: at(studio.port) }) });
+      expect(linked.status).toBe(201);
+      const laptopId = (JSON.parse(readFileSync(join(dataStudio, "inbox", "machines.json"), "utf8")) as Json).links[0].id as string;
+      await waitFor("Laptop's list on Studio", async () => ((await get(studio.port, "/api/inbox/machines")).machines as Json[]).find((m) => m.id === laptopId)?.marks?.includes("decisions") === true, 15_000);
+      const onLaptop = await ask(laptop, "ses_collide");
+      await waitFor("Laptop's decisions on Studio", async () => (await merged(studio.port)).filter((d) => d.machine === laptopId).length === 2, 15_000);
+      const [q] = (await merged(studio.port)).filter((d) => d.machine === laptopId);
+      const prompt = "Ship the new search index tonight?";
+      const far = `/api/inbox/m/${laptopId}`;
+      const onLaptopNow = () => question(laptop, onLaptop.thread_id, onLaptop.message_id, q!.key);
+
+      // Studio's window holds q at revision r. On Laptop's own window the person picks B (q at r + 1 there).
+      expect((await press(laptop.port, `/api/inbox/messages/${onLaptop.message_id}/picks`, { unsent_only: true, questions: [{ key: q!.key, revision: q!.revision, answer: answer(q!.key, prompt, "No, wait for Monday") }] })).status).toBe(200);
+      expect((await onLaptopNow()).revision).toBe(q!.revision + 1);
+      const seen = (await get(studio.port, `${far}/threads/${onLaptop.thread_id}`)).cursor as number;
+
+      // Laptop away. In Studio's window the person picks A (held, at r), then Send names q at the revision that pick
+      // makes there (r + 1, farThread.ts), held behind it.
+      laptop.stop();
+      await waitFor("Laptop offline on Studio", async () => ((await get(studio.port, "/api/inbox/machines")).machines as Json[]).find((m) => m.id === laptopId)?.state === "offline", 30_000);
+      const heldPick = await press(studio.port, `${far}/messages/${onLaptop.message_id}/picks`, { unsent_only: true, questions: [{ key: q!.key, revision: q!.revision, answer: answer(q!.key, prompt, "Yes, tonight") }] });
+      expect(heldPick.status).toBe(202);
+      const pickKey = ((await heldPick.json()) as Json).outbox.key as string;
+      const send = await press(studio.port, `${far}/messages/${onLaptop.message_id}/reply`, { words: "", seen_through_seq: seen, questions: [{ key: q!.key, revision: q!.revision + 1 }] });
+      expect(send.status).toBe(202);
+      const sendKey = ((await send.json()) as Json).outbox.key as string;
+
+      // Laptop back: the pick is refused (q moved on there), and the Send with it, never sent: no reply on Laptop,
+      // q still B there and not sent, and Studio's window is told both did not land (its Send's Try again).
+      laptop = await start(dataLaptop);
+      await waitFor("Studio's outbox settled", async () => ((await get(studio.port, "/api/inbox/outbox")).waiting as Json[]).length === 0, 45_000);
+      const notices = (await get(studio.port, "/api/inbox/outbox")).notices as Json[];
+      const told = (key: string) => notices.filter((n) => n.key === key).map((n) => [n.state, n.notice?.kind]);
+      expect([told(pickKey), told(sendKey)]).toEqual([[["refused", "refused"]], [["refused", "refused"]]]);
+      expect([(await onLaptopNow()).state, (await onLaptopNow()).answer?.selected]).toEqual(["picked", ["No, wait for Monday"]]);
+      const replies = () => laptop.store.threadMessageIds(onLaptop.thread_id).map((id) => laptop.store.message(id)!).filter((m) => m.author.kind === "person");
+      expect(replies()).toHaveLength(0);
+
+      // Try again: a new key, from the thread as it is now there. It goes.
+      const now = await get(studio.port, `${far}/threads/${onLaptop.thread_id}`);
+      const again = await press(studio.port, `${far}/messages/${onLaptop.message_id}/reply`, { words: "", seen_through_seq: now.cursor, questions: [{ key: q!.key, revision: q!.revision + 1 }] });
+      expect(again.status).toBe(200);
+      expect(replies()).toHaveLength(1);
+      expect((await onLaptopNow()).state).toBe("sent");
+    } finally {
+      studio.stop();
+      laptop.stop();
+    }
+  }, 180_000);
+
   test("a phone never reaches the routes a linked computer's window uses for decision mode", async () => {
     const { doorRouteOf } = await import("./inbox-devices");
     expect(doorRouteOf("GET", "decisions", false)).toBeNull();

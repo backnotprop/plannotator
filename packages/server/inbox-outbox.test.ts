@@ -259,6 +259,74 @@ describe("rule 3: refused answers leave the outbox", () => {
   });
 });
 
+describe("a held reply goes only on top of the held picks and marks it carries", () => {
+  const pick = (key: string, question: string, revision: number) => ({ idempotency_key: key, questions: [{ key: question, revision, answer: { selected: ["A"] } }] });
+  const answered = (key: string, questions: { key: string; revision: number; message_id?: string }[], actions: { key: string }[] = []) => ({ idempotency_key: key, words: "", questions, ...(actions.length > 0 ? { actions } : {}) });
+  const conflict: OutboxAnswer = { status: 409, body: { code: "question_revision_conflict", error: "This question changed on Laptop." } };
+
+  test("a held pick refused there takes the reply that names its question with it, never sent; later writes still go, in order", async () => {
+    const dir = dataDir();
+    let outbox = InboxOutbox.open(dir);
+    // While Laptop is away: A picked here on q (revision 3), then Send names q at the revision that pick makes there.
+    outbox.submit(B, "messages/m1/picks", pick("k-pick", "q", 3));
+    outbox.submit(B, "messages/m1/reply", answered("k-reply", [{ key: "q", revision: 4 }]));
+    outbox.submit(B, "threads/t1/read", { idempotency_key: "k-read" });
+    // Another question's answer, and another message's: they do not rely on that pick.
+    outbox.submit(B, "messages/m1/reply", answered("k-other", [{ key: "q2", revision: 1 }]));
+    outbox.submit(B, "messages/m2/reply", answered("k-m2", [{ key: "q", revision: 4 }]));
+    // A restart in between: what it relies on is kept with it.
+    outbox = InboxOutbox.open(dir);
+    // Laptop is back: B was picked there meanwhile (q at 4 there), so the pick is refused.
+    const answers = owner(conflict, ok);
+    expect(await outbox.drain(B, answers.send)).toBe("empty");
+    expect(answers.sent).toEqual(["k-pick", "k-read", "k-other", "k-m2"]);
+    const held = outbox.get("k-reply")!;
+    expect(held.state).toBe("refused");
+    expect(held.left).toBe(false);
+    // Refused with the pick's own answer, so the person is told why, as for the pick.
+    expect([held.status, held.answer]).toEqual([409, conflict!.body]);
+    expect(outbox.notices().map((e) => e.key)).toEqual(["k-pick", "k-reply"]);
+    // Try again goes under a new key, from the thread as it is now: nothing waits, so nothing takes it with it.
+    outbox.submit(B, "messages/m1/reply", answered("k-again", [{ key: "q", revision: 4 }]));
+    await outbox.drain(B, owner(ok).send);
+    expect(outbox.get("k-again")!.state).toBe("delivered");
+  });
+
+  test("a held pick delivered there: the reply goes after it", async () => {
+    const outbox = InboxOutbox.open(dataDir());
+    outbox.submit(B, "messages/m1/picks", pick("k-pick", "q", 3));
+    // A pick on an earlier message of the same session, named with its message.
+    outbox.submit(B, "messages/m0/picks", pick("k-pick0", "q0", 0));
+    outbox.submit(B, "messages/m1/reply", answered("k-reply", [{ key: "q", revision: 4 }, { key: "q0", revision: 1, message_id: "m0" }]));
+    const answers = owner(ok);
+    await outbox.drain(B, answers.send);
+    expect(answers.sent).toEqual(["k-pick", "k-pick0", "k-reply"]);
+    expect(outbox.get("k-reply")!.state).toBe("delivered");
+  });
+
+  test("a held pick on another message's question, refused, takes the reply that names it there", async () => {
+    const outbox = InboxOutbox.open(dataDir());
+    outbox.submit(B, "messages/m0/picks", pick("k-pick0", "q0", 0));
+    outbox.submit(B, "messages/m1/reply", answered("k-reply", [{ key: "q0", revision: 1, message_id: "m0" }]));
+    const answers = owner(conflict, ok);
+    await outbox.drain(B, answers.send);
+    expect(answers.sent).toEqual(["k-pick0"]);
+    expect(outbox.get("k-reply")!.state).toBe("refused");
+  });
+
+  test("an action item's held mark taken back before it left takes the reply carrying that item with it", async () => {
+    const outbox = InboxOutbox.open(dataDir());
+    outbox.submit(B, "messages/m1/actions/a-0123abcd", { idempotency_key: "k-mark", outcome: "done" });
+    outbox.submit(B, "messages/m1/reply", answered("k-reply", [], [{ key: "a-0123abcd" }]));
+    outbox.cancel("k-mark");
+    const answers = owner(ok);
+    await outbox.drain(B, answers.send);
+    expect(answers.sent).toEqual([]);
+    const held = outbox.get("k-reply")!;
+    expect([held.state, held.notice?.kind]).toEqual(["refused", "refused"]);
+  });
+});
+
 describe("rule 4: Unlink and revoke empty the machine's outbox", () => {
   test("never left: not delivered; left: may have been delivered (F4)", async () => {
     const outbox = InboxOutbox.open(dataDir());

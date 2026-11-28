@@ -3841,8 +3841,8 @@ export const INBOX_DRAFT_PASTED_LEAD_MAX = 2;
  * its door (`threads/:id/draft`, `threads/:id/draft/delete`), and its stream says when one changes (`drafts=1`), so
  * every window of either machine shows the same draft.
  * `decisions`: decision mode works on its threads from a linked machine's window: its door gives the decisions waiting
- * there (`GET decisions`) and keeps a Can't do it's reason as the thread's comment draft (`threads/:id/comment-draft`;
- * inbox-decisions-merged.ts in the server). A machine without it is never asked: its threads offer no "Decide these N".
+ * there (`GET decisions`; inbox-decisions-merged.ts in the server). A Can't do it's reason stays the window's own
+ * Inbox's comment draft, named by that machine (no door route). A machine without it is never asked: its threads offer no "Decide these N".
  */
 export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked", "branches", "project-tags", "agent-read", "agent-search", "combine-across", "remove-agent", "artifact-pins", "routines", "capabilities", "capability-note", "ships", "tag-across", "capability-set", "link-through", "linked-reads", "reply-drafts", "decisions"] as const;
 export type InboxLinkedMark = (typeof INBOX_LINKED_MARKS)[number];

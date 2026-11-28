@@ -566,7 +566,8 @@ export function DecisionMode(props: DecisionModeProps) {
         // A replay of a key answers the reply it wrote: a changed answer (a new revision) takes a new key.
         // A reply held for another computer that surely never applied there (refused, cancelled, unlinked before it
         // went) takes a new key too, so Try again sends it; one that may have applied keeps its key.
-        const heldBefore = props.outbox?.get(sendKeys.current.get(keyId) ?? '');
+        // The outbox as it is now (`sendGroup` keeps the first render's `sendOnce`, so never this render's props).
+        const heldBefore = propsRef.current.outbox?.get(sendKeys.current.get(keyId) ?? '');
         const renew = !sendKeys.current.has(keyId) || outboxNotApplied(heldBefore) || (last !== undefined && replyKeysToRenew(new Map([[keyId, last]]), new Map([[keyId, contents]])).length > 0);
         if (renew) sendKeys.current.set(keyId, newUuid());
         sendContents.current.set(keyId, contents);
