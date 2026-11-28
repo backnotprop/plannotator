@@ -212,3 +212,7 @@ The advertised `appUrl` is the proxy under its LOCALHOST spelling with the targe
 **Live restore resilience:** a `find-and-mark` that resolves nothing in live mode keeps its record, seeded with unresolved placeholder targets from the durable anchor/text params, so the mutation-driven reconcile re-acquires the pin once a lazy route or data-dependent tree finishes rendering. Srcdoc restores keep the old fail-closed drop (a static document would never re-resolve).
 
 **Known limitations (documented, not bugs):** hardcoded absolute origins in the app, origin-pinned CORS to secondary APIs, and OAuth `redirect_uri` flows land outside the proxy; frame-busting apps break the wrapper; content-encoded HTML that survives the encoding strip renders without the bridge; cross-page annotation clicks do not navigate; a redirect to a DIFFERENT loopback service (another port) is passed through un-rewritten and the iframe leaves the proxy, which is why the probe refuses such targets up front. Manual smoke loop: `scripts/live-annotate-smoke.sh` (not CI).
+
+### Recent assistant message order
+
+The Messages sidebar lets you switch between Newest first (the default) and Oldest first. It remembers the choice using the UI storage backend (cookies by default, so it persists across review ports). The star stays on the newest assistant message in either order; selecting a message and its annotation count still follow that message.

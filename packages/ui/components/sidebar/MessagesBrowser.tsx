@@ -7,6 +7,7 @@
  */
 
 import React from "react";
+import { getItem, setItem } from "../../utils/storage";
 
 export interface PickerMessage {
   messageId: string;
@@ -23,6 +24,7 @@ interface MessagesBrowserProps {
 
 // Hard cap for browsers where line-clamp is unavailable, and to avoid huge sidebar text nodes.
 const PREVIEW_MAX_CHARS = 140;
+const ORDER_KEY = "plannotator-message-order";
 
 function previewText(text: string): string {
   const normalized = text.replace(/\s+/g, " ").trim();
@@ -49,6 +51,9 @@ export const MessagesBrowser: React.FC<MessagesBrowserProps> = ({
   onSelect,
   annotationCounts,
 }) => {
+  const [oldestFirst, setOldestFirst] = React.useState(() => getItem(ORDER_KEY) === "oldest");
+  const orderedMessages = oldestFirst ? [...messages].reverse() : messages;
+
   if (messages.length === 0) {
     return (
       <div className="p-4 text-xs text-muted-foreground text-center">
@@ -59,13 +64,25 @@ export const MessagesBrowser: React.FC<MessagesBrowserProps> = ({
 
   return (
     <div className="p-2">
-      <div className="px-2 pt-1 pb-2 text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
-        Recent messages — newest first
+      <div className="px-2 pt-1 pb-2 flex items-center justify-between gap-2 text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+        <span>Recent messages</span>
+        <button
+          type="button"
+          aria-label="Reverse message order"
+          onClick={() => {
+            const next = !oldestFirst;
+            setOldestFirst(next);
+            setItem(ORDER_KEY, next ? "oldest" : "newest");
+          }}
+          className="rounded px-1 py-1 hover:bg-muted/50 text-foreground"
+        >
+          {oldestFirst ? "Oldest first" : "Newest first"}
+        </button>
       </div>
       <div className="space-y-0.5">
-        {messages.map((msg, idx) => {
+        {orderedMessages.map((msg, idx) => {
           const isSelected = msg.messageId === selectedMessageId;
-          const isDefault = idx === 0;
+          const isDefault = msg.messageId === messages[0]?.messageId;
           const ts = formatTimestamp(msg.timestamp);
           const annotationCount = annotationCounts?.get(msg.messageId) ?? 0;
           return (
