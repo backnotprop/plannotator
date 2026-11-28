@@ -9,6 +9,7 @@ export interface SemDiffRequest {
   oldText: string;
   newText: string;
   opinion?: { rejected: string[] };
+  background?: true;
 }
 
 export type SemDiffReply =

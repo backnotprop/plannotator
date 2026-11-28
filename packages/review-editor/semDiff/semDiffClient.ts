@@ -38,7 +38,7 @@ export interface SemDiffAttempt {
 export interface SemDiffClient {
   supports(path: string): boolean;
   diff(path: string, oldText: string, newText: string, signal?: AbortSignal, opinion?: SemDiffOpinionRequest): Promise<SemDiffResult | null>;
-  attempt(path: string, oldText: string, newText: string, signal?: AbortSignal, opinion?: SemDiffOpinionRequest): Promise<SemDiffAttempt>;
+  attempt(path: string, oldText: string, newText: string, signal?: AbortSignal, opinion?: SemDiffOpinionRequest, background?: boolean): Promise<SemDiffAttempt>;
   dispose(): void;
 }
 
@@ -193,10 +193,10 @@ export function createSemDiffClient(options: SemDiffClientOptions): SemDiffClien
 
   const results = new Map<string, Promise<SemDiffAttempt>>();
 
-  const compute = (path: string, oldText: string, newText: string, opinion?: SemDiffOpinionRequest): Promise<SemDiffAttempt> => {
+  const compute = (path: string, oldText: string, newText: string, opinion?: SemDiffOpinionRequest, background?: boolean): Promise<SemDiffAttempt> => {
     if (stalledDownloads.has(languageForPath(path) ?? '')) return Promise.resolve({ result: null, failed: true });
     const id = nextId++;
-    const request: SemDiffRequest = { id, advert: advert!, origin, path, oldText, newText, ...(opinion ? { opinion: { rejected: [...opinion.rejected] } } : {}) };
+    const request: SemDiffRequest = { id, advert: advert!, origin, path, oldText, newText, ...(opinion ? { opinion: { rejected: [...opinion.rejected] } } : {}), ...(background ? { background: true as const } : {}) };
     return new Promise<SemDiffReply | null>((resolve) => {
       pending.set(id, { request, settle: resolve });
       post(id);
@@ -217,12 +217,12 @@ export function createSemDiffClient(options: SemDiffClientOptions): SemDiffClien
     });
   };
 
-  const attempt = async (path: string, oldText: string, newText: string, signal?: AbortSignal, opinion?: SemDiffOpinionRequest): Promise<SemDiffAttempt> => {
+  const attempt = async (path: string, oldText: string, newText: string, signal?: AbortSignal, opinion?: SemDiffOpinionRequest, background?: boolean): Promise<SemDiffAttempt> => {
     if (!advert || !supports(path) || signal?.aborted || oldText === newText) return { result: null, failed: false };
     const key = `${path}\0${hashText(oldText)}\0${hashText(newText)}${opinion ? `\0opinion\0${opinion.settingsRevision}\0${[...opinion.rejected].sort().join(',')}` : ''}`;
     let found = results.get(key);
     if (!found) {
-      found = compute(path, oldText, newText, opinion);
+      found = compute(path, oldText, newText, opinion, background);
       results.set(key, found);
       void found.then((outcome) => {
         const keep = !outcome.failed && (!opinion || outcome.result?.secondOpinion?.state === 'ok');

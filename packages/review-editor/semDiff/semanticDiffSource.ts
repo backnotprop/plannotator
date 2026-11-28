@@ -16,7 +16,7 @@ type Source = (signal?: AbortSignal) => Promise<SemanticDiffResponse>;
 
 const MAX_FILES = 400;
 export const SEM_DIFF_MAX_CHARS = 2_000_000;
-const CONCURRENCY = 3;
+const CONCURRENCY = 8;
 
 let source: Source | null = null;
 
@@ -57,7 +57,7 @@ export async function computeReviewSemanticDiff(
         unread.push({ path: file.path, reason: 'too-large' });
         continue;
       }
-      const plain = await client.attempt(file.path, contents.oldContent, contents.newContent, signal);
+      const plain = await client.attempt(file.path, contents.oldContent, contents.newContent, signal, undefined, true);
       if (plain.failed) unread.push({ path: file.path, reason: 'timed-out' });
       const powered = opinion && !plain.failed ? await client.attempt(file.path, contents.oldContent, contents.newContent, signal, opinion) : null;
       const links = powered?.result?.secondOpinion?.state === 'ok' ? powered.result.secondOpinion.links : [];
