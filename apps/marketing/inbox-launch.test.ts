@@ -16,6 +16,7 @@ const switchFile = join(marketingRoot, 'src/lib/inbox-launch.ts');
 const postPath = 'blog/the-age-of-the-inbox/index.html';
 const agentsPath = 'inbox/agents/index.html';
 const agentPaths = LISTED_AGENTS.map((a) => `inbox/agents/${a.slug}/index.html`);
+const reviewPath = 'inbox/review/index.html';
 
 let temporaryRoot = '';
 const dist = { on: '' };
@@ -53,6 +54,19 @@ const text = (html: string) => html.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ')
 const inboxLinks = (html: string) => html.match(/<a\b[^>]*href="\/inbox\/"[^>]*>[\s\S]*?<\/a>/g) ?? [];
 const files = (root: string) => [...new Bun.Glob('**/*').scanSync({ cwd: root })];
 
+/** A WebP file's pixel size, from its first chunk (lossy, lossless or extended). */
+function webpSize(bytes: Buffer): { width: number; height: number } {
+  expect(bytes.subarray(0, 4).toString('latin1') + bytes.subarray(8, 12).toString('latin1')).toBe('RIFFWEBP');
+  const chunk = bytes.subarray(12, 16).toString('latin1');
+  if (chunk === 'VP8 ') return { width: bytes.readUInt16LE(26) & 0x3fff, height: bytes.readUInt16LE(28) & 0x3fff };
+  if (chunk === 'VP8L') {
+    const bits = bytes.readUInt32LE(21);
+    return { width: (bits & 0x3fff) + 1, height: ((bits >> 14) & 0x3fff) + 1 };
+  }
+  expect(chunk).toBe('VP8X');
+  return { width: bytes.readUIntLE(24, 3) + 1, height: bytes.readUIntLE(27, 3) + 1 };
+}
+
 beforeAll(async () => {
   temporaryRoot = await mkdtemp(join(marketingRoot, '.astro-inbox-launch-'));
   dist.on = await build('on');
@@ -68,7 +82,7 @@ describe('Plannotator Inbox launch switch', () => {
   });
 
   test('on: the page, the post and the images are built and linked', async () => {
-    expect(files(join(dist.on, 'assets/inbox')).length).toBe(53);
+    expect(files(join(dist.on, 'assets/inbox')).length).toBe(63);
     const home = inboxLinks(await read(dist.on, 'index.html')).map(text);
     // Nav, the announcement bar (src/components/landing/AnnounceBar.astro), Footer.
     expect(home).toHaveLength(3);
@@ -85,10 +99,12 @@ describe('Plannotator Inbox launch switch', () => {
     const sitemap = await read(dist.on, 'sitemap-0.xml');
     expect(sitemap).toContain('<loc>https://plannotator.ai/inbox/</loc>');
     expect(sitemap).toContain('<loc>https://plannotator.ai/blog/the-age-of-the-inbox/</loc>');
+    expect(sitemap).toContain('<loc>https://plannotator.ai/inbox/review/</loc>');
+    expect(await read(dist.on, reviewPath)).toContain('<title>Plannotator Inbox for code review</title>');
   });
 
   test('on: no comma in any h1 h2 h3 or button on the page and the post', async () => {
-    for (const path of ['inbox/index.html', postPath, agentsPath, ...agentPaths]) {
+    for (const path of ['inbox/index.html', postPath, agentsPath, ...agentPaths, reviewPath]) {
       const html = await read(dist.on, path);
       const elements = html.match(/<(h1|h2|h3|button)\b[^>]*>[\s\S]*?<\/\1>/g) ?? [];
       expect(elements.length).toBeGreaterThan(0);
@@ -121,7 +137,7 @@ describe('Plannotator Inbox launch switch', () => {
   });
 
   test('on: every image on the page and the post resolves', async () => {
-    for (const path of ['inbox/index.html', postPath, agentsPath, ...agentPaths]) {
+    for (const path of ['inbox/index.html', postPath, agentsPath, ...agentPaths, reviewPath]) {
       const html = await read(dist.on, path);
       const urls = new Set<string>();
       for (const [, attr, value] of html.matchAll(/\b(src|srcset|data-lightbox-dark|data-lightbox-light|content)="([^"]*)"/g)) {
@@ -134,6 +150,27 @@ describe('Plannotator Inbox launch switch', () => {
       expect(urls.size).toBeGreaterThan(path === 'inbox/index.html' ? 30 : 0);
       for (const url of urls) {
         if (/\.(webp|png|jpe?g|svg)$/.test(url)) expect(existsSync(join(dist.on, url)), `${path}: ${url}`).toBe(true);
+      }
+    }
+  });
+
+  // /inbox/review/'s picture is retaken now and then. A file whose pixels no
+  // longer match its srcset width, or whose proportions no longer match the
+  // width and height in the markup, is drawn stretched or makes the page jump
+  // as it loads.
+  test('on: every /inbox/review/ picture file matches its srcset width and its markup proportions', async () => {
+    const html = await read(dist.on, reviewPath);
+    const tags = html.match(/<(img|source)\b[^>]*\bsrcset="[^"]*"[^>]*>/g) ?? [];
+    expect(tags.length).toBe(4);
+    for (const tag of tags) {
+      const width = Number(/\bwidth="(\d+)"/.exec(tag)?.[1]);
+      const height = Number(/\bheight="(\d+)"/.exec(tag)?.[1]);
+      expect(width > 0 && height > 0, tag).toBe(true);
+      for (const part of /\bsrcset="([^"]*)"/.exec(tag)![1].split(',')) {
+        const [url, descriptor] = part.trim().split(/\s+/);
+        const pixels = webpSize(await readFile(join(dist.on, url)));
+        expect(pixels.width, url).toBe(Number(descriptor.replace(/w$/, '')));
+        expect(Math.abs(pixels.height - (pixels.width * height) / width), url).toBeLessThanOrEqual(1);
       }
     }
   });

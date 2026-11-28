@@ -1,0 +1,373 @@
+---
+import Base from '../../layouts/Base.astro';
+import Nav from '../../components/Nav.astro';
+import Footer from '../../components/Footer.astro';
+import { INBOX_LAUNCHED } from '../../lib/inbox-launch';
+
+// /inbox/review/: the Inbox for code review only. Generated with /inbox/,
+// behind the same launch switch. Words and layout are the owner's approved
+// mock (round 2's words, round 8's picture, composition B); /inbox/ itself is
+// unchanged. The picture is one drawing of four real Inbox captures with
+// made-up data, in a light and a dark render, and a taller arrangement of the
+// same captures below the phone breakpoint.
+export function getStaticPaths() {
+  return INBOX_LAUNCHED ? [{ params: { inbox: 'inbox' } }] : [];
+}
+
+const title = 'Plannotator Inbox for code review';
+const description = "Your pull requests and your agents' changes in one list, with what needs you first.";
+const command = 'plannotator inbox --review';
+const install = 'curl -fsSL https://plannotator.ai/install.sh | bash';
+const alt =
+  "A guided review: each chapter has a diagram above its code. Beside it, Reviews sorted by risk with the High pull request first, a row's menu open on Ship, and a diff with risk bars on the risky lines and the reason: charges stop being idempotent.";
+const copyIcon =
+  '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>';
+const base = '/assets/inbox/review';
+const modes = ['dark', 'light'] as const;
+---
+
+<Base title={title} description={description} ogImage="https://plannotator.ai/assets/inbox/inbox-og.jpg">
+  <div class="min-h-screen bg-background text-foreground">
+    <Nav />
+
+    <main class="max-w-6xl mx-auto px-6 md:px-8">
+      <header class="ib-hero">
+        <!-- As /inbox/: the wordmark at the top right, its cap top on the
+             headline's first line. -->
+        <div class="ib-hero-head">
+          <p class="font-display ib-wordmark"><span>Plannotator</span> <span class="ib-wordmark-muted">Inbox</span></p>
+          <h1 class="font-display ib-heading">An inbox for <em>code&nbsp;review</em></h1>
+        </div>
+
+        <div class="ib-hero-inner">
+          <p class="ib-overview">
+            Your pull requests from GitHub and GitLab and your agents' local changes, in one list. Filter them by your own
+            risk rules, and let a review curator walk you through each change. Your agents hear about the Inbox only in the
+            reviews you start.
+          </p>
+
+          <p class="ib-trust">Local. GitHub and GitLab. Open source.</p>
+
+          <div class="ib-row">
+            <div class="hero-install ib-command">
+              <span class="ib-dollar" aria-hidden="true">$</span>
+              <code>{command}</code>
+              <!-- Shown by the script below: without it the command is text to select. -->
+              <button type="button" class="copy-btn" data-copy={command} aria-label="Copy the command" hidden set:html={copyIcon} />
+            </div>
+            <a class="ib-alt" href="/inbox/">The full Inbox</a>
+          </div>
+
+          <p class="ib-first">New to Plannotator? First: <code>{install}</code></p>
+        </div>
+
+        <!-- The page's picture: the light or the dark render by the mode, the
+             phone arrangement below 640 px. Only the shown one loads. -->
+        <figure class="ib-picture">
+          {modes.map((mode) => (
+            <picture class={`ib-${mode}`}>
+              <source
+                media="(max-width: 639px)"
+                srcset={`${base}-phone-${mode}.webp 390w, ${base}-phone-${mode}@2x.webp 780w, ${base}-phone-${mode}@3x.webp 1170w`}
+                sizes="100vw"
+                width="1170"
+                height="2764"
+              />
+              <img
+                src={`${base}-${mode}.webp`}
+                srcset={`${base}-${mode}.webp 1088w, ${base}-${mode}@2x.webp 2176w`}
+                sizes="(min-width: 1152px) 1088px, calc(100vw - 4rem)"
+                width="2176"
+                height="1242"
+                loading="lazy"
+                decoding="async"
+                alt={alt}
+              />
+            </picture>
+          ))}
+        </figure>
+      </header>
+    </main>
+
+    <p class="sr-only" aria-live="polite" data-copy-live></p>
+
+    <script is:inline>
+      (() => {
+        const live = document.querySelector('[data-copy-live]');
+        const announce = (message) => {
+          if (!live) return;
+          live.textContent = '';
+          setTimeout(() => { live.textContent = message; }, 50);
+        };
+
+        // The clipboard API, else a selected off-screen textarea (plain http,
+        // older browsers, a denied permission). As /inbox/.
+        const copyText = (text) => {
+          const fallback = () =>
+            new Promise((resolve, reject) => {
+              const ta = document.createElement('textarea');
+              ta.value = text;
+              ta.setAttribute('readonly', '');
+              ta.setAttribute('aria-hidden', 'true');
+              ta.style.position = 'fixed';
+              ta.style.top = '0';
+              ta.style.left = '0';
+              ta.style.opacity = '0';
+              document.body.appendChild(ta);
+              const focused = document.activeElement;
+              ta.select();
+              try {
+                document.execCommand('copy') ? resolve() : reject(new Error('copy failed'));
+              } catch (e) {
+                reject(e);
+              } finally {
+                ta.remove();
+                if (focused && focused.focus) focused.focus();
+              }
+            });
+          if (navigator.clipboard && window.isSecureContext) {
+            return navigator.clipboard.writeText(text).catch(fallback);
+          }
+          return fallback();
+        };
+
+        const check =
+          '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>';
+        document.querySelectorAll('[data-copy]').forEach((b) => {
+          const icon = b.innerHTML;
+          b.hidden = false;
+          b.addEventListener('click', () => {
+            copyText(b.getAttribute('data-copy') || '').then(() => {
+              b.innerHTML = check;
+              announce('Copied.');
+              setTimeout(() => { b.innerHTML = icon; }, 1500);
+            }, () => announce('Copy failed. Select the command and copy it by hand.'));
+          });
+        });
+      })();
+    </script>
+
+    <Footer />
+  </div>
+</Base>
+
+<style>
+  /* /inbox/'s hero (src/pages/[inbox].astro), at the sizes of the approved
+     mock. Tokens come from global.css. */
+  main {
+    --ib-dim: color-mix(in oklab, var(--foreground) 62%, transparent);
+  }
+
+  main code {
+    font-family: var(--font-mono);
+  }
+
+  .ib-hero {
+    padding: 6.5rem 0 4rem;
+  }
+
+  .ib-hero-head {
+    --ib-h1: clamp(2.5rem, 7vw, 4rem);
+    font-feature-settings: normal;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 1rem;
+    margin-bottom: 1.25rem;
+  }
+
+  .ib-wordmark {
+    justify-self: end;
+    align-self: start;
+    display: flex;
+    gap: 0.3333em;
+    white-space: nowrap;
+    font-size: 1.125rem;
+    font-weight: 600;
+    line-height: 1;
+    letter-spacing: 0;
+    color: var(--foreground);
+  }
+
+  .ib-wordmark-muted {
+    color: var(--muted-foreground);
+  }
+
+  /* Side by side once both fit; the margin puts the two cap tops level
+     (Instrument Sans metrics, as /inbox/). */
+  @media (min-width: 56rem) {
+    .ib-hero-head {
+      grid-template-columns: minmax(0, 1fr) auto;
+      column-gap: 2rem;
+    }
+    .ib-wordmark {
+      grid-column: 2;
+      grid-row: 1;
+      font-size: calc(var(--ib-h1) * 24 / 76);
+      margin-top: calc(var(--ib-h1) * (0.15 - 0.14 * 24 / 76));
+    }
+    .ib-heading {
+      grid-column: 1;
+      grid-row: 1;
+    }
+  }
+
+  .ib-heading {
+    max-width: 46rem;
+    font-size: var(--ib-h1);
+    line-height: 1.02;
+    font-weight: 700;
+    letter-spacing: -0.04em;
+  }
+
+  .ib-heading em {
+    display: block;
+    font-style: normal;
+    color: var(--primary);
+  }
+
+  .ib-hero-inner {
+    max-width: 46rem;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1.25rem;
+  }
+
+  .ib-overview {
+    font-size: 1rem;
+    line-height: 1.7;
+    color: var(--ib-dim);
+    max-width: 42rem;
+  }
+
+  .ib-trust {
+    font-size: 11px;
+    letter-spacing: 0.025em;
+    color: color-mix(in oklab, var(--muted-foreground) 55%, transparent);
+  }
+
+  .ib-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem 1.25rem;
+  }
+
+  .ib-command {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.85rem 3.25rem 0.85rem 1.1rem;
+    border-radius: 0.625rem;
+    font-size: 0.95rem;
+  }
+
+  .ib-command code {
+    white-space: nowrap;
+    color: var(--foreground);
+  }
+
+  .ib-dollar {
+    color: var(--muted-foreground);
+    user-select: none;
+  }
+
+  .ib-command .copy-btn {
+    display: inline-grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+  }
+
+  .ib-command .copy-btn[hidden] {
+    display: none;
+  }
+
+  .ib-command .copy-btn:focus-visible,
+  .ib-alt:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 3px;
+  }
+
+  .ib-alt {
+    font-size: 0.9375rem;
+    color: var(--ib-dim);
+    text-decoration: underline;
+    text-decoration-color: color-mix(in oklab, var(--foreground) 25%, transparent);
+    text-underline-offset: 4px;
+    transition: color 0.15s, text-decoration-color 0.15s;
+  }
+
+  .ib-alt:hover {
+    color: var(--foreground);
+    text-decoration-color: currentColor;
+  }
+
+  .ib-first {
+    margin-top: -0.25rem;
+    font-size: 0.875rem;
+    color: var(--ib-dim);
+  }
+
+  .ib-first code {
+    font-size: 0.8125rem;
+    padding: 2px 6px;
+    border-radius: 5px;
+    background: color-mix(in oklch, var(--muted) 70%, transparent);
+    color: var(--foreground);
+  }
+
+  /* The picture: its own drawing carries the cards, their shadows and the
+     page's background, so the frame adds nothing. */
+  .ib-picture {
+    margin: 3.5rem 0 0;
+  }
+
+  .ib-picture img {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+
+  :global(.light) .ib-dark,
+  :global(html:not(.light)) .ib-light {
+    display: none;
+  }
+
+  @media (max-width: 639px) {
+    .ib-hero {
+      padding-top: 5rem;
+    }
+    .ib-row {
+      width: 100%;
+    }
+    .ib-command {
+      width: 100%;
+      font-size: 0.8rem;
+    }
+    .ib-first code {
+      display: inline-block;
+      margin-top: 6px;
+      font-size: 0.6875rem;
+      white-space: nowrap;
+    }
+    /* The phone arrangement runs to both screen edges and carries 16 px of
+       the page above and below its cards. */
+    .ib-picture {
+      margin: calc(2.5rem - 16px) -1.5rem 0;
+    }
+  }
+
+  /* The narrowest phones: the commands keep to the screen. */
+  @media (max-width: 359px) {
+    .ib-command {
+      padding-right: 2.75rem;
+      font-size: 0.72rem;
+    }
+    .ib-first code {
+      white-space: normal;
+      overflow-wrap: anywhere;
+    }
+  }
+</style>
