@@ -1325,9 +1325,9 @@ function skippedOnPurpose(agent: InboxNoteAgentId, e: AgentEnvironment): "read-o
 /**
  * Whether the file `agent` reads its note from holds the note with exactly
  * its rules (inboxNoteHoldsRules: what the hosts' reminders check too). False
- * with no rules, for Cursor, and with no file. Exported for the Inbox's MCP
- * instructions, which can leave the rules out for a client whose agent has
- * them here (not used there yet).
+ * with no rules, for Cursor, and with no file. The Inbox's MCP instructions
+ * leave the rules out for a client whose agent has them here
+ * (inbox-mcp-note-rules.ts).
  */
 export function inboxNoteHoldsAgentRules(agent: InboxNoteAgentId, e: AgentEnvironment, config: unknown): boolean {
   const rules = agentRulesText(agent, config);

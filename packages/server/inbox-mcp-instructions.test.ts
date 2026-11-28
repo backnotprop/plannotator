@@ -257,7 +257,8 @@ describe("over MCP: each initialize is sized to its client and reads config.json
     rmSync(dir, { recursive: true, force: true });
   });
 
-  // The same wiring as the Inbox server's /mcp route (inbox.ts), with no Inbox running.
+  // The Inbox server's /mcp route (inbox.ts) for a client whose agent has no note holding the rules (that case:
+  // inbox-agent-note-rules.test.ts), with no Inbox running.
   const context = { inboxReminder: () => resolveInboxMcpReminder(loadConfig({ quiet: true })) } as unknown as InboxMcpContext;
   const instructions = async (clientInfo: InboxMcpClient): Promise<string> => {
     const body = { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, ...(clientInfo ? { clientInfo } : {}) } };

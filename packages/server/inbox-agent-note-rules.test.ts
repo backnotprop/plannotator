@@ -38,7 +38,8 @@ import {
 import { noteWithoutMarkers } from "../inbox/agents";
 import { createAgentEnvironmentFor, type AgentEnvironment } from "./inbox-agents";
 import { inboxRulesModel } from "./inbox-rules";
-import { INBOX_MCP_RULES_ROOMS } from "./inbox-mcp-instructions";
+import { INBOX_MCP_INSTRUCTIONS, INBOX_MCP_RULES_ROOMS, inboxMcpInstructions, inboxMcpTierOf, type InboxMcpClient } from "./inbox-mcp-instructions";
+import { inboxMcpReminderFor, type InboxMcpHere } from "./inbox-mcp-note-rules";
 
 let fake: FakeAgents;
 let dataDir: string;
@@ -385,6 +386,86 @@ describe("each agent gets its rules exactly once", () => {
     }
   });
 
+  // Codex and Gemini CLI connected through MCP: their note, then the instructions one `initialize` on this computer's
+  // `/mcp` gets (inbox.ts mcpForInitialize: inboxMcpReminderFor with `here`; inbox-mcp.ts builds them with the tier).
+  const MCP_CLIENTS = { codex: { name: "codex-mcp-client", version: "0.165.0" }, gemini: { name: "gemini-cli-mcp-client", version: "0.0.1" } } as const;
+  const mcpSession = (agent: keyof typeof MCP_CLIENTS, config: object, client: InboxMcpClient = MCP_CLIENTS[agent], here: InboxMcpHere | null = { dataDir, environment: () => e }) => {
+    let fileText = "";
+    try {
+      fileText = read(noteTarget(agent, e).path!);
+    } catch {
+      // No file.
+    }
+    return { fileText, instructions: inboxMcpInstructions(inboxMcpReminderFor(config, client, here ?? undefined), inboxMcpTierOf(client)) };
+  };
+  const mcpNoteFor = (agent: keyof typeof MCP_CLIENTS, config: object) => {
+    mkdirSync(file(agent === "codex" ? ".codex" : ".gemini"), { recursive: true });
+    expect(addInboxNote(agent, dataDir, e, undefined, { config }).ok).toBe(true);
+  };
+
+  for (const agent of ["codex", "gemini"] as const) {
+    test(`${agent} through MCP: note with the rules → the instructions leave them out, byte for byte the built-in ones`, () => {
+      mcpNoteFor(agent, shared());
+      const { fileText, instructions } = mcpSession(agent, shared());
+      expect(count(fileText, RULES)).toBe(1);
+      expect(count(fileText + instructions, INBOX_RULES_LEAD)).toBe(1);
+      expect(count(fileText + instructions, RULES)).toBe(1);
+      expect(instructions).toBe(INBOX_MCP_INSTRUCTIONS);
+      // The person's reminder is not in the note: it stays in the instructions, the rules alone go.
+      const withReminder = { prompts: { inbox: { rules: RULES, reminder: "Write to me in French." } } };
+      mcpNoteFor(agent, withReminder);
+      const both = mcpSession(agent, withReminder);
+      expect(count(both.fileText + both.instructions, RULES)).toBe(1);
+      expect(count(both.instructions, "Write to me in French.")).toBe(1);
+    });
+
+    test(`${agent} through MCP: no note (never added, or turned off) → the instructions carry them`, () => {
+      expect(count(mcpSession(agent, shared()).instructions, RULES)).toBe(1);
+      mcpNoteFor(agent, shared());
+      removeInboxNote(agent, dataDir, e);
+      const { fileText, instructions } = mcpSession(agent, shared());
+      expect(count(fileText, RULES)).toBe(0);
+      expect(instructions).toContain(`${INBOX_RULES_LEAD}\n${RULES}`);
+    });
+
+    test(`${agent} through MCP: a note with older rules → the instructions carry the current ones`, () => {
+      mcpNoteFor(agent, shared(OTHER));
+      const { fileText, instructions } = mcpSession(agent, shared());
+      expect(count(fileText + instructions, RULES)).toBe(1);
+      expect(instructions).toContain(`${INBOX_RULES_LEAD}\n${RULES}`);
+    });
+
+    test(`${agent} through MCP: a note edited so the rules are gone → the instructions carry them`, () => {
+      mcpNoteFor(agent, shared());
+      const path = noteTarget(agent, e).path!;
+      write(path, read(path).replace(`\n\n${INBOX_RULES_LEAD}\n${RULES}`, ""));
+      const { fileText, instructions } = mcpSession(agent, shared());
+      expect(count(fileText + instructions, RULES)).toBe(1);
+    });
+
+    test(`${agent} through MCP: a connection that is not this computer's own /mcp (a cloud agent's door, a linked computer) → the instructions carry them`, () => {
+      mcpNoteFor(agent, shared());
+      // The note here says nothing about what an agent elsewhere read.
+      expect(count(mcpSession(agent, shared(), MCP_CLIENTS[agent], null).instructions, RULES)).toBe(1);
+    });
+  }
+
+  test("through MCP: a client the Inbox cannot tie to a note gets the rules, whatever the notes hold", () => {
+    mcpNoteFor("codex", shared());
+    mcpNoteFor("gemini", shared());
+    for (const client of [
+      { name: "Codex-MCP-Client" },
+      { name: " gemini-cli-mcp-client" },
+      { name: "qwen-cli-mcp-client-plannotator-inbox" },
+      { name: "cursor-vscode" },
+      { name: "claude-code", version: "2.1.323" },
+      { name: "" },
+      null,
+    ]) {
+      expect(count(mcpSession("codex", shared(), client).instructions, RULES)).toBe(1);
+    }
+  });
+
   test("the holds check reads the block only: the rules outside the markers do not count; CRLF and a BOM do not matter", () => {
     expect(inboxNoteHoldsRules(`${INBOX_NOTE_BLOCK}\n\n${INBOX_RULES_LEAD}\n${RULES}\n`, RULES)).toBe(false);
     expect(inboxNoteHoldsRules(`﻿Mine.\r\n\r\n${inboxNoteBlockWith(RULES).replace(/\n/g, "\r\n")}\r\n`, RULES)).toBe(true);
@@ -531,6 +612,22 @@ describe("the Inbox's gate: no rules through a note until the person turned the 
       expect(refreshInboxNotes(dataDir, e, { config: shared() }).map((r) => r.result)).toEqual(["refreshed"]);
       expect(count(read(CODEX_FILE()), RULES)).toBe(1);
       expect(count(read(CODEX_FILE()), INBOX_RULES_LEAD)).toBe(1);
+    });
+  });
+
+  test("while it is off, the MCP instructions are today's: they carry the rules even beside a note that holds them", () => {
+    mkdirSync(file(".codex"), { recursive: true });
+    // A note written while the Inbox was on, then the mark says off.
+    expect(addInboxNote("codex", dataDir, e, undefined, { config: shared() }).ok).toBe(true);
+    expect(count(read(CODEX_FILE()), RULES)).toBe(1);
+    const client = { name: "codex-mcp-client", version: "0.165.0" };
+    const here = { dataDir, environment: () => e };
+    off(() => {
+      mkdirSync(join(dataDir, "inbox"), { recursive: true });
+      writeFileSync(join(dataDir, "inbox", "turned-on"), `${JSON.stringify({ on: false, by: "command" })}\n`);
+      expect(inboxMcpReminderFor(shared(), client, here)).toEqual({ custom: null, rules: RULES });
+      turnOn();
+      expect(inboxMcpReminderFor(shared(), client, here)).toBeNull();
     });
   });
 });

@@ -298,4 +298,42 @@ describe("Settings → Prompts", () => {
       chmodSync(join(home, ".claude", "rules"), 0o755);
     }
   });
+
+  test("over /mcp: Codex, whose note holds the rules, gets instructions without them; a client the Inbox cannot tie to a note gets them", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-prompts-mcp-")));
+    roots.push(root);
+    const home = join(root, "home");
+    mkdirSync(join(home, ".codex"), { recursive: true });
+    const dataDir = join(root, "data");
+    mkdirSync(dataDir, { recursive: true });
+    const first = { prompts: { inbox: { rules: "Ask me before you delete any file." } } };
+    writeFileSync(join(dataDir, "config.json"), JSON.stringify(first));
+    previousDataDir = process.env.PLANNOTATOR_DATA_DIR;
+    process.env.PLANNOTATOR_DATA_DIR = dataDir;
+    const agentEnvironment = createAgentEnvironmentFor({ platform: "linux", homeDir: home, env: { HOME: home, PATH: "", CODEX_HOME: join(home, ".codex") } });
+    expect(addInboxNote("codex", dataDir, agentEnvironment, undefined, { config: first }).ok).toBe(true);
+    const note = join(home, ".codex", "AGENTS.md");
+    const server = await startInboxServer({ dataDir, agentEnvironment });
+    servers.push(server);
+    const instructions = async (name: string): Promise<string> => {
+      const response = await fetch(`http://127.0.0.1:${server.port}/mcp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name, version: "1.0.0" } } }),
+      });
+      const text = await response.text();
+      const body = text.trimStart().startsWith("{") ? text : text.split("\n").find((line) => line.startsWith("data: "))!.slice(6);
+      return (JSON.parse(body) as { result: { instructions: string } }).result.instructions;
+    };
+    expect(readFileSync(note, "utf8")).toContain("Ask me before you delete any file.");
+    expect(await instructions("codex-mcp-client")).not.toContain("Ask me before you delete any file.");
+    expect(await instructions("some-mcp-client")).toContain("Ask me before you delete any file.");
+    // New rules: the save rewrites the note, and the next Codex connection still gets them there only.
+    expect((await post(server, { serverSession: server.serverSession, prompts: { inbox: { rules: "Keep messages short." } } })).status).toBe(200);
+    expect(readFileSync(note, "utf8")).toContain("Keep messages short.");
+    expect(await instructions("codex-mcp-client")).not.toContain("Keep messages short.");
+    // The note gone from the file: the next Codex connection gets them in the instructions.
+    writeFileSync(note, "Mine.\n");
+    expect(await instructions("codex-mcp-client")).toContain("Keep messages short.");
+  });
 });
