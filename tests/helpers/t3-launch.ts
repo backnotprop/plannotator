@@ -200,7 +200,8 @@ export function t3LaunchSetup(cleanup: (() => void | Promise<void>)[], options: 
       selfCommand: ["plannotator"],
       now: () => clock.now,
       firstTurn: (message) => codexQueueMessage(commandOf(message)),
-      hosts: (_ctx: LaunchHostContext) => [backgroundHost("claude-code", "Claude Code", background, trusted), backgroundHost("codex", "Codex", background)],
+      // Every agent T3 Code runs, standing in: no real Claude Code, Codex, OpenCode or Pi is ever asked anything.
+      hosts: (_ctx: LaunchHostContext) => [backgroundHost("claude-code", "Claude Code", background, trusted), backgroundHost("codex", "Codex", background), backgroundHost("opencode", "OpenCode", background), backgroundHost("pi", "Pi", background)],
       ...(options.startTimeoutMs ? { t3StartTimeoutMs: options.startTimeoutMs } : {}),
       ...(options.rex
         ? {

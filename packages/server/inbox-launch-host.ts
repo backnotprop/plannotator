@@ -224,10 +224,12 @@ export interface LaunchHostContext {
   /** The mod's bridge poll (createInboxLaunch's `live`), for a host whose sessions connect through the mod. */
   bridge: { runStateOf(session: string): LaunchLive | null };
   /**
-   * Whether an agent session is already this Inbox's: another launch started it, an agent wrote as it, or a person's
-   * message went to it. A host that picks up a session a cut-short start may have made (T3 Code) never takes one of those.
+   * Whether an agent session belongs elsewhere than launch `launchId`: another launch (deleted or not) started it, or
+   * its first message in this Inbox (one it wrote, or a person's that went to it) is in another thread than that
+   * launch's. A host that picks up a session a cut-short start may have made (T3 Code) never takes one of those, and
+   * still takes its own launch's, whose agent may have written in that launch's thread already.
    */
-  sessionKnown?: (session: string) => boolean;
+  sessionElsewhere?: (session: string, launchId: string) => boolean;
   log: (line: string) => void;
 }
 
@@ -335,10 +337,12 @@ export interface LaunchHost {
   /**
    * Make the session for a launch, with the person's login env. No first turn: the root is moved to the
    * session (`settleLaunch`) and its own channel delivers it (but see `startsWithTurn`). It writes its own start.log entries.
+   * `wrote`: the agent of an earlier, cut-short start already wrote in the launch's thread (T3 Code): take that session,
+   * never start a second.
    */
   start(
     launch: InboxLaunchRecord,
-    input: { name: string; login: LaunchEnv; firstTurn?: string },
+    input: { name: string; login: LaunchEnv; firstTurn?: string; wrote?: boolean },
   ): Promise<{ ok: true; session: string; ref: string; inner?: InboxLaunchInner; declined?: string; declined_effort?: string } | ({ ok: false; away?: LaunchStartAway; why?: LaunchStartWhy; declined?: string; declined_effort?: string } & LaunchStartFailure)>;
   /**
    * Start in Rex (Settings → Agents' "Start new agents in"): the agent's ordinary interactive command, for a Rex tab

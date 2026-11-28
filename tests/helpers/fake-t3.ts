@@ -21,7 +21,7 @@
  * A send is idempotent by `clientRequestId`, as T3's is: a retry under the
  * same id returns the first receipt and records no second turn.
  */
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 export interface FakeT3 {
@@ -157,6 +157,10 @@ export interface FakeT3Home {
   revoked(): string[];
   /** Answer every later `auth session issue` as a T3 without it does. */
   refuseAuth(): void;
+  /** A T3 whose `thread start` has no `--option` flag (as the CLI parser refuses an unknown flag). */
+  withoutOptionFlag(): void;
+  /** Make every later `thread list` fail (false: answer again). */
+  refuseList(refused?: boolean): void;
 }
 
 /** T3's state database (`userdata/statev2.sqlite`), one provider thread row per Codex thread. Bun only (`bun:sqlite`). */
@@ -288,6 +292,8 @@ else if (args[0] === "auth" && args[1] === "session" && args[2] === "issue") {
   fs.appendFileSync(addedFile, root + "\\n");
   process.stdout.write("Added project project:" + require("node:path").basename(root) + " (" + require("node:path").basename(root) + ") at " + root + ".\\n");
 } else if (args[0] === "thread" && args[1] === "start") {
+  // A T3 whose CLI has no --option: Effect's CLI parser refuses the flag (CliError.UnrecognizedOption).
+  if (fs.existsSync(${JSON.stringify(join(dir, "no-option-flag"))}) && args.some((a) => a === "--option" || a.startsWith("--option="))) say("Unrecognized flag: --option in command t3 thread start", 1);
   const cwd = fs.realpathSync(process.cwd());
   const project = projectOf(cwd);
   if (args[2] !== "." || !project) say("No T3 Code project matches '" + args[2] + "'. Pass a project id or a path inside a project.", 1);
@@ -312,6 +318,7 @@ else if (args[0] === "auth" && args[1] === "session" && args[2] === "issue") {
   if (state === "taken-then-hang") setTimeout(() => {}, 60000);
   else process.stdout.write(JSON.stringify({ threadId: id, projectId: "project:" + require("node:path").basename(project), runId: "run:" + randomUUID() }) + "\\n");
 } else if (args[0] === "thread" && args[1] === "list") {
+  if (fs.existsSync(${JSON.stringify(join(dir, "list-refused"))})) say("Something went wrong.", 1);
   const cwd = fs.realpathSync(process.cwd());
   const project = projectOf(cwd);
   if (!project) say("No T3 Code project matches '.'. Pass a project id or a path inside a project.", 1);
@@ -357,6 +364,8 @@ else if (args[0] === "auth" && args[1] === "session" && args[2] === "issue") {
     issued: () => (existsSync(join(dir, "issued.log")) ? readFileSync(join(dir, "issued.log"), "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as ReturnType<FakeT3Home["issued"]>[number]) : []),
     revoked: () => (existsSync(join(dir, "revoked.log")) ? readFileSync(join(dir, "revoked.log"), "utf8").split("\n").filter(Boolean) : []),
     refuseAuth: () => writeFileSync(join(dir, "auth-refused"), "1"),
+    withoutOptionFlag: () => writeFileSync(join(dir, "no-option-flag"), "1"),
+    refuseList: (refused = true) => (refused ? writeFileSync(join(dir, "list-refused"), "1") : renameSync(join(dir, "list-refused"), join(dir, `list-answered-${Date.now()}`))),
   };
 }
 

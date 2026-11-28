@@ -517,7 +517,7 @@ describe("T3 start pieces", () => {
     expect(t3TurnEndedOf("not json")).toBeNull();
   });
 
-  test("which thread a later start takes: only after an uncertain end, only a new one of the title made since, never one this Inbox already has", () => {
+  test("which thread a later start takes: only after an uncertain end, only a new one of the title made since, never one that is elsewhere in this Inbox", () => {
     const at = Date.parse("2026-11-17T10:00:00.000Z");
     const listed = [
       { threadId: "thread:project:p:new-known", title: "Fix login", createdAt: at + 5_000 },
@@ -526,10 +526,10 @@ describe("T3 start pieces", () => {
       { threadId: "thread:project:p:before", title: "Fix login", createdAt: at - 120_000 },
     ];
     const known = (thread: string) => thread.endsWith("new-known");
-    const attempt = (outcome: T3StartAttempt["outcome"]): T3StartAttempt => ({ title: "Fix login", before: ["thread:project:p:before"], at, outcome });
+    const attempt = (outcome: T3StartAttempt["outcome"]): T3StartAttempt => ({ title: "Fix login", before: ["thread:project:p:before"], listed: true, at, outcome });
     expect(t3AdoptableOf(attempt("uncertain"), "Fix login", listed, known)).toBe("thread:project:p:new");
     expect(t3AdoptableOf(attempt("running"), "Fix login", listed, known)).toBe("thread:project:p:new");
-    for (const outcome of ["refused", "started", "unlisted"] as const) expect(t3AdoptableOf(attempt(outcome), "Fix login", listed, known)).toBeNull();
+    for (const outcome of ["refused", "started"] as const) expect(t3AdoptableOf(attempt(outcome), "Fix login", listed, known)).toBeNull();
     expect(t3AdoptableOf(attempt("uncertain"), "Fix logout", listed, known)).toBeNull();
     expect(t3AdoptableOf(null, "Fix login", listed, known)).toBeNull();
   });
