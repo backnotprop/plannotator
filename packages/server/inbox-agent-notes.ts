@@ -61,6 +61,7 @@ import {
 import { loadConfig, loadConfigOrNull, saveConfig } from "@plannotator/shared/config";
 import { inboxNoteHoldsRules, inboxNoteRulesSection, inboxReminderRulesText } from "@plannotator/shared/inbox/connection";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
+import { isInboxTurnedOn } from "@plannotator/shared/inbox/turned-on";
 import { type AgentFileRead, describeFsError, readAgentFile, stripJsonComments, withBom, writeAgentFileAtomic } from "./agent-files";
 import {
   agentHomeAllowed,
@@ -272,6 +273,15 @@ export const INBOX_NOTE_BLOCK = `${INBOX_NOTE_START}\n${INBOX_NOTE_BODY}\n${INBO
 export function inboxNoteRules(agent: InboxNoteAgentId, config: unknown): string | null {
   const host = (INBOX_PROMPT_HOSTS as readonly string[]).includes(agent) ? agent : null;
   return noteSafe(host ? inboxReminderRulesText(config, host) : sharedNoteRules(config));
+}
+
+/**
+ * The config whose rules a note carries: config.json's once the person has turned the Inbox on here
+ * (turned-on.ts), else none, so a note written before that (`plannotator inbox --notes`) is today's
+ * block byte for byte and no rules reach an agent through it.
+ */
+export function noteRulesConfig(dataDir: string, config: unknown): unknown {
+  return isInboxTurnedOn(dataDir) ? config : {};
 }
 
 /** The rules for all agents (`prompts.inbox.rules`), trimmed, or null: the ones a file several agents read carries, and Cursor's copy. */
@@ -764,7 +774,7 @@ export function addInboxNote(agent: InboxNoteAgentId, dataDir: string, e: AgentE
   const config = options.config === undefined ? loadConfigOrNull() : options.config;
   // config.json there but unreadable: its rules are unknown, and `{}` would write a note without them.
   if (config === null) return { ok: false, agent, reason: "config.json can't be read, so the note's rules are unknown; fix it and try again", path: shown };
-  const block = blockFor([agent, ...sharersOf(agent, real, notes)], config);
+  const block = blockFor([agent, ...sharersOf(agent, real, notes)], noteRulesConfig(dataDir, config));
   let next: string;
   let action: "added" | "created" | "updated" | "unchanged" | "shared";
   /** The block's hash before this add (null: there was none), for the other records naming the same file. */
@@ -907,6 +917,7 @@ export function refreshInboxNotes(dataDir: string, e: AgentEnvironment, options:
   // config.json there but unreadable: the rules each note should hold are unknown. Nothing is written
   // (a read that failed is not "no rules"); the next start, or a save in Settings, refreshes them.
   if (config === null) return [];
+  const rulesConfig = noteRulesConfig(dataDir, config);
   const byPath = new Map<string, InboxNoteAgentId[]>();
   for (const agent of INBOX_NOTE_AGENT_IDS) {
     // Cursor's note is copied by hand into the app: never Plannotator's to rewrite, whatever a record says.
@@ -931,7 +942,7 @@ export function refreshInboxNotes(dataDir: string, e: AgentEnvironment, options:
   let staleRecords = false;
   for (const [path, agents] of byPath) {
     const recorded = agents.map((agent) => file.notes[agent]!);
-    const block = blockFor(agents, config);
+    const block = blockFor(agents, rulesConfig);
     const current = sha256(block);
     // Right before the file's write: the records first (throws, writing nothing, when they cannot be
     // written), with a way back if the file's write then fails.
@@ -1339,7 +1350,7 @@ export type InboxNoteRulesState = "held" | { why: "none" | "edited" | "stale"; f
  */
 export function inboxNoteBlockFor(agent: InboxNoteAgentId, dataDir: string, e: AgentEnvironment, config: unknown): string {
   const path = noteTarget(agent, e).path;
-  return blockFor(path ? [agent, ...sharersOf(agent, resolved(path), readInboxAgentNotes(dataDir).notes)] : [agent], config);
+  return blockFor(path ? [agent, ...sharersOf(agent, resolved(path), readInboxAgentNotes(dataDir).notes)] : [agent], noteRulesConfig(dataDir, config));
 }
 
 /** The other agents (Cursor never) whose record names this resolved file. */

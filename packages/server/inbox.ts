@@ -460,7 +460,7 @@ import {
   writeInboxAgents,
   type AgentEnvironment,
 } from "./inbox-agents";
-import { addInboxNote, autoAddInboxNotes, inboxNoteBlockFor, inboxNoteBlockWith, inboxNotesDisabled, markAutoNotesSaid, markNotesAsked, noteCandidateIds, noteRulesStates, notesAsked, noteStatus, refreshInboxNotes, removeInboxNote, sharedNoteRules, unsaidAutoNotes } from "./inbox-agent-notes";
+import { addInboxNote, autoAddInboxNotes, inboxNoteBlockFor, inboxNoteBlockWith, inboxNotesDisabled, markAutoNotesSaid, markNotesAsked, noteCandidateIds, noteRulesConfig, noteRulesStates, notesAsked, noteStatus, refreshInboxNotes, removeInboxNote, sharedNoteRules, unsaidAutoNotes } from "./inbox-agent-notes";
 import {
   displayInboxSubject,
   INBOX_AGENT_IDS,
@@ -2656,7 +2656,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // The block a note writes, with the person's rules for all agents (the dialog, Settings → Agents, Cursor's
   // copy), and each agent's own where it differs (its own rules).
   const noteTexts = (): { note_text: string; note_texts: Partial<Record<InboxNoteAgentId, string>> } => {
-    const config = loadConfig();
+    const config = noteRulesConfig(dataDir, loadConfig());
     const shared = inboxNoteBlockWith(sharedNoteRules(config));
     const own: Partial<Record<InboxNoteAgentId, string>> = {};
     for (const id of INBOX_NOTE_AGENT_IDS) {

@@ -9,7 +9,7 @@
  * a scratch home (tests/helpers/fake-agents.ts); no Inbox is started.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { chmodSync, linkSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, linkSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { INBOX_NOTE_AGENT_IDS, type InboxNoteAgentId } from "@plannotator/core/inbox-types";
 import { inboxNoteFileOf, inboxReminderRulesFor, resolveInboxReminderText } from "@plannotator/shared/config";
@@ -495,3 +495,42 @@ describe("Settings says who does not get them", () => {
   });
 });
 
+
+describe("the Inbox's gate: no rules through a note until the person turned the Inbox on", () => {
+  // The real rule (turned-on.ts): `0` turns off the test run's "a scratch data dir counts as on".
+  const off = <T>(run: () => T): T => {
+    const before = process.env.PLANNOTATOR_TEST_INBOX_ON;
+    process.env.PLANNOTATOR_TEST_INBOX_ON = "0";
+    try {
+      return run();
+    } finally {
+      if (before === undefined) delete process.env.PLANNOTATOR_TEST_INBOX_ON;
+      else process.env.PLANNOTATOR_TEST_INBOX_ON = before;
+    }
+  };
+  const turnOn = () => {
+    mkdirSync(join(dataDir, "inbox"), { recursive: true });
+    writeFileSync(join(dataDir, "inbox", "turned-on"), `${JSON.stringify({ on: true, by: "command" })}\n`);
+  };
+
+  test("an add, a refresh and the preview carry no rules while it is off, and the rules come once it is on", () => {
+    mkdirSync(file(".codex"), { recursive: true });
+    off(() => {
+      // `plannotator inbox --notes codex` before the Inbox was ever turned on: today's block, no rules.
+      expect(addInboxNote("codex", dataDir, e, undefined, { config: shared() }).ok).toBe(true);
+      expect(read(CODEX_FILE())).toBe(`${INBOX_NOTE_BLOCK}\n`);
+      // A refresh with rules set writes nothing new, and the preview shows no rules.
+      expect(refreshInboxNotes(dataDir, e, { config: shared() }).map((r) => r.result)).toEqual(["current"]);
+      expect(read(CODEX_FILE())).toBe(`${INBOX_NOTE_BLOCK}\n`);
+      expect(inboxNoteBlockFor("codex", dataDir, e, shared())).toBe(INBOX_NOTE_BLOCK);
+    });
+    expect(existsSync(join(dataDir, "inbox", "turned-on"))).toBe(false);
+    // The person's own `plannotator inbox` writes the mark: from then on the note carries the rules, once.
+    off(() => {
+      turnOn();
+      expect(refreshInboxNotes(dataDir, e, { config: shared() }).map((r) => r.result)).toEqual(["refreshed"]);
+      expect(count(read(CODEX_FILE()), RULES)).toBe(1);
+      expect(count(read(CODEX_FILE()), INBOX_RULES_LEAD)).toBe(1);
+    });
+  });
+});
