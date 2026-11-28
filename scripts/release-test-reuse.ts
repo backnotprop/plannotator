@@ -17,7 +17,7 @@
  *  - X is the nearest commit in the checked-out commit's ancestry that has a
  *    passed Test run (`test.yml`) on a push to main.
  *  - When `git diff X HEAD` changes only the release bump files (BUMP_FILES:
- *    the 11 version files that scripts/check-release-version.mjs checks, and
+ *    the version files that scripts/check-release-version.mjs checks, and
  *    the Feedback form's search index), changes nothing but the version in the
  *    version files, and leaves the search index valid JSON, the job reuses that
  *    run and skips `bun test`. It still runs the type check, and the search
@@ -42,6 +42,7 @@ export const JSON_VERSION_FILES = [
   'apps/openclaw-plugin/package.json',
   'apps/pi-extension/package.json',
   'apps/hook/.claude-plugin/plugin.json',
+  'apps/skills/.codex-plugin/plugin.json',
   'apps/copilot/plugin.json',
   'packages/server/package.json',
 ];

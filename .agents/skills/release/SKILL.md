@@ -135,7 +135,7 @@ Write the draft to `RELEASE_NOTES_v<VERSION>.md` in the repo root and tell the u
 
 ## Phase 2: Version Bump
 
-Bump the version string in these **11 files** (and only these — other package.json files use stub versions). `scripts/check-release-version.mjs` (run in CI and on the tag) fails if any of them disagrees:
+Bump the version string in these **12 files** (and only these — other package.json files use stub versions). `scripts/check-release-version.mjs` (run in CI and on the tag) fails if any of them disagrees:
 
 | File | Field |
 |------|-------|
@@ -146,14 +146,15 @@ Bump the version string in these **11 files** (and only these — other package.
 | `apps/openclaw-plugin/package.json` | `"version"` |
 | `apps/pi-extension/package.json` | `"version"` |
 | `apps/hook/.claude-plugin/plugin.json` | `"version"` |
+| `apps/skills/.codex-plugin/plugin.json` | `"version"` |
 | `apps/copilot/plugin.json` | `"version"` |
 | `.github/plugin/marketplace.json` | `"version"` of the `plannotator-copilot` entry |
 | `openpackage.yml` (root) | `version:` |
 | `packages/server/package.json` | `"version"` |
 
-Read each file, confirm the current version matches expectations, then update all 11 atomically.
+Read each file, confirm the current version matches expectations, then update all 12 atomically.
 
-`node scripts/check-release-version.mjs` (also `bun run check:release-version`) checks exactly these 11 files and fails the release when one differs; `apps/dsh-plugin/package.json` (`@plannotator/dsh`), `apps/cline-plugin/package.json` (`@plannotator/cline`) and `apps/openclaw-plugin/package.json` (`@plannotator/openclaw`) are among them.
+`node scripts/check-release-version.mjs` (also `bun run check:release-version`) checks exactly these 12 files and fails the release when one differs; `apps/dsh-plugin/package.json` (`@plannotator/dsh`), `apps/cline-plugin/package.json` (`@plannotator/cline`) and `apps/openclaw-plugin/package.json` (`@plannotator/openclaw`) are among them.
 
 `@plannotator/openclaw` (`apps/openclaw-plugin`) goes to npm like `@plannotator/cline`, in a publish step allowed to fail until its first version is on npm and its trusted publisher is set up. Its ClawHub release is not automated yet: see "OpenClaw on npm and ClawHub" in `docs/agent-guides/project-and-development.md`.
 
@@ -216,7 +217,7 @@ If anything is missing, fix it before proceeding to Phase 4. Common fixes:
    ```
    chore: bump version to X.Y.Z
    ```
-   Stage only the 11 version-bumped files and `packages/inbox/feedbackSearch.data.json`. Do not stage the release notes file (it's untracked by design).
+   Stage only the 12 version-bumped files and `packages/inbox/feedbackSearch.data.json`. Do not stage the release notes file (it's untracked by design).
 
 2. **Push the bump, then run the heavy suites on main and wait for them.** A push to main runs only the fast tier (Test, Security), plus the Mobile contract workflow, which no release waits on. The full browser tests (Inbox window e2e) run on main only every two hours, and the Windows, Inbox Pi, Inbox Claude Code and relay suites only nightly, so start them on the bump commit by hand:
    ```bash
@@ -308,7 +309,7 @@ If anything is missing, fix it before proceeding to Phase 4. Common fixes:
 ## Checklist
 
 Before tagging, verify:
-- [ ] All 11 version files bumped consistently, `.github/plugin/marketplace.json` included (`bun run check:release-version` passes)
+- [ ] All 12 version files bumped consistently, `.github/plugin/marketplace.json` included (`bun run check:release-version` passes)
 - [ ] `bun scripts/feedback-search-index.ts` run, and `packages/inbox/feedbackSearch.data.json` in the release commit
 - [ ] The published-package floor guard is green (`bun test tests/published-package-floors.test.ts`), and no `engines.node`/`npm`/`opencode`/`vscode`/`bun`, `os`, `cpu`, `libc` or host peer was added or changed on a published package without an `ALLOWED` entry the owner signed off (`engines.vscode` is pinned at `^1.85.0`: a raise stops updates for Cursor, Windsurf and older VS Code). npm silently installs an older version for anyone whose runtime misses such a field: 0.28.32's Pi Node floor kept older-Node users on 0.28.31
 - [ ] Sibling dependencies resolve: `bun run check:sibling-deps @plannotator/opencode @plannotator/pi-extension` passes (it reads npm). When `@plannotator/core` and `@plannotator/ui` ship, publish core before ui, and run it with every package going out (`bun run check:sibling-deps @plannotator/core @plannotator/ui`): ui pins an exact core, and a ui published first fails to install with ETARGET
