@@ -164,6 +164,20 @@ for (const [w, scheme] of [...WIDTHS.map((w) => [w, 'light'] as const), [WIDTHS[
       expect(await shapes(page)).toEqual([]);
       const cell = await page.locator('section.ib-pane .ib-body td').first().evaluate((el) => el.getBoundingClientRect().width);
       expect(cell, 'a table cell keeps a word whole').toBeGreaterThan(40);
+      if (w.name === 'phone') {
+        const tables = page.locator('section.ib-pane .ib-body table');
+        const decision = await tables.filter({ hasText: '决定保留旧行为还是切换到新行为' })
+          .getByRole('cell', { name: '决定保留旧行为还是切换到新行为' })
+          .evaluate((el) => el.getBoundingClientRect().width / parseFloat(getComputedStyle(el).fontSize));
+        expect(decision, 'the decision column fits several CJK characters on each line').toBeGreaterThanOrEqual(6);
+
+        const scrollLeft = await tables.first().evaluate((table) => {
+          const scroller = table.parentElement!;
+          scroller.scrollLeft = scroller.scrollWidth;
+          return scroller.scrollLeft;
+        });
+        expect(scrollLeft, 'the wide metrics table scrolls independently of the pane').toBeGreaterThan(0);
+      }
       // A full-page capture (390 by 4000) shows its top down to 70% of the window (never under 320 px); "Show all" opens it in place.
       const img = page.locator('section.ib-pane .ib-body img[data-ib-cut]');
       await expect(img).toHaveCount(1);

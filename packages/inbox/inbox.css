@@ -4577,6 +4577,7 @@ label.ib-anote-r:hover { background: color-mix(in oklch, var(--muted) 40%, trans
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   /* A table in a message keeps whole words in its cells and scrolls sideways (TableBlock) rather than standing
      one letter per line: the phone's "break anywhere" stops at the table. */
+  .ib-body :is(th, td) { min-width: 6em; }
   .ib-body :is(th, td), .ib-body :is(th, td) :not(pre) > code { overflow-wrap: break-word; word-break: normal; }
   /* "↓ N new" is laid over the middle of the foot's row (Thread.tsx): never over a sender's row, and the foot keeps its height. */
   .ib-pfoot .ib-acts:has(> .ib-npill-wrap) { position: relative; }

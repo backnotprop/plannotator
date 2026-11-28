@@ -106,6 +106,13 @@ const METRICS_TABLE = [
   '| Asia Pacific | 455,020 | 9,912 | 2.18% | 731 ms | processor timeouts in ap-southeast-2 |',
 ].join('\n');
 
+const DECISIONS_TABLE = [
+  '| 项目 | 决定 |',
+  '| --- | --- |',
+  '| [Checkout](https://example.com/checkout) | 决定保留旧行为还是切换到新行为 |',
+  `| 还有十项待处理：${Array.from({ length: 10 }, (_, i) => `[退款审批流程的变更提案 ${i + 1}](https://example.com/changes/${i + 1})`).join('、')} | |`,
+].join('\n');
+
 /** A solid-striped PNG of `width` by `height` (a tall phone screenshot): stripes every 120 px so a crop shows. */
 export function stripedPng(width: number, height: number): Buffer {
   const row = width * 3 + 1;
@@ -305,6 +312,8 @@ export async function seedWorstCase(options: { dataDir: string; src?: string; no
       'Refund metrics for the last 30 days, and the full checkout page as a phone shows it.',
       '',
       METRICS_TABLE,
+      '',
+      DECISIONS_TABLE,
       '',
       '![The checkout page on a phone](shots/checkout-mobile-full-page.png)',
       '',
