@@ -9,7 +9,7 @@ export interface SemDiffDevice {
 
 export function semDiffPoolSize({ cores, memoryGb, touch }: SemDiffDevice): number {
   if (touch || (memoryGb != null && memoryGb <= LOW_MEMORY_GB)) return 1;
-  return Math.max(1, Math.min(MAX_SEM_DIFF_WORKERS, (cores ?? 2) - 1));
+  return Math.max(1, Math.min(MAX_SEM_DIFF_WORKERS, Math.floor((cores ?? 2) / 2) - 1));
 }
 
 export function thisDevice(): SemDiffDevice {

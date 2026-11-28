@@ -69,8 +69,9 @@ function fixture(index: number): { path: string; oldContent: string; newContent:
 describe('semantic diff worker pool', () => {
   test('sizes itself from the cores, and stays at one worker on touch screens and low memory', () => {
     expect(semDiffPoolSize({ cores: 16 })).toBe(4);
-    expect(semDiffPoolSize({ cores: 4 })).toBe(3);
-    expect(semDiffPoolSize({ cores: 2 })).toBe(1);
+    expect(semDiffPoolSize({ cores: 8 })).toBe(3);
+    expect(semDiffPoolSize({ cores: 6 })).toBe(2);
+    expect(semDiffPoolSize({ cores: 4 })).toBe(1);
     expect(semDiffPoolSize({})).toBe(1);
     expect(semDiffPoolSize({ cores: 16, touch: true })).toBe(1);
     expect(semDiffPoolSize({ cores: 16, memoryGb: 4 })).toBe(1);
@@ -100,10 +101,10 @@ describe('semantic diff worker pool', () => {
     answer(workers[0]!, 1);
     await settled();
     expect(workers).toHaveLength(3);
-    expect(workers.map((w) => w.posted.map((r) => r.id))).toEqual([[1, 7], [2], [3]]);
+    expect(workers.map((w) => w.posted.map((r) => r.id))).toEqual([[1, 2, 4], [7, 5], [3, 6]]);
   });
 
-  test('a worker that dies fails only its own file, and the rest still get answered', async () => {
+  test('a worker that dies fails only the files it held, and the queue keeps going', async () => {
     const { workers, create, answer } = heldWorkers();
     const pool = createSemDiffWorkerPool({ createWorker: create, size: 2 });
     const replies: SemDiffReply[] = [];
@@ -115,12 +116,14 @@ describe('semantic diff worker pool', () => {
     workers[1]!.onerror?.();
     await settled();
     expect(workers[1]!.terminated).toBe(true);
+    pool.postMessage(request(6));
+    await settled();
     for (let round = 0; round < 6; round++) {
       for (const worker of workers) for (const job of worker.posted) if (!worker.terminated && !replies.some((r) => r.id === job.id)) answer(worker, job.id);
       await settled();
     }
-    expect(replies.filter((r) => !r.ok).map((r) => r.id)).toEqual([3]);
-    expect(replies.filter((r) => r.ok).map((r) => r.id).sort()).toEqual([1, 2, 4, 5]);
+    expect(replies.filter((r) => !r.ok).map((r) => r.id).sort()).toEqual([3, 5]);
+    expect(replies.filter((r) => r.ok).map((r) => r.id).sort()).toEqual([1, 2, 4, 6]);
   });
 
   test('gives the same review-wide result as a single worker', async () => {

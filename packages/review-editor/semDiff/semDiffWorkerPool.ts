@@ -1,6 +1,7 @@
 import type { SemDiffDownload, SemDiffReply, SemDiffRequest } from './protocol';
 
 export const SPAWN_BACKLOG = 3;
+export const JOBS_PER_WORKER = 2;
 
 export interface SemDiffWorkerPoolOptions {
   createWorker: () => Worker | Promise<Worker>;
@@ -92,12 +93,12 @@ export function createSemDiffWorkerPool({ createWorker, size }: SemDiffWorkerPoo
   };
 
   const freeSlot = (): Slot | null => {
-    const idle = slots.find((slot) => slot.jobs.size === 0);
-    if (idle) return idle;
+    const empty = slots.find((slot) => slot.jobs.size === 0);
+    if (empty) return empty;
     const stalled = slots.every((slot) => slot.downloads.size > 0);
     if (slots.length === 0 || (warm && slots.length < size && (stalled || waiting.length >= SPAWN_BACKLOG))) return spawn();
-    if (!stalled) return null;
-    return slots.reduce((least, slot) => (slot.jobs.size < least.jobs.size ? slot : least));
+    const least = slots.reduce((a, b) => (b.jobs.size < a.jobs.size ? b : a));
+    return stalled || least.jobs.size < JOBS_PER_WORKER ? least : null;
   };
 
   function dispatch(): void {
