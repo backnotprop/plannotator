@@ -172,7 +172,7 @@ if ($Version -eq "latest") {
                 $apiError = "Failed to fetch latest version: $($_.Exception.Message)"
             }
         } else {
-            $apiError = "Failed to fetch latest version: $($_.Exception.Message) (if this is HTTP 403, the GitHub API may be rate-limiting your IP; see https://github.com/backnotprop/plannotator/issues/1156)"
+            $apiError = "Failed to fetch latest version: $($_.Exception.Message) (if this is HTTP 403, the GitHub API may be rate-limiting your IP), see https://github.com/backnotprop/plannotator/issues/1156"
         }
     }
     # Drop the local token copies; GITHUB_TOKEN / GH_TOKEN themselves remain

@@ -231,7 +231,7 @@ export function registerInboxThreadPullsTool(server: McpServer, context: InboxPu
         const logged = !input.ship
           ? ""
           : shipped && "ship" in shipped
-            ? ` Logged in the ship log of ${shipped.ship.url}.`
+            ? ` Logged in the ship log of ${shipped.ship.url}`
             : shipped && "stopped" in shipped
               ? ` ${shipStopLine(shipped.stopped)}`
               : shipped

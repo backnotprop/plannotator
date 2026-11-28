@@ -81,7 +81,7 @@ export const GUIDE_CLI_USAGE = [
   "  --patch <file>     The unified diff the guide describes (`git diff <base>...HEAD > guide.patch`); `-` reads stdin",
   "  --snapshot <file>  A complete portable guide snapshot document (JSON)",
   "  --out <file>       Where to write the HTML (default: ./guided-review-<slug>.html); `-` writes to stdout",
-  "  --viewer-url <u>   Viewer base URL override (default https://guides.show/v1/; also PLANNOTATOR_GUIDE_VIEWER_URL)",
+  "  --viewer-url <u>   Viewer base URL override, default https://guides.show/v1/ (also PLANNOTATOR_GUIDE_VIEWER_URL)",
   "  --pr <url>         (import) The PR this guide reviews: it's saved with that PR's repository and labelled with it.",
   "                     Default: the guide's own PR, else the origin remote, else this directory.",
   "                     A --pr that names a different PR than the guide is refused.",

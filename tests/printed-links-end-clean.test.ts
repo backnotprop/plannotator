@@ -2,9 +2,11 @@
  * The printed lines listed in `printedTexts` below end each link at whitespace or the end of the text. A terminal
  * (and many agent UIs) makes a link of everything up to the next space: the Inbox's send answer once read
  * `(thread msg_…, http://localhost:59812/#thread=msg_…).`, and a click opened `…#thread=msg_…).`, a thread that
- * does not exist. Covered: the Inbox's send_message and submit_guide answers, the PR list change line, the prototype
- * refusals and the not-framed note, the live-URL and `--app` errors, the Tailscale setup hints, the Inbox install
- * line, an agent's docs-only launch message, and the plan-waiting deny text. Other printed lines are not checked here.
+ * does not exist. Covered: the Inbox's send_message and submit_guide answers, thread_pulls' ship log answer, the PR
+ * list change line, the prototype refusals and the not-framed note, the live-URL and `--app` errors, the Tailscale
+ * setup hints, the Inbox install line, an agent's docs-only launch message, the plan-waiting deny text and
+ * `plannotator guide --help`; and every Inbox tool the server registers, asked about a thread and about nothing.
+ * Other printed lines are not checked here.
  * The texts come from their real builders (a real store on a temp folder and the tools' own handlers, no Inbox
  * server), each with a link in it, so a reworded line that puts punctuation back after its link fails here.
  * PLANNOTATOR_DATA_DIR points at the test's temp folder while it runs, so nothing reaches the real data folder.
@@ -16,6 +18,7 @@ import { join } from "node:path";
 import { InboxStore } from "../packages/shared/inbox/store";
 import { createInboxMcpServer, type InboxMcpContext } from "../packages/server/inbox-mcp";
 import { GUIDE_BRIEF_EXAMPLE } from "../packages/server/inbox-guides";
+import { GUIDE_CLI_USAGE } from "../packages/server/guide/guide-cli";
 import { pullsChangeText } from "../packages/server/inbox-mcp-pulls";
 import { prototypesNotFramedText } from "../packages/server/inbox-web-prototypes";
 import { checkInboxLiveUrl, createInboxLiveSites } from "../packages/server/inbox-live";
@@ -58,11 +61,13 @@ function world() {
     resolveProject: async () => project,
     // A self-hosted GitLab: its PRs read back as their URLs, in the middle of a sentence.
     projectHost: async () => GITLAB,
+    // Ship's step logged: the answer names the pull request by its URL.
+    shipStep: () => ({ ship: { url: `https://${GITLAB}/acme/api/-/merge_requests/9` } }),
   } as unknown as InboxMcpContext;
   const server = createInboxMcpServer(context) as unknown as { _registeredTools: Record<string, { handler: Handler }> };
   const tool = (name: string) => (input: Record<string, unknown>) =>
     server._registeredTools[name]!.handler({ project_path: project.root, agent_session: "ses_a", agent_host: "claude-code", ...input }, {});
-  return { root, store, send: tool("send_message"), guide: tool("submit_guide") };
+  return { root, store, tools: Object.keys(server._registeredTools), tool, send: tool("send_message"), guide: tool("submit_guide"), pulls: tool("thread_pulls") };
 }
 
 /** The texts, each paired with what produced it, so a failure names the builder. */
@@ -83,6 +88,8 @@ async function printedTexts(): Promise<[string, string][]> {
   await sent("send_message, a replay", w.send({ body: "Once.", idempotency_key: "k1" }));
   await sent("send_message, a reply", w.send({ body: "And again.", reply_to: String(first.structuredContent?.message_id) }));
   await sent("submit_guide", w.guide({ ...GUIDE_BRIEF_EXAMPLE }));
+  await sent("thread_pulls, a ship step logged", w.pulls({ thread_id: String(first.structuredContent?.thread_id), ship: { kind: "step", text: "Pushed a fix", sha: "a".repeat(40) } }));
+  texts.push(["plannotator guide --help", GUIDE_CLI_USAGE]);
 
   const pr = (n: number) => ({ pull: `${GITLAB}/acme/api#${n}:pull`, url: `https://${GITLAB}/acme/api/-/merge_requests/${n}` });
   texts.push(["pullsChangeText", pullsChangeText({ added: [pr(1), pr(2)], already: [pr(3)], removed: [pr(4)], missing: [{ key: pr(5).pull, url: pr(5).url }] as never })]);
@@ -138,6 +145,29 @@ test("every printed link ends at whitespace or the end, never inside brackets or
   const texts = await printedTexts();
   // Each builder above printed a link: a builder that stopped printing one would pass here for nothing.
   for (const [label, text] of texts) expect(/https?:\/\//.test(text), `${label} carries a link`).toBe(true);
+  const bad = texts.flatMap(([label, text]) => linksNotEndingClean(text).map((link) => `${label}: …${link}`));
+  expect(bad).toEqual([]);
+});
+
+test("every Inbox tool's answer ends its links cleanly, a tool added later included", async () => {
+  // Each registered tool, as the server serves it, asked about a real thread and about nothing: a new tool, or a new
+  // line in an old one's answer or refusal, is checked here without anyone adding it to the list above.
+  const w = world();
+  const first = await w.send({ body: "Done." });
+  const thread = String(first.structuredContent?.thread_id);
+  const texts: [string, string][] = [];
+  for (const name of w.tools) {
+    for (const input of [{}, { thread_id: thread }]) {
+      const answer = await w.tool(name)(input).then(
+        (result) => result.content.map((part) => part.text).join("\n"),
+        (thrown: unknown) => (thrown instanceof Error ? thrown.message : String(thrown)),
+      );
+      texts.push([`${name} ${JSON.stringify(input)}`, answer]);
+    }
+  }
+  expect(w.tools.length).toBeGreaterThan(5);
+  // The sweep reads real links: the thread read prints the thread's link.
+  expect(texts.some(([label, text]) => label.startsWith("read_thread") && text.includes(`${BASE}#thread=${thread}`))).toBe(true);
   const bad = texts.flatMap(([label, text]) => linksNotEndingClean(text).map((link) => `${label}: …${link}`));
   expect(bad).toEqual([]);
 });
