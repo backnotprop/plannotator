@@ -3147,24 +3147,81 @@ ${SANDBOX_SHIM_SCRIPT}
     }
   }
 
+  function resolveScrollTarget(record) {
+    beginDeadSearchPass(Infinity); // user-initiated one-shot: never budget-starved
+    refreshRecordTargets(record);
+    for (var i = 0; i < record.targets.length; i++) {
+      var target = record.targets[i];
+      if (target.kind === 'element' && target.element && target.element.isConnected) {
+        return { el: target.element, box: target.element.getBoundingClientRect() };
+      }
+      if (target.kind === 'range' && rangeAlive(target.range)) {
+        var node = target.range.startContainer;
+        var box = null;
+        try { box = target.range.getBoundingClientRect(); } catch (ex) {}
+        return { el: node.nodeType === 1 ? node : node.parentElement, box: box };
+      }
+    }
+    return null;
+  }
+
+  // Virtualized pages (e.g. Feishu docs) only build blocks near the viewport,
+  // so a far mark has no DOM to find. Page the largest scroller one screen at
+  // a time until the mark renders; give up at the bottom and restore the
+  // original position. A newer scroll-to cancels an older seek.
+  var seekToken = 0;
+  var SEEK_SETTLE_MS = 150;
+  function largestScroller() {
+    var best = document.scrollingElement;
+    var bestRange = best ? best.scrollHeight - best.clientHeight : 0;
+    var all = document.querySelectorAll('*');
+    for (var i = 0; i < all.length; i++) {
+      var el = all[i];
+      var range = el.scrollHeight - el.clientHeight;
+      if (range <= bestRange + 50) continue;
+      if (!/auto|scroll/.test(getComputedStyle(el).overflowY)) continue;
+      best = el;
+      bestRange = range;
+    }
+    return bestRange > 0 ? best : null;
+  }
+
+  function seekAnnotation(id, record, onFound) {
+    var scroller = largestScroller();
+    if (!scroller) { onFound(null); return; }
+    var token = ++seekToken;
+    var origin = scroller.scrollTop;
+    var top = 0;
+    var step = function () {
+      if (token !== seekToken) return;
+      for (var i = 0; i < record.targets.length; i++) {
+        record.targets[i].failedGeneration = 0;
+        record.targets[i].searchBackoffUntil = 0;
+      }
+      var found = resolveScrollTarget(record);
+      if (found) { onFound(found); return; }
+      var max = scroller.scrollHeight - scroller.clientHeight;
+      if (top >= max) { scroller.scrollTop = origin; onFound(null); return; }
+      top = Math.min(max, top + Math.max(100, Math.floor(scroller.clientHeight * 0.9)));
+      scroller.scrollTop = top;
+      setTimeout(step, SEEK_SETTLE_MS);
+    };
+    scroller.scrollTop = top;
+    setTimeout(step, SEEK_SETTLE_MS);
+  }
+
   function scrollToAnnotation(id, behavior, clear) {
     var record = findAnnRecord(id);
     if (!record) return;
-    beginDeadSearchPass(Infinity); // user-initiated one-shot: never budget-starved
-    refreshRecordTargets(record);
-    var scrollEl = null;
-    var box = null;
-    for (var i = 0; i < record.targets.length && !scrollEl; i++) {
-      var target = record.targets[i];
-      if (target.kind === 'element' && target.element && target.element.isConnected) {
-        scrollEl = target.element;
-        box = scrollEl.getBoundingClientRect();
-      } else if (target.kind === 'range' && rangeAlive(target.range)) {
-        var node = target.range.startContainer;
-        scrollEl = node.nodeType === 1 ? node : node.parentElement;
-        try { box = target.range.getBoundingClientRect(); } catch (ex) { box = null; }
-      }
-    }
+    seekToken++;
+    var found = resolveScrollTarget(record);
+    if (found) { scrollToFoundTarget(id, found, behavior, clear); return; }
+    seekAnnotation(id, record, function (hit) { scrollToFoundTarget(id, hit, behavior, clear); });
+  }
+
+  function scrollToFoundTarget(id, found, behavior, clear) {
+    var scrollEl = found ? found.el : null;
+    var box = found ? found.box : null;
     if (scrollEl) {
       var by = clear && box ? clearOfPanelBy(box, clear) : null;
       if (by === null) {
