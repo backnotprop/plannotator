@@ -903,6 +903,7 @@ export interface InboxMessage {
    * (`action_result` with `by: "agent"`). Absent otherwise and on older records.
    */
   done?: string[];
+  answered_in_reply?: InboxAnsweredInReplyRequest[];
   /**
    * On a person's reply that reports action items (Done, Can't do it): the action items
    * it reports (`<message id>/<key>`), sent once the Undo window passed.
@@ -1264,6 +1265,19 @@ export interface InboxAck {
 export interface InboxSupersededBy {
   message_id: string;
   key: string | null;
+}
+
+export interface InboxAnsweredInReply {
+  reply_id: string;
+  quote: string;
+  message_id: string;
+  at: string;
+}
+
+export interface InboxAnsweredInReplyRequest {
+  question: string;
+  reply?: string;
+  quote?: string;
 }
 
 /** The agent session a person's New message is addressed to (`InboxMessage.to`). */
@@ -1697,6 +1711,7 @@ export interface InboxQuestionRecord {
    * it stands. Added for replaced questions: older records lack it.
    */
   superseded_by?: InboxSupersededBy | null;
+  answered_in_reply?: InboxAnsweredInReply | null;
   /**
    * The person's Mark read closed this question unanswered: it reads as
    * `closed` with a skip for its answer. `previous`
@@ -1838,7 +1853,7 @@ export interface InboxQuestionSetAside {
  * card still says what replaced it. `closed`: the thread is archived, or the
  * person's Mark read closed the question (`set_aside_at`).
  */
-export type InboxQuestionState = "open" | "picked" | "sent" | "closed" | "superseded";
+export type InboxQuestionState = "open" | "picked" | "sent" | "closed" | "superseded" | "answered_in_reply";
 
 /**
  * A question as the window and the agents read it: Workspaces' `Question`
@@ -1869,6 +1884,7 @@ export interface InboxQuestion extends InboxQuestionContract {
   message_id: string;
   /** What superseded it (`state: "superseded"`), or null. */
   superseded_by: InboxSupersededBy | null;
+  answered_in_reply?: InboxAnsweredInReply | null;
   /**
    * When the person's Mark read closed it unanswered (`state: "closed"`,
    * answer a skip), or null. Absent from an older Inbox.

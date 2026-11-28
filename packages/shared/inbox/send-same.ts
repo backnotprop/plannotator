@@ -16,6 +16,7 @@ export interface InboxSendCall {
   guide: string | null;
   supersedes: readonly string[];
   done: readonly string[];
+  answered?: readonly string[];
   /** The live sites' ids. */
   live: readonly string[];
 }
@@ -32,6 +33,7 @@ export function sameInboxSend(a: InboxSendCall, b: InboxSendCall): boolean {
     a.guide === b.guide &&
     ids(a.supersedes) === ids(b.supersedes) &&
     ids(a.done) === ids(b.done) &&
+    ids(a.answered ?? []) === ids(b.answered ?? []) &&
     ids(a.live) === ids(b.live)
   );
 }

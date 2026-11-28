@@ -42,6 +42,8 @@ import {
 } from "@plannotator/core/inbox-questions";
 import type { InboxPictureItPage } from "@plannotator/core/picture-it-page";
 import { inboxStoredSkips, inboxSupersedeSkipState, type InboxStoredMessage, type InboxSupersedeSkip } from "./supersede-skips";
+import { planInboxAnsweredInReply, type InboxAnsweredView } from "./answered-in-reply";
+import { composeInboxAnsweredReopenedBody, normalizeInboxAnsweredRequests } from "@plannotator/core/inbox-answered-in-reply";
 import { inboxFileQuestionTwin } from "@plannotator/core/inbox-file-question-twin";
 import { inboxTwinChoicesRefusal } from "@plannotator/core/inbox-choice-twins";
 import { withoutInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
@@ -333,6 +335,7 @@ export interface InboxSendInput {
    * the whole send (`invalid_done`).
    */
   done?: readonly string[] | null;
+  answered_in_reply?: unknown;
   /**
    * The send came through a connection that wakes its session with the
    * person's reply (the Claude Code mod, Pi, OpenCode 2): kept on the message
@@ -356,6 +359,7 @@ export interface InboxSendResult {
   naming?: InboxThreadNaming;
   /** The action items this send marked done (`done`), `<message id>/<key>`. Absent when none. */
   done?: string[];
+  answered_in_reply?: string[];
   skipped?: InboxSupersedeSkip[];
 }
 
@@ -4610,6 +4614,9 @@ export class InboxStore {
 
     const supersedes = this.normalizeSupersedes(input.supersedes);
     const done = this.normalizeDone(input.done);
+    const answeredRequests = normalizeInboxAnsweredRequests(input.answered_in_reply);
+    if (!answeredRequests.ok) throw new InboxError("invalid_answered_in_reply", `answered_in_reply: ${answeredRequests.reason}`, { field: "answered_in_reply" });
+    const answered = answeredRequests.requests;
     const key = input.idempotency_key?.trim() || null;
     if (key) {
       for (const message of this.messages.values()) {
@@ -4625,8 +4632,8 @@ export class InboxStore {
         const naming = !!message.thread_naming;
         const liveIds = (sites: readonly { id: string }[] | undefined) => (sites ?? []).map((site) => site.id);
         const same = sameInboxSend(
-          { body: message.body, reply_to: message.reply_to, thread_name: message.thread_name ?? null, reply_thread: naming ? (message.reply_thread ?? null) : null, guide: message.guide?.input_sha256 ?? null, supersedes: message.supersedes ?? [], done: message.done ?? [], live: liveIds(message.live_sites) },
-          { body, reply_to: replyTo, thread_name: threadName, reply_thread: naming ? replyThread : null, guide: input.guide?.input_sha256 ?? null, supersedes, done, live: liveIds(input.live_sites) },
+          { body: message.body, reply_to: message.reply_to, thread_name: message.thread_name ?? null, reply_thread: naming ? (message.reply_thread ?? null) : null, guide: message.guide?.input_sha256 ?? null, supersedes: message.supersedes ?? [], done: message.done ?? [], answered: (message.answered_in_reply ?? []).map((r) => r.question), live: liveIds(message.live_sites) },
+          { body, reply_to: replyTo, thread_name: threadName, reply_thread: naming ? replyThread : null, guide: input.guide?.input_sha256 ?? null, supersedes, done, answered: answered.map((r) => r.question), live: liveIds(input.live_sites) },
         );
         if (!same) {
           throw new InboxError(
@@ -4637,11 +4644,13 @@ export class InboxStore {
         }
         const markedDone = this.doneBy(message.id);
         const keptSkips = inboxStoredSkips(message);
+        const markedAnswered = this.answeredInReplyBy(message.id);
         return {
           message: this.wire(message),
           replayed: true,
           ...(message.thread_naming ? { naming: message.thread_naming } : {}),
           ...(markedDone.length > 0 ? { done: markedDone } : {}),
+          ...(markedAnswered.length > 0 ? { answered_in_reply: markedAnswered } : {}),
           ...(keptSkips ? { skipped: keptSkips } : {}),
         };
       }
@@ -4694,6 +4703,7 @@ export class InboxStore {
     if (twins) throw new InboxError("validation_error", twins.message, { field: twins.field });
     const { plan: superseding, skipped } = this.planSupersede(threadId, id, supersedes, [...parsed, ...fileQuestions.map((f) => ({ key: f.key, replaces: f.question.replaces }))], actions);
     const doneIds = this.planDone(threadId, done, superseding, input.author);
+    const answering = planInboxAnsweredInReply(this.answeredView(), threadId, answered, input.author, new Set(superseding.keys()), id, at);
     const agentSubject = subjectCheck.subject;
     const message: InboxStoredMessage = {
       id,
@@ -4706,6 +4716,7 @@ export class InboxStore {
       ...(threadId ? {} : { subject_question: !agentSubject && (parsed[0] ?? actions[0]) ? `${id}/${(parsed[0] ?? actions[0])!.key}` : null }),
       ...(supersedes.length > 0 ? { supersedes } : {}),
       ...(done.length > 0 ? { done } : {}),
+      ...(answered.length > 0 ? { answered_in_reply: answered } : {}),
       body,
       created_at: at,
       resolved_at: null,
@@ -4813,6 +4824,7 @@ export class InboxStore {
       const record = this.questions.get(questionId)!;
       this.appendQuestion({ ...record, superseded_by: by }, at);
     }
+    for (const [questionId, answer] of answering) this.appendQuestion({ ...this.questions.get(questionId)!, answered_in_reply: answer }, at);
     // The action items the agent saw done: closed, nothing sent. A Done or Can't do it the person
     // had waiting in their draft is kept under `person`: its note still goes with their Send (Q3). A skip
     // the person already sent is kept the same way (nothing of it is left to send).
@@ -4871,6 +4883,7 @@ export class InboxStore {
       replayed: false,
       ...(naming ? { naming } : {}),
       ...(doneIds.length > 0 ? { done: doneIds } : {}),
+      ...(answering.size > 0 ? { answered_in_reply: [...answering.keys()] } : {}),
       ...(skipped.length > 0 ? { skipped } : {}),
     };
   }
@@ -5042,6 +5055,51 @@ export class InboxStore {
       if (!out.includes(id)) out.push(id);
     }
     return out;
+  }
+
+  private answeredView(): InboxAnsweredView {
+    return {
+      message: (id) => this.messages.get(id),
+      threadMessages: (threadId) => this.threadMessages(threadId),
+      questionRecords: (messageId) => this.questionRecords(messageId),
+      closedByArchive: (message) => this.closedByArchive(message),
+      openQuestionsOf: (threadId) => this.openQuestionsOf(threadId),
+    };
+  }
+
+  answeredInReplyBy(messageId: string): string[] {
+    const message = this.messages.get(messageId);
+    if (!message) return [];
+    return this.threadMessages(message.thread_id).flatMap((member) =>
+      this.questionRecords(member.id).filter((r) => r.answered_in_reply?.message_id === messageId).map((r) => r.id),
+    );
+  }
+
+  reopenAnswered(messageId: string, key: string): InboxQuestion[] {
+    const message = this.messages.get(messageId);
+    if (!message) throw new InboxError("message_not_found", `No message ${messageId}.`);
+    const record = this.questionRecords(messageId).find((r) => r.key === key);
+    if (!record) throw new InboxError("question_not_found", `No question ${key} on message ${messageId}.`, { key, message_id: messageId });
+    if (!record.answered_in_reply) return this.questionsOf(messageId);
+    const at = this.stamp();
+    this.appendQuestion({ ...record, answered_in_reply: null }, at);
+    this.appendMessage(
+      {
+        id: inboxId("msg"),
+        project_id: message.project_id,
+        thread_id: message.thread_id,
+        reply_to: message.id,
+        author: { kind: "person" },
+        subject: null,
+        body: composeInboxAnsweredReopenedBody(record),
+        created_at: at,
+        resolved_at: null,
+        idempotency_key: null,
+        reopened: [record.id],
+      },
+      at,
+    );
+    return this.questionsOf(messageId);
   }
 
   /** The questions a message superseded (`<message id>/<key>`), in thread order. */
@@ -5359,6 +5417,9 @@ export class InboxStore {
       if (record.superseded_by) {
         const by = { message_id: record.superseded_by.message_id, key: record.superseded_by.key ?? null };
         throw refusalError({ code: "question_superseded", key: entry.key, superseded_by: by });
+      }
+      if (record.answered_in_reply) {
+        throw new InboxError("question_answered_in_reply", `Question ${entry.key} was answered in the person's reply; Reopen it to answer it here.`, { key: entry.key });
       }
       // Mark read closed it: Move back reopens it, pick included.
       if (record.set_aside) {
