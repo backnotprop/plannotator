@@ -199,7 +199,7 @@ export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
       p.onOpenRepoFile?.(focused, { pin: false });
     }
   }, [model]);
-  const searchKeys = useTreeSearchKeys(model);
+  const searchKeys = useTreeSearchKeys(model, () => live.current.props.activePath);
   const focusing = useRef(false);
 
   useEffect(() => {

@@ -33,6 +33,7 @@ import { registerActionFlush, trackActionSave } from '../actionSaves';
 import { registerReloadFlush } from '../stalePage';
 import { inboxApi } from '../api';
 import { useLineToggle } from './actionLineToggle';
+import { holdsImeEscape } from '@plannotator/ui/utils/commentSubmitKey';
 
 /** A Done, Can't do it or Skip as the window marks it: always into the reply draft (`staged` on the wire). */
 export interface ActionMark {
@@ -507,6 +508,7 @@ function ActionRow({ action, state, agent, refRepo, readOnly, open, onToggle, to
               rows={2}
               onChange={(event) => setText(event.target.value)}
               onKeyDown={(event) => {
+                if (holdsImeEscape(event)) return;
                 if (event.key === 'Escape') {
                   event.preventDefault();
                   event.stopPropagation();

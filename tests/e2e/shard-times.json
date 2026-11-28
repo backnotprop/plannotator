@@ -236,6 +236,7 @@
   "inbox-search-type-filter.spec.ts": 13,
   "inbox-search.spec.ts": 26,
   "inbox-seen-on-sight.spec.ts": 33,
+  "inbox-send-always-ends-webkit.spec.ts": 44,
   "inbox-send-now.spec.ts": 19,
   "inbox-sent-row-lit.spec.ts": 6,
   "inbox-session-label-surfaces.spec.ts": 62,

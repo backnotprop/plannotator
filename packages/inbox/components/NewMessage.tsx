@@ -288,6 +288,8 @@ export function NewMessageComposer({
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const key = useRef(newUuid());
+  /** The words the key went with: Send again of the same words replays it, edited words are a new message (never dropped by a replay). */
+  const keyWords = useRef<string | null>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
   const name = hostName(target.host);
   const phone = usePhone();
@@ -301,6 +303,8 @@ export function NewMessageComposer({
       setError('Write a message first.');
       return;
     }
+    if (keyWords.current !== null && keyWords.current !== body) key.current = newUuid();
+    keyWords.current = body;
     setSending(true);
     setError(null);
     try {

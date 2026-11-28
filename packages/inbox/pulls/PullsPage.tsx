@@ -94,6 +94,7 @@ import type { InboxToastModel } from '../components/Toast';
 import { focusWhenGone, hiddenLabel, hideWithUndo, itemsBy, showRepoWithToast, showWithToast } from './hiddenPulls';
 import { useKeptStack } from './keptStack';
 import { withShipState } from './routePull';
+import { holdsImeEscape } from '@plannotator/ui/utils/commentSubmitKey';
 
 /** System in Reviews: present only while System shows (`systemShown`). */
 export interface PullsSystem {
@@ -894,6 +895,7 @@ function StackReply({ link, agent, onOpenThread }: { link: InboxPullLink; agent:
             aria-label={`Reply to ${agent}`}
             onChange={(event) => setWords(event.target.value)}
             onKeyDown={(event) => {
+              if (holdsImeEscape(event)) return;
               // The registry's Send (`inboxThreadShortcuts.send`, Mod+Enter), as the thread's reply box and compose match it.
               if (!event.nativeEvent.isComposing && resolveShortcutBindings(inboxThreadShortcuts.shortcuts.send).some((binding) => matchesShortcutBinding(event.nativeEvent, binding))) {
                 event.preventDefault();

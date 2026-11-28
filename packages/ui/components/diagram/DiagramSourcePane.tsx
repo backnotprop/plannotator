@@ -5,6 +5,7 @@ import React, { useEffect, useRef } from 'react';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui/button';
 import type { DiagramSourceDraft } from './useDiagramSourceDraft';
+import { holdsImeEscape } from '../../utils/commentSubmitKey';
 
 /**
  * The Source pane beside the canvas (owner ruling: source and diagram are
@@ -187,7 +188,7 @@ export function DiagramSourcePane({
       // keystroke mid-draft would take the pane, the preview and the
       // person's place with it.
       onKeyDown={(event) => {
-        if (event.key !== 'Escape' || event.defaultPrevented) return;
+        if (holdsImeEscape(event) || event.key !== 'Escape' || event.defaultPrevented) return;
         event.preventDefault();
         event.stopPropagation();
         viewRef.current?.contentDOM.blur();

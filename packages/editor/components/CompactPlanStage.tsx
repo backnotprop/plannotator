@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { isImeCompositionKey } from '@plannotator/ui/utils/commentSubmitKey';
 
 interface CompactPlanStageProps {
   id: string;
@@ -34,7 +35,7 @@ export const CompactPlanStage: React.FC<CompactPlanStageProps> = ({
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
     if (event.defaultPrevented) return;
-    if (event.key === 'Escape') {
+    if (event.key === 'Escape' && !isImeCompositionKey(event)) {
       event.preventDefault();
       event.stopPropagation();
       onClose();

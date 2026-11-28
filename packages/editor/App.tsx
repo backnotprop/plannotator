@@ -385,6 +385,7 @@ import {
 import { pickRestoredSingleFileDraftToDisplay } from './draftRestoreSelection';
 import { scrollableEditSurface } from './editScroll';
 import { configurePlannotatorUI } from '@plannotator/ui/configure';
+import { isImeCompositionKey } from '@plannotator/ui/utils/commentSubmitKey';
 
 // Plannotator's own plan review and annotate: the selection toolbar's Copy
 // copies rich text, and on a touch screen the toolbar sits below the selection
@@ -1479,7 +1480,7 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!isPlanDiffActive) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !e.defaultPrevented) {
+      if (e.key === 'Escape' && !e.defaultPrevented && !isImeCompositionKey(e)) {
         setIsPlanDiffActive(false);
       }
     };

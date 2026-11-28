@@ -11,8 +11,11 @@
  * every few seconds and as it hides or shows, and removes it as it goes for good: another page's words are taken back
  * only once its heartbeat is gone or older than KEPT_ALIVE_MS.
  *
- * Kept at most 14 days, at most 20 entries and 200 KB in all (the oldest go first); a full or blocked storage keeps
- * nothing (the page still has the words). The words are never logged.
+ * Kept at most 14 days, at most 20 entries and 200 KB in all (the oldest go first, a Send's record before any words);
+ * a full or blocked storage keeps nothing (the page still has the words). The words are never logged.
+ *
+ * A Send given up with no answer (sendLanded.ts `late`) keeps its record here too, in its own slot (`keepLate`): a
+ * reload before Send again still sends that reply under its keys, never a second one.
  */
 
 const PREFIX = 'plannotator-inbox-reply-kept:';
@@ -37,10 +40,13 @@ export interface KeptWords {
   /** The `updated_at` of the draft the words were typed over (null: none, or not known). */
   base: string | null;
 }
-interface Entry extends KeptWords {
+interface Entry extends Omit<KeptWords, 'kind'> {
+  kind: KeptKind | 'late';
   thread: string;
   page: string;
   at: number;
+  /** `late`: the Send's record, as sendLanded.ts writes it. */
+  send?: unknown;
 }
 
 const newPageId = (): string => {
@@ -138,10 +144,11 @@ function parse(key: string, raw: string | null): Entry | null {
   if (!raw || !key.startsWith(PREFIX)) return null;
   try {
     const kept = JSON.parse(raw) as Partial<Entry>;
-    if (typeof kept.words !== 'string' || (kept.kind !== 'conflict' && kept.kind !== 'failed' && kept.kind !== 'remote')) return null;
+    if (typeof kept.words !== 'string' || (kept.kind !== 'conflict' && kept.kind !== 'failed' && kept.kind !== 'remote' && kept.kind !== 'late')) return null;
     if (kept.base !== null && typeof kept.base !== 'string') return null;
     if (typeof kept.thread !== 'string' || typeof kept.page !== 'string' || typeof kept.at !== 'number') return null;
-    return { kind: kept.kind, words: kept.words, base: kept.base, thread: kept.thread, page: kept.page, at: kept.at };
+    if (kept.kind === 'late' && (typeof kept.send !== 'object' || kept.send === null)) return null;
+    return { kind: kept.kind, words: kept.words, base: kept.base, thread: kept.thread, page: kept.page, at: kept.at, ...(kept.kind === 'late' ? { send: kept.send } : {}) };
   } catch {
     return null;
   }
@@ -181,7 +188,9 @@ function trim(storage: Storage): void {
     remove(storage, key);
     return false;
   });
-  kept.sort((a, b) => a.entry!.at - b.entry!.at);
+  // A Send's record (`late`) goes before any words: it is a copy of what its page holds, while the words kept here may
+  // be the only copy there is (a failed save's), so a long reply's record never pushes another thread's words out.
+  kept.sort((a, b) => Number(b.entry!.kind === 'late') - Number(a.entry!.kind === 'late') || a.entry!.at - b.entry!.at);
   let total = kept.reduce((sum, { size }) => sum + size, 0);
   for (let count = kept.length; count > 0 && (count > MAX_ENTRIES || total > MAX_TOTAL); count -= 1) {
     const oldest = kept[kept.length - count]!;
@@ -196,19 +205,29 @@ function sweepOnce(storage: Storage): void {
   trim(storage);
 }
 
-/** `remote`: a thread's words kept while its draft is not kept there, beside (never over) its other words. */
-const keyOf = (threadId: string, slot: '' | ':remote' = '') => `${PREFIX}${page}:${threadId}${slot}`;
+/** `remote`: a thread's words kept while its draft is not kept there, beside (never over) its other words. `late`: a Send's record. */
+const keyOf = (threadId: string, slot: '' | ':remote' | ':late' = '') => `${PREFIX}${page}:${threadId}${slot}`;
 
 /**
  * The newest words another page kept for the thread whose page is gone (null: none): its entry's key goes with it, for
  * `dropKept` once this page keeps them. A page still open keeps its own.
  */
 export async function keptWordsGone(threadId: string, remote?: boolean): Promise<(KeptWords & { key: string }) | null> {
+  // `remote` given: only the entries of that slot (a remote thread's page-only words sit beside its other words).
+  const gone = await goneEntry(threadId, (entry) => entry.kind !== 'late' && (remote === undefined || (entry.kind === 'remote') === remote));
+  return gone ? { kind: gone.entry.kind as KeptKind, words: gone.entry.words, base: gone.entry.base, key: gone.key } : null;
+}
+
+/** The record of a Send given up (`keepLate`) that a page now gone kept for the thread, with its entry's key and when it was kept. */
+export async function keptLateGone(threadId: string): Promise<{ key: string; send: unknown; at: number } | null> {
+  const gone = await goneEntry(threadId, (entry) => entry.kind === 'late');
+  return gone ? { key: gone.key, send: gone.entry.send, at: gone.entry.at } : null;
+}
+
+async function goneEntry(threadId: string, slotOf: (entry: Entry) => boolean): Promise<{ key: string; entry: Entry } | null> {
   const storage = store();
   if (!storage) return null;
   sweepOnce(storage);
-  // `remote` given: only the entries of that slot (a remote thread's page-only words sit beside its other words).
-  const slotOf = (entry: Entry) => remote === undefined || (entry.kind === 'remote') === remote;
   const theirs = entries(storage)
     .flatMap(({ key, entry }) => (entry && entry.thread === threadId && entry.page !== page && slotOf(entry) ? [{ key, entry }] : []))
     .sort((a, b) => b.entry.at - a.entry.at);
@@ -224,8 +243,7 @@ export async function keptWordsGone(threadId: string, remote?: boolean): Promise
     // No Web Locks: a page whose heartbeat is fresh is open.
     for (const { entry } of theirs) if (Date.now() - (Number(storage.getItem(ALIVE_PREFIX + entry.page)) || 0) <= KEPT_ALIVE_MS) open.add(entry.page);
   }
-  const gone = theirs.find(({ entry }) => !open.has(entry.page));
-  return gone ? { kind: gone.entry.kind, words: gone.entry.words, base: gone.entry.base, key: gone.key } : null;
+  return theirs.find(({ entry }) => !open.has(entry.page)) ?? null;
 }
 
 /** Another page's entry, taken by this one (which keeps the words under its own). */
@@ -251,7 +269,23 @@ export function keepWords(threadId: string, kept: KeptWords): void {
   trim(storage);
 }
 
-export function forgetWords(threadId: string, slot: '' | ':remote' = ''): void {
+/** Keep a Send's record for the thread (sendLanded.ts), its words with it: it replaces what this page kept for that Send. */
+export function keepLate(threadId: string, words: string, send: object): void {
+  const storage = store();
+  if (!storage) return;
+  if (words.length > MAX_CHARS) return forgetWords(threadId, ':late');
+  holdPageLock();
+  sweepOnce(storage);
+  try {
+    const entry: Entry = { kind: 'late', words, base: null, send, thread: threadId, page, at: Date.now() };
+    storage.setItem(keyOf(threadId, ':late'), JSON.stringify(entry));
+  } catch {
+    // Full or blocked: the page still holds the record.
+  }
+  trim(storage);
+}
+
+export function forgetWords(threadId: string, slot: '' | ':remote' | ':late' = ''): void {
   const storage = store();
   if (!storage) return;
   remove(storage, keyOf(threadId, slot));

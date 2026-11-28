@@ -108,6 +108,8 @@ import { LaunchTipCard } from './LaunchTipCard';
 import { LAUNCH_TIP_SAID, LAUNCH_TIP_TIMES, launchTipPlace, launchTipPlainOpen, type LaunchTipPlace } from './launchTip';
 import { useComposeAutosave } from './composeAutosave';
 import { useComposeCaretMenu } from './composeCaretMenu';
+import { isImeCompositionKey } from '@plannotator/ui/utils/commentSubmitKey';
+import { useImeCancelHold } from '../shortcuts/imeCancelHold';
 
 /** How long after the last keystroke a pasted link is read. */
 const REVIEW_LINK_PAUSE_MS = 300;
@@ -670,8 +672,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
     sendKey.current = newUuid();
   }, [body, chosen, start?.agent, start?.project.id, start?.machine, threadName, nameState.edited ? '' : suggested, uploadIds.join(','), boardChip && boardRequest, reviewKind, reviewChanges, boxPull?.id]);
   const draftId = useRef(request.draft?.id ?? inboxId('drf'));
-  // When an Escape last ended an IME composition: the native cancel that may follow it is not a close.
-  const imeEscape = useRef(-Infinity);
+  const imeHold = useImeCancelHold();
 
   // Nothing written: no words, no files, no typed thread name. An empty compose is never kept as a draft.
   // A Board card's Create thread starts with the card's title: left as it was, that is nothing written either.
@@ -1071,11 +1072,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDialogElement>) => {
     // A key the skill picker took (Escape closing it, Enter on a row) is not the dialog's.
     // An Escape that ends an IME composition is the IME's (Safari sends it with isComposing false and keyCode 229).
-    const imeKey = event.nativeEvent.isComposing || (event.key === 'Escape' && event.keyCode === 229);
-    if (imeKey) {
-      if (event.key === 'Escape') imeEscape.current = event.timeStamp;
-      return;
-    }
+    if (event.nativeEvent.isComposing || (event.key === 'Escape' && isImeCompositionKey(event))) return;
     if (event.defaultPrevented) return;
     if (event.key === 'Escape') {
       // Never the window's Escape (it would close the thread under the dialog).
@@ -1616,10 +1613,11 @@ export function ComposeDialog(props: ComposeDialogProps) {
       data-review-box={box ? '' : undefined}
       data-phone={phone ? '' : undefined}
       onKeyDown={onKeyDown}
+      onKeyDownCapture={imeHold.onKeyDownCapture}
       onCancel={(event) => {
         event.preventDefault();
         // The browser's own close request for an Escape the IME took (same press, so within a frame or two): not a close.
-        if (event.timeStamp - imeEscape.current < 100) return;
+        if (imeHold.held(event)) return;
         if (!escapeTip()) requestClose();
       }}
       // A phone's tip covers Thread and the message: a tap into either lets it go (it was stamped when it showed).

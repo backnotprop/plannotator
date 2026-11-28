@@ -34,6 +34,7 @@ import { PanelControlsRow, PanelSearchField } from './PanelChrome';
 import { countColumnVars, compactRowsProps } from './FileRowBits';
 import { useHiddenViewedFiles } from '../hooks/useHiddenViewedFiles';
 import { useReviewStateOptional } from '../dock/ReviewStateContext';
+import { holdsImeEscape, isImeCompositionKey } from '@plannotator/ui/utils/commentSubmitKey';
 
 interface FileTreeProps {
   controlsNotice?: React.ReactNode;
@@ -450,7 +451,8 @@ export const FileTree: React.FC<FileTreeProps> = ({
           event.preventDefault();
           return;
         }
-        if (event.key === 'Enter' && searchMatches.length > 0 && !isSearchPending) {
+        if (holdsImeEscape(event)) return;
+        if (event.key === 'Enter' && searchMatches.length > 0 && !isSearchPending && !isImeCompositionKey(event)) {
           event.preventDefault();
           onStepSearchMatch?.(event.shiftKey ? -1 : 1);
         }

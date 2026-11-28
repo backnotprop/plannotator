@@ -83,6 +83,7 @@ export type { CardsModel } from './cardsWire';
 import type { InboxAskChat } from './askChatWire';
 export type { InboxAskChat } from './askChatWire';
 import { gzipped, wholeBody } from './apiBody';
+import { WITHIN, fetchFor, sendReadMs, withinFor } from './apiWrite';
 import { referencedFileUrl, type OpenInFileCode, type OpenInFileScope, type ReferencedFileScope, type ReferencedFileView } from './openInWire';
 export { InboxApiError };
 import type { InboxSearchAnswer, InboxSearchFrom, InboxSearchGroupId, InboxSearchSort, InboxSearchStatus } from '@plannotator/core/inbox-search';
@@ -785,8 +786,7 @@ export const REF_CARD_READ_MS = 20_000;
 /** A storage read with no answer by then (a held connection on a phone over the tailnet) fails, so Try again or a reopen reads anew. XL counts in about 1.3 s. */
 export const STORAGE_READ_MS = 20_000;
 
-/** `get`, given up after `timeoutMs` with nothing arriving: the fetch is aborted and the read fails with InboxReadTimeout. */
-/** `outer`: the caller gave the read up (the person moved on): it ends at once, with that abort. */
+/** `get`, given up after `timeoutMs` with nothing arriving (InboxReadTimeout); `outer`: the caller gave it up (the person moved on), it ends at once. */
 async function getWithin<T>(path: string, timeoutMs: number, outer?: AbortSignal): Promise<T> {
   const controller = new AbortController();
   let timedOut = false;
@@ -894,20 +894,20 @@ export { get as apiGet, post as apiPost };
  * `keepalive`: the request outlives the page (a save made as the page hides or goes). The answer is read as ever when
  * the page stays. The fetch starts before this function first waits, so a caller in a `pagehide` handler gets it out.
  */
-export async function post<T>(path: string, body: Record<string, unknown>, init: { keepalive?: boolean; gzip?: boolean } = {}): Promise<T> {
+export async function post<T>(path: string, body: Record<string, unknown>, init: { keepalive?: boolean; gzip?: boolean; within?: boolean | 'launch' } = {}): Promise<T> {
   refuseContested(path);
   const machine = forwardedTo(path);
   // A write to another machine is keyed end to end (rule 1): the window's own key, or one made for it here.
   const sent = machine && typeof body.idempotency_key !== 'string' ? { ...body, idempotency_key: newUuid() } : body;
   const text = JSON.stringify(pageSession ? { ...sent, serverSession: pageSession } : sent);
   const zipped = init.gzip && !machine ? await gzipped(text) : null;
-  const response = await fetch(path, {
+  const response = await fetchFor(init.within)(path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'X-Plannotator-Load': pageLoad, ...(machine ? threadHeader(path) : {}), ...(zipped ? { 'Content-Encoding': 'gzip' } : {}) },
     body: zipped ?? text,
     ...(init.keepalive && (zipped ? zipped.byteLength : new TextEncoder().encode(text).length) <= KEEPALIVE_BODY_MAX ? { keepalive: true } : {}),
   });
-  if (machine && (await localInstead(response))) return post<T>(localRoute(path), body);
+  if (machine && (await localInstead(response))) return post<T>(localRoute(path), body, init);
   if (machine && response.status === 202) {
     const held = (await response.clone().json().catch(() => ({}))) as { outbox?: OutboxView; machine?: MachineView | null };
     if (held.outbox) {
@@ -1235,9 +1235,9 @@ export const inboxApi = {
   /** An attached HTML page's frame document, kept by the Inbox and served under its own policy (inbox-pages.ts). */
   page: (html: string) => post<{ id: string; url: string }>(inboxUrl('/pages'), { html }, { gzip: true }),
   /** The global skills the composers' `/` and `$` picker lists (raw entries; ui's catalog layer normalizes them). */
-  skills: () => get<{ skills?: unknown }>(inboxUrl('/skills')),
+  skills: () => getWithin<{ skills?: unknown }>(inboxUrl('/skills'), sendReadMs()),
   /** One human-only skill's SKILL.md, read when the person sends a message that references it. */
-  skillContent: (name: string) => get<{ skill?: unknown }>(inboxUrl(`/skills/content?name=${encodeURIComponent(name)}`)),
+  skillContent: (name: string) => getWithin<{ skill?: unknown }>(inboxUrl(`/skills/content?name=${encodeURIComponent(name)}`), sendReadMs()),
   // Archived threads leave the window's list (Settings lists them): an older
   // window and the phone, which ask without this, still get them in Quiet.
   // `machines=1`: the merged view (linked machines). An Inbox with nothing linked answers its own list, each row and
@@ -1404,7 +1404,7 @@ export const inboxApi = {
     post<{ project: ProjectFolder | null }>(projectUrl(projectId, `/combine`), { into }),
   /** `unsentOnly`: refused (`question_already_sent`) when a reply already sent the question (decision mode, where a pick can race a Send). */
   pick: (messageId: string, key: string, revision: number, answer: QuestionAnswer | null, options: { unsentOnly?: boolean; confirmFull?: boolean; keepalive?: boolean } = {}) =>
-    post<{ questions: InboxQuestion[] }>(messageUrl(messageId, `/picks`), inboxPickBody(key, revision, answer, options), { keepalive: options.keepalive }).then((result) => ({ ...result, questions: questionsOnly(result.questions) })),
+    post<{ questions: InboxQuestion[] }>(messageUrl(messageId, `/picks`), inboxPickBody(key, revision, answer, options), { keepalive: options.keepalive, within: true }).then((result) => ({ ...result, questions: questionsOnly(result.questions) })),
   /**
    * An action item's Done (with an optional note) or Can't do it (with the reason),
    * or taking it back (`null`). `staged` (the thread's checklist; approval
@@ -1415,7 +1415,7 @@ export const inboxApi = {
    * Answers the message's action items.
    */
   markAction: (messageId: string, key: string, mark: ActionMarkBody | null, staged = false) =>
-    post<{ questions: InboxQuestion[] }>(messageUrl(messageId, `/actions/${encodeURIComponent(key)}`), actionMarkBody(mark, staged)).then(
+    post<{ questions: InboxQuestion[] }>(messageUrl(messageId, `/actions/${encodeURIComponent(key)}`), actionMarkBody(mark, staged), WITHIN).then(
       (result) => ({ actions: result.questions.filter(isActionRecord) }),
     ),
   /**
@@ -1473,8 +1473,8 @@ export const inboxApi = {
     },
   ) =>
     // To another machine: the newest seq the person saw there rides along (rule 11), and a reply its Inbox has not
-    // confirmed yet is held (`held`): the Send went into this Inbox's outbox, not into the thread.
-    post<ReplyResult>(messageUrl(messageId, `/reply`), { ...input, ...seenThrough(messageId) }).then(
+    // confirmed yet is held (`held`): the Send went into this Inbox's outbox, not into the thread. One that starts a session waits longer.
+    post<ReplyResult>(messageUrl(messageId, `/reply`), { ...input, ...seenThrough(messageId) }, withinFor(input.to)).then(
       (result) => {
         if (input.author_only !== true) noteReplySent(input.words);
         // Only this Inbox's own thread, read as `thread` reads one; a linked machine's thread is read after, as before.
@@ -1490,7 +1490,7 @@ export const inboxApi = {
    * session, because the one that asked has ended.
    */
   reask: (messageId: string, input: { idempotency_key: string; to?: { host: string; session: string } }) =>
-    post<ReplyResult>(messageUrl(messageId, `/reask`), input).then((result) => ({
+    post<ReplyResult>(messageUrl(messageId, `/reask`), input, WITHIN).then((result) => ({
       ...result,
       questions: questionsOnly(result.questions),
     }), heldReply),
@@ -1515,10 +1515,10 @@ export const inboxApi = {
     post<{ message_id: string; viewed: string[] }>(messageUrl(messageId, `/guide/viewed`), { path, viewed }),
   /** A comment on that guide's diff (the review app's line comment), new or edited; removed through `removeAnnotation`. */
   saveGuideAnnotation: (messageId: string, annotation: object) =>
-    trackCommentWrite(post<{ annotation: InboxAnnotationRecord }>(messageUrl(messageId, `/guide/annotations`), { annotation }), { on: messageId, id: (annotation as { id?: unknown }).id }),
+    trackCommentWrite(post<{ annotation: InboxAnnotationRecord }>(messageUrl(messageId, `/guide/annotations`), { annotation }, WITHIN), { on: messageId, id: (annotation as { id?: unknown }).id }),
   /** A comment on the text of an agent's message (the words selected), new or edited; removed through `removeAnnotation`. */
   saveMessageAnnotation: (messageId: string, annotation: object) =>
-    trackCommentWrite(post<{ annotation: InboxAnnotationRecord }>(messageUrl(messageId, `/annotations`), { annotation }), { on: messageId, id: (annotation as { id?: unknown }).id }),
+    trackCommentWrite(post<{ annotation: InboxAnnotationRecord }>(messageUrl(messageId, `/annotations`), { annotation }, WITHIN), { on: messageId, id: (annotation as { id?: unknown }).id }),
   // A question choice's running-app prototype, through the live proxy (packages/server/inbox-live.ts). `probe`: the
   // app is asked first, so a stopped one answers 422 live_not_answering instead of the proxy framing its error.
   liveSite: (threadId: string, siteId: string, probe = false) =>
@@ -1526,7 +1526,7 @@ export const inboxApi = {
   pingLiveSite: (threadId: string, siteId: string) =>
     post<{ running: boolean }>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/live/${encodeURIComponent(siteId)}/ping`), {}),
   saveLiveAnnotation: (threadId: string, siteId: string, annotation: object) =>
-    trackCommentWrite(post<{ annotation: InboxAnnotationRecord }>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/live/${encodeURIComponent(siteId)}/annotations`), { annotation }), { on: threadId, id: (annotation as { id?: unknown }).id }),
+    trackCommentWrite(post<{ annotation: InboxAnnotationRecord }>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/live/${encodeURIComponent(siteId)}/annotations`), { annotation }, WITHIN), { on: threadId, id: (annotation as { id?: unknown }).id }),
   restart: () => post<{ ok: true }>(inboxUrl('/restart'), {}),
   // The update control: the dialogs' facts, Update now, Remind me tomorrow, Check now, What's new.
   updateDetails: () => get<UpdateDetails>(inboxUrl('/update')),
@@ -1601,9 +1601,9 @@ export const inboxApi = {
   linkedPage: (attachmentId: string, path: string) =>
     get<LinkedPageView>(attachmentUrl(attachmentId, `/linked-page?path=${encodeURIComponent(path)}`)),
   saveAnnotation: (attachmentId: string, version: string, annotation: object) =>
-    trackCommentWrite(post<{ annotation: InboxAnnotationRecord }>(inboxUrl('/annotations', undefined, machineOf(attachmentId)), { attachment_id: attachmentId, version, annotation }), { on: attachmentId, id: (annotation as { id?: unknown }).id }),
+    trackCommentWrite(post<{ annotation: InboxAnnotationRecord }>(inboxUrl('/annotations', undefined, machineOf(attachmentId)), { attachment_id: attachmentId, version, annotation }, WITHIN), { on: attachmentId, id: (annotation as { id?: unknown }).id }),
   removeAnnotation: (id: string) =>
-    trackCommentWrite(post<{ annotation: InboxAnnotationRecord }>(inboxUrl(`/annotations/${encodeURIComponent(id)}/remove`, undefined, machineOf(id)), {}), { on: id, id, remove: true }),
+    trackCommentWrite(post<{ annotation: InboxAnnotationRecord }>(inboxUrl(`/annotations/${encodeURIComponent(id)}/remove`, undefined, machineOf(id)), {}, WITHIN), { on: id, id, remove: true }),
   /** "Open in": the file as it is now, in a catalog app or the default app, by the attachment's id (on this computer only). */
   openIn: (attachmentId: string, appId: string) =>
     post<{ ok: boolean; error?: string }>(inboxUrl('/open-in'), { attachment_id: attachmentId, app_id: appId }),
@@ -1659,7 +1659,7 @@ export const inboxApi = {
     get<{ reach: CloneReach }>(inboxUrl('/launch/clone-check', new URLSearchParams({ url }).toString(), machine), signal),
   /** `machine`: start the agent on that linked machine (remote launch), through the forward; a `202` is `InboxHeldError`. */
   startThread: (input: StartThreadInput, machine?: string | null) =>
-    post<{ thread_id: string; message: InboxMessage; project?: { id: string; name: string; root: string }; replayed: boolean; launch?: { id: string; state: 'starting' | 'failed' } }>(inboxUrl('/messages', undefined, machine), { ...input }),
+    post<{ thread_id: string; message: InboxMessage; project?: { id: string; name: string; root: string }; replayed: boolean; launch?: { id: string; state: 'starting' | 'failed' } }>(inboxUrl('/messages', undefined, machine), { ...input }, withinFor(input.to)),
   // Launch (behind `inboxLaunch.enabled`, on unless false): the run line's buttons and Settings → Agents' switches.
   launchStop: (launchId: string, machine?: string | null) => post<{ run: InboxRun | null }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/stop`, undefined, machine), {}),
   launchOpen: (launchId: string) => post<{ ok: true; command: string }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/open`), {}),
@@ -1683,7 +1683,7 @@ export const inboxApi = {
   /** `replies` (additive): open threads holding unsent work; an older Inbox sends none. */
   drafts: () => get<{ serverSession: string; drafts: DraftView[]; replies?: InboxReplyDraftRow[] }>(inboxUrl('/drafts')),
   // Reply drafts (approval "inbox-reply-drafts"): the reply box's words per thread.
-  replyDraft: (threadId: string) => get<{ draft: InboxReplyDraft | null; not_landed?: ReplyDraftNotLanded }>(threadUrl(threadId, `/draft`)),
+  replyDraft: (threadId: string) => getWithin<{ draft: InboxReplyDraft | null; not_landed?: ReplyDraftNotLanded }>(threadUrl(threadId, `/draft`), sendReadMs()),
   commentDraft: (threadId: string, key: string) => get<{ draft: InboxCommentDraftView | null }>(threadUrl(threadId, '/comment-draft', `key=${encodeURIComponent(key)}`)),
   saveCommentDraft: (threadId: string, body: { key: string; text: string; images: readonly ImageRef[]; base: string | null; force?: boolean }, init: { keepalive?: boolean } = {}) =>
     post<{ draft: InboxCommentDraftView | null }>(threadUrl(threadId, '/comment-draft'), body, init),
@@ -1702,7 +1702,7 @@ export const inboxApi = {
     files: ReplyDraftFileOps = NO_FILE_OPS,
     recipients?: readonly string[],
     quote?: InboxReplyQuote | null, mentions?: readonly InboxReplyMention[],
-  ) => post<{ draft: InboxReplyDraft | null }>(threadUrl(threadId, `/draft`), replyDraftSaveBody(body, base, baseBody, files, recipients, quote, mentions)),
+  ) => post<{ draft: InboxReplyDraft | null }>(threadUrl(threadId, `/draft`), replyDraftSaveBody(body, base, baseBody, files, recipients, quote, mentions), WITHIN),
   /** A pending pasted-text upload's words (Put back after a reload, or in another window); `machine`: another machine's thread. */
   uploadText: (uploadId: string, machine: string | null = null) =>
     get<{ text: string }>(inboxUrl(`/uploads/${encodeURIComponent(uploadId)}/text`, undefined, machine)),
@@ -1917,7 +1917,7 @@ export const inboxApi = {
   /** Snooze the thread until a time, or end its snooze (`null`). `at`: an earlier snooze's own time, for an Undo. On the thread's own machine. */
   snooze: (threadId: string, until: string | null, at?: string) =>
     post<{ snoozed: { until: string; at: string } | null }>(threadUrl(threadId, '/snooze'), { until, ...(at ? { at } : {}) }),
-  discardReplyDraft: (threadId: string, body: { base?: string | null; base_body?: string; not_landed?: string } = {}) => post<{ ok: true; deleted: boolean }>(threadUrl(threadId, '/draft/delete'), body),
+  discardReplyDraft: (threadId: string, body: { base?: string | null; base_body?: string; not_landed?: string } = {}) => post<{ ok: true; deleted: boolean }>(threadUrl(threadId, '/draft/delete'), body, WITHIN),
   saveDraft: (id: string, input: { body: string; to: InboxDraft['to']; project: InboxDraft['project']; files: DraftFileInput[]; base: string | null; thread_name?: string; card?: InboxDraft['card']; pulls?: InboxDraft['pulls']; board_request?: true; start?: InboxDraft['start'] }) =>
     post<{ draft: DraftView }>(inboxUrl(`/drafts/${encodeURIComponent(id)}`), { ...input }),
   deleteDraft: (id: string) => post<{ ok: true; deleted: boolean }>(inboxUrl(`/drafts/${encodeURIComponent(id)}/delete`), {}),
@@ -1940,7 +1940,7 @@ export const inboxApi = {
     post<{ message: InboxMessage }>(messageUrl(messageId, `/send-now`), session ? { session } : {}),
   takeBack: (messageId: string) => post<{ message: InboxMessage; draft: InboxReplyDraft | null; compose: InboxDraft | null }>(messageUrl(messageId, '/take-back'), {}),
   newMessage: (threadId: string, input: { session: string; body: string; idempotency_key: string }) =>
-    post<{ message: InboxMessage | null; replayed: boolean; held?: OutboxView }>(threadUrl(threadId, `/message`), input).catch((cause) => {
+    post<{ message: InboxMessage | null; replayed: boolean; held?: OutboxView }>(threadUrl(threadId, `/message`), input, WITHIN).catch((cause) => {
       // To another machine: held in the outbox, as a reply is; the thread shows it waiting.
       if (cause instanceof InboxHeldError) return { message: null, replayed: false, held: cause.outbox };
       throw cause;

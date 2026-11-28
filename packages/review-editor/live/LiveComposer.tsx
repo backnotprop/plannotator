@@ -5,6 +5,7 @@ import type { MentionSource } from '@plannotator/ui/utils/mentions';
 import type { LiveSendTag } from './api';
 import { agentLabel, type LiveAgent } from './model';
 import { LiveHostMark } from './LiveMark';
+import { holdsImeEscape } from '@plannotator/ui/utils/commentSubmitKey';
 
 export function liveMentionSource(agents: readonly LiveAgent[]): MentionSource {
   return {
@@ -68,7 +69,7 @@ export function LiveComposer(props: {
         }}
         onSelect={mention.onSelect}
         onKeyDown={(e) => {
-          if (mention.onKeyDown(e)) return;
+          if (holdsImeEscape(e) || mention.onKeyDown(e)) return;
           if (e.key === 'Escape' && props.onCancel && !text.trim()) {
             e.preventDefault();
             props.onCancel();

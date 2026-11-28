@@ -7,7 +7,8 @@ import { expect, test } from 'bun:test';
 import type { InboxAuthor, InboxMessageWire, InboxThread } from '@plannotator/core/inbox-types';
 import { QUESTION_ANSWERS_HEADING } from '@plannotator/core/question-block';
 import { parseInboxQuestionBlocks } from '@plannotator/core/inbox-questions';
-import { KEPT_CHARS_MAX, SNIPPET_PROMPT_MAX, answerWords, cleanInline, cutAtWord, firstWords, foldSnippet, keptFirstWords, keptFirstWordsChars, lookBoundary, newSinceLook, plainLabel, planFolds, replyWords, snippetText } from './folding';
+import { threadOpenQuestions } from '@plannotator/core/inbox-open-questions';
+import { KEPT_CHARS_MAX, SNIPPET_PROMPT_MAX, answerWords, cleanInline, cutAtWord, firstWords, foldSnippet, holdingsOf, keptFirstWords, keptFirstWordsChars, lookBoundary, newSinceLook, plainLabel, planFolds, replyWords, snippetText } from './folding';
 
 const AGENT: InboxAuthor = { kind: 'agent', host: 'claude-code', session: 'ses_a', name: null };
 const PERSON: InboxAuthor = { kind: 'person' };
@@ -301,4 +302,15 @@ test("an agent's message with a run or secret card stays open, like one with a p
   expect(plan.folded.has('m3')).toBe(true);
   // A person's message quoting a block is not a card.
   expect(planFolds([msg('m1', AGENT, 1), msg('m2', PERSON, 2, { body: card }), msg('m3', AGENT, 3)], new Set(), 9).folded.has('m2')).toBe(true);
+});
+
+test("questions Mark read closed leave a folded line with no open count, as the thread's foot button has none; an open one still counts", () => {
+  const ask = (key: string, state: 'open' | 'closed') => ({ key, prompt: key, kind: 'single', state, orphaned: false, answer: null, set_aside_at: state === 'closed' ? '2026-10-10T11:00:00.000Z' : null }) as never;
+  const openCount = (message: InboxMessageWire) => holdingsOf(message, { delivered: false }).find((h) => h.kind === 'open')?.count ?? 0;
+  const markedRead = msg('m1', AGENT, 2, { questions: [ask('q-1', 'closed'), ask('q-2', 'closed')] });
+  expect(openCount(markedRead)).toBe(0);
+  expect(threadOpenQuestions([markedRead]).questions).toHaveLength(0);
+  const oneLeft = msg('m2', AGENT, 3, { questions: [ask('q-1', 'closed'), ask('q-2', 'open')] });
+  expect(openCount(oneLeft)).toBe(1);
+  expect(threadOpenQuestions([oneLeft]).questions).toHaveLength(1);
 });

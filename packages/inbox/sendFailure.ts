@@ -8,8 +8,11 @@
  *   "The reply was not sent: the disk is full. …".
  * - Any other failure of the Inbox (5xx): "The reply was not sent: the Inbox could not write it. Send again to retry."
  * - No answer at all (the Inbox is down, the network dropped): "The reply was not sent. Send again to retry."
+ * - Given up with nothing arriving (`InboxWriteTimeout`): the request may still be on its way (a slow Inbox, a phone's
+ *   connection sending it again after a network change), so "was not sent" could be false: `SEND_MAY_NOT_HAVE_GONE`.
  */
 import { InboxApiError } from './api';
+import { InboxWriteTimeout } from './apiWrite';
 
 export interface SendFailure {
   line: string;
@@ -22,11 +25,14 @@ const LINE_MAX = 160;
 const TECHNICAL = /(?:^|[\s'"(])(?:\/[^\s/'"]+){2,}|[A-Za-z]:\\|\bE[A-Z]{3,}\b/;
 
 export const SEND_NOT_SENT = 'The reply was not sent. Send again to retry.';
+/** A Send whose reply may have gone: its next Send looks for it first (`unconfirmed` in data/actions/sendLanded.ts). */
+export const SEND_MAY_NOT_HAVE_GONE = 'The reply may not have gone. Send again: it looks for this one first, so it is not sent twice.';
 
 export function sendFailure(cause: unknown): SendFailure {
   if (!(cause instanceof InboxApiError)) {
     const words = cause instanceof Error && cause.message ? cause.message : null;
-    return { line: SEND_NOT_SENT, details: words && words !== SEND_NOT_SENT ? words : null };
+    const line = cause instanceof InboxWriteTimeout ? SEND_MAY_NOT_HAVE_GONE : SEND_NOT_SENT;
+    return { line, details: words && words !== line ? words : null };
   }
   const words = cause.message.trim();
   const plain = words.length > 0 && words.length <= LINE_MAX && !TECHNICAL.test(words);

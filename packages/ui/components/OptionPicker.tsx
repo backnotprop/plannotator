@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ChevronDown, Plus } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { isImeCompositionKey } from '../utils/commentSubmitKey';
 
 export const SEARCHABLE_THRESHOLD = 12;
 
@@ -131,6 +132,7 @@ export function OptionPicker({
                   onChange={(e) => setQuery(e.target.value)}
                   onKeyDown={(e) => {
                     e.stopPropagation();
+                    if (isImeCompositionKey(e)) return;
                     if (e.key === 'Escape') {
                       if (keysStayInList) e.preventDefault();
                       close();

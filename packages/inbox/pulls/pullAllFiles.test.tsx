@@ -19,7 +19,7 @@ import { afterEach, beforeEach, expect, mock, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxPull, InboxPullsAnswer } from '@plannotator/core/inbox-types';
-import { pullRepoFetch } from './RailScope';
+import { focusScopeWhenLost, pullRepoFetch } from './RailScope';
 
 const hasDom = typeof document !== 'undefined';
 const reveals: (string | null)[] = [];
@@ -260,6 +260,80 @@ test.skipIf(!hasDom)("a phone's Files sheet: tapping All files keeps focus on th
   } finally {
     window.matchMedia = savedMatchMedia;
   }
+});
+
+const later = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+function railWithSwitch() {
+  const rail = document.createElement('nav');
+  rail.innerHTML = '<div data-old=""><button data-tree-scope="changes">Changes</button><button data-tree-scope="all">All files</button></div>';
+  document.body.appendChild(rail);
+  rail.querySelector<HTMLElement>('[data-tree-scope="all"]')!.focus();
+  return rail;
+}
+
+test.skipIf(!hasDom)('the first switch to All files: focus waits for the All files list however late it mounts, then lands on its switch', async () => {
+  const rail = railWithSwitch();
+  try {
+    focusScopeWhenLost(rail, 'all');
+    rail.querySelector('[data-old]')!.remove();
+    await later(400);
+    expect(document.activeElement).toBe(document.body);
+    rail.insertAdjacentHTML('beforeend', '<div data-pull-all-files=""><button data-tree-scope="changes">Changes</button><button data-tree-scope="all">All files</button></div>');
+    await later(0);
+    expect(document.activeElement).toBe(rail.querySelector('[data-pull-all-files] [data-tree-scope="all"]'));
+  } finally {
+    rail.remove();
+  }
+});
+
+test.skipIf(!hasDom)('a switch that never lost focus lets go: focus lost later for another reason stays where the page puts it', async () => {
+  const rail = railWithSwitch();
+  rail.insertAdjacentHTML('beforeend', '<button data-row="">src/app.ts</button>');
+  try {
+    rail.querySelector<HTMLElement>('[data-row]')!.focus();
+    focusScopeWhenLost(rail, 'all');
+    rail.querySelector('[data-old]')!.remove();
+    rail.insertAdjacentHTML('afterbegin', '<div data-pull-all-files=""><button data-tree-scope="all">All files</button></div>');
+    await later(0);
+    expect(document.activeElement === rail.querySelector('[data-row]')).toBe(true);
+    await later(50);
+    rail.querySelector('[data-row]')!.remove();
+    await later(0);
+    expect(document.activeElement === document.body).toBe(true);
+  } finally {
+    rail.remove();
+  }
+});
+
+test.skipIf(!hasDom)('a dialog open while All files mounts keeps the focus it has', async () => {
+  const rail = railWithSwitch();
+  const dialog = document.createElement('dialog');
+  try {
+    focusScopeWhenLost(rail, 'all');
+    rail.querySelector('[data-old]')!.remove();
+    dialog.setAttribute('open', '');
+    document.body.appendChild(dialog);
+    rail.insertAdjacentHTML('beforeend', '<div><button data-tree-scope="all">All files</button></div>');
+    await later(50);
+    expect(rail.contains(document.activeElement)).toBe(false);
+  } finally {
+    dialog.remove();
+    rail.remove();
+  }
+});
+
+test.skipIf(!hasDom)('picking the scope already on starts no watcher: focus lost later stays where the page puts it', async () => {
+  mount(pr);
+  await settle();
+  await act(async () => {
+    el('[data-tree-scope="changes"]').focus();
+    el('[data-tree-scope="changes"]').click();
+  });
+  await settle();
+  act(() => (document.activeElement as HTMLElement).blur());
+  el('nav.ib-rrail').appendChild(document.createElement('span'));
+  await later(0);
+  expect(document.activeElement === document.body).toBe(true);
 });
 
 test.skipIf(!hasDom)('no head commit known: no switch, the file count as before', async () => {

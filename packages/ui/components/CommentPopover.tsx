@@ -1068,7 +1068,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
           style={{ ...(cardDragged ? cardDragStyle : cardGeo.style), ...(zIndex !== undefined ? { zIndex } : {}), ...(showsSkillMenu ? { overflow: 'visible' } : {}) }}
           onPointerDown={(e) => e.stopPropagation()}
           onKeyDown={(e) => {
-            if (e.key !== 'Escape' || e.defaultPrevented) return;
+            if (e.key !== 'Escape' || e.defaultPrevented || isImeCompositionKey(e)) return;
             e.preventDefault();
             e.stopPropagation();
             if (cardExpanded) setCardExpanded(false);
@@ -1234,7 +1234,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
           }}
           onPointerDown={(e) => e.stopPropagation()}
           onKeyDown={(e) => {
-            if (e.key !== 'Escape') return;
+            if (e.key !== 'Escape' || isImeCompositionKey(e)) return;
             e.preventDefault();
             e.stopPropagation();
             handleClose();

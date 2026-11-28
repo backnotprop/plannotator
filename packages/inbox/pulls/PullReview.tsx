@@ -775,7 +775,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
     if (filesSheet) closeFiles();
   };
   const pickScope = (next: 'changes' | 'all') => {
-    if (railRef.current?.contains(document.activeElement)) focusScopeWhenLost(railRef.current, next);
+    if (next !== (allFiles ? 'all' : 'changes') && railRef.current?.contains(document.activeElement)) focusScopeWhenLost(railRef.current, next);
     setTreeScope(next);
     if (next === 'changes') setRepoOpen(null);
   };

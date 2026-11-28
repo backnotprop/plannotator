@@ -43,6 +43,7 @@ export function PhoneReplyRecipient({
   labels,
   folderOf,
   noun = 'reply',
+  max,
 }: {
   /** Every agent the sheet offers, live first, ended last. */
   rows: readonly RecipientRow[];
@@ -65,6 +66,8 @@ export function PhoneReplyRecipient({
   folderOf: (session: string) => string;
   /** What is sent: a reply, or a PR's new thread's first message (`PullThreadStart`), as the sheet and names say it. */
   noun?: 'reply' | 'message';
+  /** The most the reply goes to (default: what a draft holds, `RECIPIENTS_MAX`). */
+  max?: number;
 }) {
   const titleOf = (row: RecipientRow) => labelOf(labels, row.session);
   const names = recipientNames(rows, labels, folderOf);
@@ -147,7 +150,7 @@ export function PhoneReplyRecipient({
                     aria-label={`Also send to ${named.name}`}
                     className="ib-sheet-tick"
                     data-recipient-tick={row.session}
-                    disabled={!canAddRecipient(row, chosenIds, rows)}
+                    disabled={!canAddRecipient(row, chosenIds, rows, max)}
                     onClick={(event) => {
                       event.stopPropagation();
                       onToggle(row);

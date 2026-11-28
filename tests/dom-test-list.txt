@@ -19,6 +19,7 @@ packages/ui/components/html-viewer/HtmlViewer.bridgeAsset.test.tsx
 packages/ui/components/html-viewer/HtmlViewer.sandbox.test.tsx
 packages/ui/components/html-viewer/HtmlViewer.frameScale.test.tsx
 packages/ui/components/html-viewer/bridgeTouchSelection.test.tsx
+packages/ui/components/html-viewer/bridgeCollapsedRange.test.ts
 packages/ui/components/html-embed/HtmlEmbedBlock.test.tsx
 packages/ui/components/LazyBlockBoundary.test.tsx
 packages/ui/components/RegionBoundary.test.tsx
@@ -103,6 +104,7 @@ packages/inbox/permissionFocus.test.tsx
 packages/inbox/replyBoxTyping.test.tsx
 packages/inbox/paneFailureKeepsReply.test.tsx
 packages/inbox/replyFootPhone.test.tsx
+packages/inbox/sendAlwaysEnds.test.tsx
 packages/inbox/replyDraftNeverLost.test.tsx
 packages/inbox/farReplyDrafts.test.tsx
 packages/inbox/composeAutosave.test.tsx
@@ -369,6 +371,8 @@ packages/inbox/videoAttachment.test.tsx
 packages/inbox/audioAttachment.test.tsx
 packages/inbox/markupAddsToReply.test.tsx
 packages/inbox/commentSubmitKey.test.tsx
+packages/inbox/imeEscape.test.tsx
+packages/inbox/imeDialogCancel.test.tsx
 packages/inbox/commentRowSkills.test.tsx
 packages/inbox/skillReferences.test.tsx
 packages/inbox/skillListRoom.test.tsx
@@ -423,6 +427,7 @@ packages/ui/components/Viewer.diagramLazyRestore.test.tsx
 packages/ui/components/Viewer.diagramAnchorHostile.test.tsx
 packages/ui/components/CommentPopover.skillReferences.test.tsx
 packages/ui/components/commentSubmitKey.composers.test.tsx
+packages/ui/components/imeEscape.composers.test.tsx
 packages/ui/components/CommentPopover.mentionChips.test.tsx
 packages/ui/components/SkillReferenceMenu.placement.test.tsx
 packages/ui/components/sidebar/FileBrowser.test.ts
@@ -562,6 +567,7 @@ packages/editor/App.agentTool.test.tsx
 packages/ui/hooks/useFirstRunAnnouncementWindow.test.tsx
 packages/review-editor/components/ReviewSidebar.generalComment.test.tsx
 packages/review-editor/components/commentSubmitKey.review.test.tsx
+packages/review-editor/components/imeEscape.review.test.tsx
 packages/review-editor/components/ReviewSidebar.outdated.test.tsx
 packages/ui/components/HtmlSurfaceControls.test.tsx
 packages/ui/components/AnnotationPanel.unanchored.test.tsx
@@ -988,6 +994,8 @@ packages/inbox/reviewSettings/reviewsSettings.test.tsx
 packages/inbox/guide/usePowerUp.test.tsx
 packages/inbox/guide/useViewedTicks.test.tsx
 packages/inbox/components/reply/replyBoxParity.test.tsx
+packages/inbox/components/reply/replyBoxSeams.test.tsx
+packages/inbox/components/reply/replyDraftPages.test.tsx
 packages/inbox/guide/diffFontLoad.test.tsx
 packages/ui/components/diagram/DiagramCanvas.controlsReserve.test.tsx
 packages/ui/components/diagram/diagramSourceAccept.test.tsx

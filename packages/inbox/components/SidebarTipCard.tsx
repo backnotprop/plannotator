@@ -7,6 +7,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { PAGE_OVERLAYS } from '../idleClock';
 import { SIDEBAR_TIP_SAID, SIDEBAR_TIP_TIMES, SIDEBAR_TIP_WORDS, sidebarTipPlace, sidebarTipTarget, type SidebarTipPlace } from '../sidebarTip';
+import { isImeCompositionKey } from '@plannotator/ui/utils/commentSubmitKey';
 
 export function SidebarTipCard(props: {
   /** The tip no longer has its place (the Customize panel opened, the sidebar closed, something is over the page). */
@@ -67,7 +68,7 @@ export function SidebarTipCard(props: {
   useEffect(() => {
     // Escape closes only the tip; with a menu or dialog open, Escape is theirs.
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.defaultPrevented || document.querySelector(PAGE_OVERLAYS)) return;
+      if (event.key !== 'Escape' || event.defaultPrevented || isImeCompositionKey(event) || document.querySelector(PAGE_OVERLAYS)) return;
       event.preventDefault();
       event.stopPropagation();
       leave();

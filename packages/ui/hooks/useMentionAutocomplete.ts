@@ -11,6 +11,7 @@ import {
 } from '../utils/mentions';
 import { mentionAnchorOf, type MentionAnchor } from '../components/MentionPicker';
 import { replaceUndoably } from '../utils/undoableEdit';
+import { isImeCompositionKey } from '../utils/commentSubmitKey';
 
 export interface MentionMenuState {
   items: readonly MentionPerson[];
@@ -245,7 +246,7 @@ export function useMentionAutocomplete(options: {
       if (!open || !trigger) return false;
       // Never consume keys mid-composition: for Pinyin, Telex and friends the
       // composition buffer is ASCII, so Enter can mean "commit this candidate".
-      if (e.nativeEvent.isComposing) return false;
+      if (isImeCompositionKey(e)) return false;
       if (e.metaKey || e.ctrlKey || e.altKey) return false;
       switch (e.key) {
         case 'ArrowDown':
