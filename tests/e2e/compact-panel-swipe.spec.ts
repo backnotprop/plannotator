@@ -71,10 +71,11 @@ async function finger(page: Page, engine: Engine): Promise<Finger> {
   if (engine === 'chromium') {
     const cdp = await page.context().newCDPSession(page);
     let at = { x: 0, y: 0 };
-    // Each event carries its own time (a second behind the clock, 16 ms or the wait apart): the page reads a flick's
-    // speed from event.timeStamp, and the protocol delivers a move about every 50 ms, slower than any real flick.
+    // Each event carries its own time (from now, 16 ms or the wait apart): the page reads a flick's speed from
+    // event.timeStamp, and the protocol delivers a move about every 35-50 ms, slower than any real flick. A start
+    // dated before now can fall before a young page's time origin, and that flick reads as no speed at all.
     let clock = 0;
-    const tick = (ms: number, sync = false) => (clock = sync ? Math.max(clock + ms / 1000, Date.now() / 1000 - 1) : clock + ms / 1000);
+    const tick = (ms: number, sync = false) => (clock = sync ? Math.max(clock + ms / 1000, Date.now() / 1000) : clock + ms / 1000);
     return {
       async down(x, y) {
         at = { x, y };
@@ -617,21 +618,16 @@ test('code review: Commits reopens where it was', async ({ browser, browserName 
   });
 });
 
-async function inPageFlick(page: Page, x: number, y: number, dx: number) {
-  const webkitStyle = await finger(page, 'webkit');
-  await webkitStyle.flick!(x, y, dx, 0);
-}
-
 test('code review: a flick inside Changes or All files closes the sheet', async ({ browser, browserName }) => {
-  await withReview(browser, browserName, async ({ page, sheet, openSheet, showAllFiles }) => {
-    await inPageFlick(page, 330, 520, -110);
+  await withReview(browser, browserName, async ({ page, f, sheet, openSheet, showAllFiles }) => {
+    await swipe(f, 330, 520, -110, 0, 'flick');
     await expect(sheet).toHaveCount(0);
     await openSheet();
     const tree = await showAllFiles();
     await repoFolder(tree, 'docs').click();
     await repoFolder(tree, 'docs/guides').click();
     await scrollTo(page, tree.locator('[data-file-tree-virtualized-scroll]'), 300);
-    await inPageFlick(page, 330, 520, -110);
+    await swipe(f, 330, 520, -110, 0, 'flick');
     await expect(sheet).toHaveCount(0);
   });
 });
