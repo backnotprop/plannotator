@@ -152,7 +152,12 @@ export interface T3StartAttempt {
    */
   outcome: "running" | "uncertain" | "refused" | "started";
   timedOut?: boolean;
+  /** The thread T3 named for it while another launch held that thread ("uncertain"): this launch's once no other holds it. */
+  thread?: string;
 }
+
+/** The T3 thread title a launch's name starts as (`--title`). */
+export const t3TitleOf = (name: string): string => name.replace(/\s+/g, " ").trim();
 
 /** Whether a start of a launch may have made a thread no one has taken yet: the Inbox closed during it, or it ended uncertain. */
 export const t3MayHaveMade = (attempt: T3StartAttempt | null): boolean => attempt?.outcome === "running" || attempt?.outcome === "uncertain";
@@ -166,11 +171,19 @@ export const t3MayHaveMade = (attempt: T3StartAttempt | null): boolean => attemp
  * Null: none, so a new start runs.
  */
 export function t3AdoptableOf(attempt: T3StartAttempt | null, title: string, listed: { threadId: string; title: string; createdAt: number | null }[] | null, elsewhere: (thread: string) => boolean): string | null {
-  if (!attempt || attempt.title !== title || !t3MayHaveMade(attempt) || !listed) return null;
+  const made = t3MadeOf(attempt, title, listed, elsewhere);
+  return made.length === 1 ? made[0]! : null;
+}
+
+/**
+ * Every thread that cut-short start may have made (`t3AdoptableOf`'s rule, before "exactly one"): none means nothing
+ * of it is there and a new start may run; two or more can't be told apart, so nothing is taken and nothing new starts.
+ */
+export function t3MadeOf(attempt: T3StartAttempt | null, title: string, listed: { threadId: string; title: string; createdAt: number | null }[] | null, elsewhere: (thread: string) => boolean): string[] {
+  if (!attempt || attempt.title !== title || !t3MayHaveMade(attempt) || !listed) return [];
   // A second of slack for two clocks on the same computer.
   const since = (t: { createdAt: number | null }) => (t.createdAt === null ? attempt.listed : t.createdAt >= attempt.at - 1_000);
-  const made = listed.filter((t) => t.title === title && !(attempt.listed && attempt.before.includes(t.threadId)) && since(t) && !elsewhere(t.threadId));
-  return made.length === 1 ? made[0]!.threadId : null;
+  return listed.filter((t) => t.title === title && !(attempt.listed && attempt.before.includes(t.threadId)) && since(t) && !elsewhere(t.threadId)).map((t) => t.threadId);
 }
 
 /** An agent's words in the Inbox, as `t3LaunchWriterOf` reads them. */
@@ -181,9 +194,10 @@ type Written = Pick<InboxMessage, "author" | "created_at" | "to" | "tags">;
  * thread's id (`T3CODE_THREAD_ID`) only to the Claude it runs, which writes as that thread (host "t3"); Codex,
  * OpenCode and Pi write under their own session ids, and nothing T3 says (`thread show`/`list`) names those. The thread
  * id is told only to the agent of that thread, in the first turn the start put in. So: the first agent message here
- * since the start, from a session of the launch's own agent (`agent`) or a T3 thread (`own`, the thread the launch
- * is on, once known), whose first words in this Inbox are in this thread (`firstThreadOf`), that no person's message
- * here is addressed to or tags (an agent the person brought in), and that is no other launch's (`elsewhere`). Another
+ * since the start, from a session of the launch's own agent (`agent`) or, for a Claude Code launch only, a T3 thread
+ * (`own`, the thread the launch is on, once known), whose first words in this Inbox are in this thread
+ * (`firstThreadOf`), that no person's message here is addressed to or tags (an agent the person brought in), and that
+ * is no other launch's (`elsewhere`). Another
  * session of the same agent in the same folder never counts unless it wrote here first. Null: none has.
  */
 export function t3LaunchWriterOf(messages: readonly Written[], at: { threadId: string; agent: string; since: number; own: string | null }, firstThreadOf: (session: string) => string | null, elsewhere: (session: string) => boolean): { host: string; session: string } | null {
@@ -196,7 +210,8 @@ export function t3LaunchWriterOf(messages: readonly Written[], at: { threadId: s
     }
     if (m.author.kind !== "agent" || !m.author.session || m.author.session.startsWith("launch:")) continue;
     const { host, session } = { host: m.author.host ?? "", session: m.author.session };
-    const ours = host === at.agent || (host === INBOX_T3_HOST && isT3ThreadId(session) && (at.own === null || at.own === session));
+    // Only Claude Code writes as its T3 thread: a T3 thread's words never count for a Codex, OpenCode or Pi launch.
+    const ours = host === at.agent || (at.agent === "claude-code" && host === INBOX_T3_HOST && isT3ThreadId(session) && (at.own === null || at.own === session));
     if (!ours || !(Date.parse(m.created_at) >= at.since - 1_000) || (brought.has(session) && session !== at.own)) continue;
     if (firstThreadOf(session) !== at.threadId || elsewhere(session)) continue;
     return { host, session };
@@ -355,12 +370,12 @@ export function createT3LaunchHost(ctx: LaunchHostContext, options: { startTimeo
   const attemptFile = (id: string) => join(ctx.launchDir(id), "t3-start.json");
   const readAttempt = (id: string): T3StartAttempt | null => {
     try {
-      const said = JSON.parse(readFileSync(attemptFile(id), "utf8")) as { title?: unknown; before?: unknown; listed?: unknown; at?: unknown; outcome?: unknown; timedOut?: unknown };
+      const said = JSON.parse(readFileSync(attemptFile(id), "utf8")) as { title?: unknown; before?: unknown; listed?: unknown; at?: unknown; outcome?: unknown; timedOut?: unknown; thread?: unknown };
       if (typeof said.title !== "string" || !Array.isArray(said.before)) return null;
       // "unlisted" (this branch's first form): no list before it, and how it ended not kept, so it may have made one.
       const listed = said.listed !== false && said.outcome !== "unlisted";
       const outcome = said.outcome === "uncertain" || said.outcome === "refused" || said.outcome === "started" ? said.outcome : said.outcome === "unlisted" ? "uncertain" : "running";
-      return { title: said.title, before: said.before.filter((id): id is string => typeof id === "string"), listed, at: typeof said.at === "number" ? said.at : 0, outcome, ...(said.timedOut === true ? { timedOut: true } : {}) };
+      return { title: said.title, before: said.before.filter((id): id is string => typeof id === "string"), listed, at: typeof said.at === "number" ? said.at : 0, outcome, ...(said.timedOut === true ? { timedOut: true } : {}), ...(isT3ThreadId(said.thread) ? { thread: said.thread } : {}) };
     } catch {
       return null;
     }
@@ -385,15 +400,34 @@ export function createT3LaunchHost(ctx: LaunchHostContext, options: { startTimeo
 
   /**
    * A thread an earlier start of this launch made and no one took (`t3AdoptableOf`), from `titled`: noted as this
-   * launch's ("started") and returned; null when none. Never one another launch or Inbox thread has.
+   * launch's ("started") and returned; null when none. Never one another launch or Inbox thread has. "unsure": two or
+   * more could be it, or the one could be the thread of another start of that title in the folder still running
+   * (`t3StartingBeside`), or T3 named this launch's thread while another launch held it: none is taken and no new
+   * start runs beside them.
    */
-  const adoptFrom = (launch: InboxLaunchRecord, title: string, titled: ReturnType<typeof t3ListedThreadsOf>): string | null => {
+  const adoptFrom = (launch: InboxLaunchRecord, title: string, titled: ReturnType<typeof t3ListedThreadsOf>): { thread: string } | "unsure" | null => {
     const before = readAttempt(launch.id);
-    const made = t3AdoptableOf(before, title, titled, (thread) => ctx.sessionElsewhere?.(thread, launch.id) === true);
-    if (!made) return null;
+    // T3 named this launch's thread, but another launch held it then: its own once no other launch holds it.
+    if (before?.thread && t3MayHaveMade(before)) {
+      if (ctx.sessionHeld?.(before.thread, launch.id) === true) return "unsure";
+      writeAttempt(launch.id, { ...before, outcome: "started" });
+      ctx.startLog(launch.id, `T3 thread ${before.thread}, named by an earlier start of this launch: taken, no second thread`);
+      return { thread: before.thread };
+    }
+    const candidates = t3MadeOf(before, title, titled, (thread) => ctx.sessionElsewhere?.(thread, launch.id) === true);
+    if (candidates.length === 0) return null;
+    if (candidates.length > 1) {
+      ctx.startLog(launch.id, `T3 threads ${candidates.join(", ")}: more than one could be this launch's earlier start's: none taken, no new thread`);
+      return "unsure";
+    }
+    if (ctx.t3StartingBeside?.(launch.id, launch.folder, title) === true) {
+      ctx.startLog(launch.id, `T3 thread ${candidates[0]}: another start of "${title}" in this folder is still running, so it may be that one's: not taken, no new thread`);
+      return "unsure";
+    }
+    const made = candidates[0]!;
     writeAttempt(launch.id, { ...before!, outcome: "started" });
     ctx.startLog(launch.id, `T3 thread ${made}, made by an earlier start of this launch: taken, no second thread`);
-    return made;
+    return { thread: made };
   };
 
   /**
@@ -458,7 +492,7 @@ export function createT3LaunchHost(ctx: LaunchHostContext, options: { startTimeo
       if (!driver) return away("refused", `T3 Code doesn't run ${launch.agent}.`);
       const message = input.firstTurn ?? "";
       if (!message.trim()) return { ok: false as const, code: "failed" as const, text: "The message is empty." };
-      const title = input.name.replace(/\s+/g, " ").trim();
+      const title = t3TitleOf(input.name);
       const said = (result: { stdout: string; stderr: string }) => `${result.stdout}\n${result.stderr}`;
 
       // The folder as a T3 project of its own, every time: T3 runs `.` in the deepest project holding it, or in another
@@ -480,9 +514,10 @@ export function createT3LaunchHost(ctx: LaunchHostContext, options: { startTimeo
       // closed) may have made the thread: a new thread of its title made since then, that no other launch or Inbox
       // thread has, is that one, never a second. After a plain refusal nothing was made: a new start runs.
       const made = adoptFrom(launch, title, titled);
-      if (made) return { ok: true as const, session: made, ref: made };
-      // Its agent wrote, or T3 lists nothing now to find an earlier start's thread by: no second start beside it.
-      if (input.wrote || (titled === null && t3MayHaveMade(readAttempt(launch.id)))) return stillUnsure(launch);
+      if (made && made !== "unsure") return { ok: true as const, session: made.thread, ref: made.thread };
+      // Its agent wrote, T3 lists nothing now to find an earlier start's thread by, or more than one could be it: no
+      // second start beside it.
+      if (made === "unsure" || input.wrote || (titled === null && t3MayHaveMade(readAttempt(launch.id)))) return stillUnsure(launch);
 
       // The model, as Rex starts it: the person's pick in New message (and its effort). None picked: the one T3 last
       // ran this agent on in this project, else T3's own first for it (asked under a token, only then).
@@ -516,6 +551,15 @@ export function createT3LaunchHost(ctx: LaunchHostContext, options: { startTimeo
       const refusedOf = () => ({ ...(declined ? { declined } : {}), ...(declinedEffort ? { declined_effort: declinedEffort } : {}) });
       for (let tries = 0; ; tries++) {
         const { result, thread } = await attempt(pick);
+        // A thread another launch took meanwhile (no two launches on one T3 thread): this launch settles on neither.
+        // It shows the line of a start that may have made its thread, and its Try again takes this one once no other
+        // launch holds it, never a new one beside it.
+        if (thread && ctx.sessionHeld?.(thread, launch.id) === true) {
+          const noted = readAttempt(launch.id);
+          if (noted) writeAttempt(launch.id, { ...noted, outcome: "uncertain", thread });
+          ctx.startLog(launch.id, `T3 thread ${thread}: another launch holds it already: not taken`);
+          return stillUnsure(launch);
+        }
         if (thread) {
           const inner: InboxLaunchInner = { provider: pick.provider, model: pick.model, agent: t3AgentName(pick.provider, driver) };
           ctx.startLog(launch.id, `T3 thread ${thread}, on ${inner.agent} · ${inner.model}`);
@@ -546,13 +590,21 @@ export function createT3LaunchHost(ctx: LaunchHostContext, options: { startTimeo
 
     /**
      * The thread an earlier start of `launch` made, found among T3's threads now (`t3AdoptableOf`), for a start the
-     * Inbox closed during whose agent then wrote: it settles as started with no Try again. Null when T3 can't say.
+     * Inbox closed during whose agent then wrote: it settles as started with no Try again. `writer`: the T3 thread a
+     * Claude Code launch's agent wrote as, taken only when T3 lists it under the launch's title. Null when T3 can't say.
      */
-    async adopt(launch: InboxLaunchRecord, name: string): Promise<string | null> {
+    async adopt(launch: InboxLaunchRecord, name: string, writer?: string): Promise<string | null> {
       const found = await command();
       if (!found || !t3ServerOf(t3HomeOf(found.e))) return null;
-      const title = name.replace(/\s+/g, " ").trim();
-      return adoptFrom(launch, title, (await listTitled(found, launch.folder, title)).titled);
+      const title = t3TitleOf(name);
+      const { titled } = await listTitled(found, launch.folder, title);
+      if (writer !== undefined) {
+        if (titled?.some((t) => t.threadId === writer)) return writer;
+        ctx.startLog(launch.id, `T3 thread ${writer} wrote in the thread, but T3 Code lists no thread of that id under "${title}": not taken`);
+        return null;
+      }
+      const made = adoptFrom(launch, title, titled);
+      return made && made !== "unsure" ? made.thread : null;
     },
 
     // T3 keeps the thread: there is nothing to list, stop or start again from here.
@@ -573,5 +625,5 @@ export function createT3LaunchHost(ctx: LaunchHostContext, options: { startTimeo
     terminal: (launch: InboxLaunchRecord): string => `cd ${shellQuote(launch.folder)}`,
     // Its prompts wait in T3's own app.
     permissions: () => ({ sweep() {}, withdrawAll() {} }),
-  } satisfies LaunchHost & { here(): Promise<{ installed: boolean; open: boolean }>; adopt(launch: InboxLaunchRecord, name: string): Promise<string | null> };
+  } satisfies LaunchHost & { here(): Promise<{ installed: boolean; open: boolean }>; adopt(launch: InboxLaunchRecord, name: string, writer?: string): Promise<string | null> };
 }

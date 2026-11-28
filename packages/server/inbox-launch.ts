@@ -108,7 +108,7 @@ import { createClaudeLaunchHost } from "./inbox-launch-claude";
 import { createPiLaunchHost } from "./inbox-launch-pi";
 import { createCodexLaunchHost } from "./inbox-launch-codex";
 import { createOpenCodeLaunchHost } from "./inbox-launch-opencode";
-import { createT3LaunchHost, t3LaunchWriterOf } from "./inbox-launch-t3";
+import { createT3LaunchHost, t3LaunchWriterOf, t3TitleOf } from "./inbox-launch-t3";
 import { launchPlainEnv, launchSpawnEnv, type LaunchEnv } from "./inbox-launch-env";
 import { pathFoldersOf } from "./env-path";
 import type { LaunchAvailability, LaunchDelivery, LaunchHost, LaunchHostContext, LaunchHostPermissions, LaunchHostResult, LaunchLive, LaunchSessions, LaunchStartFailure, LaunchStartWhy, LaunchTrustOffer, LaunchTurnError } from "./inbox-launch-host";
@@ -566,6 +566,12 @@ export function createInboxLaunch(options: {
     displayFolder: options.displayFolder,
     bridge: options.live,
     sessionElsewhere: (session, launchId) => sessionElsewhere(session, launchId),
+    sessionHeld: (session, launchId) => sessionHeld(session, launchId),
+    t3StartingBeside: (launchId, folder, title) =>
+      roots().some((m) => {
+        const other = m.launch!;
+        return other.id !== launchId && starting.has(other.id) && !other.session_ref && !other.deleted_at && other.folder === folder && inboxLaunchInT3(other) && t3TitleOf(launchNameOf(m)) === title;
+      }),
     log,
   };
   const claude = createClaudeLaunchHost(context);
@@ -600,10 +606,13 @@ export function createInboxLaunch(options: {
    * here (one it wrote, or a person's that went to it) is in another thread than that launch's.
    */
   function sessionElsewhere(session: string, launchId: string): boolean {
-    const all = roots();
-    if (all.some((m) => m.launch!.id !== launchId && (m.launch!.session_ref === session || m.launch!.session === session))) return true;
+    if (sessionHeld(session, launchId)) return true;
     const first = store.firstThreadsBySession().get(session);
-    return !!first && first.id !== all.find((m) => m.launch!.id === launchId)?.thread_id;
+    return !!first && first.id !== roots().find((m) => m.launch!.id === launchId)?.thread_id;
+  }
+  /** Whether another launch than `launchId` (deleted or not) started `session` or took it as its own. */
+  function sessionHeld(session: string, launchId: string): boolean {
+    return roots().some((m) => m.launch!.id !== launchId && (m.launch!.session_ref === session || m.launch!.session === session));
   }
   /** The agent a T3 start of this root's launch put in its thread, once it wrote there (`t3LaunchWriterOf`); null otherwise. */
   const t3WriterOf = (root: InboxMessage): { host: string; session: string } | null => {
@@ -1107,7 +1116,9 @@ export function createInboxLaunch(options: {
     memo.t3Settling = true;
     starting.add(launch.id);
     void (async () => {
-      const thread = writer.host === t3.agent ? writer.session : await t3.adopt(launch, launchNameOf(root));
+      // Only a Claude Code launch's agent writes as its T3 thread (taken once T3 lists it under the launch's title); any
+      // other's thread is found among T3's.
+      const thread = launch.agent === "claude-code" && writer.host === t3.agent ? await t3.adopt(launch, launchNameOf(root), writer.session) : await t3.adopt(launch, launchNameOf(root));
       const at = store.message(root.id)?.launch;
       if (!thread || !at || at.session_ref || at.error || at.deleted_at) return;
       startLog(launch.id, `T3 thread ${thread}: its agent (${writer.host} ${writer.session}) wrote in the thread after the Inbox closed during its start: taken as started`);

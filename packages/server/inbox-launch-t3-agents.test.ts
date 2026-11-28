@@ -18,7 +18,7 @@ import type { InboxLaunchAgent, InboxMessage } from "@plannotator/core/inbox-typ
 import { inboxHostSessionFromEnv } from "../../apps/hook/server/inbox-mcp-shim";
 import { CAPABILITIES, commandOf, t3LaunchSetup, until } from "../../tests/helpers/t3-launch";
 import { codexQueueMessage } from "./inbox-codex-wake";
-import { T3_LAUNCH_INTERRUPTED, t3AdoptableOf, t3LaunchWriterOf, type T3StartAttempt } from "./inbox-launch-t3";
+import { T3_LAUNCH_INTERRUPTED, t3AdoptableOf, t3LaunchWriterOf, t3StartUncertain, type T3StartAttempt } from "./inbox-launch-t3";
 
 const cleanup: (() => void | Promise<void>)[] = [];
 afterEach(async () => {
@@ -66,6 +66,12 @@ async function cutStart(t: Setup, root: InboxMessage, provider: string, model: s
   await made.exited;
   return t.t3!.starts().at(-1)!.id;
 }
+
+/** The run line's Try again on `root`, pressed in this computer's window of `launch` (an engine `t.restart()` made too). */
+const retry = (launch: Setup["launch"], root: InboxMessage) => {
+  const at = `/api/inbox/launch/${root.launch!.id}/retry`;
+  return launch.route(new Request(`http://127.0.0.1:4000${at}`, { method: "POST", headers: { host: "127.0.0.1:4000", "content-type": "application/json" }, body: JSON.stringify({ serverSession: "srv" }) }), at, "local");
+};
 
 describe("Codex, OpenCode and Pi in T3 Code reach the Inbox under their own sessions", () => {
   for (const [agent, provider] of [
@@ -132,9 +138,12 @@ describe("Codex, OpenCode and Pi in T3 Code reach the Inbox under their own sess
     expect(of([agent("codex", "codex-b")])).toBeNull();
     expect(of([agent("codex", "codex-a", -60_000)])).toBeNull();
     expect(of([agent("codex", "codex-a")], null, (s) => s === "codex-a")).toBeNull();
-    // The T3 thread itself (Claude Code in T3): any while the launch has none, then only its own.
-    expect(of([agent("t3", "t3-x")])).toEqual({ host: "t3", session: "t3-x" });
-    expect(of([agent("t3", "t3-x")], "t3-y")).toBeNull();
+    // The T3 thread itself: only for a Claude Code launch (only Claude writes as its T3 thread), any while the launch
+    // has none, then only its own.
+    expect(of([agent("t3", "t3-x")])).toBeNull();
+    const claude = (messages: Parameters<typeof t3LaunchWriterOf>[0], own: string | null = null) => t3LaunchWriterOf(messages, { threadId: thread, agent: "claude-code", since, own }, (s) => first.get(s) ?? null, () => false);
+    expect(claude([agent("t3", "t3-x")])).toEqual({ host: "t3", session: "t3-x" });
+    expect(claude([agent("t3", "t3-x")], "t3-y")).toBeNull();
     // Brought in by the person before it wrote: not it. A reply to it afterwards changes nothing.
     const toIt = { author: { kind: "person" as const }, created_at: at(500), to: { host: "codex", session: "codex-a" } };
     expect(of([toIt, agent("codex", "codex-a")])).toBeNull();
@@ -187,6 +196,43 @@ describe("a start the Inbox closed during", () => {
     expect(t.background).toEqual([]);
   });
 
+  test("a Codex start cut short: a Claude Code T3 thread no launch made, writing here first, is not taken for it; Try again takes the thread its own start made", async () => {
+    const t = t3LaunchSetup(cleanup, { used: USED });
+    const root = await t.prepare("Tighten the checkout copy.", "codex");
+    const made = await cutStart(t, root, "codex", "gpt-5.5");
+    const launch = t.restart();
+    // A Claude Code that T3 runs in some other thread writes its first Inbox message in this one.
+    const foreign = `thread:project:${randomUUID()}:${randomUUID()}`;
+    writes(t, root, agentIn("claude-code", foreign), "Looking at the copy.");
+    expect(launch.runOfMessage(root.id)).toMatchObject({ state: "failed", cause: T3_LAUNCH_INTERRUPTED });
+    await Bun.sleep(300);
+    expect(launch.runOfMessage(root.id)).toMatchObject({ state: "failed", cause: T3_LAUNCH_INTERRUPTED });
+    expect(t.store.message(root.id)!.launch!.session_ref).toBeFalsy();
+    await retry(launch, root);
+    expect(await until("taken", () => t.store.message(root.id)!.launch!.session_ref)).toBe(made);
+    expect(t.starts()).toHaveLength(1);
+    expect(t.background).toEqual([]);
+  });
+
+  test("a Claude Code start cut short: a T3 thread T3 lists under no thread of the launch's title, writing here first, is not taken for it", async () => {
+    const t = t3LaunchSetup(cleanup, { used: USED });
+    const root = await t.prepare("Tighten the checkout copy.");
+    const made = await cutStart(t, root, "claudeAgent", "sonnet");
+    const launch = t.restart();
+    const foreign = `thread:project:${randomUUID()}:${randomUUID()}`;
+    writes(t, root, agentIn("claude-code", foreign), "Looking at the copy.");
+    expect(launch.runOfMessage(root.id)).toMatchObject({ state: "failed", cause: T3_LAUNCH_INTERRUPTED });
+    await until("asked T3", () => t.t3!.calls().some((args) => args[1] === "list"));
+    await Bun.sleep(300);
+    expect(launch.runOfMessage(root.id)).toMatchObject({ state: "failed", cause: T3_LAUNCH_INTERRUPTED });
+    expect(t.store.message(root.id)!.launch!.session_ref).toBeFalsy();
+    // Its own start's thread is still found and taken by Try again (its agent "wrote": nothing new starts).
+    await retry(launch, root);
+    expect(await until("taken", () => t.store.message(root.id)!.launch!.session_ref)).toBe(made);
+    expect(t.starts()).toHaveLength(1);
+    expect(t.background).toEqual([]);
+  });
+
   test("its agent has not written: Try again takes the thread that start made", async () => {
     const t = t3LaunchSetup(cleanup, { used: USED });
     const root = await t.prepare("Tighten the checkout copy.");
@@ -215,6 +261,62 @@ describe("a start the Inbox closed during", () => {
     expect(mine).not.toBe(theirs);
     expect(t.starts()).toHaveLength(2);
   });
+
+  test("two cut starts of the same title in the same folder each made a thread: Try again takes neither and starts no third", async () => {
+    const t = t3LaunchSetup(cleanup, { used: USED });
+    const first = await t.prepare("Tighten the checkout copy.", "codex");
+    // No thread name of its own (two open threads can't share one): T3's title is its subject, the same words.
+    const second = await t.prepare("Checkout copy", "codex", null);
+    await cutStart(t, first, "codex", "gpt-5.5");
+    await cutStart(t, second, "codex", "gpt-5.5");
+    const launch = t.restart();
+    expect(launch.runOfMessage(first.id)).toMatchObject({ state: "failed", cause: T3_LAUNCH_INTERRUPTED });
+    await retry(launch, first);
+    expect(await until("the line again", () => t.store.message(first.id)!.launch!.error)).toMatchObject({ text: T3_LAUNCH_INTERRUPTED });
+    expect(t.store.message(first.id)!.launch!.session_ref).toBeFalsy();
+    expect(t.starts()).toHaveLength(2);
+    expect(t.background).toEqual([]);
+  });
+
+  test("Try again while another start of the same title in the same folder is still running: the one new thread may be that start's, so it is not taken and nothing starts", async () => {
+    const t = t3LaunchSetup(cleanup, { used: USED, startTimeoutMs: 3_000 });
+    const root = await t.prepare("Tighten the checkout copy.");
+    // This launch's start was cut before T3 made anything.
+    const dir = join(t.dataDir, "inbox", "launch", root.launch!.id);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "t3-start.json"), `${JSON.stringify({ title: "Checkout copy", before: [], listed: true, at: Date.now() - 1_000, outcome: "running" })}\n`);
+    // Another launch of the same title: T3 makes its thread, and its `thread start` hasn't answered yet.
+    t.t3!.setState("taken-then-hang");
+    const other = await t.send("Checkout copy", "claude-code", null);
+    const theirs = await until("their thread made", () => t.t3!.starts()[0]?.id);
+    await retry(t.launch, root);
+    expect(await until("the line again", () => t.store.message(root.id)!.launch!.error)).toMatchObject({ text: T3_LAUNCH_INTERRUPTED });
+    expect(t.store.message(root.id)!.launch!.session_ref).toBeFalsy();
+    expect(t.starts()).toHaveLength(1);
+    // The other start then ends uncertain; its thread was never this launch's.
+    await until("their start ended", () => t.store.message(other.id)!.launch!.error, 10_000);
+    expect(t.store.message(root.id)!.launch!.session_ref).toBeFalsy();
+    expect(theirs).toBeTruthy();
+    expect(t.background).toEqual([]);
+  }, 30_000);
+
+  test("a start that named a thread another launch already holds settles on neither: the line of a start that may have made its thread, and Try again starts nothing beside it", async () => {
+    const t = t3LaunchSetup(cleanup, { used: USED });
+    const holder = await t.prepare("Tighten the checkout copy.");
+    t.t3!.slowStart(1_500);
+    const root = await t.send("Fix the totals.", "claude-code", "Totals fix");
+    const made = await until("the thread made", () => t.t3!.starts()[0]?.id);
+    // Meanwhile another launch took that thread as its own.
+    t.store.settleLaunch(holder.id, { to: { host: "t3", session: made }, session_ref: made, delivered: true });
+    expect(await until("the line", () => t.store.message(root.id)!.launch!.error)).toMatchObject({ text: t3StartUncertain({}) });
+    expect(t.store.message(root.id)!.launch!.session_ref).toBeFalsy();
+    expect(await t.route(root.launch!.id, "retry")).toMatchObject({ ok: true });
+    await until("asked T3 again", () => t.t3!.calls().filter((args) => args[1] === "list").length >= 2);
+    expect(await until("the line again", () => t.store.message(root.id)!.launch!.error)).toMatchObject({ text: t3StartUncertain({}) });
+    expect(t.store.message(root.id)!.launch!.session_ref).toBeFalsy();
+    expect(t.starts()).toHaveLength(1);
+    expect(t.background).toEqual([]);
+  }, 30_000);
 
   test("T3 didn't list the threads before a start that then timed out: Try again lists again and takes the thread by its title and time, never a second", async () => {
     // With no list, the model is T3's first listed one.

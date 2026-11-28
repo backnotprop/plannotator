@@ -230,6 +230,13 @@ export interface LaunchHostContext {
    * still takes its own launch's, whose agent may have written in that launch's thread already.
    */
   sessionElsewhere?: (session: string, launchId: string) => boolean;
+  /** Whether another launch than `launchId` (deleted or not) holds `session` as its own: no two launches on one session. */
+  sessionHeld?: (session: string, launchId: string) => boolean;
+  /**
+   * Whether another T3 Code launch than `launchId`, in `folder` and of thread title `title`, is starting now with no
+   * thread yet: a thread of that title T3 lists may be that start's, whose `thread start` hasn't answered.
+   */
+  t3StartingBeside?: (launchId: string, folder: string, title: string) => boolean;
   log: (line: string) => void;
 }
 

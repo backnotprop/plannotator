@@ -159,6 +159,8 @@ export interface FakeT3Home {
   refuseAuth(): void;
   /** A T3 whose `thread start` has no `--option` flag (as the CLI parser refuses an unknown flag). */
   withoutOptionFlag(): void;
+  /** Every later `thread start` makes its thread at once and answers `ms` later. */
+  slowStart(ms: number): void;
   /** Make every later `thread list` fail (false: answer again). */
   refuseList(refused?: boolean): void;
 }
@@ -315,8 +317,12 @@ else if (args[0] === "auth" && args[1] === "session" && args[2] === "issue") {
   const id = "thread:project:" + randomUUID() + ":" + randomUUID();
   fs.appendFileSync(startsFile, JSON.stringify({ id, cwd, project, base, title: flag("--title") ?? null, provider, model, options, text, createdAt: new Date().toISOString() }) + "\\n");
   fs.appendFileSync(turnsFile, JSON.stringify([id, text]) + "\\n");
+  const answer = () => process.stdout.write(JSON.stringify({ threadId: id, projectId: "project:" + require("node:path").basename(project), runId: "run:" + randomUUID() }) + "\\n");
+  const delayFile = ${JSON.stringify(join(dir, "start-delay"))};
+  const delay = fs.existsSync(delayFile) ? Number(fs.readFileSync(delayFile, "utf8")) : 0;
   if (state === "taken-then-hang") setTimeout(() => {}, 60000);
-  else process.stdout.write(JSON.stringify({ threadId: id, projectId: "project:" + require("node:path").basename(project), runId: "run:" + randomUUID() }) + "\\n");
+  else if (delay > 0) setTimeout(answer, delay);
+  else answer();
 } else if (args[0] === "thread" && args[1] === "list") {
   if (fs.existsSync(${JSON.stringify(join(dir, "list-refused"))})) say("Something went wrong.", 1);
   const cwd = fs.realpathSync(process.cwd());
@@ -365,6 +371,7 @@ else if (args[0] === "auth" && args[1] === "session" && args[2] === "issue") {
     revoked: () => (existsSync(join(dir, "revoked.log")) ? readFileSync(join(dir, "revoked.log"), "utf8").split("\n").filter(Boolean) : []),
     refuseAuth: () => writeFileSync(join(dir, "auth-refused"), "1"),
     withoutOptionFlag: () => writeFileSync(join(dir, "no-option-flag"), "1"),
+    slowStart: (ms: number) => writeFileSync(join(dir, "start-delay"), String(ms)),
     refuseList: (refused = true) => (refused ? writeFileSync(join(dir, "list-refused"), "1") : renameSync(join(dir, "list-refused"), join(dir, `list-answered-${Date.now()}`))),
   };
 }
