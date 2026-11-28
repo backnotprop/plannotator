@@ -691,3 +691,112 @@ test.if(hasDom)("a linked machine's card: its project names the machine, bold by
   expect(drawn.moves).toEqual([{ id: 'crd_far', move: { op: 'move', column: 'done' } }]);
   expect($('.ib-bfail')).toBeNull();
 });
+
+test.if(hasDom)('New card rejected for a bad link succeeds once the bad link is removed', async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input), 'http://127.0.0.1:1');
+    const method = init?.method ?? 'GET';
+    const body = typeof init?.body === 'string' ? (JSON.parse(init.body) as Record<string, unknown>) : null;
+    calls.push({ method, path: url.pathname, body });
+    if (url.pathname === '/api/inbox/sessions') return json({ serverSession: 's', home: '/Users/ada', projects: [] });
+    if (url.pathname === '/api/inbox/board/intro') return json({ show: false });
+    if (url.pathname === '/api/inbox/cards' && method === 'POST') {
+      const refs = (body?.refs as string[]) ?? [];
+      if (refs.includes('bad-link')) return json({ code: 'validation_error', error: 'Invalid link: "bad-link".' }, 400);
+      return json({ card: card('crd_new', { title: String(body?.title), agent: null, notes: (body?.notes as string) ?? null }) });
+    }
+    return json({ error: 'not scripted' }, 404);
+  }) as typeof fetch;
+  restorers.push(() => {
+    globalThis.fetch = original;
+  });
+
+  const drawn = draw();
+  await settle();
+  act(() => $('[data-board-new]')!.click());
+  await settle();
+
+  const title = $('[data-new-card-title]') as HTMLInputElement;
+  const links = $('[data-new-card-links]') as HTMLInputElement;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(title, 'Check refs');
+    title.dispatchEvent(new Event('input', { bubbles: true }));
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(links, 'bad-link');
+    links.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await act(async () => $$('[data-new-card-add]').at(-1)!.click());
+  await settle();
+
+  expect($('[data-new-card-error]')!.textContent).toBe('Invalid link: "bad-link".');
+
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(links, '');
+    links.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await act(async () => $$('[data-new-card-add]').at(-1)!.click());
+  await settle();
+
+  const creates = calls.filter((c) => c.path === '/api/inbox/cards' && c.method === 'POST');
+  expect(creates).toHaveLength(2);
+  expect(creates[0]!.body).toMatchObject({ title: 'Check refs', refs: ['bad-link'] });
+  expect(creates[1]!.body).toMatchObject({ title: 'Check refs', refs: [] });
+  expect($('[data-new-card-error]')).toBeNull();
+  expect(drawn.changed).toBe(1);
+  expect($('[data-board-live]')!.textContent).toBe('Added “Check refs” to Backlog.');
+});
+
+test.if(hasDom)('New card still replays the first try after a 503 even when the title is edited before retrying', async () => {
+  const original = globalThis.fetch;
+  let createAttempts = 0;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input), 'http://127.0.0.1:1');
+    const method = init?.method ?? 'GET';
+    const body = typeof init?.body === 'string' ? (JSON.parse(init.body) as Record<string, unknown>) : null;
+    calls.push({ method, path: url.pathname, body });
+    if (url.pathname === '/api/inbox/sessions') return json({ serverSession: 's', home: '/Users/ada', projects: [] });
+    if (url.pathname === '/api/inbox/board/intro') return json({ show: false });
+    if (url.pathname === '/api/inbox/cards' && method === 'POST') {
+      createAttempts += 1;
+      if (createAttempts === 1) return json({ error: 'Temporary failure' }, 503);
+      return json({ card: card('crd_new', { title: String(body?.title), agent: null, notes: null }) });
+    }
+    if (url.pathname === '/api/inbox/cards/crd_new' && method === 'POST') {
+      return json({ card: card('crd_new', { title: String(body?.title), agent: null, notes: (body?.notes as string) ?? null }) });
+    }
+    return json({ error: 'not scripted' }, 404);
+  }) as typeof fetch;
+  restorers.push(() => {
+    globalThis.fetch = original;
+  });
+
+  const drawn = draw();
+  await settle();
+  act(() => $('[data-board-new]')!.click());
+  await settle();
+
+  const title = $('[data-new-card-title]') as HTMLInputElement;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(title, 'First title');
+    title.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await act(async () => $$('[data-new-card-add]').at(-1)!.click());
+  await settle();
+  expect($('[data-new-card-error]')!.textContent).toBe('Temporary failure');
+
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(title, 'Updated title');
+    title.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await act(async () => $$('[data-new-card-add]').at(-1)!.click());
+  await settle();
+
+  const creates = calls.filter((c) => c.path === '/api/inbox/cards' && c.method === 'POST');
+  expect(creates).toHaveLength(2);
+  expect(creates[1]!.body!.idempotency_key).toBe(creates[0]!.body!.idempotency_key);
+  expect(creates[1]!.body!.title).toBe('First title');
+  const edits = calls.filter((c) => c.path === '/api/inbox/cards/crd_new' && c.method === 'POST');
+  expect(edits[0]!.body).toMatchObject({ op: 'edit', title: 'Updated title', notes: null });
+  expect(drawn.changed).toBe(1);
+  expect($('[data-board-live]')!.textContent).toBe('Added “Updated title” to Backlog.');
+});
