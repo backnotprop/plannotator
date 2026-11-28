@@ -12,7 +12,7 @@
  * A small bridge in the test's data dir stands in for the Inbox's.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InboxLaunchRecord, InboxMessage } from "@plannotator/core/inbox-types";
@@ -24,7 +24,7 @@ import type { FakePi } from "../../tests/helpers/fake-pi";
 import { createAgentEnvironmentFor } from "./inbox-agents";
 import type { LaunchHostContext, LaunchLive } from "./inbox-launch-host";
 import type { LaunchEnv } from "./inbox-launch-env";
-import { createOhMyPiLaunchHost, ompAgentDir, ompPluginsDirs, ompSessionDirOf, ompSessionsRoot, OMP_STOPPED_NOTE } from "./inbox-launch-omp";
+import { createOhMyPiLaunchHost, ompAgentDir, ompPluginInstalled, ompPluginsDirs, ompSessionDirOf, ompSessionsRoot, OMP_STOPPED_NOTE } from "./inbox-launch-omp";
 import { piSessionContinues, piSessionProcesses } from "./inbox-launch-pi";
 
 const cleanup: (() => void | Promise<void>)[] = [];
@@ -383,7 +383,7 @@ describe("Oh My Pi's launch host, against the fake omp", () => {
     writeFileSync(join(home, ".omp", "agent", "settings.json"), JSON.stringify({ extensions: ["npm:@plannotator/pi-extension"] }));
     expect(await host.available()).toMatchObject({ ok: true });
     fake.configure({ version: "19.1.0" });
-    expect(await host.available()).toMatchObject({ ok: false, reason: "Oh My Pi 19.1.0 is older than 19.2.1" });
+    expect(await host.available()).toMatchObject({ ok: false, reason: "Oh My Pi 19.1.0 is older than 19.2.1", code: "too_old" });
     fake.setInstalled(false);
     expect(await host.available()).toMatchObject({ ok: false, missing: true, code: "missing" });
   });
@@ -405,6 +405,38 @@ describe("Oh My Pi's launch host, against the fake omp", () => {
     expect((await host.purge(folder)).skipped).toBeUndefined();
     expect(fake.sessionFiles()).toEqual([]);
   }, 15_000);
+});
+
+describe("Oh My Pi's plugin record, as its loader reads it", () => {
+  /** A plugins folder holding `pi-subagents` by `omp plugin install`, and Plannotator's extension as `link` says. */
+  function plugins(input: { lock?: boolean; enabled?: boolean; entry: "link" | "dangling" | "folder" | "none" }) {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-omp-link-")));
+    cleanup.push(() => rmSync(root, { recursive: true, force: true }));
+    const dir = join(root, "plugins");
+    const checkout = join(root, "checkout", "pi-extension");
+    mkdirSync(join(dir, "node_modules", "@plannotator"), { recursive: true });
+    mkdirSync(checkout, { recursive: true });
+    writeFileSync(join(checkout, "package.json"), JSON.stringify({ name: "@plannotator/pi-extension", version: "0.29.6", pi: {} }));
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "omp-plugins", private: true, dependencies: { "pi-subagents": "^1.0.0" } }));
+    const entries: Record<string, unknown> = { "pi-subagents": { version: "1.0.0", enabledFeatures: null, enabled: true } };
+    if (input.lock !== false) entries["@plannotator/pi-extension"] = { version: "0.29.6", enabledFeatures: null, enabled: input.enabled !== false };
+    writeFileSync(join(dir, "omp-plugins.lock.json"), JSON.stringify({ plugins: entries, settings: {} }));
+    const at = join(dir, "node_modules", "@plannotator", "pi-extension");
+    if (input.entry === "link") symlinkSync(checkout, at, "dir");
+    if (input.entry === "dangling") symlinkSync(join(root, "gone"), at, "dir");
+    if (input.entry === "folder") cpSync(checkout, at, { recursive: true });
+    return dir;
+  }
+
+  test("a checkout `omp plugin link` linked (a lock entry, no dependency) is installed; a link to nothing, a disabled one, a stray folder or a link the lock does not name is not", () => {
+    expect(ompPluginInstalled(plugins({ entry: "link" }))).toBe(true);
+    expect(ompPluginInstalled(plugins({ entry: "dangling" }))).toBe(false);
+    expect(ompPluginInstalled(plugins({ entry: "link", enabled: false }))).toBe(false);
+    // Oh My Pi skips a lock entry that is neither a dependency nor a link ("stale lockfile entry").
+    expect(ompPluginInstalled(plugins({ entry: "folder" }))).toBe(false);
+    expect(ompPluginInstalled(plugins({ entry: "link", lock: false }))).toBe(false);
+    expect(ompPluginInstalled(plugins({ entry: "none" }))).toBe(false);
+  });
 });
 
 describe("Oh My Pi's folders", () => {
