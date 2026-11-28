@@ -39,6 +39,7 @@ export function backFocusTargets(to: BackFocusRoute, from: BackFocusRoute): stri
 export function focusKept(active: Element | null, to: BackFocusRoute, from: BackFocusRoute): boolean {
   if (!active || focusLost(active)) return false;
   if (active.closest('.ib-side')) return true;
+  if (to.page === 'artifacts' && active.closest('[data-artifacts-wall]')) return true;
   if (to.page !== 'inbox') return false;
   if (!to.thread) return !!active.closest('.ib-main .ib-lbody');
   // Within one thread (a file opened or closed), the thread puts focus back itself: where O was pressed.

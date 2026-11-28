@@ -9,11 +9,12 @@
  * the person nears the end. A tile opens what its card in the thread opens.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Menu } from '@base-ui/react/menu';
 import { INBOX_ARTIFACTS_PAGE, INBOX_ARTIFACTS_PAGE_MAX, type InboxArtifactRow, type InboxArtifactsPage, type InboxArtifactType } from '@plannotator/core/inbox-artifact-pins';
 import { inboxApi } from '../api';
 import type { Route } from '../app/route';
+import { dropWallPlace, keepWallPlace, wallPlace } from '../app/wallReturn';
 import { htmlArtifactName, originOf, type Artifact } from '../artifacts';
 import { openHtmlArtifact } from '../htmlArtifactOpen';
 import { useArtifactPins } from '../artifactPins';
@@ -156,8 +157,9 @@ export interface ArtifactsWallProps {
 }
 
 export function ArtifactsWall({ pinned, onPinned, onOpen, phone, read = inboxApi.artifacts }: ArtifactsWallProps) {
-  const [type, setType] = useState<InboxArtifactType | null>(null);
-  const [archived, setArchived] = useState(false);
+  const back = useRef(wallPlace());
+  const [type, setType] = useState<InboxArtifactType | null>(back.current?.type ?? null);
+  const [archived, setArchived] = useState(back.current?.archived ?? false);
   const [size, setSize] = useState<WallSize>(readSize);
   const [page, setPage] = useState<{ rows: InboxArtifactRow[]; next: string | null; counts: InboxArtifactsPage['counts'] | null } | null>(null);
   const [failed, setFailed] = useState(false);
@@ -184,8 +186,21 @@ export function ArtifactsWall({ pinned, onPinned, onOpen, phone, read = inboxApi
   );
   useEffect(() => {
     setPage(null);
-    load(INBOX_ARTIFACTS_PAGE);
+    load(back.current?.shown ?? INBOX_ARTIFACTS_PAGE);
   }, [load]);
+  const scroller = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    const place = back.current;
+    if (!place || !page || !scroller.current) return;
+    back.current = null;
+    dropWallPlace();
+    scroller.current.scrollTop = place.top;
+    scroller.current.querySelector<HTMLElement>(`[data-wall-artifact="${CSS.escape(place.key)}"] .ib-wall-tile`)?.focus({ preventScroll: true });
+  }, [page]);
+  const open = (row: InboxArtifactRow) => {
+    keepWallPlace({ type, archived, shown: loaded.current, top: scroller.current?.scrollTop ?? 0, key: row.key });
+    onOpen(row);
+  };
   // A pin changed (here, another window, a phone): the counts and the Pinned list follow.
   const firstPins = useRef(true);
   useEffect(() => {
@@ -243,7 +258,7 @@ export function ArtifactsWall({ pinned, onPinned, onOpen, phone, read = inboxApi
   const counts = page?.counts ?? null;
 
   return (
-    <section className="ib-dpage ib-wall" aria-label="Artifacts" data-artifacts-wall="" data-size={size} data-phone={phone ? '' : undefined}>
+    <section ref={scroller} className="ib-dpage ib-wall" aria-label="Artifacts" data-artifacts-wall="" data-size={size} data-phone={phone ? '' : undefined}>
       <div className="ib-dh ib-wall-h">
         <SidebarTrigger />
         <h1 tabIndex={-1}>Artifacts</h1>
@@ -314,7 +329,7 @@ export function ArtifactsWall({ pinned, onPinned, onOpen, phone, read = inboxApi
               <h2 className="ib-wall-day-h">{d.day}</h2>
               <ul className="ib-wall-grid" aria-label={plural(d.rows.length, 'artifact')}>
                 {d.rows.map((row) => (
-                  <WallTile key={`${row.thread_id}:${row.key}`} row={row} onOpen={onOpen} />
+                  <WallTile key={`${row.thread_id}:${row.key}`} row={row} onOpen={open} />
                 ))}
               </ul>
             </section>
