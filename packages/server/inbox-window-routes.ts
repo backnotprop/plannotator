@@ -79,6 +79,7 @@ export const ROUTE_FILES = [
   'packages/server/inbox-skills.ts',
   'packages/server/inbox-snooze.ts',
   'packages/server/inbox-steps.ts',
+  'packages/server/inbox-swarm-route.ts',
   'packages/server/inbox-system.ts',
   'packages/server/inbox-tags.ts',
   'packages/server/inbox-tailscale.ts',

@@ -264,6 +264,11 @@ export const SLICE_RULES: SliceRule[] = [
   { name: 'Inbox: Ask window', stopgap: true, paths: ['packages/inbox/ask/**', 'packages/server/inbox-ask*'], specs: ['inbox-ask-window.spec.ts', 'inbox-reask.spec.ts'] },
   { name: 'Inbox: search', stopgap: true, paths: ['packages/inbox/search/**'], specs: ['inbox-search*.spec.ts', 'inbox-feedback-search*.spec.ts'] },
   {
+    name: 'Inbox: swarm',
+    paths: ['packages/inbox/swarm/**', 'packages/server/inbox-swarm*', 'packages/shared/inbox/swarm*', 'packages/core/inbox-swarm*', 'packages/core/swarm-skill*'],
+    specs: ['inbox-swarm*.spec.ts'],
+  },
+  {
     // Every Inbox spec reads the store and the server; these are the short ones that walk a message's life
     // (an agent writes through `plannotator inbox mcp`, the window shows, reads, archives, acks, replies, restarts).
     name: 'Inbox: the store, the server and the agents\' write path',

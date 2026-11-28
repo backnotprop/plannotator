@@ -11,6 +11,7 @@ import { MessageBody } from './MessageBody/MessageBody';
 import { ReviewAnchorLine } from '../components/ReviewAnchorLine';
 import type { MessageActsRef } from './messageActs';
 import { farChangeMessage } from '../scheduled/farLinks';
+import { SwarmPlanSlot } from '../swarm/SwarmPlanCard';
 import { skillReactionShownBody } from '@plannotator/core/inbox-folding';
 
 export type MessageBodyData = {
@@ -44,10 +45,16 @@ export type MessageBodyData = {
 };
 
 export function drawMessageBody(d: MessageBodyData) {
-  const { acts } = d;
   // A skill emoji's reply is a reply like any other whose words read "🦃 /bro" (core inbox-skill-reaction.ts).
   const far = farChangeMessage(d.message, d.farMachine);
   const message = far.skill_reaction ? { ...far, body: skillReactionShownBody(far) } : far;
+  // A swarm's plan card (`swarm propose`): the card while Swarm is on and the thread's read has its plan, else its words.
+  if (message.swarm_plan) return <SwarmPlanSlot message={message} fallback={wordsOf(d, message)} />;
+  return wordsOf(d, message);
+}
+
+function wordsOf(d: MessageBodyData, message: InboxMessageWire) {
+  const { acts } = d;
   const id = message.id;
   const isAgent = message.author.kind === 'agent';
   const questions = message.questions ?? [];

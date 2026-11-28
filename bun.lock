@@ -27,11 +27,11 @@
     },
     "apps/cline-plugin": {
       "name": "@plannotator/cline",
-      "version": "0.29.5",
+      "version": "0.29.6",
     },
     "apps/dsh-plugin": {
       "name": "@plannotator/dsh",
-      "version": "0.29.5",
+      "version": "0.29.6",
     },
     "apps/feedback-service": {
       "name": "@plannotator/feedback-service",
@@ -134,11 +134,11 @@
     },
     "apps/openclaw-plugin": {
       "name": "@plannotator/openclaw",
-      "version": "0.29.5",
+      "version": "0.29.6",
     },
     "apps/opencode-plugin": {
       "name": "@plannotator/opencode",
-      "version": "0.29.5",
+      "version": "0.29.6",
       "devDependencies": {
         "@opencode-ai/plugin": "1.19.3",
         "@opencode/plugin": "2.0.32",
@@ -157,7 +157,7 @@
     },
     "apps/pi-extension": {
       "name": "@plannotator/pi-extension",
-      "version": "0.29.5",
+      "version": "0.29.6",
       "dependencies": {
         "@joplin/turndown-plugin-gfm": "^1.0.68",
         "@pierre/diffs": "1.7.0-beta.3",
@@ -297,7 +297,7 @@
     },
     "packages/core": {
       "name": "@plannotator/core",
-      "version": "0.25.35",
+      "version": "0.25.36",
       "dependencies": {
         "croner": "11.0.0",
       },
@@ -416,7 +416,7 @@
     },
     "packages/server": {
       "name": "@plannotator/server",
-      "version": "0.29.5",
+      "version": "0.29.6",
       "dependencies": {
         "@modelcontextprotocol/server": "2.3.1",
         "@pierre/diffs": "1.7.0-beta.3",
@@ -514,7 +514,7 @@
         "@lezer/highlight": "^1.2.5",
         "@pierre/diffs": "1.7.0-beta.3",
         "@plannotator/atomic-editor": "^0.9.0",
-        "@plannotator/core": "0.25.34",
+        "@plannotator/core": "0.25.35",
         "@plannotator/markdown-editor": "^0.5.0",
         "@plannotator/web-highlighter": "^0.8.2",
         "@tanstack/react-table": "^8.21.3",

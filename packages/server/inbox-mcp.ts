@@ -44,6 +44,7 @@ import { QUESTION_OPENERS_WITH_TEXT_MAX, questionOpenersWithText, questionOpener
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxSendResult, InboxStore } from "@plannotator/shared/inbox/store";
 import { inboxSupersedeSkipsText, type InboxSupersedeSkip } from "@plannotator/shared/inbox/supersede-skips";
+import { SWARM_GHOST_SEND_REFUSED } from "@plannotator/shared/inbox/swarm-start";
 import type { InboxAttachment, InboxListRow, InboxLiveSiteRef, InboxMessageWire } from "@plannotator/core/inbox-types";
 import { inboxAgentFilesOf } from "./inbox-agent-files";
 import { registerInboxGuideTools } from "./inbox-guides";
@@ -642,6 +643,8 @@ export async function sendProject(
     const far = parent ? null : (context.farThreadMachine?.(input.reply_to) ?? null);
     if (far) throw new InboxError("thread_on_other_machine", farReplyRefusal(input.reply_to, far));
     if (!parent) throw new InboxError("message_not_found", `No message ${input.reply_to}.`);
+    // Before attachments are kept: the store refuses it too (store.ts `sendMessage`).
+    if (context.store.ghostParentOf(parent.thread_id)) throw new InboxError("validation_error", SWARM_GHOST_SEND_REFUSED, { field: "reply_to" });
     return context.store.project(parent.project_id)!;
   }
   if (!input.project_path) {

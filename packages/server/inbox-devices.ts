@@ -258,6 +258,12 @@ const ALLOWLIST: readonly DoorRoute[] = [
   // Star and Unstar (`threads/:id/pin`), and the stars' order or Unstar's Undo (`pins`): contract 7.65, approval
   // "inbox-starred-pills". A linked machine sends the same two for this Inbox's threads (approval "inbox-linked-marks").
   { method: "POST", route: /^threads\/([^/]+)\/pin$/, window: (m) => `/api/inbox/threads/${m[1]}/pin` },
+  // Swarm's ghost pane (inbox-swarm-route.ts): the phone's ghost page, and a linked computer's window, read the ghost
+  // thread and write the person's words to the agents on the thread's own computer.
+  { method: "GET", route: /^threads\/([^/]+)\/swarm$/, window: (m) => `/api/inbox/threads/${m[1]}/swarm` },
+  { method: "POST", route: /^threads\/([^/]+)\/swarm$/, window: (m) => `/api/inbox/threads/${m[1]}/swarm` },
+  // Swarm's Add an agent: the person's message to one more agent, on the thread's own computer.
+  { method: "POST", route: /^threads\/([^/]+)\/swarm\/add$/, window: (m) => `/api/inbox/threads/${m[1]}/swarm/add` },
   { method: "POST", route: /^pins$/, window: () => "/api/inbox/pins" },
   // Add to Priority, Remove from Priority and their Undo (contract 7.66). A linked machine sends the same for this
   // Inbox's threads (approval "inbox-linked-marks").
@@ -471,6 +477,8 @@ const DOOR_OWN_ROUTES = [
   { method: "POST", route: "far-wake", grant: "machine", needs: "machines" },
   { method: "POST", route: "agent-reply", grant: "machine", needs: "machines" },
   { method: "POST", route: "far-delivered", grant: "machine", needs: "machines" },
+  // Swarm (inbox-swarm-route.ts): a linked computer's agent's `plannotator inbox swarm` for a thread here.
+  { method: "POST", route: "swarm", grant: "machine", needs: "machines" },
   { method: "POST", route: "link-back", grant: "machine", needs: "machines" },
   { method: "POST", route: "unlink", grant: "machine", needs: "machines" },
   // Link two computers through a third (inbox-link-through.ts, mark `link-through`): a linked computer asks this one to
@@ -715,6 +723,8 @@ export interface InboxDevicesContext {
     wake: (machine: string, body: Record<string, unknown>) => unknown;
     reply: (machine: string, body: Record<string, unknown>) => Promise<unknown>;
     delivered: (machine: string, body: Record<string, unknown>) => unknown;
+    /** Swarm: that computer's agent's swarm command for a thread here (inbox-swarm-route.ts `farSwarmAnswer`). */
+    swarm?: (machine: string, body: Record<string, unknown>) => unknown;
   };
   /** A linked machine's Update (inbox-updates.ts). */
   machineUpdate?: { read: () => unknown; start: () => Promise<{ outcome: string }> };
@@ -1380,6 +1390,7 @@ export function createInboxDevices(context: InboxDevicesContext) {
     "POST far-wake": async (req, _url, device) => (context.farTags ? await farTagWrite(device, () => context.readBody(req), context.farTags.wake) : routeNotFound(device)),
     "POST agent-reply": async (req, _url, device) => (context.farTags ? await farTagWrite(device, () => context.readBody(req), context.farTags.reply) : routeNotFound(device)),
     "POST far-delivered": async (req, _url, device) => (context.farTags ? await farTagWrite(device, () => context.readBody(req), context.farTags.delivered) : routeNotFound(device)),
+    "POST swarm": async (req, _url, device) => (context.farTags?.swarm ? await farTagWrite(device, () => context.readBody(req), context.farTags.swarm) : routeNotFound(device)),
     "POST link-back": async (req, _url, device) => context.machines?.()?.linkBack(device.id, await context.readBody(req)) ?? routeNotFound(device),
     "POST unlink": async (_req, _url, device) => context.machines?.()?.unlinkedBy(device.id) ?? routeNotFound(device),
     // Who asks is its token's linked computer only; a press in its window, its `X-Plannotator-Window` (a machine's word).

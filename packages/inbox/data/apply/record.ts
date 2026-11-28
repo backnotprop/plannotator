@@ -135,6 +135,8 @@ export function applyRecord(model: HeldThread, event: InboxEvent): RecordOutcome
     case 'scheduled':
       return NONE;
     case 'project':
+    // A thread's swarm (swarm/): the read carries it, so the thread is read again.
+    case 'swarm':
       return REREAD;
     default: {
       const unknown: never = event;

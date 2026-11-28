@@ -261,6 +261,8 @@
   "inbox-stale-page-webkit.spec.ts": 20,
   "inbox-starred-pills.spec.ts": 9,
   "inbox-supersede-read-webkit.spec.ts": 9,
+  "inbox-swarm-add-linked.spec.ts": 90,
+  "inbox-swarm.spec.ts": 40,
   "inbox-tag-across-computers.spec.ts": 120,
   "inbox-tag-colors.spec.ts": 4,
   "inbox-tag-handoff.spec.ts": 42,

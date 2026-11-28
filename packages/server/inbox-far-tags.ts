@@ -244,7 +244,8 @@ export function createInboxFarTags(deps: FarTagsDeps) {
 
   /** A person's message was written here: every far session of its thread that it (or anything still owed) is for is sent its wake. */
   const onPersonMessage = (record: InboxMessage) => {
-    if (record.author.kind !== "person") return;
+    // An agent's words in a ghost thread go to its far members as a person's do (Swarm, store.ts `isGhostSay`).
+    if (record.author.kind !== "person" && !store.isGhostSay(record)) return;
     const members = store.farSessions(record.thread_id);
     for (const [session, member] of members) {
       // This reply's own change after its wake went: taken back (not handed there), or Send now (into the running turn).
@@ -345,7 +346,18 @@ export function createInboxFarTags(deps: FarTagsDeps) {
     return null;
   };
 
-  return { rows, prepare, targets, onPersonMessage, agentReply, delivered, self, lists, connectionOf };
+  /**
+   * The linked computers' agents as last read, as a window shows them (who is live there and whether each works: a
+   * swarm member's state, inbox-swarm-context.ts): it moves only when one of those does, so the delivery watch in
+   * inbox.ts tells the windows, which then read their swarm's thread again.
+   */
+  const liveSignature = (): string =>
+    [...agents.entries()]
+      .map(([machine, entry]) => `${machine}:${entry.rows.map((row) => `${row.session}=${row.busy}`).sort().join(",")}`)
+      .sort()
+      .join(";");
+
+  return { rows, prepare, targets, onPersonMessage, agentReply, delivered, self, lists, connectionOf, liveSignature };
 }
 
 export type InboxFarTags = ReturnType<typeof createInboxFarTags>;

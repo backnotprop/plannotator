@@ -45,6 +45,7 @@ import { INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_ANSWERS_WAKE_LINE, INBOX_ASK_REC
 import { INBOX_CALL_ACTIONS, INBOX_COMMAND_USAGE } from "./cli";
 import { createAgentEnvironment, displayPath, type AgentEnvironment } from "@plannotator/server/inbox-agents";
 import { noteTarget } from "@plannotator/server/inbox-agent-notes";
+import { INBOX_SWARM_HELP_SECTION } from "./inbox-swarm-command";
 import { INBOX_AGENT_LABELS, INBOX_NOTE_AGENT_IDS, INBOX_NOTE_AUTO_AGENT_IDS } from "@plannotator/core/inbox-types";
 
 export type InboxMcpToolName = (typeof INBOX_MCP_TOOLS)[number];
@@ -331,6 +332,8 @@ export interface InboxHelpOptions {
    * guide says nothing of it: no `branch` field on send_message, as the Inbox serves none then.
    */
   branchReviews?: boolean;
+  /** Swarm is on (experimental `swarm`). Off (the default), the guide says nothing of it. */
+  swarm?: boolean;
 }
 
 export function inboxHelpPlatform(platform: NodeJS.Platform = process.platform): ConnectContext["platform"] {
@@ -629,6 +632,8 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     `- \`<capability>\`: ${INBOX_CAPABILITY_AGENT_IDS.map(code).join(", ")}. Without \`<capability>\` and \`on\` or \`off\`, it lists each one and whether it is on.`,
     "- A turn posts one line for the person (\"Turned on Routines.\"): in `--thread`, the thread you work in, when you pass it, else in a new thread in your project. Turned on, an action it serves reaches agents in their next session (a session's tools are listed once, at its start); from a shell it works now, and the result names the command.",
     "",
+    // Swarm (experimental): only while it is on, so no other agent carries its words.
+    ...(options.swarm === true ? [...INBOX_SWARM_HELP_SECTION, ""] : []),
     "## Scripting the Inbox",
     "",
     "When you have many Inbox calls to make, a tidy above all, put them in one script instead of making them one tool call at a time. Each call's whole result stays in your context; a script keeps only what it prints.",

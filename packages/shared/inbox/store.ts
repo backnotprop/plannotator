@@ -111,6 +111,7 @@ import {
   inboxDefaultSkip,
   inboxScriptAuthor,
   inboxSessionlessSend,
+  inboxTagsOnly,
   inboxWordsDefault,
   inboxRemovedNow,
   inboxCanRemove,
@@ -171,6 +172,7 @@ import {
 } from "@plannotator/core/inbox-types";
 import { checkReplyDraftConflict, projectReplyDraft, replyDraftFilesAfter, settleReplyDraftAfterSend } from "@plannotator/core/inbox-reply-draft";
 import type { InboxReplyMention } from "@plannotator/core/inbox-types";
+import { isInboxGhostRoot, type InboxSwarmRecord } from "@plannotator/core/inbox-swarm-types";
 import { isLineRangeInPatch, parseDiffToFiles, type DiffFile } from "@plannotator/core/diff-files";
 import { inboxBlobPath, inboxBlobSizes, removeUnusedInboxBlobs } from "./attachments";
 import { inboxMarkupNamesOf, removeInboxMarkups } from "./markups";
@@ -257,6 +259,7 @@ import { InboxError, inboxDir } from "./schema";
 import type { InboxLog, InboxLogFactory } from "./store-log/log";
 import { agentNamesHere, archiveSeqAfter, cardAfter, firstLineName, firstLineTagKeys, movesAddress, pullEventOf, threadNameIndexKey } from "./store-log/history";
 import { jsonlInboxLog } from "./store-log/jsonl-log";
+import { SWARM_GHOST_SEND_REFUSED } from "./swarm-start";
 
 /** The local person, the only picker on a local Inbox. */
 export const INBOX_PERSON: InboxPicker = { id: "person", name: null };
@@ -279,6 +282,8 @@ export interface InboxSendInput {
   turn_error?: boolean;
   /** Server only (launch's notes, `writeLaunchNote`): one of the Inbox's own launch notes (`InboxMessage.launch_note`). */
   launch_note?: boolean;
+  /** Server only (`swarm propose`, packages/shared/inbox/swarm.ts): a swarm's plan card (`InboxMessage.swarm_plan`). */
+  swarm_plan?: boolean;
   /** Server only (packages/server/inbox-scheduled.ts): an agent's routine change (`InboxMessage.scheduled_change`). */
   scheduled_change?: InboxScheduledChange;
   body: string;
@@ -675,6 +680,12 @@ function intoTurnOf(by: InboxDeliverNowBy | null | undefined, intoTurn: boolean 
   return by === "auto" && typeof intoTurn === "boolean" ? { into_turn: intoTurn } : {};
 }
 
+/** New message's other agents (`startThread`'s `tags`): each session once, never the one `to` names. */
+function newMessageTags(tags: readonly InboxTag[] | undefined, to: string): { tags?: InboxTag[] } {
+  const kept = (tags ?? []).filter((tag, i, all) => tag.session !== to && all.findIndex((t) => t.session === tag.session) === i);
+  return kept.length > 0 ? { tags: kept } : {};
+}
+
 /** The tag a person's message carries for `session`, or null. */
 function tagOf(message: InboxMessage, session: string): InboxTag | null {
   return message.tags?.find((tag) => tag.session === session) ?? null;
@@ -1019,6 +1030,10 @@ export class InboxStore {
   private readonly stepsIdOf = new Map<string, string>();
   /** Each thread's steps record ids (a thread's read never scans every list). */
   private readonly stepsIdsByThread = new Map<string, Set<string>>();
+  /** Each thread's swarm (inbox-swarm-types.ts), by the thread's id. */
+  private readonly swarmsByThread = new Map<string, InboxSwarmRecord>();
+  /** Each ghost thread's parent thread, by the ghost thread's id (its root carries `ghost_of`). */
+  private readonly ghostParents = new Map<string, string>();
   /** Each thread's PRs (approval "inbox-pr-binding"): the current record per (thread, PR), by id. */
   private readonly pullsById = new Map<string, InboxThreadPull>();
   /** Each thread's PR record ids. */
@@ -1212,6 +1227,10 @@ export class InboxStore {
         this.cards.set(card.id, card);
         break;
       }
+      case "swarm":
+        // A thread's swarm (inbox-swarm-types.ts): quiet, as a thread's PRs.
+        this.swarmsByThread.set(line.record.thread_id, line.record);
+        break;
       case "thread_pull":
         // A thread's PRs (approval "inbox-pr-binding"): nothing here touches routing, the list's sections, unread or notifications.
         if (isInboxThreadPullRecord(line.record)) {
@@ -1232,7 +1251,7 @@ export class InboxStore {
   /** A message's latest record in memory; `first`: its first line, at `firstSeq` (its place in the thread and the log). */
   private placeMessage(record: InboxMessage, firstSeq: number, first: boolean): void {
     this.messages.set(record.id, record);
-    if (record.author.kind === "person") this.indexPersonTags(record);
+    if (record.author.kind === "person" && !this.ghostParents.has(record.thread_id)) this.indexPersonTags(record);
     this.threadLines.set(record.thread_id, (this.threadLines.get(record.thread_id) ?? 0) + 1);
     if (record.wakes === true && record.author.kind === "agent" && record.author.session) this.wakingSessions.add(record.author.session);
     // A scheduled run's divider is indexed by its routine (`placeScheduledLine`), only its newest run.
@@ -1241,8 +1260,12 @@ export class InboxStore {
     if (!first) return;
     this.notePersonAct(record.thread_id, personActOfMessage(record));
     this.messageSeq.set(record.id, firstSeq);
-    this.noteAgentMessage(record, firstSeq);
-    this.noteFirstSessionMessage(record, firstSeq);
+    if (isInboxGhostRoot(record) && record.thread_id === record.id) this.ghostParents.set(record.id, record.ghost_of!);
+    // A ghost thread's messages are never a session's latest or first thread (the sidebar, routing): only its parent is.
+    if (!this.ghostParents.has(record.thread_id)) {
+      this.noteAgentMessage(record, firstSeq);
+      this.noteFirstSessionMessage(record, firstSeq);
+    }
     const members = this.threadMembers.get(record.thread_id);
     if (members) members.push(record.id);
     else this.threadMembers.set(record.thread_id, [record.id]);
@@ -2485,7 +2508,7 @@ export class InboxStore {
   threadsOf(projectId: string): InboxThreadSummary[] {
     const out: InboxThreadSummary[] = [];
     for (const message of this.messages.values()) {
-      if (message.thread_id !== message.id || !this.sameProject(message.project_id, projectId)) continue;
+      if (message.thread_id !== message.id || this.ghostParents.has(message.id) || !this.sameProject(message.project_id, projectId)) continue;
       const summary = this.threadSummary(message.id);
       if (summary) out.push(summary);
     }
@@ -2527,6 +2550,8 @@ export class InboxStore {
 
   /** One row of the list: the thread's summary, its project label and its section. */
   listRow(threadId: string): InboxListRow | null {
+    // A ghost thread is reached only through its parent thread: never a row (the list, unread, search, the Board, Tidy).
+    if (this.ghostParents.has(threadId)) return null;
     const summary = this.threadSummary(threadId);
     if (!summary) return null;
     const root = this.messages.get(threadId)!;
@@ -2779,11 +2804,13 @@ export class InboxStore {
 
   /**
    * Where a person's message is addressed: its own `to`, or in a thread the person started, that thread's. Not when it
-   * answers another session that wrote in it: the reply goes to that one (the thread's rule too).
+   * answers another session that wrote in it: the reply goes to that one (the thread's rule too). None for a message
+   * only its tags get (`inboxTagsOnly`, Swarm's Add an agent): no session owns it.
    */
   private replyAddressee(root: InboxMessage, last: InboxMessage): InboxAddressee | null {
     const startedTo = root.started_by_person && root.to ? root.to : null;
     const askedBy = last.reply_to ? this.messages.get(last.reply_to) : undefined;
+    if (inboxTagsOnly(last, askedBy)) return null;
     return last.to ?? (startedTo && last.reply_to && !otherSessionThan(askedBy, startedTo) ? startedTo : null);
   }
 
@@ -2835,7 +2862,8 @@ export class InboxStore {
     });
 
     if (lastReal.author.kind === "person") {
-      if (isInboxNote(lastReal)) return null;
+      // Only its tags get it (`inboxTagsOnly`): no owner's delivery to show.
+      if (isInboxNote(lastReal) || inboxTagsOnly(lastReal, lastReal.reply_to ? this.messages.get(lastReal.reply_to) : undefined)) return null;
       const last = lastReal;
       const startedTo = root.started_by_person && root.to ? root.to : null;
       const askedBy = last.reply_to ? this.messages.get(last.reply_to) : undefined;
@@ -3970,7 +3998,9 @@ export class InboxStore {
     const messages = this.threadMessages(threadId);
     const standing = inboxRemovedNow(messages).get(session);
     if (standing) return { removal: standing, root };
-    const member = this.participantsOf(messages).find((p) => p.session === session);
+    // A swarm's member counts as in its thread, though it never wrote there (a sub-agent that joined).
+    const joined = this.swarmsByThread.get(threadId)?.members.find((m) => m.session === session);
+    const member = this.participantsOf(messages).find((p) => p.session === session) ?? (joined ? { host: joined.host, session, name: joined.name } : undefined);
     if (!member) throw new InboxError("not_in_thread", "That agent is not in this thread.", { field: "session" });
     if (!inboxCanRemove(messages, session)) throw new InboxError("last_agent", "It is the last agent in this thread, so it stays.", { field: "session" });
     const at = this.stamp();
@@ -4029,8 +4059,11 @@ export class InboxStore {
       else if (!known) out.set(session, { machine, host: host ?? null });
     };
     for (const message of this.threadMessages(threadId)) {
-      if (message.author.kind === "agent") add(message.author.session, message.author.machine, message.author.host);
-      else {
+      if (message.author.kind === "agent") {
+        add(message.author.session, message.author.machine, message.author.host);
+        // An agent's words in a ghost thread go to the members it names, on any computer.
+        if (this.isGhostSay(message)) for (const tag of message.tags ?? []) add(tag.session, tag.machine, tag.host);
+      } else {
         for (const tag of message.tags ?? []) add(tag.session, tag.machine, tag.host);
         add(message.to?.session, message.to?.machine, message.to?.host);
       }
@@ -4041,9 +4074,10 @@ export class InboxStore {
 
   /**
    * Where this store knows `session`: "here" when it wrote here as this computer's own (no `machine`), else the
-   * linked computer its messages, tags or addressing name (the first seen), else null.
+   * linked computer its messages, tags or addressing name (the first seen), else null. `rootsHere` (Swarm's check):
+   * a person's thread whose `to` or tags name it with no `machine` puts it here too, live or not, written or not.
    */
-  sessionMachine(session: string): string | null {
+  sessionMachine(session: string, options: { rootsHere?: boolean } = {}): string | null {
     let found: string | null = null;
     for (const message of this.messages.values()) {
       if (message.author.kind === "agent") {
@@ -4052,6 +4086,9 @@ export class InboxStore {
           found ??= message.author.machine;
         }
         continue;
+      }
+      if (options.rootsHere && message.id === message.thread_id) {
+        if ((message.to?.session === session && !message.to.machine) || message.tags?.some((tag) => tag.session === session && !tag.machine)) return "here";
       }
       for (const tag of message.tags ?? []) if (tag.session === session && tag.machine) found ??= tag.machine;
       if (message.to?.session === session && message.to.machine) found ??= message.to.machine;
@@ -4600,6 +4637,8 @@ export class InboxStore {
     if (input.reply_to) {
       const parent = this.messages.get(input.reply_to);
       if (!parent) throw new InboxError("message_not_found", `No message ${input.reply_to}.`, { field: "reply_to" });
+      // A swarm's ghost thread takes words only through `swarm say` (swarm.ts), so they reach its members.
+      if (this.ghostParents.has(parent.thread_id)) throw new InboxError("validation_error", SWARM_GHOST_SEND_REFUSED, { field: "reply_to" });
       projectId = parent.project_id;
       threadId = parent.thread_id;
       replyTo = parent.id;
@@ -4726,6 +4765,7 @@ export class InboxStore {
       ...(input.wakes === true ? { wakes: true } : {}),
       ...(input.turn_error === true ? { turn_error: true as const } : {}),
       ...(input.launch_note === true ? { launch_note: true as const } : {}),
+      ...(input.swarm_plan === true ? { swarm_plan: true as const } : {}),
       ...(input.scheduled_change ? { scheduled_change: input.scheduled_change } : {}),
       ...(replyThread !== null ? { reply_thread: replyThread } : {}),
       ...(naming ? { thread_naming: naming } : {}),
@@ -7105,6 +7145,12 @@ export class InboxStore {
     const markups = this.markupsOf((record) => record.thread_id === threadId);
     this.keepDecisionLines((question) => messageIds.has(question.message_id));
     this.releaseScheduledThreads((id) => id === threadId);
+    // Its ghost thread (Swarm) goes with it: a ghost thread is reached only through its parent, so one left behind is
+    // words nobody can open or delete. Its swarm record is the parent's (`thread_id`) and goes in the parent's delete.
+    for (const [ghost, parent] of this.ghostParents) {
+      if (parent !== threadId || !this.messages.has(ghost)) continue;
+      this.log.deleteThread(project, ghost, new Set(this.threadMembers.get(ghost) ?? []), this.seq);
+    }
     this.log.deleteThread(project, threadId, messageIds, this.seq);
     this.reload(markups);
   }
@@ -7242,6 +7288,8 @@ export class InboxStore {
     this.stepsIdsByThread.clear();
     this.pullsById.clear();
     this.pullIdsByThread.clear();
+    this.swarmsByThread.clear();
+    this.ghostParents.clear();
     this.pullEvents.clear();
     this.initiativesById.clear();
     this.tagThreads.clear();
@@ -7304,7 +7352,7 @@ export class InboxStore {
   pendingReplies(session: string, options: { tags?: boolean } = {}): InboxMessage[] {
     const out: { message: InboxMessage; seq: number }[] = [];
     for (const message of this.messages.values()) {
-      if (message.author.kind !== "person") continue;
+      if (message.author.kind !== "person" && !this.isGhostSay(message)) continue;
       if (this.pendingFor(message, session, options)) out.push({ message, seq: this.messageSeq.get(message.id) ?? 0 });
     }
     return out.sort((a, b) => a.seq - b.seq).map((entry) => entry.message);
@@ -7320,7 +7368,7 @@ export class InboxStore {
     const found = new Map<string, { message: InboxMessage; seq: number }[]>();
     if (sessions.size === 0) return new Map();
     for (const message of this.messages.values()) {
-      if (message.author.kind !== "person") continue;
+      if (message.author.kind !== "person" && !this.isGhostSay(message)) continue;
       const candidates: string[] = [];
       if (message.to) candidates.push(message.to.session);
       else {
@@ -7344,6 +7392,14 @@ export class InboxStore {
 
   /** Whether a person's `message` waits for `session` (the rules of `pendingReplies`). */
   private pendingFor(message: InboxMessage, session: string, options: { tags?: boolean }): boolean {
+    // Swarm: an agent's words reach other agents only inside a ghost thread, and only its swarm's members.
+    if (message.author.kind !== "person") {
+      const tag = this.isGhostSay(message) ? tagOf(message, session) : null;
+      return !!tag && !tag.delivery && options.tags !== false && this.isSwarmMember(this.ghostParents.get(message.thread_id)!, session) && this.ghostSaidSinceOn(message);
+    }
+    // The person's words in a ghost thread (the ghost pane) likewise: only to its swarm's members, while it is on.
+    const ghostOf = this.ghostParents.get(message.thread_id);
+    if (ghostOf && (!this.isSwarmMember(ghostOf, session) || !this.ghostSaidSinceOn(message))) return false;
     // A hand-off inside its Undo window goes to nobody yet.
     if (handoffHeld(message) || message.taken_back_at) return false;
     // The Inbox's own notes (a Mark read's set-aside note, a 👍's) written after the person removed the session from
@@ -7397,13 +7453,21 @@ export class InboxStore {
     return withdrawn;
   }
 
+  /** A cloud wake's state for `session`: in a ghost thread each member's own (its tag's), elsewhere the message's. */
+  cloudWakeOf(message: InboxMessage, session: string): InboxCloudWake | null {
+    return (this.ghostParents.has(message.thread_id) ? tagOf(message, session)?.cloud_wake : message.cloud_wake) ?? null;
+  }
+
   recordCloudWake(messageId: string, wake: InboxCloudWake, session?: string, host = "cloud"): InboxMessage {
     const message = this.messages.get(messageId);
-    if (!message || message.author.kind !== "person") throw new InboxError("message_not_found", `No message ${messageId}.`);
-    const before = message.cloud_wake;
+    if (!message || (message.author.kind !== "person" && !this.isGhostSay(message))) throw new InboxError("message_not_found", `No message ${messageId}.`);
+    // Words in a ghost thread are for several members, each woken on its own: the state is kept on its tag.
+    const ghost = this.ghostParents.has(message.thread_id);
+    if (ghost && (!session || !tagOf(message, session))) throw new InboxError("message_not_found", `No message ${messageId} for ${session ?? "that session"}.`);
+    const before = ghost ? this.cloudWakeOf(message, session!) : message.cloud_wake;
     if (before && before.state === wake.state && before.at === wake.at && before.next_at === wake.next_at && before.run_url === wake.run_url) return message;
     const at = this.stamp();
-    const next: InboxMessage = { ...message, cloud_wake: wake };
+    const next: InboxMessage = ghost ? { ...message, tags: message.tags!.map((t) => (t.session === session ? { ...t, cloud_wake: wake } : t)) } : { ...message, cloud_wake: wake };
     this.appendMessage(next, at);
     if (wake.state === "started" && session && this.isFor(next, session)) return this.recordDelivery(this.deliveryIdOf(next, session), { host, session });
     return next;
@@ -7442,7 +7506,7 @@ export class InboxStore {
     const noticeOf = inboxStopNoticeReply(deliveryId);
     const replyId = noticeOf ?? deliveryId;
     const reply = this.messages.get(replyId);
-    if (!reply || reply.author.kind !== "person" || (!reply.reply_to && !reply.to)) throw new InboxError("message_not_found", `No reply ${replyId}.`);
+    if (!reply || (reply.author.kind !== "person" && !this.isGhostSay(reply)) || (!reply.reply_to && !reply.to)) throw new InboxError("message_not_found", `No reply ${replyId}.`);
     // A stop notice says nothing about the words, and nothing at all once the reply moved back to this session.
     if (noticeOf && !tagOf(reply, by.session)?.handed_away) return reply;
     if (!this.isFor(reply, by.session)) {
@@ -7961,6 +8025,11 @@ export class InboxStore {
     decision_ask?: unknown;
     /** Sent from Settings → Rows' ask box: the root carries `rows_ask`, and what the agent receives for it carries the Rows instructions. */
     rows_ask?: unknown;
+    /**
+     * New message's other agents (Swarm; the server resolved them as a reply's tags): one message, handed to `to` and
+     * to each of these, each with its own delivery, as a reply's tags are. `to`'s own session is never one of them.
+     */
+    tags?: InboxTag[];
     /** Launch: the agent the Inbox starts for this thread (the server's record; `to` is then its placeholder). */
     launch?: InboxLaunchRecord;
     review_live?: InboxReviewLive;
@@ -8008,6 +8077,7 @@ export class InboxStore {
       ...(input.board_request === true ? { board_request: true as const } : {}),
       ...(input.decision_ask === true ? { decision_ask: true as const } : {}),
       ...(input.rows_ask === true ? { rows_ask: true as const } : {}),
+      ...newMessageTags(input.tags, input.to.session),
       ...(input.launch ? { launch: input.launch } : {}),
       ...(input.review_live ? { review_live: input.review_live } : {}),
       ...(input.review_anchor ? { review_anchor: input.review_anchor } : {}),
@@ -8434,7 +8504,8 @@ export class InboxStore {
   wakingSessionsOfHost(host: string): Set<string> {
     const out = new Set<string>();
     for (const message of this.messages.values()) {
-      if (message.author.kind === "agent") {
+      // An agent's words in a ghost thread wake the members they tag, as a person's tags do (Swarm).
+      if (message.author.kind === "agent" && !this.isGhostSay(message)) {
         if (message.wakes === true && message.author.host === host && message.author.session) out.add(message.author.session);
         continue;
       }
@@ -8583,6 +8654,158 @@ export class InboxStore {
   // `removed_at`), a re-add (a new line without them), and the reader's state
   // change. Silent: nothing that routes, lists unread or notifies reads it.
   // Who may change it is the server's to check; the store keeps what it is told.
+
+  // ─────────────────────────── Swarm (inbox-swarm-types.ts) ───────────────────────────
+  //
+  // One record per thread (kind `swarm`, swarm.jsonl), quiet as a thread's PRs. The ghost thread is a real thread whose
+  // root carries `ghost_of`; it is never a row (`listRow`), and an agent's words reach other agents only there
+  // (`isGhostSay`, `pendingFor`). The rules (who joins, what is said to whom) are packages/shared/inbox/swarm.ts's.
+
+  /** A thread's swarm, or null. */
+  swarmOf(threadId: string): InboxSwarmRecord | null {
+    return this.swarmsByThread.get(threadId) ?? null;
+  }
+
+  /** Every thread's swarm. */
+  allSwarms(): InboxSwarmRecord[] {
+    return [...this.swarmsByThread.values()];
+  }
+
+  /** The thread a ghost thread belongs to; null when `threadId` is not a ghost thread. */
+  ghostParentOf(threadId: string): string | null {
+    return this.ghostParents.get(threadId) ?? null;
+  }
+
+  /** An agent's words in a ghost thread, to the members its tags name: the only agent message delivered to agents. */
+  isGhostSay(message: InboxMessage): boolean {
+    return message.author.kind === "agent" && this.ghostParents.has(message.thread_id) && (message.tags?.length ?? 0) > 0;
+  }
+
+  /** The experimental switch `swarm` (the server's; a bare store has it on). Off, no ghost thread's words wait for anyone. */
+  private swarmSwitch: () => boolean = () => true;
+
+  setSwarmSwitch(on: () => boolean): void {
+    this.swarmSwitch = on;
+  }
+
+  /**
+   * The sessions words in a ghost thread (an agent's `swarm say`, the person's from the ghost pane) still wait for:
+   * each tagged member of its swarm, while the swarm and the switch are on, not yet delivered. Never its author.
+   */
+  ghostWaitsFor(message: InboxMessage): string[] {
+    const parent = this.ghostParents.get(message.thread_id);
+    if (!parent || message.id === message.thread_id || !this.ghostSaidSinceOn(message)) return [];
+    const author = message.author.kind === "agent" ? message.author.session : null;
+    return (message.tags ?? []).filter((tag) => !tag.delivery && tag.session !== author && this.isSwarmMember(parent, tag.session)).map((tag) => tag.session);
+  }
+
+  /** Whether `session` joined the swarm of `threadId`, while it and the switch are on, and the person has not removed it. */
+  isSwarmMember(threadId: string, session: string): boolean {
+    const swarm = this.swarmsByThread.get(threadId);
+    return this.swarmSwitchOn() && !!swarm?.on && swarm.members.some((member) => member.session === session) && !this.swarmRemoved(threadId).has(session);
+  }
+
+  /**
+   * The sessions the person removed from a swarm's thread (Remove, approval "inbox-remove-agent-from-thread"): out of
+   * its members, its status and its ghost thread's "everyone" until the person adds them again. Empty, without reading
+   * the thread, when nobody was ever removed from it.
+   */
+  swarmRemoved(threadId: string): ReadonlyMap<string, InboxRemoval> {
+    return (this.messages.get(threadId)?.removed?.length ?? 0) > 0 ? this.removedFrom(threadId) : new Map();
+  }
+
+  /**
+   * The switch's in-process marks: the store's seq the last time this Inbox saw it off, and, once it is seen on again,
+   * that seq as the on mark (0 until then). The routes refuse ghost writes while it is off, so whatever was written after
+   * the last time it was seen off was written after it came back, even when that write is the first thing to look.
+   */
+  private swarmSwitchWas: boolean | null = null;
+  private swarmSwitchOffSeq = 0;
+  private swarmSwitchOnSeq = 0;
+
+  private swarmSwitchOn(): boolean {
+    const on = this.swarmSwitch();
+    if (!on) this.swarmSwitchOffSeq = this.seq;
+    else if (this.swarmSwitchWas === false) this.swarmSwitchOnSeq = this.swarmSwitchOffSeq;
+    this.swarmSwitchWas = on;
+    return on;
+  }
+
+  /**
+   * Whether ghost words were written since their swarm (and the switch) was last turned on: words from before a Turn
+   * off, or from before the switch went off, are not handed out in a burst when it comes back on.
+   */
+  private ghostSaidSinceOn(message: InboxMessage): boolean {
+    const swarm = this.swarmsByThread.get(this.ghostParents.get(message.thread_id) ?? "");
+    const seq = this.messageSeq.get(message.id) ?? 0;
+    return seq > (swarm?.on_seq ?? 0) && seq > this.swarmSwitchOnSeq;
+  }
+
+  /** Write a thread's swarm, whole. */
+  writeSwarm(record: InboxSwarmRecord): InboxSwarmRecord {
+    const project = this.projectsById.get(record.project_id);
+    if (!project) throw new InboxError("project_not_found", `No project ${record.project_id}.`);
+    const at = this.stamp();
+    const seq = this.seq + 1;
+    // Turned on (started, or back on after Turn off): ghost words from before this line wait for nobody.
+    const turnedOn = record.on && !this.swarmsByThread.get(record.thread_id)?.on;
+    const next: InboxSwarmRecord = { ...record, updated_at: at, ...(turnedOn ? { on_seq: seq } : {}) };
+    this.write(project, { v: INBOX_RECORD_VERSION, seq, at, kind: "swarm", id: next.id, record: next });
+    return next;
+  }
+
+  /** The ghost thread of `threadId`: its root, written by the Inbox the first time. */
+  ghostThreadFor(threadId: string): InboxMessage {
+    for (const [ghost, parent] of this.ghostParents) if (parent === threadId && this.messages.has(ghost)) return this.messages.get(ghost)!;
+    const root = this.messages.get(threadId);
+    if (!root || root.thread_id !== threadId || this.ghostParents.has(threadId)) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
+    const at = this.stamp();
+    const id = inboxId("msg");
+    const ghost: InboxMessage = { id, project_id: root.project_id, thread_id: id, reply_to: null, author: { kind: "person" }, subject: this.threadSubject(threadId), body: "", created_at: at, resolved_at: null, idempotency_key: null, ghost_of: threadId };
+    this.appendMessage(ghost, at);
+    return ghost;
+  }
+
+  /** Words in a ghost thread, an agent's or the person's, for the members `to` names (one tag each). */
+  writeGhostMessage(ghostId: string, author: InboxMessage["author"], body: string, to: InboxTag[], key: string | null = null): InboxMessage {
+    const root = this.messages.get(ghostId);
+    if (!root || !this.ghostParents.has(ghostId)) throw new InboxError("thread_not_found", `No ghost thread ${ghostId}.`);
+    // A held `swarm say` from a linked computer sent again (its answer was lost): the words it wrote, once.
+    const again = key ? this.ghostMessages(ghostId).find((m) => m.idempotency_key === key && m.author.kind === "agent" && author.kind === "agent" && m.author.session === author.session) : undefined;
+    if (again) return again;
+    // Only a member speaks in it: an agent's words there reach the members they tag (`pendingFor`).
+    const parent = this.ghostParents.get(ghostId)!;
+    if (author.kind === "agent" && !this.swarmsByThread.get(parent)?.members.some((member) => member.session === author.session)) {
+      throw new InboxError("not_in_swarm", "Only a member of the swarm writes in its ghost thread.");
+    }
+    const at = this.stamp();
+    const message: InboxMessage = { id: inboxId("msg"), project_id: root.project_id, thread_id: ghostId, reply_to: ghostId, author, subject: null, body, created_at: at, resolved_at: null, idempotency_key: key, ...(to.length > 0 ? { tags: to } : {}) };
+    this.appendMessage(message, at);
+    return message;
+  }
+
+  /**
+   * Swarm's Add an agent: the person's message in the swarm's own thread to one more agent, `tag` (joined: the agent works
+   * on the thread with the others), whose body carries the `/swarm` skill. It answers the thread's first message and is
+   * addressed to nobody else, so only that agent is handed it; a removed agent is back, as any message of the person's
+   * to it brings it back. Written once per `key`.
+   */
+  writeSwarmAdd(threadId: string, tag: InboxTag, body: string, key: string): InboxMessage {
+    const root = this.messages.get(threadId);
+    if (!root || root.thread_id !== threadId || this.ghostParents.has(threadId)) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
+    const again = this.replyByKey(threadId, key);
+    if (again) return again;
+    const at = this.stamp();
+    const message: InboxMessage = { id: inboxId("msg"), project_id: root.project_id, thread_id: threadId, reply_to: threadId, author: { kind: "person" }, subject: null, body, created_at: at, resolved_at: null, idempotency_key: key, tags: [tag] };
+    this.appendMessage(message, at);
+    this.endSnooze(threadId);
+    return message;
+  }
+
+  /** A ghost thread's messages, oldest first, its root left out. */
+  ghostMessages(ghostId: string): InboxMessage[] {
+    return this.ghostParents.has(ghostId) ? this.threadMessages(ghostId).filter((message) => message.id !== ghostId) : [];
+  }
 
   /** A PR record's latest line in memory (its event, if any, is `apply`'s: `pullEventOf`). */
   private placeThreadPull(record: InboxThreadPull): void {

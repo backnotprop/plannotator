@@ -18,6 +18,7 @@ import type { InboxReviewAnchor, InboxReviewBatch, InboxReviewLive, InboxReviewR
 import type { QuestionAnswer, QuestionKind } from "./question-block";
 import type { InboxAnnotationRecord, InboxAttachment, InboxAttachmentKind, InboxInlineImage, InboxLiveSiteRef } from "./inbox-attachments";
 import type { InboxDeliverNowBy, InboxRowDelivery } from "./inbox-delivery";
+import type { InboxSwarmRecord, InboxThreadSwarm } from "./inbox-swarm-types";
 import type { InboxCard } from "./inbox-cards";
 import type { InboxCloudWake } from "./inbox-cloud";
 import type { InboxSteps } from "./inbox-steps";
@@ -678,6 +679,8 @@ export interface InboxMessage {
    * never listed in the thread (as the 👍's note). Absent otherwise.
    */
   moved_note?: InboxMovedNote | null;
+  /** On a ghost thread's root (Swarm, inbox-swarm-types.ts): the thread it belongs to. Absent otherwise. */
+  ghost_of?: string;
   /**
    * On a person's reopened note: the questions an Undo of Mark read opened
    * again after a set-aside note had named them. Absent on every other message.
@@ -815,6 +818,12 @@ export interface InboxMessage {
    * failed turn's (`turn_error`), which notifies. Absent otherwise. Additive.
    */
   launch_note?: true;
+  /**
+   * A swarm's plan card (docs/agent-guides/inbox-swarm.md): the agent reply its first `swarm propose` wrote. Its body
+   * is the plan as plain words, for any reader that does not know the card; the window draws the swarm's plan in its
+   * place while Swarm is on. Written only by the Inbox itself. Absent otherwise. Additive.
+   */
+  swarm_plan?: true;
   /**
    * A guided review this message carries (submit_guide, PLAN step 5): the
    * snapshot is a content-addressed blob, `inbox/blobs/<sha256>`. Absent on
@@ -1108,6 +1117,8 @@ export interface InboxTag {
    * wake there, and takes that session's answer from there only. Absent for this computer's own sessions.
    */
   machine?: string;
+  /** In a swarm's ghost thread: this member's own cloud wake (elsewhere a message has one, `InboxMessage.cloud_wake`). */
+  cloud_wake?: InboxCloudWake | null;
 }
 
 /** How many sessions one reply may tag: any number (through 0.28.61, at most 8, for no stated reason). Kept so an importer still builds. */
@@ -2435,6 +2446,8 @@ export interface InboxThread {
   /** The thread's name, or null for an unnamed thread. */
   thread_name: string | null;
   resolved_at: string | null;
+  /** The window's read only, with the experimental switch `swarm` on: the thread's swarm (inbox-swarm-types.ts). */
+  swarm?: InboxThreadSwarm;
   /**
    * The window's read only (`GET /api/inbox/threads/:id`): the seq of the
    * archive line of a resolved thread, null for an open one. A message whose
@@ -2468,7 +2481,7 @@ export interface InboxThread {
  * (inbox-scheduled-types.ts). A reader that does not know a kind
  * skips its lines.
  */
-export type InboxRecordKind = "project" | "message" | "question" | "annotation" | "card" | "steps" | "initiative" | "thread_pull" | "scheduled";
+export type InboxRecordKind = "project" | "message" | "question" | "annotation" | "card" | "steps" | "initiative" | "thread_pull" | "scheduled" | "swarm";
 
 /** One line of the store: a full snapshot of one record. */
 export type InboxLine =
@@ -2480,7 +2493,8 @@ export type InboxLine =
   | { v: 1; seq: number; at: string; kind: "steps"; id: string; record: InboxSteps }
   | { v: 1; seq: number; at: string; kind: "initiative"; id: string; record: InboxInitiative }
   | { v: 1; seq: number; at: string; kind: "thread_pull"; id: string; record: InboxThreadPull }
-  | { v: 1; seq: number; at: string; kind: "scheduled"; id: string; record: InboxScheduledThread };
+  | { v: 1; seq: number; at: string; kind: "scheduled"; id: string; record: InboxScheduledThread }
+  | { v: 1; seq: number; at: string; kind: "swarm"; id: string; record: InboxSwarmRecord };
 
 // ─────────────────────────────── Health ───────────────────────────────
 

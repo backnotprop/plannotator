@@ -74,11 +74,11 @@ export function useSettingsSaves(
   const toggleDecisionMode = (next: boolean) =>
     saveSetting((s) => ({ ...s, decision_mode: { ...s.decision_mode, on: next } }), () => inboxApi.saveDecisionMode(next), (s, saved) => ({ ...s, decision_mode: { ...s.decision_mode, ...saved.decision_mode } }));
 
-  /** The one experimental switch with a row: Grid (approval "inbox-agent-grid"). */
-  const toggleExperimental = (next: boolean, _feature: 'grid' = 'grid') =>
+  /** One experimental switch: Grid (approval "inbox-agent-grid") or Swarm; the other keeps what it was. */
+  const toggleExperimental = (next: boolean, feature: 'grid' | 'swarm' = 'grid') =>
     saveSetting(
-      (s) => ({ ...s, experimental: { ...s.experimental, grid: { on: next, env: s.experimental?.grid?.env ?? null } } }),
-      () => inboxApi.saveExperimental({ grid: next }),
+      (s) => ({ ...s, experimental: { ...s.experimental, [feature]: { on: next, env: s.experimental?.[feature]?.env ?? null } } }),
+      () => inboxApi.saveExperimental({ [feature]: next }),
       (s, saved) => ({ ...s, experimental: saved.experimental }),
     );
 

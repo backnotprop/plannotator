@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/core",
-  "version": "0.25.35",
+  "version": "0.25.36",
   "license": "Apache-2.0",
   "type": "module",
   "exports": {
@@ -54,6 +54,8 @@
     "./markdown-structure": "./markdown-structure.ts",
     "./html-anchor": "./html-anchor.ts",
     "./inbox-types": "./inbox-types.ts",
+    "./inbox-swarm-types": "./inbox-swarm-types.ts",
+    "./swarm-skill": "./swarm-skill.ts",
     "./inbox-inline-media": "./inbox-inline-media.ts",
     "./inbox-push": "./inbox-push.ts",
     "./inbox-door-version": "./inbox-door-version.ts",

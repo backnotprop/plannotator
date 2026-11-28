@@ -121,7 +121,7 @@ export type InboxRevealId = 'theme_chooser' | 'code_review' | 'sound' | 'list_in
 /** What the line claims (`POST /api/inbox/reveal`): every offer, and the tab icon, the one update-day dialog claimed through the line. */
 export type InboxRevealOfferId = Exclude<InboxRevealId, 'sound' | 'list_intro' | 'voice'>;
 /** What a page claims through `POST /api/inbox/reveal`: Snooze, an offer, the agent note, the Launch tip or the Sidebar tip (both outside the line). */
-export type InboxRevealClaimId = InboxRevealOfferId | 'agent_note' | 'launch_tip' | 'sidebar_tip' | 'band_tip' | 'search_tip';
+export type InboxRevealClaimId = InboxRevealOfferId | 'agent_note' | 'launch_tip' | 'sidebar_tip' | 'band_tip' | 'search_tip' | 'swarm_tip';
 
 /**
  * This page load's id, sent with every read and write (`X-Plannotator-Load`): the Inbox keeps it with a one-time
@@ -470,8 +470,8 @@ export function inboxAskOn(settings: Pick<SettingsModel, 'via'> | null | undefin
 export interface InboxExperimentalSettings {
   /** Decision mode's old place, kept for an older window; read `SettingsModel.decision_mode`. */
   decision_mode?: { on: boolean; env: boolean | null };
-  /** Grid (approval "inbox-agent-grid"); absent from an older Inbox. */
-  grid?: { on: boolean; env: boolean | null };
+  /** Grid (approval "inbox-agent-grid") and Swarm (swarm/swarmOn.ts); each absent from an older Inbox. */
+  grid?: { on: boolean; env: boolean | null }; swarm?: { on: boolean; env: boolean | null };
 }
 
 /** One live agent session of a thread's project (New message, record 5.x). */
@@ -1132,7 +1132,7 @@ export interface StartThreadInput {
   /** Asked from Settings -> Decision data: the agent also receives how to answer it. */
   decision_ask?: true;
   /** Settings → Rows' ask box: the agent also receives how to change the rows. */
-  rows_ask?: true;
+  rows_ask?: true; /** New message's other agents (Swarm, swarm/useSwarmPicks.tsx); refused while Swarm is off. */ tags?: { host: string | null; session: string; machine?: string }[];
 }
 
 /** A file this Inbox already holds, as a pending upload (never another machine's: a thread there offers no reuse). No bytes travel. */
@@ -1289,7 +1289,7 @@ export const inboxApi = {
   startTidy: (input: { sessions: readonly string[]; idempotency_key: string; project: string | null; surface: 'list' | 'board'; thread_ids?: readonly string[]; words?: string }, machine?: string | null) =>
     post<{ run: InboxTidyRun | null; asked: string[] }>(inboxUrl('/tidy', undefined, machine), { ...input, sessions: [...input.sessions], ...(input.thread_ids ? { thread_ids: [...input.thread_ids] } : {}) }),
   saveCookieHost: (on: boolean) => post<{ cookie_host: InboxCookieHost }>(inboxUrl('/settings'), { cookie_host: on }),
-  saveExperimental: (change: { grid: boolean }) =>
+  saveExperimental: (change: { grid?: boolean; swarm?: boolean }) =>
     post<{ experimental: InboxExperimentalSettings }>(inboxUrl('/settings'), { experimental: change }),
   /** The Board on or off (Settings → Capabilities): agents get the card action from their next session. */
   saveBoard: (on: boolean) => post<{ board: { on: boolean } }>(inboxUrl('/settings'), { board: { on } }),
@@ -2081,7 +2081,7 @@ export type InboxEvent =
   /** A thread's PRs changed (approval "inbox-pr-binding"): silent; the window reads that thread's PRs and the list again. Absent from an older Inbox. */
   | { seq: number; kind: 'thread_pull'; id: string; thread_id: string }
   /** A routine changed (scheduled/store.ts reads the list again): its id only. Absent from an older Inbox. */
-  | { seq: number; kind: 'scheduled'; id: string };
+  | { seq: number; kind: 'scheduled'; id: string } /** A thread's swarm or its ghost thread's words changed (swarm/): silent; that thread is read again. */ | { seq: number; kind: 'swarm'; id: string; thread_id: string };
 
 /** A thread's attachments as they are now, and the person's annotations waiting for a Send. */
 export interface AttachmentsModel {

@@ -4,7 +4,8 @@
  * the list shows, and a real text field. It follows the message while the
  * person has not typed in it (`suggested`, compose's short suggestion), and
  * stops following once they do. Emptied, it follows the message again, but
- * only once focus leaves it, so it never refills under the person's caret.
+ * only once focus leaves it, so it never refills under the person's caret; for the same reason a newer suggestion
+ * waits while it has focus.
  *
  * While it follows the message its words are muted and a small "auto"
  * follows them; a screen reader hears the same through aria-describedby.
@@ -85,8 +86,11 @@ export function ThreadNameChip(props: {
   const [note, setNote] = useState<string | null>(null);
   // Emptied while focused: show it empty until focus leaves, then follow the message again.
   const [clearing, setClearing] = useState(false);
+  // The suggestion as it was when focus came in: a newer one (worked out a moment after typing stops) never lands
+  // under the caret, where it would join the words being typed. Focus leaving follows the message again.
+  const [held, setHeld] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const value = clearing && !state.edited ? '' : shownThreadName(state, suggested);
+  const value = clearing && !state.edited ? '' : shownThreadName(state, held ?? suggested);
   const mode = state.edited ? 'edited' : 'auto';
   const columns = Math.min(40, Math.max(widthOf(value || THREAD_NAME_PLACEHOLDER), 4)) + 1;
   const errorId = `${idBase}-err`;
@@ -139,7 +143,11 @@ export function ThreadNameChip(props: {
             event.stopPropagation();
             setNote(onOverflow(text) || THREAD_NAME_OVERFLOW_NOTE);
           }}
-          onBlur={() => setClearing(false)}
+          onFocus={() => setHeld(suggested)}
+          onBlur={() => {
+            setClearing(false);
+            setHeld(null);
+          }}
           onKeyDown={(event) => {
             if (event.key === 'Enter' && !event.nativeEvent.isComposing && !event.metaKey && !event.ctrlKey) {
               event.preventDefault();

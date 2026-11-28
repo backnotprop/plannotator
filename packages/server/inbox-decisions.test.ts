@@ -115,8 +115,11 @@ describe("the switch (Settings → Capabilities, on unless turned off)", () => {
     expect(first.experimental.grid).toEqual({ on: false, env: null });
     const on = await post(server, "/api/inbox/settings", { experimental: { grid: true } });
     expect(on.status).toBe(200);
-    expect(((await on.json()) as { experimental: unknown }).experimental).toEqual({ decision_mode: { on: true, env: null }, grid: { on: true, env: null } });
+    expect(((await on.json()) as { experimental: unknown }).experimental).toEqual({ decision_mode: { on: true, env: null }, grid: { on: true, env: null }, swarm: { on: false, env: null } });
     expect(JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")).experimental).toEqual({ decisionMode: true, grid: true });
+    // Swarm's switch saves on its own too, beside Grid, and keeps it.
+    const swarm = await post(server, "/api/inbox/settings", { experimental: { swarm: true } });
+    expect(((await swarm.json()) as { experimental: unknown }).experimental).toEqual({ decision_mode: { on: true, env: null }, grid: { on: true, env: null }, swarm: { on: true, env: null } });
     process.env.PLANNOTATOR_EXPERIMENTAL = "-grid";
     expect((await post(server, "/api/inbox/settings", { experimental: { grid: true } })).status).toBe(409);
     delete process.env.PLANNOTATOR_EXPERIMENTAL;

@@ -19,7 +19,7 @@
  * decides, its row locked as before. Taking a flip turns the switch the way the person's row does (every window
  * follows), and posts nothing for the person: the line a turn posts is the computer's where it was turned.
  */
-import { INBOX_CAPABILITY_SET_KEYS, type InboxCapabilitySetKey } from "@plannotator/core/inbox-types";
+import { INBOX_CAPABILITY_EXPERIMENTAL_KEYS, INBOX_CAPABILITY_SET_KEYS, type InboxCapabilitySetKey } from "@plannotator/core/inbox-types";
 
 /** The mark a linked computer's list says it keeps the one set with. Without it, a computer keeps its own switches. */
 export const CAPABILITY_SET_MARK = "capability-set";
@@ -122,7 +122,7 @@ export interface CapabilitySetHost {
 export function capabilitySetKeysIn(body: Record<string, unknown>): InboxCapabilitySetKey[] {
   const experimental = plain(body.experimental) ? body.experimental : {};
   return INBOX_CAPABILITY_SET_KEYS.filter((key) =>
-    key === "grid" ? experimental[key] !== undefined : key === "decision_mode" ? body[key] !== undefined || experimental[key] !== undefined : body[key] !== undefined,
+    INBOX_CAPABILITY_EXPERIMENTAL_KEYS.includes(key) ? experimental[key] !== undefined : key === "decision_mode" ? body[key] !== undefined || experimental[key] !== undefined : body[key] !== undefined,
   );
 }
 

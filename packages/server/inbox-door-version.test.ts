@@ -74,7 +74,7 @@ function concrete(row: { route: string; pattern: string }): string | null {
 
 describe("the route table: one source for health.door.routes", () => {
   test("every row is plain words that the door answers with the entry it came from, for the token the row names", () => {
-    const own = new Set(["POST pair", "POST revoke", "GET accounts", "GET agent-read", "GET agent-file", "GET agent-search", "GET agent-threads", "GET taggable-agents", "POST far-wake", "POST agent-reply", "POST far-delivered", "GET update", "POST update", "POST link-back", "POST unlink", "POST link-through-ask", "POST link-through-offer", "POST link-through-introduce"]);
+    const own = new Set(["POST pair", "POST revoke", "GET accounts", "GET agent-read", "GET agent-file", "GET agent-search", "GET agent-threads", "GET taggable-agents", "POST far-wake", "POST agent-reply", "POST far-delivered", "POST swarm", "GET update", "POST update", "POST link-back", "POST unlink", "POST link-through-ask", "POST link-through-offer", "POST link-through-introduce"]);
     const rows = doorRouteTable();
     expect(new Set(rows.map((row) => row.name)).size).toBe(rows.length);
     for (const row of rows) {

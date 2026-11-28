@@ -38,7 +38,7 @@ import { homedir } from "node:os";
 import { basename } from "node:path";
 import { inboxHasUnsent, inboxRowArchived } from "@plannotator/shared/inbox/list";
 import { INBOX_CROSS_SITE_BODY, INBOX_MACHINE_WINDOW_ONLY_BODY, INBOX_WINDOW_ONLY_BODY, isCrossSiteRequest, isWindowRequest } from "./inbox-cross-site";
-import type { InboxReplyDraftRow } from "@plannotator/core/inbox-types";
+import type { InboxReplyDraftRow, InboxTag } from "@plannotator/core/inbox-types";
 import type { InboxComposeProject, InboxComposeSession, InboxDraft, InboxDraftStatus, InboxLaunchFrom, InboxMessage, InboxProject, InboxSentFrom } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { deleteInboxDraft, inboxDraftUploadIds, listInboxDrafts, saveInboxDraft } from "@plannotator/shared/inbox/drafts";
@@ -84,6 +84,11 @@ export function createInboxCompose(options: {
   store: InboxStore;
   serverSession: string;
   live: ReturnType<typeof createInboxLiveSessions>;
+  /**
+   * Swarm (experimental, inbox-swarm-route.ts): New message's other agents (`tags`, each `{ host, session, machine? }`),
+   * resolved as a reply's tags are (this computer's and a linked one's). Absent, or answering null: `tags` is refused.
+   */
+  severalAgents?: () => ((value: unknown) => InboxTag[]) | null;
   /** A folder to its project (realpath, git toplevel), created on first use: send_message's resolver. */
   resolveProject: (path: string) => Promise<InboxProject>;
   readBody: (req: Request) => Promise<Record<string, unknown>>;
@@ -208,6 +213,10 @@ export function createInboxCompose(options: {
     if (!target) {
       throw new InboxError("session_not_live", "That session is not live any more: nothing was sent. Pick a live session, or save it as a draft.");
     }
+    // New message's other agents (Swarm): checked before anything is written; refused while the switch is off.
+    const resolveTags = body.tags === undefined || body.tags === null ? null : (options.severalAgents?.() ?? null);
+    if ((body.tags ?? null) !== null && !resolveTags) throw new InboxError("validation_error", "tags: not taken in a New message.", { field: "tags" });
+    const picks = resolveTags ? resolveTags(body.tags).filter((tag) => tag.session !== target.session) : [];
     const root = placeOf(target.root, target.session, store.lastThreadsBySession());
     if (root === null) throw new InboxError("session_not_live", "That session has not said where it works yet; try again in a moment.");
     const project = prepared ? prepared.project : target.root !== null ? await options.resolveProject(root) : store.projectByRoot(root);
@@ -251,6 +260,8 @@ export function createInboxCompose(options: {
         decision_ask: body.decision_ask === true,
         // Settings -> Rows' ask box: the agent also receives how to change the rows (INBOX_ROWS_ASK_BLOCK).
         rows_ask: body.rows_ask === true,
+        // New message's other agents (Swarm): one thread, each agent handed it with its own delivery.
+        ...(picks.length > 0 ? { tags: picks } : {}),
         ...(prepared ? { launch: prepared.launch } : {}),
         sent_from: sentFrom,
       });

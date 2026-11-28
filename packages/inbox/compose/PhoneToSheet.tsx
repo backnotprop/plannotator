@@ -30,6 +30,7 @@ export function PhoneToSheet({
   host,
   machines,
   opensOn,
+  checked,
 }: {
   open: boolean;
   groups: readonly ComposeGroup[];
@@ -47,6 +48,8 @@ export function PhoneToSheet({
   machines?: readonly ToMachine[];
   /** The machine the chips open on. */
   opensOn?: string;
+  /** Sessions also picked (New message's other agents, swarm/useSwarmPicks.tsx): their rows carry the check too. */
+  checked?: ReadonlySet<string>;
 }) {
   const [query, setQuery] = useState('');
   const [chosen, setChosen] = useState(opensOn ?? HERE);
@@ -168,7 +171,7 @@ export function PhoneToSheet({
                 />
               );
             }
-            const on = toItemOn(item, selected, typing);
+            const on = toItemOn(item, selected, typing) || (item.type === 'session' && !!checked?.has(item.key));
             const check = on && <Icon name="check" size={18} className="ib-sheet-check" />;
             if (item.type === 'start') {
               const s = item.start;

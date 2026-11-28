@@ -26,7 +26,12 @@ const ROUTES: readonly { method: "GET" | "POST"; path: RegExp }[] = [
   // `plannotator inbox capability` (inbox-capability-agent.ts): a list, and a turn.
   { method: "GET", path: /^\/api\/inbox\/capability$/ },
   { method: "POST", path: /^\/api\/inbox\/capability$/ },
+  // `plannotator inbox swarm` (inbox-swarm-route.ts): one route for every subcommand.
+  { method: "POST", path: /^\/api\/inbox\/swarm$/ },
 ];
+
+/** What a swarm command sends: who runs it is the door's to say. */
+const SWARM_FIELDS = ["action", "thread", "as", "for", "text", "to"];
 
 /** The settings a rows command sends: the look, and its undo. Who made it is the door's to say. */
 const ROWS_FIELDS = ["rows", "rows_undo"];
@@ -52,7 +57,7 @@ export async function inboxAgentRouteAction(
   if (extra) throw refuse(`${extra}: not taken. ${tool} takes: ${FIELDS.join(", ")}.`);
   const { method, path } = args;
   if (typeof method !== "string" || typeof path !== "string" || !ROUTES.some((route) => route.method === method && route.path.test(path))) {
-    throw refuse("method, path: one of the requests plannotator inbox rows, projects, icon, capability and export-decisions make.");
+    throw refuse("method, path: one of the requests plannotator inbox rows, projects, icon, capability, swarm and export-decisions make.");
   }
   if (!handle) throw new InboxError("internal_error", "This Inbox cannot answer that here.");
   let body: Record<string, unknown> | undefined;
@@ -70,6 +75,11 @@ export async function inboxAgentRouteAction(
       body.by = { host: by.host, session: by.session, ...(by.name ? { name: by.name } : {}) };
       const project = by.project?.() ?? null;
       if (project) body.project_id = project;
+    }
+    if (path === "/api/inbox/swarm") {
+      const other = Object.keys(body).find((field) => !SWARM_FIELDS.includes(field));
+      if (other) throw refuse(`body: ${other}: not taken here; only ${SWARM_FIELDS.join(", ")}.`);
+      body.by = { host: by.host, session: by.session, ...(by.name ? { name: by.name } : {}) };
     }
   }
   // As the command's own request on this computer: loopback, no browser origin.

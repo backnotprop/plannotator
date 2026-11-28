@@ -12,6 +12,7 @@
  */
 
 import { isInboxCloudSession, type InboxCloudWake } from "@plannotator/core/inbox-cloud";
+import { SHIP_NOTE_WAKE_INSTRUCTION } from "@plannotator/core/inbox-pull-handoff";
 import { INBOX_ANTIGRAVITY_HOST, INBOX_CODEX_HOST, INBOX_QWEN_HOST, INBOX_T3_HOST, type InboxLine, type InboxMessage, type InboxThread } from "@plannotator/core/inbox-types";
 import type { InboxReplyCommand } from "@plannotator/shared/inbox/connection";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
@@ -30,7 +31,10 @@ export function farWakeItem(wake: FarWake): InboxMessage {
     reply_to: wake.command.reply_to,
     author: { kind: "person" },
     subject: wake.command.subject,
-    body: wake.command.body,
+    // A swarm's ghost-thread notice keeps its own first line for a wake that words the item's body (the cloud's), as the
+    // thread's computer's own cloud wake does (inbox-cloud-wake.ts `wakeItem`). Ship's note goes with its body alone there,
+    // so here too.
+    body: wake.command.moved && wake.command.notice && wake.command.notice !== SHIP_NOTE_WAKE_INSTRUCTION ? `${wake.command.notice}\n\n${wake.command.body}` : wake.command.body,
     created_at: wake.received_at,
     resolved_at: null,
     idempotency_key: null,

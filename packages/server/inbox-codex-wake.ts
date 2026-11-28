@@ -866,7 +866,8 @@ export function createInboxCodexWake(options: {
   const unsubscribe = store.subscribe((line) => {
     if (line.kind !== "message") return;
     const message = line.record as InboxMessage;
-    if (message.author.kind === "agent") {
+    // An agent's words in a ghost thread (Swarm) are looked at as a person's tags are.
+    if (message.author.kind === "agent" && !store.isGhostSay(message)) {
       // A Codex message that wakes: also a moment to look again (a reply that waited for a Codex CLI to appear).
       if (message.wakes !== true || message.author.host !== INBOX_CODEX_HOST || !message.author.session) return;
       knownSessions().add(message.author.session);

@@ -357,6 +357,20 @@ describe("one set of switches across linked computers", () => {
     expect([studio.on.board, studio.on.steps, studio.set.wire().board, studio.state.told]).toEqual([false, true, { on: false, at: null, by: null }, 1]);
   });
 
+  test("Swarm is one of the set: flipped on Laptop, it turns on Studio, and flipped off there it turns off on Laptop", async () => {
+    const laptop = computer(LAPTOP);
+    const studio = computer(STUDIO);
+    laptop.flip("swarm", true, 2_000);
+    expect(laptop.set.wire().swarm).toEqual({ on: true, at: 2_000, by: LAPTOP });
+    await studio.set.take(laptop.set.wire());
+    expect([studio.on.swarm, studio.applied]).toEqual([true, ["swarm true"]]);
+    studio.flip("swarm", false, 3_000);
+    await laptop.set.take(studio.set.wire());
+    expect(laptop.on.swarm).toBe(false);
+    // Its row saves it inside `experimental`, as Grid's does: that save is the flip that is shared.
+    expect(capabilitySetKeysIn({ experimental: { swarm: true } })).toEqual(["swarm"]);
+  });
+
   test("the switches a settings save names, Decision mode and Grid inside `experimental` too", () => {
     expect(capabilitySetKeysIn({ board: { on: true }, sound: {}, experimental: { grid: true } })).toEqual(["board", "grid"]);
     expect(capabilitySetKeysIn({ show_archived: { on: true } })).toEqual([]);

@@ -395,6 +395,15 @@ export function sentRecipientsWords(recipients: readonly { host: string | null; 
 }
 
 /**
+ * A Sent row whose latest message only its tagged agents get (no owner among `recipients`, the core's `inboxTagsOnly`:
+ * Swarm's Add an agent): "To <them>", never the thread's first agent. Null for any other row.
+ */
+export function tagsOnlyToWords(recipients: readonly { host: string | null; name?: string | null; owner: boolean }[] | null | undefined): string | null {
+  if (!recipients || recipients.length === 0 || recipients.some((r) => r.owner)) return null;
+  return `To ${namesList(recipients.map((r) => agentName(r.host, r.name)))}`;
+}
+
+/**
  * The tags one Send carries, and the reply they ride: every `@` tag in the
  * words and in every comment the Send carries, once each, on the LAST reply
  * only (the one that carries the words). So a tag in a comment on an earlier

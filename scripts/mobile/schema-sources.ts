@@ -43,6 +43,7 @@ export const SCHEMA_SOURCES = [
   'packages/core/inbox-snooze.ts',
   'packages/core/inbox-steps.ts',
   'packages/core/inbox-surface-bridge.ts',
+  'packages/core/inbox-swarm-types.ts',
   'packages/core/inbox-t3.ts',
   'packages/core/inbox-tag-colours.ts',
   'packages/core/inbox-thread-pulls.ts',

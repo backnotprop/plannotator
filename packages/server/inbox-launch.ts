@@ -1450,6 +1450,12 @@ ${result.text}`);
   const unsubscribe = store.subscribe((line) => {
     if (line.kind !== "message") return;
     const message = line.record;
+    // Words in a ghost thread (Swarm): a launched member that rests is started again, as the person's reply starts it.
+    if (store.ghostParentOf(message.thread_id)) {
+      const waits = new Set(line.at === message.created_at ? store.ghostWaitsFor(message) : []);
+      if (waits.size > 0) for (const root of roots()) if (root.to && waits.has(root.to.session)) queueMicrotask(() => maybeRespawn(store.message(root.id) ?? root));
+      return;
+    }
     if (message.author.kind !== "person" || message.id === message.thread_id || message.delivery) return;
     const run = store.scheduledRunOf(message.thread_id);
     for (const root of [...launchesOf(message.thread_id), ...(run ? [run] : [])]) if (root.id !== message.id) queueMicrotask(() => maybeRespawn(store.message(root.id) ?? root));

@@ -1,0 +1,109 @@
+/*
+ * The Swarm badge (swarm/SwarmBadge.tsx), "Gather": its static look, its rest loops and its first-time card. The
+ * one-shot motion (the Gather, the regather) is swarmBadgeMotion.ts; this file, that one and SwarmBadge.tsx's markup
+ * constants are the badge's whole look, so the designer's later round replaces them and nothing else.
+ * Every change is opacity or transform on a layer. Reduced motion: no motion; the badge and its stars are simply there.
+ */
+.ib-sw-slot { position: relative; display: inline-flex; flex: none; height: 26px; }
+.ib-sw-halo { position: absolute; inset: 0; z-index: 0; border-radius: 999px; pointer-events: none;
+  box-shadow: 0 0 0 4px rgb(165 160 255 / 0.16), 0 0 22px 2px rgb(112 159 255 / 0.45), 0 1px 2px rgb(70 33 172 / 0.2); }
+.ib-swarm-badge { position: relative; z-index: 1; display: inline-flex; align-items: center; height: 26px; padding: 0 11px 0 8px; border: 0; border-radius: 999px;
+  background: none; color: inherit; font: inherit; font-size: 12.5px; letter-spacing: -0.005em; white-space: nowrap; cursor: pointer;
+  -webkit-tap-highlight-color: transparent; transition: transform 140ms cubic-bezier(0.23, 1, 0.32, 1); }
+.ib-swarm-badge:active { transform: scale(0.96); }
+.pn-inbox .ib-swarm-badge:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; }
+.ib-sw-clip { position: absolute; inset: 0; border-radius: inherit; overflow: hidden; }
+.ib-sw-clip > * { position: absolute; inset: 0; }
+.ib-sw-offbg { background: color-mix(in oklch, var(--foreground) 7%, transparent); opacity: 0; }
+.ib-sw-on, .ib-sw-look { background: linear-gradient(115deg, oklch(0.90 0.085 305), oklch(0.92 0.07 255) 38%, oklch(0.94 0.075 185) 68%, oklch(0.95 0.09 100)); }
+.ib-sw-ring { position: absolute; inset: 0; border-radius: inherit; box-shadow: 0 0 0 1px rgb(126 114 231 / 0.45); pointer-events: none; }
+.ib-sw-face { position: relative; display: grid; }
+.ib-sw-lab { grid-area: 1 / 1; display: inline-flex; align-items: center; gap: 6px; }
+.ib-sw-lab-on, .ib-sw-look { font-weight: 650; color: oklch(0.30 0.16 285); }
+.ib-sw-lab-off { font-weight: 550; color: var(--muted-foreground); opacity: 0; }
+/* "Swarm" centred on its cap height, not its line box (round 3, measured). */
+.ib-sw-word { display: inline-block; text-box: trim-both cap alphabetic; }
+@supports not (text-box: trim-both cap alphabetic) { .ib-sw-word { position: relative; top: 0.6px; } }
+.ib-sw-g { position: relative; display: block; width: 14px; height: 14px; flex: none; }
+.ib-sw-g i { position: absolute; border-radius: 50%; background: currentColor; }
+
+/* Off: a control you can turn on; it answers the pointer. */
+.ib-sw-slot[data-state="off"] :is(.ib-sw-on, .ib-sw-ring, .ib-sw-halo, .ib-sw-lab-on) { opacity: 0; }
+.ib-sw-slot[data-state="off"] :is(.ib-sw-offbg, .ib-sw-lab-off) { opacity: 1; }
+@media (hover: hover) {
+  .ib-sw-slot[data-state="off"] .ib-swarm-badge:hover .ib-sw-offbg { background: color-mix(in oklch, var(--foreground) 11%, transparent); }
+  .ib-sw-slot[data-state="off"] .ib-swarm-badge:hover .ib-sw-lab-off { color: var(--foreground); }
+}
+.ib-sw-offbg, .ib-sw-on, .ib-sw-ring, .ib-sw-halo, .ib-sw-lab { transition: opacity 200ms cubic-bezier(0.23, 1, 0.32, 1); }
+/* The appearance settles to off: the glow subsides more slowly than a click turns it off. */
+.ib-sw-slot[data-settling] :is(.ib-sw-on, .ib-sw-ring, .ib-sw-halo, .ib-sw-lab, .ib-sw-offbg, .ib-sw-stars) { transition-duration: 480ms; }
+
+/* The particles the Gather draws in. */
+.ib-sw-fx { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
+.ib-sw-p { position: absolute; left: 13.5px; top: 11.5px; width: 3px; height: 3px; border-radius: 50%; opacity: 0; }
+:is(.ib-sw-p, .ib-sw-st-t)[data-hue="0"] { background: rgb(126 114 231); }
+:is(.ib-sw-p, .ib-sw-st-t)[data-hue="1"] { background: rgb(82 148 230); }
+:is(.ib-sw-p, .ib-sw-st-t)[data-hue="2"] { background: rgb(29 188 181); }
+:is(.ib-sw-p, .ib-sw-st-t)[data-hue="3"] { background: rgb(218 188 67); }
+
+/* The stars: there while Swarm is on. .ib-sw-st enters (the script), .ib-sw-st-d drifts, .ib-sw-st-t twinkles.
+   Off: they fade in 180 ms and their loops pause where they are. */
+.ib-sw-stars { position: absolute; inset: 0; z-index: 3; pointer-events: none; transition: opacity 220ms cubic-bezier(0.23, 1, 0.32, 1); }
+.ib-sw-slot[data-state="off"] .ib-sw-stars { opacity: 0; transition-duration: 180ms; }
+.ib-sw-st { position: absolute; display: block; }
+.ib-sw-st-d, .ib-sw-st-t { display: block; width: 100%; height: 100%; }
+.ib-sw-st-t { clip-path: polygon(50% 0, 62% 38%, 100% 50%, 62% 62%, 50% 100%, 38% 62%, 0 50%, 38% 38%); }
+.ib-sw-slot[data-state="off"] :is(.ib-sw-st-d, .ib-sw-st-t) { animation-play-state: paused; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .ib-sw-st-d { animation-timing-function: cubic-bezier(0.45, 0, 0.55, 1); animation-iteration-count: infinite; animation-direction: alternate; }
+  .ib-sw-st-t { animation-name: ib-sw-tw; animation-timing-function: cubic-bezier(0.45, 0, 0.55, 1); animation-iteration-count: infinite; }
+  /* At rest, on, the icon's dots drift a hair. */
+  .ib-sw-slot[data-state="on"][data-rest] .ib-sw-lab-on .ib-sw-g i:nth-child(1) { animation: ib-sw-dot-a 3.2s ease-in-out infinite alternate; }
+  .ib-sw-slot[data-state="on"][data-rest] .ib-sw-lab-on .ib-sw-g i:nth-child(2) { animation: ib-sw-dot-b 4.1s ease-in-out infinite alternate; }
+  .ib-sw-slot[data-state="on"][data-rest] .ib-sw-lab-on .ib-sw-g i:nth-child(3) { animation: ib-sw-dot-c 3.7s ease-in-out infinite alternate; }
+  .ib-sw-slot[data-state="on"][data-rest] .ib-sw-lab-on .ib-sw-g i:nth-child(4) { animation: ib-sw-dot-b 4.6s ease-in-out infinite alternate-reverse; }
+  .ib-sw-slot[data-state="on"][data-rest] .ib-sw-lab-on .ib-sw-g i:nth-child(5) { animation: ib-sw-dot-a 3.4s ease-in-out infinite alternate-reverse; }
+  .ib-sw-slot[data-state="on"][data-rest] .ib-sw-lab-on .ib-sw-g i:nth-child(6) { animation: ib-sw-dot-c 5.2s ease-in-out infinite alternate; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ib-sw-st-d, .ib-sw-st-t { animation: none !important; }
+  .ib-sw-slot *, .ib-swarm-badge { transition: none !important; }
+}
+@keyframes ib-sw-dot-a { to { transform: translate(0.6px, -0.7px); } }
+@keyframes ib-sw-dot-b { to { transform: translate(-0.7px, 0.5px); } }
+@keyframes ib-sw-dot-c { to { transform: translate(0.5px, 0.7px); } }
+@keyframes ib-sw-st-a { 0% { transform: translate(0, 0); } 50% { transform: translate(2px, -3px); } 100% { transform: translate(-1.5px, -1px); } }
+@keyframes ib-sw-st-b { 0% { transform: translate(0, 0); } 50% { transform: translate(-2.5px, 1.5px); } 100% { transform: translate(1px, 3px); } }
+@keyframes ib-sw-st-c { 0% { transform: translate(0, 0); } 50% { transform: translate(1.5px, 2.5px); } 100% { transform: translate(3px, -1px); } }
+@keyframes ib-sw-tw { 0%, 100% { opacity: 1; transform: scale(1) rotate(0deg); } 50% { opacity: 0.35; transform: scale(0.72) rotate(18deg); } }
+
+/* The on look alone (a swarm thread's line): the badge's face, not a control. */
+.ib-sw-look { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 9px 0 7px; border-radius: 999px; font-size: 12px;
+  box-shadow: 0 0 0 1px rgb(126 114 231 / 0.45); }
+
+/* The first-time card (useSwarmTip): it hangs from the badge, its caret at the badge's centre; the badge is its one action. */
+.ib-sw-tip { position: absolute; top: calc(100% + 10px); right: -6px; z-index: 9; padding: 10px 12px 11px; border-radius: 10px;
+  background: var(--popover); color: var(--popover-foreground); box-shadow: var(--ib-float-shadow); font-size: 13px; line-height: 1.3; white-space: nowrap;
+  transform-origin: calc(100% - 40px) 0; }
+.ib-sw-tip::before { content: ''; position: absolute; top: -5px; right: 35px; width: 10px; height: 10px; background: var(--popover); transform: rotate(45deg);
+  border-radius: 2px 0 0 0; box-shadow: -1px -1px 0 0 color-mix(in oklch, var(--border) 70%, transparent); }
+.ib-sw-tip-h { margin: 0 0 4px; font-size: 12px; color: var(--muted-foreground); }
+.ib-sw-tip-r { display: flex; align-items: center; gap: 9px; height: 28px; font-weight: 500; }
+.ib-sw-tip-r svg { color: color-mix(in oklch, var(--primary) 85%, var(--foreground)); }
+@media (prefers-reduced-motion: no-preference) {
+  .ib-sw-tip { animation: ib-sw-tip-in 200ms cubic-bezier(0.23, 1, 0.32, 1) both; }
+}
+@keyframes ib-sw-tip-in { from { opacity: 0; transform: translateY(-4px) scale(0.97); } }
+/* A phone: the badge sits in the composer's foot, at the screen's bottom, so the card stands above it, inside the screen.
+   A computer with no room beside the badge but room over it (swarmTipPlace.ts `above`): the same. */
+.pn-inbox[data-phone] .ib-sw-tip, [data-phone] .ib-sw-tip, .ib-sw-tip[data-side="above"] { top: auto; bottom: calc(100% + 10px); transform-origin: calc(100% - 40px) 100%; }
+:is([data-phone] .ib-sw-tip, .ib-sw-tip[data-side="above"])::before { top: auto; bottom: -5px; border-radius: 0 0 2px 0; box-shadow: 1px 1px 0 0 color-mix(in oklch, var(--border) 70%, transparent); }
+/* A computer (swarmTipPlace.ts `right`): right of the badge, level with To, its caret pointing left at the badge, so it
+   lies over the dialog's edge and not over the words being written. */
+.ib-sw-tip[data-side="right"] { top: calc(50% - 24px); right: auto; left: calc(100% + 10px); transform-origin: 0 24px; }
+.ib-sw-tip[data-side="right"]::before { top: 19px; right: auto; left: -5px; border-radius: 0 0 0 2px; box-shadow: -1px 1px 0 0 color-mix(in oklch, var(--border) 70%, transparent); }
+@media (prefers-reduced-motion: no-preference) {
+  .ib-sw-tip[data-side="right"] { animation-name: ib-sw-tip-in-r; }
+}
+@keyframes ib-sw-tip-in-r { from { opacity: 0; transform: translateX(-4px) scale(0.97); } }

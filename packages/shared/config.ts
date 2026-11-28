@@ -505,7 +505,7 @@ export interface PlannotatorConfig {
    * mode's switch, now `inboxDecisionMode`; read only as its fallback
    * (`inboxDecisionModeOn`), never written.
    */
-  experimental?: { decisionMode?: boolean; grid?: boolean };
+  experimental?: { decisionMode?: boolean; grid?: boolean; swarm?: boolean };
   /**
    * Decision mode (the owner, 2026-11-24: "default on, switch off in capabilities, no longer experimental"): on
    * unless false. On: a thread's open questions offer "Decide", one question at a time in a focused dialog, answers
@@ -776,6 +776,8 @@ export interface PlannotatorConfig {
     sidebar_tip?: { shownAt?: string; key?: string };
     /** The Group tip (packages/shared/inbox/band-tip.ts): stamped once when shown, or when a band's menu was opened first. */
     band_tip?: { shownAt?: string; key?: string; usedAt?: string };
+    /** The Swarm tip (packages/shared/inbox/swarm-tip.ts): stamped once when shown, outside the line. */
+    swarm_tip?: { shownAt?: string; key?: string };
     /** The Search tip (packages/shared/inbox/search-tip.ts): stamped once when shown, outside the line. */
     search_tip?: { shownAt?: string; key?: string };
   };
@@ -2558,6 +2560,7 @@ export function resolveInboxPhones(
  */
 export const EXPERIMENTAL_FEATURES = {
   grid: "grid",
+  swarm: "swarm",
 } as const;
 
 export type ExperimentalFeature = keyof typeof EXPERIMENTAL_FEATURES;

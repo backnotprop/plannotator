@@ -66,7 +66,7 @@ import { createLinkThrough, LINK_THROUGH_ASK_ROUTE, LINK_THROUGH_INTRODUCE_ROUTE
 import type { LinkThroughView } from "@plannotator/core/inbox-link-through";
 
 /** A far tag's door routes (inbox-far-tags.ts): this Inbox sends them itself; the forward never does. */
-const FAR_TAG_OWN_ROUTES = new Set([FAR_TAGGABLE_ROUTE, FAR_WAKE_ROUTE, FAR_AGENT_REPLY_ROUTE, FAR_DELIVERED_ROUTE]);
+const FAR_TAG_OWN_ROUTES = new Set([FAR_TAGGABLE_ROUTE, FAR_WAKE_ROUTE, FAR_AGENT_REPLY_ROUTE, FAR_DELIVERED_ROUTE, "swarm"]);
 
 /** The most rows a linked machine's door gives in one archived page (its `INBOX_ARCHIVED_PAGE_MAX`). */
 const FAR_ARCHIVED_LIMIT_MAX = 200;

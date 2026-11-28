@@ -1,0 +1,55 @@
+/* The swarm's plan card (swarm/SwarmPlanCard.tsx; approval "inbox-swarm-thread-ui", head H1 "the swarm band", body P2):
+   the agent's first reply in a swarm thread. Read-only in this piece. The band takes the Swarm badge's gradient,
+   softened for a wide strip; nothing in a row is highlighted, and an agent being brought in differs only by its mark's
+   dashed tile and a quiet "joining". */
+.ib-swarm-plan { container-type: inline-size; margin: 4px 0 2px; border-radius: 12px; overflow: hidden; background: var(--card);
+  box-shadow: 0 0 0 1px color-mix(in oklch, oklch(0.62 0.13 285) 30%, var(--border)); }
+
+/* ── The band: the Swarm mark, "Swarm plan", the one line that work has started, the count of parts ── */
+/* Dark is the window's default; light is `:root.light` (ThemeProvider), or a light island's `.ib-lightscope.light`. */
+.ib-sp-band { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 10px; row-gap: 2px; padding: 11px 16px;
+  background: linear-gradient(115deg, oklch(0.34 0.075 305), oklch(0.33 0.065 255) 38%, oklch(0.33 0.055 190) 68%, oklch(0.34 0.05 105));
+  color: oklch(0.91 0.06 290); }
+:root.light .ib-sp-band, .ib-lightscope.light .ib-sp-band {
+  background: linear-gradient(115deg, oklch(0.95 0.045 305), oklch(0.955 0.04 255) 38%, oklch(0.965 0.045 185) 68%, oklch(0.97 0.055 100));
+  color: oklch(0.32 0.15 285); }
+.ib-swarm-plan[data-off] .ib-sp-band { filter: saturate(0.35); }
+.ib-sp-mark { display: inline-flex; align-self: center; }
+.ib-sp-title { font-size: var(--ib-fs-15, 15px); font-weight: 650; white-space: nowrap; }
+.ib-sp-status { min-width: 0; font-size: var(--ib-fs-13, 13px); font-weight: 500; }
+.ib-sp-count { margin-left: auto; font-size: var(--ib-fs-13, 13px); white-space: nowrap; opacity: 0.8; }
+
+/* ── The plan in a line, then each part: what it does, and who does it ── */
+.ib-sp-sum { margin: 12px 16px 0; font-size: var(--ib-fs-14, 14px); line-height: 1.45; color: var(--foreground); }
+.ib-sp-parts { margin: 0; padding: 6px 0 8px; list-style: none; }
+.ib-sp-part { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 40%); column-gap: 16px; row-gap: 2px; align-items: baseline; margin: 0; padding: 7px 16px; }
+.ib-sp-part::before, .ib-sp-part::marker { content: none; }
+/* A sub-agent, under the agent it works for. */
+.ib-sp-part[data-depth="1"] { padding-left: 36px; }
+.ib-sp-does { font-size: var(--ib-fs-14, 14px); font-weight: 600; line-height: 1.4; color: var(--foreground); overflow-wrap: anywhere; }
+.ib-sp-part[data-depth="1"] .ib-sp-does { font-weight: 500; }
+.ib-sp-who { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.ib-sp-mk { display: inline-flex; flex: none; }
+.ib-sp-mk .ib-mk { width: 20px; height: 20px; border-radius: 6px; background: var(--muted); }
+.ib-sp-mk .ib-mk > svg, .ib-sp-mk .ib-mk > img { width: 14px; height: 14px; }
+/* Being brought in: the mark's tile is empty, its edge dashed; it fills when the agent joins. */
+.ib-sp-mk[data-waiting] .ib-mk { background: transparent; outline: 1px dashed color-mix(in oklch, var(--muted-foreground) 55%, transparent); outline-offset: -1px; }
+.ib-sp-nm { flex: none; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; color: var(--foreground); }
+.ib-sp-wh { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-sp-wh::before { content: "· "; }
+.ib-sp-state { flex: none; white-space: nowrap; }
+.ib-sp-state::before { content: "· "; }
+.ib-sp-by { grid-column: 1 / -1; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+/* A narrow card (a phone, a narrow pane): who sits under what it does. */
+@container (max-width: 520px) {
+  .ib-sp-part { grid-template-columns: minmax(0, 1fr); }
+  .ib-sp-nm { max-width: 50%; }
+}
+
+/* ── A long team folds; the foot opens the ghost thread ── */
+.ib-sp-more, .ib-sp-ghost { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border: 0; border-radius: 7px; background: none;
+  color: var(--muted-foreground); font: inherit; font-size: var(--ib-fs-13, 13px); cursor: pointer; }
+.ib-sp-more { margin: -4px 6px 8px; }
+@media (hover: hover) { .ib-sp-more:hover, .ib-sp-ghost:hover { background: color-mix(in oklch, var(--muted) 70%, transparent); color: var(--foreground); } }
+.pn-inbox :is(.ib-sp-more, .ib-sp-ghost):focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.ib-sp-foot { display: flex; justify-content: flex-end; padding: 6px 8px; border-top: 1px solid var(--border); }

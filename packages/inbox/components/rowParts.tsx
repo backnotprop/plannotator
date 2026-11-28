@@ -12,7 +12,7 @@ import { inboxSnoozeWhen } from '@plannotator/core/inbox-snooze';
 import { fullTime, shortTime, whenTime } from '../format';
 import { rowRecipientName, rowWho } from '../scriptAuthor';
 import { reaskRowLine, sentRowLine, undeliveredLabel } from '../deliveryLine';
-import { sentRecipientsWords } from '../tags';
+import { sentRecipientsWords, tagsOnlyToWords } from '../tags';
 import { TagStack } from './TagPicker';
 import { LazyRowTips, opensTips, RowTip } from './RowTip';
 import { RowSlotNames } from './RowSlot';
@@ -250,7 +250,8 @@ export function countWords(row: InboxListRow, now: number, tickAlone = false): {
   // An agent the person started from New message (launch): one muted word while it starts or works.
   if (row.run) return same(row.run === 'starting' ? 'Starting' : row.run === 'cloning' ? 'Cloning' : 'Working');
   if (row.combining) return { short: <span className="ib-combining">Combining…</span>, long: <span className="ib-combining">Combining…</span>, full: 'Combining…' };
-  if (row.section === 'sent' && row.addressee) return same(`To ${rowRecipient(row)}`);
+  // A message only its tagged agents get (Add an agent): whom it went to, not the thread's first agent.
+  if (row.section === 'sent' && row.addressee) return same(tagsOnlyToWords(row.sent?.recipients) ?? `To ${rowRecipient(row)}`);
   return null;
 }
 

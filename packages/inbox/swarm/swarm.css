@@ -1,0 +1,172 @@
+/* Swarm (packages/inbox/swarm/; approval "inbox-swarm-thread-ui"): New message's other agents, a swarm thread's summary
+   row and status view, its Ghost button and its ghost pane. The Swarm badge and its motion are swarmBadge.css. */
+
+/* ── New message: the other agents, Add an agent, the badge at the row's end ── */
+.ib-swarm-add { display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex: none; min-width: 34px; height: 34px; padding: 0 8px; border: 0; border-radius: 7px; background: none; color: var(--muted-foreground); font: inherit; font-size: var(--ib-fs-14, 14px); cursor: pointer; align-self: center; }
+@media (hover: hover) { .ib-swarm-add:hover { background: color-mix(in oklch, var(--muted) 70%, transparent); color: var(--foreground); } }
+.ib-swarm-add[aria-expanded="true"] { background: color-mix(in oklch, var(--muted) 70%, transparent); color: var(--foreground); }
+.pn-inbox .ib-swarm-add:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.ib-swarm-end { display: inline-flex; align-items: center; margin-left: auto; align-self: center; }
+.ib-cp-to:has(.ib-swarm-end) .ib-cp-dsaved { margin-left: 10px; }
+/* A phone: the other agents' marks, the + and the badge inline after To's pill in the foot's row. */
+.ib-swarm-phoneline { display: inline-flex; align-items: center; gap: 2px; min-width: 0; flex: none; }
+.ib-swarm-phoneline .ib-swarm-also { padding: 0 4px; }
+.ib-swarm-phoneline .ib-swarm-add { min-width: 36px; height: 36px; padding: 0; }
+.ib-swarm-phoneline .ib-swarm-end { margin-left: 2px; }
+/* With them in it the row's gaps narrow (8 → 4 px, the saved check's own 6 px gone), so Send stays on a 390 px screen. */
+.pn-inbox dialog.ib-cp[data-phone] .ib-cp-foot:has(> .ib-swarm-phoneline) { gap: 4px; }
+.pn-inbox dialog.ib-cp[data-phone] .ib-cp-foot:has(> .ib-swarm-phoneline) > .ib-cp-savedline { margin-left: 0; }
+/* A stop-gap until the phone row's design is picked (PR #4013): only so Send is never off the screen.
+   Narrower than 390 px that is still too long, so the least needed give way, only as far as each width needs: Skills
+   first, as it does for a Send with words (phoneComposer.css); under 360 px the badge also keeps only its mark, the
+   word staying its name, and wide enough that its stars above and below stay on it. Nothing wraps to a second row. */
+@media (max-width: 389px) {
+  .pn-inbox dialog.ib-cp[data-phone] .ib-cp-foot:has(> .ib-swarm-phoneline) > [data-compose-skills] { display: none; }
+}
+@media (max-width: 359px) {
+  .ib-swarm-phoneline .ib-swarm-badge { padding: 0 13px; }
+  .ib-swarm-phoneline .ib-sw-lab-off .ib-sw-word { display: none; }
+  .ib-swarm-phoneline .ib-sw-lab-on .ib-sw-word { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+}
+/* In the row the badge's neighbours are 4 px away: its stars keep to the badge's own width (those beside it are cut
+   away whole, never sliced) and to its glow's reach above and below, so none lies on the + or the saved check. */
+.ib-swarm-phoneline .ib-sw-stars { clip-path: inset(-18px 0); }
+
+/* ── The ghost mark: the owner's drawing as a mask over the colour of the words around it ── */
+.ib-ghost-g { display: inline-block; flex: none; background-color: currentColor; -webkit-mask: var(--ib-ghost-src) center / contain no-repeat; mask: var(--ib-ghost-src) center / contain no-repeat; }
+.ib-ghost-accent { color: var(--primary); }
+
+/* ── The Ghost button: first in the top bar; muted at rest, its count in the accent; pressed takes the accent (.ib-artbtn) ── */
+.ib-ghostbtn-n { color: var(--primary); }
+
+/* ── The summary row under the title ── */
+.ib-swarm-line { position: relative; display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; }
+.ib-swarm-tog { display: inline-flex; align-items: center; gap: 8px; min-width: 0; height: 30px; padding: 0 10px 0 4px; border: 0; border-radius: 15px; background: color-mix(in oklch, var(--muted) 70%, transparent); color: var(--muted-foreground); font: inherit; cursor: pointer; }
+@media (hover: hover) { .ib-swarm-tog:hover { background: var(--muted); color: var(--foreground); } }
+.ib-swarm-line[data-open] .ib-swarm-tog { background: var(--muted); color: var(--foreground); }
+.pn-inbox .ib-swarm-tog:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.ib-swarm-line .ib-ss-pile .ib-mk { width: var(--ib-mark-20); height: var(--ib-mark-20); border-radius: var(--ib-mark-20-r); background: var(--card); box-shadow: 0 0 0 2px var(--card); }
+.ib-swarm-line .ib-ss-pile .ib-mk > svg, .ib-swarm-line .ib-ss-pile .ib-mk > img { width: var(--ib-mark-20-g); height: var(--ib-mark-20-g); }
+.ib-swarm-line .ib-ss-pile .ib-mk + .ib-mk { margin-left: -6px; }
+.ib-swarm-sum { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ib-fs-13, 13px); font-weight: 500; color: var(--foreground); }
+.ib-swarm-sum b { font-weight: 550; color: color-mix(in oklab, var(--warning) 80%, var(--foreground)); }
+.ib-swarm-line[data-off] .ib-sw-look { opacity: 0.55; }
+.ib-swarm-line[data-off] .ib-swarm-sum { color: var(--muted-foreground); }
+
+/* ── The status view: under the row, over the thread on a computer ── */
+/* Over the messages: each message's Viewer (packages/ui) is `relative z-50` in the thread body's stacking context, so
+   the open row stacks above that (and the 51 of a message's reaction slot), or the words below would draw through it. */
+.ib-swarm-line[data-open] { z-index: 52; }
+.ib-swarm-pop { position: absolute; z-index: 6; left: 0; top: calc(100% + 6px); width: min(560px, calc(100vw - 48px)); box-sizing: border-box; padding: 4px; border-radius: 12px; background: var(--popover); color: var(--popover-foreground); box-shadow: var(--ib-float-shadow, 0 10px 28px -14px color-mix(in oklch, var(--foreground) 45%, transparent)); }
+.ib-swarm-rows { margin: 0; padding: 0; list-style: none; }
+.ib-swarm-row { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; gap: 1px 10px; align-items: center; margin: 0; padding: 8px 10px; }
+.ib-swarm-row::before, .ib-swarm-row::marker, .ib-swarm-li::before, .ib-swarm-li::marker { content: none; }
+.ib-swarm-li { margin: 0; padding: 0; list-style: none; }
+/* A sub-agent sits under the member it works for. */
+.ib-swarm-row[data-depth="1"] { padding-left: 44px; }
+.ib-swarm-mk { grid-row: 1 / 3; align-self: start; margin-top: 1px; display: inline-flex; }
+.ib-swarm-mk .ib-mk { width: 24px; height: 24px; border-radius: 7px; background: var(--muted); }
+.ib-swarm-row[data-depth="1"] .ib-swarm-mk .ib-mk { width: 20px; height: 20px; border-radius: 6px; }
+.ib-swarm-nm { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: var(--ib-fs-14, 14px); font-weight: 550; color: var(--foreground); }
+.ib-swarm-nm > bdi { flex: none; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-swarm-wh { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+/* Its state: quiet words, never a spinner. */
+.ib-swarm-se { justify-self: end; display: inline-flex; align-items: center; min-width: 0; }
+.ib-swarm-st { font-size: var(--ib-fs-12-5, 12.5px); white-space: nowrap; color: var(--muted-foreground); }
+/* Remove (main's, approval "inbox-remove-agent-from-thread"): quiet words after the state while the row is hovered or
+   holds focus; hidden it takes no room, and it stays in the Tab order. */
+.pn-inbox .ib-swarm-rm { height: 26px; font-size: var(--ib-fs-12-5, 12.5px); }
+.pn-inbox .ib-swarm-row:focus-within .ib-swarm-rm { max-width: 96px; margin-left: 4px; padding: 0 8px; opacity: 1; }
+@media (hover: hover) { .pn-inbox .ib-swarm-row:hover .ib-swarm-rm { max-width: 96px; margin-left: 4px; padding: 0 8px; opacity: 1; } }
+/* Add an agent's list: the `@` list's box and rows, over the foot. */
+.ib-swarm-addwrap { position: relative; display: inline-flex; min-width: 0; }
+.ib-tg-menu.ib-swarm-addlist { left: 0; right: auto; bottom: calc(100% + 6px); margin: 0; width: 320px; max-width: calc(100vw - 24px); padding: 6px; }
+.ib-swarm-addnone { margin: 0; padding: 8px 10px; color: var(--muted-foreground); }
+.ib-swarm-row[data-state="working"] .ib-swarm-st { color: var(--primary); font-weight: 550; }
+.ib-swarm-row[data-state="waiting"] .ib-swarm-st { color: color-mix(in oklab, var(--warning) 80%, var(--foreground)); font-weight: 550; }
+.ib-swarm-row[data-state="not_joined"] :is(.ib-swarm-nm, .ib-swarm-mk) { opacity: 0.6; }
+.ib-swarm-now { grid-column: 2 / 4; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ib-fs-13, 13px); color: var(--foreground); }
+.ib-swarm-when { color: var(--muted-foreground); }
+.ib-swarm-err { margin: 4px 10px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--destructive); }
+/* The foot: one row, Turn off at its end. */
+.ib-swarm-foot { display: flex; align-items: center; gap: 2px; margin-top: 4px; padding: 4px 2px 2px; border-top: 1px solid color-mix(in oklch, var(--border) 80%, transparent); }
+.ib-swarm-sp { flex: 1; }
+.ib-swarm-fb { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border: 0; border-radius: 7px; background: none; color: var(--foreground); font: inherit; font-size: var(--ib-fs-13, 13px); font-weight: 500; white-space: nowrap; cursor: pointer; }
+.ib-swarm-fb[data-swarm-turn] { color: var(--muted-foreground); }
+@media (hover: hover) { .ib-swarm-fb:hover { background: var(--muted); color: var(--foreground); } }
+.pn-inbox .ib-swarm-fb:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.ib-swarm-fb:disabled { opacity: 0.5; cursor: default; }
+.ib-swarm-fn { color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.ib-swarm-fb .ib-ic, .ib-swarm-fb svg { flex: none; color: var(--muted-foreground); }
+/* The foot stays one row at any width (320 px included): its labels give way, with an ellipsis, before it overflows. */
+.ib-swarm-foot { min-width: 0; }
+.ib-swarm-fb { min-width: 0; }
+.ib-swarm-fb > span:not(.ib-swarm-fn) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ib-swarm-fb[data-swarm-turn] { flex: none; }
+
+/* ── A phone: the row on its own line, the view opens below it, one member per row ── */
+.ib-tmeta[data-sessions]:has(> .ib-swarm-line[data-phone]) > .ib-tmeta-rest { margin-left: 0; flex-basis: 100%; }
+.ib-swarm-line[data-phone] { flex-wrap: wrap; }
+.ib-swarm-line[data-phone] .ib-swarm-tog { height: 36px; padding: 0 12px 0 6px; border-radius: 18px; }
+.ib-swarm-line[data-phone] .ib-swarm-pop { position: static; flex-basis: 100%; width: auto; margin: 6px 0 4px; box-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 80%, transparent); }
+.ib-swarm-line[data-phone] .ib-swarm-row { grid-template-columns: 28px minmax(0, 1fr) auto; padding: 10px 8px; }
+.ib-swarm-line[data-phone] .ib-swarm-row[data-depth="1"] { padding-left: 36px; }
+.ib-swarm-line[data-phone] .ib-swarm-nm { flex-wrap: wrap; row-gap: 0; font-size: 15px; }
+.ib-swarm-line[data-phone] .ib-swarm-now { white-space: normal; font-size: 14px; }
+.ib-swarm-line[data-phone] .ib-swarm-fb { min-height: 44px; padding: 0 8px; font-size: 14px; }
+/* The narrowest phones (320 px): tighter, and the two marks that only decorate go, so the labels keep their words. */
+@media (max-width: 380px) {
+  .ib-swarm-line[data-phone] .ib-swarm-foot { gap: 0; }
+  .ib-swarm-line[data-phone] .ib-swarm-fb { padding: 0 6px; gap: 4px; }
+  .ib-swarm-line[data-phone] .ib-swarm-fb[data-swarm-add] > :first-child,
+  .ib-swarm-line[data-phone] .ib-swarm-fb[data-swarm-ghost] > :last-child { display: none; }
+}
+
+/* ── The ghost pane: beside the thread the way a file is; the list steps aside while it is open ── */
+/* `data-ib-ghost-beside`: held by GhostPane while it is beside the thread (no `:has()` on the window's root). */
+.pn-inbox[data-ib-ghost-beside] .ib-main { position: relative; }
+.pn-inbox[data-ib-ghost-beside] .ib-listcol { position: absolute; inset: 0; visibility: hidden; }
+.ib-view.ib-ghostpane { display: flex; flex-direction: column; min-width: 0; background: var(--card); outline: none; }
+.ib-view.ib-ghostpane.ib-phone { padding-top: env(safe-area-inset-top); }
+.ib-ghost-back { flex: none; display: flex; align-items: center; height: 46px; padding: 0 10px; border-bottom: 1px solid var(--ib-hair); }
+.pn-inbox .ib-ghost-back .ib-pback { max-width: 100%; }
+.ib-ghost-head { flex: none; display: flex; align-items: center; gap: 9px; height: 46px; min-width: 0; padding: 0 14px 0 18px; border-bottom: 1px solid var(--ib-hair); }
+.ib-ghost-t { margin: 0; font-size: var(--ib-fs-15, 15px); font-weight: 650; white-space: nowrap; }
+.ib-ghost-n { font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.ib-ghost-of { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.ib-ghost-head .ib-sp { flex: 1; }
+.ib-ghost-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 16px; padding: 16px 20px; }
+.ib-ghost-msg { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10px; }
+.ib-ghost-mk { display: inline-flex; padding-top: 1px; }
+.ib-ghost-mk .ib-mk { width: var(--ib-mark-24); height: var(--ib-mark-24); border-radius: var(--ib-mark-24-r); background: var(--muted); }
+.ib-ghost-mk .ib-mk > svg, .ib-ghost-mk .ib-mk > img { width: var(--ib-mark-24-g); height: var(--ib-mark-24-g); }
+.ib-ghost-main { min-width: 0; }
+.ib-ghost-line { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.ib-ghost-from { flex: none; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ib-fs-14, 14px); font-weight: 600; }
+.ib-ghost-msgto { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.ib-ghost-line .ib-sp { flex: 1; }
+.ib-ghost-tm { flex: none; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.ib-ghost-words { font-size: var(--ib-fs-14, 14px); line-height: 1.5; color: var(--foreground); overflow-wrap: anywhere; }
+.ib-ghost-words p { margin: 2px 0 0; }
+.ib-ghost-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 32px 24px; text-align: center; }
+.ib-ghost-empty .ib-ghost-g { margin-bottom: 14px; }
+.ib-ghost-empty-t { margin: 0; font-size: var(--ib-fs-15, 15px); font-weight: 600; color: var(--foreground); }
+.ib-ghost-empty-s { margin: 0; max-width: 280px; font-size: var(--ib-fs-13-5, 13.5px); color: var(--muted-foreground); }
+.ib-ghost-err { margin: 0; font-size: var(--ib-fs-13, 13px); color: var(--destructive); }
+/* The box: to everyone (or one), the words, Send. */
+.ib-ghost-box { flex: none; margin: 8px 14px 14px; padding: 8px 10px 10px; border-radius: 12px; background: var(--card); box-shadow: 0 0 0 1px var(--border), 0 1px 3px color-mix(in oklch, var(--foreground) 6%, transparent); }
+.ib-ghost-box > .ib-ghost-err { margin: 0 0 6px; }
+.ib-ghost-field { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
+.ib-ghost-towrap { position: relative; flex: none; display: inline-flex; padding-top: 1px; }
+/* The reply's list's shape (inbox.css `.ib-tg-menu.ib-rpick`), not its class: that class marks the reply box's list. */
+.ib-tg-menu.ib-ghost-tolist { left: 0; right: auto; bottom: calc(100% + 6px); margin: 0; width: 240px; max-width: calc(100vw - 24px); padding: 6px; }
+.ib-ghost-in { flex: 1; min-width: 0; min-height: 26px; max-height: 180px; padding: 3px 0; border: 0; background: none; color: var(--foreground); font: inherit; font-size: var(--ib-fs-14, 14px); line-height: 1.45; resize: none; outline: none; field-sizing: content; }
+.ib-ghost-in::placeholder { color: var(--muted-foreground); }
+.ib-ghost-acts { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.ib-ghost-offline { flex: none; margin: 0; padding: 12px 20px 16px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.ib-view.ib-ghostpane.ib-phone .ib-ghost-box { margin-bottom: max(14px, env(safe-area-inset-bottom)); }
+.ib-view.ib-ghostpane.ib-phone .ib-ghost-head { height: 52px; padding-left: 16px; }
+.ib-view.ib-ghostpane.ib-phone .ib-ghost-t { font-size: 17px; }
+.ib-view.ib-ghostpane.ib-phone .ib-ghost-body { padding: 16px; }
+.ib-view.ib-ghostpane.ib-phone .ib-ghost-words { font-size: 15px; }
+.ib-view.ib-ghostpane.ib-phone .ib-ghost-acts .ib-btn { height: 40px; padding: 0 18px; }

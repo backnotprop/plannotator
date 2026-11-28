@@ -275,6 +275,60 @@
       "relay": true
     },
     {
+      "name": "GET threads/:id/swarm",
+      "method": "GET",
+      "path": "threads/{thread}/swarm",
+      "params": [
+        "thread"
+      ],
+      "call": "getThreadSwarm",
+      "window": "/api/inbox/threads/{thread}/swarm",
+      "grant": "phone",
+      "auth": "token",
+      "kind": "read",
+      "write": null,
+      "key": null,
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
+      "name": "POST threads/:id/swarm",
+      "method": "POST",
+      "path": "threads/{thread}/swarm",
+      "params": [
+        "thread"
+      ],
+      "call": "postThreadSwarm",
+      "window": "/api/inbox/threads/{thread}/swarm",
+      "grant": "phone",
+      "auth": "token",
+      "kind": "now",
+      "write": "now",
+      "key": "body",
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
+      "name": "POST threads/:id/swarm/add",
+      "method": "POST",
+      "path": "threads/{thread}/swarm/add",
+      "params": [
+        "thread"
+      ],
+      "call": "postThreadSwarmAdd",
+      "window": "/api/inbox/threads/{thread}/swarm/add",
+      "grant": "phone",
+      "auth": "token",
+      "kind": "hold",
+      "write": "append",
+      "key": "body",
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
       "name": "POST pins",
       "method": "POST",
       "path": "pins",
@@ -2705,6 +2759,22 @@
       "auth": "token",
       "kind": "hold",
       "write": "set",
+      "key": "body",
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
+      "name": "POST swarm",
+      "method": "POST",
+      "path": "swarm",
+      "params": [],
+      "call": "postSwarm",
+      "window": null,
+      "grant": "machine",
+      "auth": "token",
+      "kind": "now",
+      "write": "now",
       "key": "body",
       "answer": "json",
       "range": false,

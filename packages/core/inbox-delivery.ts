@@ -248,6 +248,20 @@ export function inboxScriptAuthor(author: { kind: string; host?: string | null; 
   return !!author && author.kind === "agent" && !author.session && !author.host && !author.name;
 }
 
+/**
+ * A person's message that only its tagged agents get: it has no `to` and answers no agent message with a session, so
+ * the store gives it no owner (`recipientOf` is null) and hands it to its tags alone. Swarm's Add an agent writes one:
+ * it answers the person's own first message and tags the agent added. The thread names those agents as its "to" and
+ * draws only their delivery lines, never the thread's first agent's; its row has no owner's delivery.
+ */
+export function inboxTagsOnly(
+  message: { author: { kind: string }; to?: unknown; tags?: readonly unknown[] | null },
+  answers: { author: { kind: string; session?: string | null } } | null | undefined,
+): boolean {
+  if (message.author.kind !== "person" || message.to || (message.tags?.length ?? 0) === 0) return false;
+  return !(answers?.author.kind === "agent" && answers.author.session);
+}
+
 /** What a person reads for a script's post (`inboxScriptAuthor`): the window, and the phone's push. Agents read "An agent". */
 export const INBOX_SCRIPT_AUTHOR_NAME = "Script";
 

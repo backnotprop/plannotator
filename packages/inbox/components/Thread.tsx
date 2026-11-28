@@ -11,7 +11,7 @@ import { noteReviews } from '../contextNotes/model';
 import { INBOX_PERMISSION_FULL, isInboxPermissionSession } from '@plannotator/core/inbox-permission';
 import { inboxLaunchedSession } from '@plannotator/core/inbox-run-line';
 import { ThreadTagLine } from './ThreadTagLine';
-import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, inboxLaunchInRex, inboxLaunchRexUnstoppable, inboxLaunchStops, inboxPersonAnsweredSince, inboxSessionlessSend, isInboxNote, isInboxT3WaitReason, type InboxAnnotationRecord, type InboxAttachmentState, type InboxDraftFile, type InboxInlineImage, type InboxMessageWire, type InboxQuestion, type InboxReplyDraft, type InboxThread, type InboxUpload } from '@plannotator/core/inbox-types';
+import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, inboxLaunchInRex, inboxLaunchRexUnstoppable, inboxLaunchStops, inboxPersonAnsweredSince, inboxSessionlessSend, inboxTagsOnly, isInboxNote, isInboxT3WaitReason, type InboxAnnotationRecord, type InboxAttachmentState, type InboxDraftFile, type InboxInlineImage, type InboxMessageWire, type InboxQuestion, type InboxReplyDraft, type InboxThread, type InboxUpload } from '@plannotator/core/inbox-types';
 import { isQuestionAnswerEmpty, type QuestionAnswer } from '@plannotator/core/question-block';
 import { StartedBy } from './StartedBy';
 import { earlierRunsLabel, RunDivider, runFolds, ScheduledFoot } from '../scheduled/thread';
@@ -19,6 +19,7 @@ import { useMessageRefRepos } from '../messageRefRepo';
 import { InboxApiError, InboxHeldError, inboxApi, type OutboxView, type TagMode, type ThreadModel } from '../api';
 import { outboxLine } from '../machines';
 import { ThreadSessions } from './ThreadSessions';
+import { useThreadSwarm } from '../swarm/useThreadSwarm';
 import { snoozeBackAbove } from '../snoozeBack';
 import { HeldWrites } from './HeldWrites';
 import { annotationOf, attachmentFeedback, attachmentImageUrl, isFileComment, OWN_MESSAGE_COMMENT_ROW, readableVersion } from '../attachments';
@@ -3478,11 +3479,11 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   // person started, the thread's (the server hands it to that session), unless it answers another
   // session that wrote in it (that session takes it, as any plain reply).
   const earlierDelivered = (message: InboxMessageWire): string | null => {
-    if (message === last || message.author.kind !== 'person' || isInboxNote(message) || !isDelivered(message, root)) return null;
+    if (message === last || message.author.kind !== 'person' || isInboxNote(message) || !isDelivered(message, root) || inboxTagsOnly(message, askedBy(message))) return null;
     const name = message.delivery ? toName(message, message.delivery) : message.to ? toName(message, message.to) : recipientName(askedBy(message));
     return message.delivery?.at ? `Delivered to ${name}, ${whenTime(message.delivery.at)}` : `Delivered to ${name}`;
   };
-  const lastTo = last.author.kind === 'person' && !isInboxNote(last) ? (last.to ?? (startedTo && last.reply_to && !isOtherAgent(askedBy(last), startedTo) ? startedTo : null)) : null;
+  const lastTo = last.author.kind === 'person' && !isInboxNote(last) && !inboxTagsOnly(last, askedBy(last)) ? (last.to ?? (startedTo && last.reply_to && !isOtherAgent(askedBy(last), startedTo) ? startedTo : null)) : null; // only its tags get one (Add an agent)
   // The session the person's last reply goes to, when its connection wakes it: a message addressed to a
   // session (`lastTo`), or a reply to an agent message sent through a waking connection (`wakes`).
   const repliedTo = last.author.kind === 'person' && !lastTo ? askedBy(last) : undefined;
@@ -3530,7 +3531,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     return { tag, name, line };
   });
   const deliveredNow: DeliveryLine | null =
-    last.author.kind !== 'person'
+    last.author.kind !== 'person' || inboxTagsOnly(last, askedBy(last))
       ? null
       : lastTo
         ? deliveryLine({
@@ -4294,6 +4295,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
 
   const openAttachment = file ? allFiles.find((a) => a.id === file.id) ?? null : null;
   const fileOpen = openAttachment !== null || (namedFile !== null && file === null);
+  const swarmUi = useThreadSwarm({ thread, title: barName || heading, phone, fileOpen, closeFile: () => (file ? onOpenFile(null) : onOpenNamedFile?.(null)), onToast, changed: onChanged });
   // The questions inside the open Markdown file (issue #2828): its cards answer like the body's, through the same
   // pick, draft and Send. A version changed since it was sent may ask otherwise: only the sent text takes answers then.
   const fileOwner = openAttachment ? thread.messages.find((m) => m.id === openAttachment.message_id) : undefined;
@@ -4526,8 +4528,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     <>
     <section
       ref={sectionRef}
-      className={`ib-pane${fileOpen ? ' ib-withfile' : ''}`}
-      data-full={threadAlone && !fileOpen ? '' : undefined}
+      className={`ib-pane${fileOpen || swarmUi.beside ? ' ib-withfile' : ''}`}
+      data-full={threadAlone && !fileOpen && !swarmUi.beside ? '' : undefined}
       aria-label={thread.subject ?? 'Thread'}
       data-thread-id={thread.thread_id}
       {...paneDrop.handlers}
@@ -4607,7 +4609,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             {/* The thread's title, always in the bar and nowhere in the body (the owner, 2026-11-15): its name (the list's
                 rule, `threadChipName`; in Reviews, `barName`) with its heading after it, muted, else its heading; cut, a
                 tap opens it whole (thread/ThreadBarTitle.tsx). The pane's h2, the focus target when focus has nowhere else to go. */}
-            <ThreadBarTitle key={thread.thread_id} thread={thread} name={barName} heading={heading} />
+            <ThreadBarTitle key={thread.thread_id} thread={thread} name={barName} heading={heading} />{!artifactsOn && swarmUi.button}
             {/* The thread's PRs (approval "inbox-pr-binding"): left of Artifacts, at its icon's size; none, no button
                 (the ⋯ menu's Add a pull request shows it with its card open on the Add field). */}
             {!artifactsOn && pullsOffered && (
@@ -4817,19 +4819,16 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         )}
         {/* The count and time; a one-message thread has none. No name chip: the top bar shows the name whenever the
             chip would (the owner, 2026-11-02: never the same words twice). */}
-        {!one && !reviewView && (
-          <div className="ib-tmeta" data-thread-meta="" data-sessions={sessions.length > 1 ? '' : undefined}>
-            {/* Two or more sessions: who at the start, the count and time at the end. */}
-            {sessions.length > 1 && <ThreadSessions sessions={sessions} phone={phone} agentFilter={agentFilter} onAgentFilter={onAgentFilter} />}
+        {(!one || !!swarmUi.row) && !reviewView && (
+          <div className="ib-tmeta" data-thread-meta="" data-sessions={sessions.length > 1 || swarmUi.row ? '' : undefined}>
+            {/* Two or more sessions: who at the start, the count and time at the end. A swarm thread: its summary row there (swarm/). */}
+            {swarmUi.row ?? (sessions.length > 1 && <ThreadSessions sessions={sessions} phone={phone} agentFilter={agentFilter} onAgentFilter={onAgentFilter} />)}
             <span className="ib-tmeta-rest" data-thread-meta-rest="">
                 <span>{plural(thread.messages.length, 'message')}</span>
                 <span className="ib-tdot" aria-hidden="true" />
                 <span>{spanWords(root.created_at, thread.messages[thread.messages.length - 1]!.created_at)}</span>
                 {showNew && (
-                  <>
-                    <span className="ib-tdot" aria-hidden="true" />
-                    <b>{fresh.size} new since you looked</b>
-                  </>
+                  <><span className="ib-tdot" aria-hidden="true" /><b>{fresh.size} new since you looked</b></>
                 )}
               </span>
           </div>
@@ -5017,9 +5016,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   kind,
                   authorLabel,
                   folder: multiAgent ? headFolder(message, thread, taggable) : thread.project.name,
-                  toLabel: isAgent ? 'you' : message.to ? toName(message, message.to) : recipientName(askedBy(message)),
+                  toLabel: isAgent ? 'you' : inboxTagsOnly(message, askedBy(message)) ? tagNames : message.to ? toName(message, message.to) : recipientName(askedBy(message)),
                   ended: isAgent && askerEnded && message.id === asking?.message.id,
-                  tagNames: sentTags.length > 0 ? tagNames : null,
+                  tagNames: sentTags.length > 0 && !inboxTagsOnly(message, askedBy(message)) ? tagNames : null,
                   fileCount,
                   filesOpen,
                   changed: fileCount > 0 ? changedCount(messageFiles) : 0,
@@ -5133,10 +5132,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   </ul>
                 )}
                 {message === last && shownRun && !runInCard && <RunLine run={shownRun} canOpen={!!openTerminal} canReaddress={waitingCanMove && anotherCanTake} machine={machine?.id ?? null} machineName={machine?.name ?? null} onChanged={() => onRunChanged?.()} onChangeUrl={changeCloneUrl} />}
-                {message === last && !shownRun && delivered && tagLines.length > 0 && (
-                  // Lines (approval "inbox-tag-agents"): the owner first, then each tagged session, each with its own state.
+                {message === last && !shownRun && (delivered || inboxTagsOnly(last, askedBy(last))) && tagLines.length > 0 && (
+                  // Lines (approval "inbox-tag-agents"): the owner first (none when only its tags get it), then each tagged session.
                   <ul className="ib-tg-dl" data-tag-lines="" tabIndex={-1}>
-                    <li data-tag-line={replySession ?? ''} data-delivery={delivered.state} data-owner="">
+                    {delivered && (<li data-tag-line={replySession ?? ''} data-delivery={delivered.state} data-owner="">
                       <HostMark host={ownerHost} agent={replySession} />
                       {delivered.wait ? <UndeliveredText wait={delivered.wait} name={ownerLineName} /> : <span className="ib-dl-text">{delivered.text}</span>}
                       {takeBackLast && <TakeBackButton busy={takingBack} onPress={takeBackLast} />}
@@ -5145,7 +5144,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                           Send now
                         </button>
                       )}
-                    </li>
+                    </li>)}
                     {tagLines.map(({ tag, name, line }) => (
                       <li key={tag.session} data-tag-line={tag.session} data-delivery={line.state}>
                         <HostMark host={tag.host} agent={tag.session} />
@@ -5622,7 +5621,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         {lineError && !errorAbove && errorLine}
       </div>
     </section>
-    {protoWindow}
+    {protoWindow}{swarmUi.pane}
     {openAttachment && (
       <ThreadSkillFilter.Provider value={skillFilter}>
       <AttachmentPane

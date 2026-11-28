@@ -112,7 +112,7 @@ import {
   handleGoalSetupServerReady,
 } from "@plannotator/server/goal-setup";
 import { type DiffType, detectManagedVcs, prepareLocalReviewDiff, gitRuntime } from "@plannotator/server/vcs";
-import { loadConfig, saveConfig, resolveAIEnabled, resolvePlanReview, resolveSessionTailscale, sessionTailscaleOptOut, resolveDefaultDiffType, resolveDefaultDiffTypeFor, resolveSharingEnabled, resolveUpdateCheck } from "@plannotator/shared/config";
+import { loadConfig, saveConfig, resolveAIEnabled, resolveExperimental, resolvePlanReview, resolveSessionTailscale, sessionTailscaleOptOut, resolveDefaultDiffType, resolveDefaultDiffTypeFor, resolveSharingEnabled, resolveUpdateCheck } from "@plannotator/shared/config";
 import { formatIgnoredReviewWords, parseReviewArgs, resolveReviewTarget, withReviewDirectory, type ParsedReviewArgs } from "@plannotator/shared/review-args";
 import { resolveReviewOpenState, type ReviewOpenState } from "@plannotator/shared/review-open-state";
 import { listBranches, type AvailableBranches } from "@plannotator/shared/review-core";
@@ -271,6 +271,7 @@ import { isInboxTurnedOn } from "@plannotator/shared/inbox/turned-on";
 import { runRoutineCommand } from "./routine-command";
 import { runInboxStepsCommand } from "./inbox-steps-command";
 import { runInboxCapabilityCommand } from "./inbox-capability-command";
+import { runInboxSwarmCommand } from "./inbox-swarm-command";
 import { runInboxPullsCommand } from "./inbox-pulls-command";
 import { runInboxExportDecisionsCommand } from "./inbox-export-decisions-command";
 import { runFeedbackCommand } from "./feedback-command";
@@ -488,6 +489,21 @@ const rawArgs = process.argv.slice(2);
         env: process.env,
         askAiChild: isAskAiChild(process.env),
         ensureRunning: () => ensureInboxRunning(capabilityDataDir),
+      }),
+    );
+  }
+}
+// `plannotator inbox swarm <join|say|doing|status|leave>`: a swarm's agents, a thin client over the Inbox's `/api/inbox/swarm` (inbox-swarm-command.ts).
+{
+  const args = rawArgs;
+  if (args[0] === "inbox" && args[1] === "swarm") {
+    const swarmDataDir = getPlannotatorDataDir();
+    process.exit(
+      await runInboxSwarmCommand(args.slice(2), {
+        cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
+        env: process.env,
+        askAiChild: isAskAiChild(process.env),
+        ensureRunning: () => ensureInboxRunning(swarmDataDir),
       }),
     );
   }
@@ -940,7 +956,7 @@ if (helpSubcommand) {
   // `inbox --help` is the Plannotator Inbox guide for agents (inbox-help.ts).
   const help =
     helpSubcommand === "inbox"
-      ? formatInboxHelp({ command: inboxSelfCommand(), dataDir: getPlannotatorDataDir(), board: boardOnForHelp(), steps: stepsOnForHelp(), scheduled: scheduledOnForHelp(), codeReview: codeReviewOnForHelp(), branchReviews: codeReviewOnForHelp() && loadConfig().inboxBranchReviews === true })
+      ? formatInboxHelp({ command: inboxSelfCommand(), dataDir: getPlannotatorDataDir(), board: boardOnForHelp(), steps: stepsOnForHelp(), scheduled: scheduledOnForHelp(), codeReview: codeReviewOnForHelp(), branchReviews: codeReviewOnForHelp() && loadConfig().inboxBranchReviews === true, swarm: resolveExperimental(loadConfig(), "swarm") })
       : formatSubcommandHelp(helpSubcommand);
   await writeWholeToStdout(`${help}\n`);
   process.exit(0);

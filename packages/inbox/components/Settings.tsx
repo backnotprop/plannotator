@@ -44,6 +44,7 @@ import type { SystemProjectRow } from '@plannotator/core/inbox-system';
 import { openSystemSetup } from '../system/opener';
 import { systemStateWords } from '../system/projects';
 import { ScheduledSettingsRow } from '../scheduled/SettingsRow';
+import { SwarmSettingsRow } from '../swarm/SwarmSettingsRow';
 import { usePhone } from '../phone';
 import { ReviewsSection, useReviewsShown } from '../reviewSettings/ReviewsSection';
 
@@ -90,8 +91,8 @@ export interface SettingsPageProps {
   context: ConnectContext | null;
   error: string | null;
   onToggleTool: (host: AgentToolHost, next: boolean) => void;
-  /** Settings → Capabilities → Experimental: Grid's switch. Absent (or an Inbox that reports no Grid): no Grid row. */
-  onToggleExperimental?: (next: boolean, feature?: 'grid') => void;
+  /** Settings → Capabilities → Experimental: Grid's and Swarm's switches (`feature`). Absent (or an Inbox that reports neither): no Grid or Swarm row. */
+  onToggleExperimental?: (next: boolean, feature?: 'grid' | 'swarm') => void;
   /** Settings → Capabilities → Decision mode (config.json `inboxDecisionMode`, on unless turned off). Absent: no row. */
   onToggleDecisionMode?: (next: boolean) => void;
   /** Settings → General: "Open Plannotator at plannotator.localhost" (#2184). Absent: no row. */
@@ -542,7 +543,7 @@ export const SYSTEM_SETTINGS_ROW_VISIBLE: boolean = INBOX_SYSTEM_SWITCH_SHOWN;
  * Routines, Code review. Then the
  * Experimental group ("Experimental just needs to be within Capabilities,
  * under the main list"): Grid (off unless turned on, locked while
- * PLANNOTATOR_EXPERIMENTAL decides), Bro mode, Float reply drafts.
+ * PLANNOTATOR_EXPERIMENTAL decides), Swarm (the same), Bro mode, Float reply drafts.
  */
 function CapabilitiesSection({
   board,
@@ -596,7 +597,7 @@ function CapabilitiesSection({
   floatDrafts: { on: boolean } | null;
   onToggleFloatDrafts?: (next: boolean) => void;
   experimental: InboxExperimentalSettings | null;
-  onToggleExperimental?: (next: boolean, feature?: 'grid') => void;
+  onToggleExperimental?: (next: boolean, feature?: 'grid' | 'swarm') => void;
   /** The Experimental group's heading, where `#settings/experimental` lands. */
   experimentalHeading: RefObject<HTMLHeadingElement | null>;
 }) {
@@ -734,7 +735,7 @@ function CapabilitiesSection({
           </div>
         </section>
       )}
-      {(gridRow || broRow || floatRow) && (
+      {(gridRow || (experimental?.swarm && onToggleExperimental) || broRow || floatRow) && (
         <section className="ib-sgroup" data-settings-experimental="" aria-labelledby="ib-g-experimental">
           <h2 id="ib-g-experimental" ref={experimentalHeading} tabIndex={-1}>
             Experimental
@@ -755,6 +756,7 @@ function CapabilitiesSection({
                 </span>
               </div>
             )}
+            <SwarmSettingsRow experimental={experimental} onToggleExperimental={onToggleExperimental} />
             {broRow && (
               <div className="ib-prow" data-settings-bro="">
                 <span className="ib-txt">
@@ -1080,9 +1082,7 @@ export function SettingsPage(props: SettingsPageProps) {
   if (props.landOnExperimental && !landAsked.current) landing.current = true;
   landAsked.current = props.landOnExperimental === true;
   if (section !== 'capabilities') landing.current = false;
-  const experimentalShown =
-    section === 'capabilities' &&
-    ((!!settings?.experimental?.grid && !!props.onToggleExperimental) || (!!settings?.bro && !!props.onToggleBro) || (!!settings?.float_drafts && !!props.onToggleFloatDrafts));
+  const experimentalShown = section === 'capabilities' && ((!!(settings?.experimental?.grid || settings?.experimental?.swarm) && !!props.onToggleExperimental) || (!!settings?.bro && !!props.onToggleBro) || (!!settings?.float_drafts && !!props.onToggleFloatDrafts));
   useEffect(() => {
     if (!landing.current || !experimentalShown || !experimentalHeading.current) return;
     landing.current = false;
@@ -1184,7 +1184,7 @@ export function SettingsPage(props: SettingsPageProps) {
         return !voice?.on ? 'Off' : voice.engine === 'api' ? 'API key' : 'Codex login';
       case 'capabilities': {
         // What is on, by name: "Off", "Board", "Decision mode", or "2 on".
-        const on = [board?.on ? 'Board' : null, steps?.on ? 'Checklist' : null, decisionMode?.on ? 'Decision mode' : null, codeReview?.on ? 'Code review' : null, experimental?.grid?.on ? 'Grid' : null].filter((name): name is string => name !== null);
+        const on = [board?.on ? 'Board' : null, steps?.on ? 'Checklist' : null, decisionMode?.on ? 'Decision mode' : null, codeReview?.on ? 'Code review' : null, experimental?.grid?.on ? 'Grid' : null, experimental?.swarm?.on ? 'Swarm' : null].filter((name): name is string => name !== null);
         return on.length === 0 ? 'Off' : on.length === 1 ? on[0]! : `${on.length} on`;
       }
     }

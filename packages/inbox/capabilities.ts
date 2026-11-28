@@ -15,12 +15,12 @@ export type InboxCapabilities = Parameters<NonNullable<InboxEventHandlers['onCap
 type CapabilitySettings = Pick<SettingsModel, 'board' | 'decision_mode' | 'steps' | 'bro' | 'float_drafts' | 'mark_read_warning' | 'code_review' | 'system' | 'chapter_diagrams' | 'scheduled_threads' | 'plans' | 'experimental'>;
 
 /**
- * A frame's `experimental` (Decision mode and Grid), which it carries only when one of them was the change: saved in
- * another window, or a linked computer's flip taken here (one set of capabilities, inbox-capability-set.ts in the
+ * A frame's `experimental` (Decision mode, Grid and Swarm), which it carries only when one of them was the change: saved
+ * in another window, or a linked computer's flip taken here (one set of capabilities, inbox-capability-set.ts in the
  * server). Read by name; anything else is none.
  */
 export function experimentalOfFrame(value: unknown): InboxExperimentalSettings | undefined {
-  const v = value && typeof value === 'object' ? (value as { decision_mode?: unknown; grid?: unknown }) : null;
+  const v = value && typeof value === 'object' ? (value as { decision_mode?: unknown; grid?: unknown; swarm?: unknown }) : null;
   const one = (s: unknown) => {
     const x = s && typeof s === 'object' ? (s as { on?: unknown; env?: unknown }) : null;
     return x && typeof x.on === 'boolean' ? { on: x.on, env: typeof x.env === 'boolean' ? x.env : null } : null;
@@ -28,7 +28,8 @@ export function experimentalOfFrame(value: unknown): InboxExperimentalSettings |
   const decisionMode = one(v?.decision_mode);
   if (!decisionMode) return undefined;
   const grid = one(v?.grid);
-  return { decision_mode: decisionMode, ...(grid ? { grid } : {}) };
+  const swarm = one(v?.swarm);
+  return { decision_mode: decisionMode, ...(grid ? { grid } : {}), ...(swarm ? { swarm } : {}) };
 }
 
 /** True when the frame names any switch (an empty one: the window reads the settings again instead). */

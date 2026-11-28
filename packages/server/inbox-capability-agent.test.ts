@@ -7,7 +7,7 @@
  * does not take; the route answering another site's page or a request through a device door.
  */
 import { describe, expect, test } from "bun:test";
-import type { InboxCapabilitySwitches, InboxCapabilitySwitchKey } from "@plannotator/core/inbox-types";
+import { inboxCapabilitySwitchesOf, type InboxCapabilitySwitches, type InboxCapabilitySwitchKey } from "@plannotator/core/inbox-types";
 import { capabilityAskOf, capabilityLineText, capabilityRoute, type InboxCapabilityContext } from "./inbox-capability-agent";
 import { inboxAgentRouteAction } from "./inbox-agent-routes";
 
@@ -43,6 +43,19 @@ function world() {
 }
 
 const SHELL_NOW = "Agents get the routine action in their next session (a session's tools are listed once, at its start); from a shell it works now: `plannotator routine --help`.";
+
+describe("Swarm in plannotator inbox capability", () => {
+  test("listed and turned by its name, read from the settings' experimental switch", async () => {
+    const w = world();
+    // As this Inbox's own settings say it: `experimental.swarm`, not a key of its own.
+    Object.assign(w.here, inboxCapabilitySwitchesOf({ board: { on: false }, experimental: { decision_mode: { on: false, env: null }, swarm: { on: false, env: null } } }));
+    expect(w.here.swarm).toEqual({ on: false });
+    expect((await w.call({})).content[0]!.text).toContain("swarm off");
+    const turned = await w.call({ capability: "swarm", on: true, thread_id: "msg_work" });
+    expect(turned.content[0]!.text).toBe("Turned on Swarm. The person sees it in thread msg_work.");
+    expect(w.turns).toEqual(["here swarm true"]);
+  });
+});
 
 describe("plannotator inbox capability, on the Inbox's side", () => {
   test("turns one on here: one line for the person, in the thread named", async () => {

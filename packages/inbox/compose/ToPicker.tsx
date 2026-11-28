@@ -39,6 +39,7 @@ export function ToPicker({
   onStart,
   machines,
   opensOn,
+  checked,
 }: {
   groups: readonly ComposeGroup[];
   /** The session To names, or a start row's key (`toStartKey`). */
@@ -55,6 +56,8 @@ export function ToPicker({
   machines?: readonly ToMachine[];
   /** The machine the switch opens on (the one To's pick is on). */
   opensOn?: string;
+  /** Sessions also picked (New message's other agents, swarm/useSwarmPicks.tsx): their rows carry the check too. */
+  checked?: ReadonlySet<string>;
 }) {
   const [query, setQuery] = useState('');
   const all = useMemo<readonly ToMachine[]>(
@@ -280,7 +283,7 @@ export function ToPicker({
           const { target, started } = item.row;
           const folder = tildePath(target.project.root, item.machine.home);
           const { hl: on, ...props } = rowProps(item);
-          const chosenRow = toItemOn(item, selected, typing);
+          const chosenRow = toItemOn(item, selected, typing) || !!checked?.has(item.key);
           // An asleep machine's agents can't take a message now: shown, as the sidebar shows them, not picked.
           const asleep = item.machine.asleep;
           return (

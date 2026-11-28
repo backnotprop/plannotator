@@ -230,6 +230,11 @@ import { systemSetupRoute } from "./inbox-system-setup";
 import { SYSTEM_READ_PATHS, systemFilesCache, systemReadRoute, systemSwitch } from "./inbox-system";
 import { capabilityNoteOf, postCapabilityNotes } from "./inbox-capability-note";
 import { capabilityRoute, type InboxCapabilityContext } from "./inbox-capability-agent";
+import { farSwarmAnswer, swarmRoute, swarmWindowRoute } from "./inbox-swarm-route";
+import { inboxSwarmContext } from "./inbox-swarm-context";
+import { swarmWakeOf } from "./inbox-swarm-wake";
+import { startSwarm, swarmWire } from "@plannotator/shared/inbox/swarm";
+import { inboxMessageStartsSwarm } from "@plannotator/shared/inbox/swarm-start";
 import { createInboxScheduled, INBOX_SCHEDULED_ERROR_STATUS, INBOX_SCHEDULED_OFF_TEXT, type InboxScheduled } from "./inbox-scheduled";
 import { createRoutineGrants, sendRecipients } from "./inbox-routine-grants";
 import { scheduledRoute, scheduledSwitch } from "./inbox-scheduled-routes";
@@ -349,6 +354,7 @@ import {
 import { launchTipClaim, launchTipDue, launchTipLaunched, type LaunchTipState } from "@plannotator/shared/inbox/launch-tip";
 import { sidebarTipClaim, sidebarTipDue, type SidebarTipState } from "@plannotator/shared/inbox/sidebar-tip";
 import { bandTipClaim, bandTipDue, bandTipUsed, type BandTipState } from "@plannotator/shared/inbox/band-tip";
+import { swarmTipClaim } from "@plannotator/shared/inbox/swarm-tip";
 import { searchTipClaim, searchTipDue, type SearchTipState } from "@plannotator/shared/inbox/search-tip";
 import { revealGrillMeGap, type GrillMeTipQuestion } from "@plannotator/shared/inbox/grill-me-tip";
 import { routinesIntroGoodDaysOnce, routinesIntroOpen, routinesIntroSend, routinesIntroWaits } from "@plannotator/shared/inbox/routines-intro";
@@ -1980,13 +1986,32 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     snoozeMade: () => markSnoozeUsed(),
     ...(options.mcpNow ? { now: options.mcpNow } : {}),
   };
+  // Swarm (inbox-swarm-route.ts), behind the experimental switch: `plannotator inbox swarm`, the window's ghost pane,
+  // and a linked computer's agent's command through its door.
+  const swarmCtx = inboxSwarmContext({
+    store,
+    on: () => swarmOn(),
+    connectionOf: (session) => live.deliveryConnectionOf(session) ?? farTags.connectionOf(session),
+    machines: () => machines,
+    farWakes,
+    ownSession: (session) => live.allLive().some((entry) => entry.session === session),
+    wakes: (session) => live.wakesTagged(session),
+    // Add an agent: the agent picked, resolved as a reply's tag is (this computer's, or a linked one's).
+    tagOf: async (value) => {
+      await farTags.prepare(value);
+      return farTags.targets(value, live.tagTargets);
+    },
+    serverSession,
+  });
   // `plannotator inbox capability` (inbox-capability-agent.ts): this computer's switches, turned through the settings
   // route as Settings turns them, so every linked computer takes the flip (inbox-capability-set.ts).
   const capabilityAgent: InboxCapabilityContext = {
     resolveProject,
     here: () => inboxCapabilitySwitchesOf(settingsModel("local", false, null, false)),
     set: async (key, on) => {
-      const answer = await globalThis.fetch(`${baseUrl.replace(/\/+$/, "")}/api/inbox/settings`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ [key]: { on } }) });
+      // Swarm is an experimental switch: saved as `experimental: { swarm }`, as its Settings row saves it.
+      const change = key === "swarm" ? { experimental: { swarm: on } } : { [key]: { on } };
+      const answer = await globalThis.fetch(`${baseUrl.replace(/\/+$/, "")}/api/inbox/settings`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(change) });
       const body = (await answer.json().catch(() => ({}))) as { code?: unknown; error?: unknown };
       if (!answer.ok) throw new InboxError(typeof body.code === "string" ? body.code : "validation_error", typeof body.error === "string" ? body.error : "The switch did not turn.");
       return inboxCapabilitySwitchesOf(settingsModel("local", false, null, false));
@@ -3528,6 +3553,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    */
   /** Grid (approval "inbox-agent-grid"), off by default: its sidebar row is never saved while it is off. */
   const gridOn = () => resolveExperimental(loadConfig(), "grid");
+  /** Swarm (docs/agent-guides/inbox-swarm.md), off by default: Settings → Capabilities → Experimental, config `experimental.swarm`, or PLANNOTATOR_EXPERIMENTAL=swarm. */
+  const swarmOn = () => resolveExperimental(loadConfig(), "swarm");
+  // Off, no ghost thread's words wait for any agent (store.ts `isSwarmMember`): no wake hands them.
+  store.setSwarmSwitch(swarmOn);
   /**
    * The Board (approval "inbox-board", 2026-10-26): on only when the person
    * turned it on (config.json `inboxBoard`), and only in a build that has the
@@ -4127,6 +4156,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // Not written (a read-only data dir): showing it anyway would show it on every load.
     return loadConfig().inboxReveals?.band_tip?.shownAt === at;
   };
+  /** The Swarm tip (packages/shared/inbox/swarm-tip.ts): once, the first time New message's Swarm badge appears; no tenure, no gap. */
+  const claimSwarmTip = (key: string | null): boolean => {
+    const at = new Date().toISOString();
+    const claim = swarmTipClaim(loadConfig().inboxReveals?.swarm_tip, key, at);
+    if (!claim.save) return claim.show;
+    saveConfig({ inboxReveals: { ...loadConfig().inboxReveals, swarm_tip: claim.save } });
+    // Not written (a read-only data dir): showing it anyway would show it on every load.
+    return loadConfig().inboxReveals?.swarm_tip?.shownAt === at;
+  };
   /**
    * The Search tip (packages/shared/inbox/search-tip.ts): at the search palette's box, a day or more after first use,
    * until it was shown once, and never for someone whose recent searches already hold a quote. Outside the line's
@@ -4203,22 +4241,24 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     decision_mode: { on: decisionModeOn(), env: inboxDecisionModeEnvOff() ? false : null },
     // Grid (approval "inbox-agent-grid"): the window's page of work in flight, drawn from what the window already reads.
     grid: { on: gridOn(), env: parseExperimentalEnv("grid") ?? null },
+    // Swarm (docs/agent-guides/inbox-swarm.md): its Settings row, and every swarm piece of the window.
+    swarm: { on: swarmOn(), env: parseExperimentalEnv("swarm") ?? null },
   });
 
   /**
-   * Save `experimental: { grid }`. `validateOnly`: check and write nothing. An older window's Decision mode switch
+   * Save `experimental: { grid?, swarm? }` (one switch or both). `validateOnly`: check and write nothing. An older window's Decision mode switch
    * (`experimental: { decision_mode }`) saves the new setting, as `decision_mode: { on }` does. Remove after one release.
    */
   const saveExperimental = (input: unknown, validateOnly = false) => {
-    const switches = { grid: ["grid", "grid", "Grid"] } as const;
+    const switches = { grid: ["grid", "grid", "Grid"], swarm: ["swarm", "swarm", "Swarm"] } as const;
     const all = input && typeof input === "object" && !Array.isArray(input) ? Object.entries(input as Record<string, unknown>) : [];
     const legacy = all.find(([key]) => key === "decision_mode");
     const named = all.filter(([key]) => key !== "decision_mode");
     if (all.length === 0 || (legacy && typeof legacy[1] !== "boolean") || named.some(([key, value]) => !Object.hasOwn(switches, key) || typeof value !== "boolean")) {
-      throw new InboxError("validation_error", "experimental: { grid: boolean }.", { field: "experimental" });
+      throw new InboxError("validation_error", "experimental: { grid?: boolean, swarm?: boolean }.", { field: "experimental" });
     }
     if (legacy) saveDecisionMode({ on: legacy[1] }, true);
-    const change: { grid?: boolean } = {};
+    const change: { grid?: boolean; swarm?: boolean } = {};
     for (const [key, on] of named as [keyof typeof switches, boolean][]) {
       const [feature, configKey, words] = switches[key];
       // The env var decides (like PLANNOTATOR_INBOX_TAILSCALE): saving to config.json would change nothing.
@@ -4408,9 +4448,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       case "project":
         // The display name (the folder's real name), as every other read gives it.
         return { seq: line.seq, kind: line.kind, id: line.id, project: { ...line.record, name: store.project(line.id)?.name ?? line.record.name } };
-      case "message":
+      case "message": {
+        // Swarm: a ghost thread's words are never a message a window lists or notifies about; its parent's swarm changed.
+        const ghostOf = store.ghostParentOf(line.record.thread_id);
+        if (ghostOf) return { seq: line.seq, kind: "swarm" as const, id: line.id, thread_id: ghostOf };
         // `first` (additive): this line is the message's first, not a later rewrite (a look, a resolve, an Unarchive).
         return { seq: line.seq, kind: line.kind, id: line.id, first: store.messageCursor(line.id) === line.seq, message: shownSubject(line.record) };
+      }
       case "question":
         // The store's one question state: a question an agent asked after the archive line is live (notifications, the sound).
         // `thread_id` (additive): its message's thread, so a window re-reads its open thread only for that thread's records.
@@ -4434,6 +4478,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       case "scheduled":
         // A routine changed: its id only, never its prompt or folder. A reader that does not know the kind skips it.
         return { seq: line.seq, kind: line.kind, id: line.id };
+      case "swarm":
+        // A thread's swarm changed (docs/agent-guides/inbox-swarm.md), or its ghost thread's words (above): silent, never
+        // a notification or unread. `thread_id` so a window reads that thread again. A reader that does not know it skips it.
+        return { seq: line.seq, kind: line.kind, id: line.id, thread_id: line.record.thread_id };
     }
   };
 
@@ -4753,7 +4801,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * that tags others is told who else it went to.
    */
   const replyCommand = (reply: InboxMessage, sendNow = false, session: string | null = null): InboxReplyCommand => {
-    const command = replyCommandOf(reply, sendNow, session);
+    // Swarm (inbox-swarm-wake.ts): a ghost thread's words are a notice; a swarm's first message carries its join line.
+    const command = swarmWakeOf(store, reply, replyCommandOf(reply, sendNow, session), swarmOn());
     // A Tidy body is written when the run starts: with steps turned off since, it goes without its steps lines.
     if (command.tidy && !stepsOn()) return { ...command, body: inboxTidyBodyStepsOff(command.body) };
     // Never on a Tidy, a 👍, a hand-off notice or the note that questions moved: those are not about the thread's work.
@@ -4815,7 +4864,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         subject,
         body: inboxBodyForAgent(reply, store.reviewBatchOf(reply), store.reviewAnchorAbove(reply)),
         url: threadPageUrl(baseUrl, reply.thread_id),
-        tagged: { owner: hostAgentName(store.recipientOf(reply)?.host) },
+        // A message addressed to nobody else (Swarm's Add an agent): the thread's owner.
+        tagged: { owner: hostAgentName((store.recipientOf(reply) ?? store.threadOwner(reply.thread_id))?.host) },
         // Added to the thread ("Add instead"): it works alongside the owner.
         ...(tag.joined ? { added: true } : {}),
         ...(tag.deliver_now_at && sendNow ? { now: true } : {}),
@@ -4940,7 +4990,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       };
       const timer = setTimeout(finish, waitMs);
       const unsubscribe = store.subscribe((line) => {
-        if (line.kind === "message" && line.record.author.kind === "person" && live.pendingOf(session, { tags }).length > 0) finish();
+        if (line.kind === "message" && (line.record.author.kind === "person" || store.isGhostSay(line.record)) && live.pendingOf(session, { tags }).length > 0) finish();
       });
       const stopAskWaits = ask.onWaits((waiting) => {
         if (waiting === session) finish();
@@ -5250,6 +5300,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   store.setCloudPolling(cloudPollsItself);
   const cloudGate = createInboxCloudGate({ dataDir, relayUrl: () => readRelayFile(dataDir)?.url ?? defaultRelayUrl() });
   const agentSignalsFor = (line: InboxLine): string[] => {
+    // Words in a ghost thread (Swarm, an agent's or the person's): only the members they wait for, never their author.
+    if (line.kind === "message" && store.ghostParentOf(line.record.thread_id)) {
+      const waits = line.at === line.record.created_at ? store.ghostWaitsFor(line.record) : [];
+      return cloudAgents.list().flatMap((agent) => (agent.device_id && waits.includes(agent.session) ? [agent.device_id] : []));
+    }
     if (line.kind !== "message" || line.record.author.kind !== "person" || line.at !== line.record.created_at) return [];
     const threadId = line.record.thread_id;
     return cloudAgents
@@ -5291,7 +5346,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // A person's item written while its session is already busy starts its clock at once, not at the next sweep.
   let waitsQueued = false;
   const unsubscribeWaits = store.subscribe((line) => {
-    if (line.kind !== "message" || line.record.author.kind !== "person" || waitsQueued) return;
+    if (line.kind !== "message" || (line.record.author.kind !== "person" && !store.isGhostSay(line.record)) || waitsQueued) return;
     waitsQueued = true;
     queueMicrotask(() => {
       waitsQueued = false;
@@ -5355,7 +5410,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // every few seconds; its news moves `rexVersion` below.
     rexWatch();
     const launched = launch.signature();
-    const signature = live.deliverySignature() + launched;
+    // Swarm: a linked computer's agents as last read here are its members' states there (inbox-swarm-context.ts).
+    const signature = live.deliverySignature() + launched + (swarmOn() ? `#${farTags.liveSignature()}` : "");
     const presence = live.presenceSignature();
     const sessions = presence !== lastPresenceSignature;
     const moved = sessions || signature !== lastDeliverySignature;
@@ -5386,9 +5442,20 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     knownHere: (session) => live.allLive().some((entry) => entry.session === session) || (store.sessionMachine(session) === null && live.mcpAgents().some((agent) => agent.session === session)),
   });
   const unsubscribeFarTags = store.subscribe((line) => {
-    if (line.kind !== "message" || line.record.author.kind !== "person") return;
+    if (line.kind !== "message" || (line.record.author.kind !== "person" && !store.isGhostSay(line.record))) return;
     const record = line.record;
     queueMicrotask(() => farTags.onPersonMessage(record));
+    // Swarm: a person's message whose skills block names `/swarm` starts the swarm of its thread (swarm-start.ts),
+    // once, when it is written (a later rewrite of it never turns a swarm the person turned off back on).
+    if (line.at === record.created_at && swarmOn() && inboxMessageStartsSwarm(record) && !store.swarmOf(record.thread_id)) {
+      queueMicrotask(() => {
+        try {
+          startSwarm(store, record.thread_id);
+        } catch (error) {
+          process.stderr.write(`Inbox: the swarm of ${record.thread_id} did not start (${error instanceof Error ? error.message : String(error)})\n`);
+        }
+      });
+    }
   });
   const tagsRoute = createInboxTagsRoute({
     store,
@@ -5582,7 +5649,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // or a test decides here is not shared. Taking a flip turns it as its Settings row does. `chosen`: its own key is
   // set (a choice from before flips were kept counts as a flip at time 0; an untouched default as none). Decision mode:
   // its own key or its old place under `experimental`; shared unless PLANNOTATOR_EXPERIMENTAL turns it off here.
-  const experimentalFree = (feature: "grid") => parseExperimentalEnv(feature) === undefined;
+  const experimentalFree = (feature: "grid" | "swarm") => parseExperimentalEnv(feature) === undefined;
   const chosen = (read: (config: PlannotatorConfig) => unknown) => () => typeof read(loadConfig()) === "boolean";
   const capabilitySet = createCapabilitySet({
     switches: {
@@ -5595,6 +5662,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       float_drafts: { on: floatDraftsOn, chosen: chosen((c) => c.inboxFloatDrafts), shared: () => true, apply: (on) => saveFloatDrafts({ on }) },
       decision_mode: { on: decisionModeOn, chosen: chosen((c) => (typeof c.inboxDecisionMode === "boolean" ? c.inboxDecisionMode : (c.experimental as Record<string, unknown> | undefined)?.decisionMode)), shared: () => !inboxDecisionModeEnvOff(), apply: (on) => saveDecisionMode({ on }) },
       grid: { on: gridOn, chosen: chosen((c) => savedExperimental(c, "grid")), shared: () => experimentalFree("grid"), apply: (on) => saveExperimental({ grid: on }) },
+      swarm: { on: swarmOn, chosen: chosen((c) => savedExperimental(c, "swarm")), shared: () => experimentalFree("swarm"), apply: (on) => saveExperimental({ swarm: on }) },
     },
     times: () => loadConfig().inboxCapabilityFlips,
     // Key by key under the config lock (saveConfig merges it), so a stamp saved meanwhile is never lost.
@@ -5768,7 +5836,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       store,
       resolveProject,
       projectOf: async ({ stack }) => (await pullRepoProjects(stack))[0] ?? null,
-      skillsBlock: (names) => inboxSkillsBlockFor(names, { codeReview: codeReviewOn(), routines: scheduledCap.on(), diagrams: chapterDiagramsOn() }),
+      skillsBlock: (names) => inboxSkillsBlockFor(names, { codeReview: codeReviewOn(), routines: scheduledCap.on(), diagrams: chapterDiagramsOn(), swarm: swarmOn() }),
       own: (layers, threadId, made) => {
         const keys = layers.map((layer) => layer.key);
         const theirs = layers.every((layer) => !layer.mine);
@@ -5806,6 +5874,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     store,
     serverSession,
     live,
+    // Swarm: New message's other agents, resolved as a reply's tags (this computer's and a linked one's).
+    severalAgents: () => (swarmOn() ? (value: unknown) => farTags.targets(value, live.tagTargets) : null),
     resolveProject,
     readBody: (req) => readBody(req),
     json,
@@ -6336,6 +6406,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       ...(pullOwners.theirs(thread.thread_id) ? { pull_theirs: true as const } : {}),
       ...(pullKeys.length > 0 ? { pull_keys: pullKeys } : {}),
       ...(codeReviewOn() && pullOwners.started().has(thread.thread_id) ? { review_started: true as const } : {}),
+      // Swarm (additive, only while its switch is on): the summary row, the Ghost button and the status view read it.
+      ...(swarmOn() && store.swarmOf(thread.thread_id) ? { swarm: swarmWire(store, thread.thread_id, swarmCtx.live, swarmCtx.far?.nameOf) } : {}),
     };
     // `run` (additive, launch only): the launched thread's run line; null while the agent rests.
     // `attach_command` (with `run`): the host's attach command, there while the agent rests too.
@@ -7627,6 +7699,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const answer = await capabilityRoute(req, url, capabilityAgent, readBody, fromDeviceDoor.has(req));
         if (answer) return answer;
       }
+      // Swarm (inbox-swarm-route.ts): an agent's `plannotator inbox swarm` (never a device door's), and the ghost pane's.
+      if (path === "/api/inbox/swarm") {
+        const answer = await swarmRoute(req, url, swarmCtx, readBody, fromDeviceDoor.has(req));
+        if (answer) return answer;
+      }
+      if ((path.endsWith("/swarm") || path.endsWith("/swarm/add")) && path.startsWith("/api/inbox/threads/")) {
+        const answer = await swarmWindowRoute(req, url, swarmCtx, readBody);
+        if (answer) return answer;
+      }
       if (path === "/api/inbox/settings") {
         if (req.method === "GET") {
           // The page's load id (api.ts): kept with a claim's stamp as a record (`inboxReveals.shownLoad`).
@@ -7870,8 +7951,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // Not now keeps the usual day, approval "inbox-one-time-dialogs").
         if (body.answer === "not_now") {
           if (!revealNotNowAllowed(id)) throw new InboxError("validation_error", `id: ${INBOX_REVEALS.filter((entry) => entry.kind === "offer").map((entry) => entry.id).join(", ")}.`, { field: "id" });
-        } else if (!(id === "snooze" || id === "agent_note" || id === "launch_tip" || id === "sidebar_tip" || id === "band_tip" || id === "search_tip" || (typeof id === "string" && id in lineOffers))) {
-          throw new InboxError("validation_error", `id: snooze, agent_note, launch_tip, sidebar_tip, band_tip, search_tip or ${Object.keys(lineOffers).join(", ")}.`, { field: "id" });
+        } else if (!(id === "snooze" || id === "agent_note" || id === "launch_tip" || id === "sidebar_tip" || id === "band_tip" || id === "search_tip" || (id === "swarm_tip" && swarmOn()) || (typeof id === "string" && id in lineOffers))) {
+          throw new InboxError("validation_error", `id: snooze, agent_note, launch_tip, sidebar_tip, band_tip, search_tip${swarmOn() ? ", swarm_tip" : ""} or ${Object.keys(lineOffers).join(", ")}.`, { field: "id" });
         }
         // The agent note's agents (the ones it would ask about): it shows once for each. Optional (an older page).
         const agents = id === "agent_note" ? revealAgentNoteAgents(body.agents) : null;
@@ -7898,6 +7979,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // The Group tip: outside the line, its own stamp only (packages/shared/inbox/band-tip.ts).
         if (id === "band_tip") {
           return json({ show: claimBandTip(key ?? null, body.used === true), reveal: { next: revealNow(load) }, board: { on: boardOn() }, steps: { on: stepsOn() } });
+        }
+        // The Swarm tip (while Swarm is on): outside the line, its own stamp only (packages/shared/inbox/swarm-tip.ts).
+        if (id === "swarm_tip") {
+          return json({ show: claimSwarmTip(key ?? null), reveal: { next: revealNow(load) }, board: { on: boardOn() }, steps: { on: stepsOn() } });
         }
         // The Search tip: outside the line, its own stamp only (packages/shared/inbox/search-tip.ts).
         if (id === "search_tip") {
@@ -7960,7 +8045,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       });
       if (searched) return searched;
       // The composers' skill picker and the SKILL.md a Send pastes in (inbox-skills.ts): read routes.
-      const skills = inboxSkillsRoute(req, url, { codeReview: codeReviewOn(), routines: scheduledCap.on(), diagrams: chapterDiagramsOn() });
+      const skills = inboxSkillsRoute(req, url, { codeReview: codeReviewOn(), routines: scheduledCap.on(), swarm: swarmOn(), diagrams: chapterDiagramsOn() });
       if (skills) return skills;
 
       // Launch: Stop, Open in Terminal, Delete, Try again, Trust folder and its settings (404 while `inboxLaunch.enabled` is off, but for the settings route).
@@ -9066,6 +9151,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         wake: (machine, body) => farWakes.receive(machine, body, (threadId) => threadPageUrl(baseUrl, threadId)),
         reply: (machine, body) => farTags.agentReply(machine, body),
         delivered: (machine, body) => farTags.delivered(machine, body),
+        swarm: (machine, body) => farSwarmAnswer(swarmCtx, machine, body),
       },
       machineUpdate: {
         read: () => updates.machineRead(),

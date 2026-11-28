@@ -623,7 +623,8 @@ export function createInboxAntigravityWake(options: {
   const unsubscribe = store.subscribe((line) => {
     if (line.kind !== "message") return;
     const message = line.record as InboxMessage;
-    if (message.author.kind === "agent") {
+    // An agent's words in a ghost thread (Swarm) are looked at as a person's tags are.
+    if (message.author.kind === "agent" && !store.isGhostSay(message)) {
       if (message.author.host !== INBOX_ANTIGRAVITY_HOST || !isAntigravityConversationId(message.author.session)) return;
       sweptSessions().add(message.author.session);
     } else {

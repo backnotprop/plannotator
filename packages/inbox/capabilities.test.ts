@@ -104,4 +104,13 @@ describe('event: capabilities', () => {
     // A malformed one is not applied.
     expect((hear(JSON.stringify({ board: { on: false }, experimental: { grid: { on: true } } }), before).settings as { experimental?: unknown }).experimental).toEqual((before as { experimental?: unknown }).experimental);
   });
+
+  test('Swarm turned in another window or on a linked computer: this window takes it, and a Grid turn keeps it on', () => {
+    const off = { decision_mode: { on: false, env: null }, grid: { on: false, env: null }, swarm: { on: false, env: null } };
+    const before = { ...OFF, experimental: off } as Held;
+    const on = hear(JSON.stringify({ board: { on: false }, experimental: { ...off, swarm: { on: true, env: null } } }), before);
+    expect((on.settings as { experimental?: { swarm?: unknown } }).experimental?.swarm).toEqual({ on: true, env: null });
+    const grid = hear(JSON.stringify({ board: { on: false }, experimental: { ...off, grid: { on: true, env: null }, swarm: { on: true, env: null } } }), on.settings);
+    expect((grid.settings as { experimental?: unknown }).experimental).toEqual({ ...off, grid: { on: true, env: null }, swarm: { on: true, env: null } });
+  });
 });

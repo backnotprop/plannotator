@@ -147,6 +147,7 @@ import { agentsRead, connectLineNews, noteQuestionRows } from './agents';
 import { ScheduledRoute, useScheduledOn } from './scheduled/ScheduledPage';
 import { PlansRoute, usePlansOn } from './plans/PlansPage';
 import { GridRoute, useGridOn } from './grid/GridPage';
+import { useSwarmOn } from './swarm/swarmOn';
 import { pageLinks } from './app/pageLinks';
 import { SettingsPage } from './components/Settings';
 import { createStepsBus } from './steps/useThreadSteps';
@@ -288,6 +289,7 @@ import { setReviewSkillsDiagrams } from './skills';
 import { SIDEBAR_OPEN_COOKIE, HIDE_AWAY_MACHINES_COOKIE, COMPOSE_LAST_COOKIE, DRAFTS_REFRESH_MS, EMPTY_SET, REFRESH_SPIN_MS, RECONNECT_SAY_GAP_MS, STALE_NOT_SAVED_MS, AGENTS_SESSIONS_REFRESH_MS, SEEN_RETRIES, SEEN_RETRY_MS, LOOK_RECORD_WAIT_MS, RECORD_PAUSE_MS, WHATS_NEW_RETRIES, WHATS_NEW_RETRY_MS, WHATS_NEW_RELEASES_RETRIES, WHATS_NEW_RELEASES_RETRY_MS, UNSENT_TOAST_MS } from './app/constants';
 import { layerClosed, readRoute, routeOf, type Route } from './app/route';
 import { hashOf, writeRoute } from './app/writeRoute';
+import { useCombinedHead } from './app/useCombinedHead';
 import { TOUR_ENDED_STATE, settleTourEntry, settleOldExperimental, settleMovedSettings, stripStrayMsg, stripClickSignal, settleReviewsAlias } from './app/boot';
 import { closeTo, covering, listCovered, rowElement, tourPageInFront, focusAfterOpen, SETTINGS_LATE_MS, FIRST_RUN_AGENTS_REFRESH_MS, FIRST_RUN_AGENTS_MIN_GAP_MS, platformOf, replyInProgress, listIntroHeldBack } from './app/focus';
 export { THREAD_READ_RETRY_MS, THREAD_READ_TIMEOUT_MS } from './app/constants';
@@ -3631,6 +3633,7 @@ function Inbox() {
   const scheduledOn = useScheduledOn(settings, settingsReadFailed);
   const plansOn = usePlansOn(settings, showToast);
   const gridOn = useGridOn(settings, refreshList);
+  useSwarmOn(settings);
 
   const projects = latest?.projects ?? [];
   /**
@@ -3638,11 +3641,7 @@ function Inbox() {
    * are made in it (no forward route makes one in another machine's project).
    */
   const ownProjects = useMemo(() => projects.filter((p) => !p.machine || p.machine === selfMachineId()), [projects]);
-  // A project that was combined (here, in another window, by an agent) has no page of its own: its link opens the project it went into.
-  const combinedHead = route.project ? projects.find((project) => project.combined?.some((member) => member.id === route.project))?.id : undefined;
-  useEffect(() => {
-    if (combinedHead) writeRoute({ ...route, project: combinedHead }, { replace: true });
-  }, [combinedHead]);
+  useCombinedHead(route, projects);
   const { recentEmpty, listSortShown, latestSections, latestGroups, latestRows, pinsOn, pinRows, pinnedIds, listedOpenRow, openThreadRow, listShown, snoozeOn, projectsReadable, projectCounts, latestProjectActivity, filterProject, filterMachine, windowRows, threadAgentContext, filterAgent, projectNames, sidebarMachineCounts, filterList, listFilterPicks, setListFilter, listFilterScoped, filterShown, listFilterRows, listSections, listFilterEmpty, listHeld, listTitle, notice, filterTag, threadTagsHost, sidebarTags, listColours } = useListShown({
     latest, projects, route, thread, threadRow, rowPatches, pinPatches, looking, shown, machines, hideAway, openedHere, heldOpen, heldRead, listSort, combining: bulk.combines.waiting,
     tags: {

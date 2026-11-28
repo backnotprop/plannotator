@@ -31,6 +31,8 @@
 @source "../../packages/inbox/plans/**/*.tsx";
 /* Grid: the page of every agent's work (packages/inbox/grid/). */
 @source "../../packages/inbox/grid/**/*.tsx";
+/* Swarm: New message's other agents, a swarm thread's summary row, Ghost button and ghost pane (packages/inbox/swarm/). */
+@source "../../packages/inbox/swarm/**/*.tsx";
 /* Settings → Reviews (packages/inbox/reviewSettings/), and code review's page it hosts (packages/ui/components/settings/). */
 @source "../../packages/inbox/reviewSettings/**/*.tsx";
 /* The shared page frame a plan is drawn in (packages/ui/components/frame: its .tsx and its .ts class recipes, not its
@@ -69,6 +71,10 @@
 @import "../../packages/inbox/plans/plans.css";
 @import "../../packages/inbox/plans/planHeader.css";
 @import "../../packages/inbox/grid/grid.css";
+/* Swarm (packages/inbox/swarm/): its pieces, and the Swarm badge with its motion. */
+@import "../../packages/inbox/swarm/swarm.css";
+@import "../../packages/inbox/swarm/swarmBadge.css";
+@import "../../packages/inbox/swarm/swarmPlan.css";
 /* A launched session's permission prompt (components/PermissionCard.tsx). */
 @import "../../packages/inbox/permissionCard.css";
 /* `:::run` and `:::secret` cards (packages/inbox/parts/RunBlocks/). */

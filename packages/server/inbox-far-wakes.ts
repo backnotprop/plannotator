@@ -90,6 +90,13 @@ export function farWakeCommand(raw: unknown, ids: { reply_id: string; thread_id:
   if (flag(c.new_thread)) out.new_thread = true;
   // Send now on the thread's computer: this Inbox hands it into the running turn, as its own Send now.
   if (flag(c.now)) out.now = true;
+  // A notice with its own first line (a swarm's ghost thread, inbox-swarm-wake.ts): handed as a notice here too, never
+  // as the person's reply. One line, as long as the thread's computer may make it.
+  const notice = shortLine(c.notice, 300);
+  if (flag(c.moved) && notice) {
+    out.moved = true;
+    out.notice = notice;
+  }
   const context = farWakeContext(c.context);
   if (context) out.context = context;
   return out;

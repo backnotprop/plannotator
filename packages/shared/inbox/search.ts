@@ -710,7 +710,8 @@ export class InboxSearchIndex {
   /** A thread's own document; with `withMessages`, its messages' too (the build). */
   private indexThread(threadId: string, withMessages: boolean): void {
     const root = this.store.message(threadId);
-    if (!root || root.thread_id !== threadId || root.taken_back_at) {
+    // A ghost thread (Swarm, `ghost_of`) is reached only through its parent: never found by search.
+    if (!root || root.thread_id !== threadId || root.taken_back_at || root.ghost_of) {
       this.remove(`t:${threadId}`);
       this.facts.delete(threadId);
       return;
@@ -773,6 +774,7 @@ export class InboxSearchIndex {
 
   private indexMessage(message: InboxMessage): void {
     const meta = { ref: message.id, threadId: message.thread_id, projectId: message.project_id, at: message.created_at };
+    if (this.store.ghostParentOf(message.thread_id)) return this.remove(`m:${message.id}`);
     if (message.author.kind === "person") {
       if (isInboxNote(message)) return;
       if (message.taken_back_at) return this.remove(`m:${message.id}`);

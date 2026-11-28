@@ -974,6 +974,12 @@ packages/inbox/commentRowFiles.test.tsx
 packages/inbox/sidebarStickyHeadings.test.tsx
 packages/inbox/grid/gridPage.test.tsx
 packages/inbox/titleFilter.test.tsx
+packages/inbox/swarm/swarmCompose.test.tsx
+packages/inbox/swarm/swarmThread.test.tsx
+packages/inbox/swarm/swarmPlanCard.test.tsx
+packages/inbox/swarm/swarmSettings.test.tsx
+packages/inbox/swarm/swarmAddRemove.test.tsx
+packages/inbox/compose/threadNameChipHold.test.tsx
 packages/inbox/skillFileOpen.dom.test.tsx
 packages/inbox/reviewAnalysis.test.tsx
 packages/ui/components/LaunchDialog.test.tsx

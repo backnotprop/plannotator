@@ -16,8 +16,9 @@ import type { AgentEnvironment, AgentRunResult } from "./inbox-agents";
 import type { InboxCloudAgent, InboxCloudAgents } from "./inbox-cloud-agents";
 import { createInboxCloudWake } from "./inbox-cloud-wake";
 import { createInboxCodexWake } from "./inbox-codex-wake";
-import { farWakeStore } from "./inbox-far-host-wakes";
-import { createInboxFarWakes, type FarWake } from "./inbox-far-wakes";
+import { SHIP_NOTE_WAKE_INSTRUCTION } from "@plannotator/core/inbox-pull-handoff";
+import { farWakeItem, farWakeStore } from "./inbox-far-host-wakes";
+import { createInboxFarWakes, farWakeCommand, type FarWake } from "./inbox-far-wakes";
 import { createInboxLiveSessions } from "./inbox-sessions";
 import { createInboxTagsRoute } from "./inbox-tags";
 
@@ -173,6 +174,24 @@ describe("a far tag for a cloud agent paired here", () => {
     await cloud.sweep();
     expect(posts).toHaveLength(1);
     expect(store.message(MSG(6))).toBeNull();
+  });
+});
+
+describe("a Ship note to a session on a linked computer, with Swarm off", () => {
+  const ship = { type: "reply", id: MSG(7), thread_id: MSG(1), reply_to: MSG(1), subject: "Retry queue", body: "PR #12: CI failed on lint.", url: "http://studio/", moved: true, notice: SHIP_NOTE_WAKE_INSTRUCTION };
+  const wake = (command: Record<string, unknown>): FarWake =>
+    ({ reply_id: MSG(7), thread_id: MSG(1), session: CLOUD, host: "cloud-other", machine: STUDIO, received_at: "2026-11-24T09:00:00.000Z", command: farWakeCommand(command, { reply_id: MSG(7), thread_id: MSG(1) }, "http://laptop/")! }) as FarWake;
+
+  test("is handed as the notice the thread's computer worded, as a Ship note on that computer is", () => {
+    expect(farWakeCommand(ship, { reply_id: MSG(7), thread_id: MSG(1) }, "http://laptop/")).toMatchObject({ moved: true, notice: SHIP_NOTE_WAKE_INSTRUCTION, body: "PR #12: CI failed on lint." });
+    // The note that questions moved has no notice line: it goes as before, with no `moved`.
+    const movedNote = farWakeCommand({ ...ship, notice: undefined }, { reply_id: MSG(7), thread_id: MSG(1) }, "http://laptop/")!;
+    expect(movedNote.moved).toBeUndefined();
+  });
+
+  test("goes to a cloud agent with its body alone (as that computer's own cloud wake sends it); a ghost notice keeps its line", () => {
+    expect(farWakeItem(wake(ship)).body).toBe("PR #12: CI failed on lint.");
+    expect(farWakeItem(wake({ ...ship, notice: "Codex wrote in the swarm's ghost thread." })).body).toBe("Codex wrote in the swarm's ghost thread.\n\nPR #12: CI failed on lint.");
   });
 });
 
