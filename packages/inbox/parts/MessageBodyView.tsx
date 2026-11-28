@@ -12,6 +12,7 @@ import { ReviewAnchorLine } from '../components/ReviewAnchorLine';
 import type { MessageActsRef } from './messageActs';
 import { farChangeMessage } from '../scheduled/farLinks';
 import { SwarmPlanSlot } from '../swarm/SwarmPlanCard';
+import { skillReactionShownBody } from '@plannotator/core/inbox-folding';
 
 export type MessageBodyData = {
   message: InboxMessageWire;
@@ -44,9 +45,9 @@ export type MessageBodyData = {
 };
 
 export function drawMessageBody(d: MessageBodyData) {
-  const message = farChangeMessage(d.message, d.farMachine);
-  // A skill emoji's reply is drawn as its head line alone ("You 😵‍💫 /bro"): its words and skills block are not shown.
-  if (message.skill_reaction) return null;
+  // A skill emoji's reply is a reply like any other whose words read "🦃 /bro" (core inbox-skill-reaction.ts).
+  const far = farChangeMessage(d.message, d.farMachine);
+  const message = far.skill_reaction ? { ...far, body: skillReactionShownBody(far) } : far;
   // A swarm's plan card (`swarm propose`): the card while Swarm is on and the thread's read has its plan, else its words.
   if (message.swarm_plan) return <SwarmPlanSlot message={message} fallback={wordsOf(d, message)} />;
   return wordsOf(d, message);
@@ -73,6 +74,8 @@ function wordsOf(d: MessageBodyData, message: InboxMessageWire) {
         repo={d.repo}
         onOpenAttachment={(attachment, start) => acts.current.openFromMessage(attachment, null, start ? () => acts.current.setPageStart({ id: attachment.id, start }) : undefined)}
         onOpenFileRef={d.fileRefs ? (ref) => acts.current.openFileRef(id, ref) : undefined}
+        // A skill the person's message used: read where it was typed when the message says, else here, else on a linked computer.
+        onOpenSkill={isAgent ? undefined : (name) => acts.current.openFileRef(id, { path: name, skill: true })}
         onOpenInlineImage={(image) => acts.current.openFromMessage(image)}
         onOpenOptionSet={(key, image, choice) => acts.current.openOptionSet(id, key, image, choice)}
         onTryPrototype={isAgent ? (key) => acts.current.tryPrototype(id, key) : undefined}

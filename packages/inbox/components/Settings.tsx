@@ -46,6 +46,7 @@ import { systemStateWords } from '../system/projects';
 import { ScheduledSettingsRow } from '../scheduled/SettingsRow';
 import { SwarmSettingsRow } from '../swarm/SwarmSettingsRow';
 import { usePhone } from '../phone';
+import { ReviewsSection, useReviewsShown } from '../reviewSettings/ReviewsSection';
 
 const TOOL_HOSTS: { host: AgentToolHost; name: string }[] = [
   { host: 'claude-code', name: 'Claude Code' },
@@ -60,6 +61,7 @@ const TOOL_HOSTS: { host: AgentToolHost; name: string }[] = [
 const SECTION_ICON: Record<SettingsSection, IconName> = {
   general: 'settings',
   rows: 'contents',
+  reviews: 'reviews',
   agents: 'chip',
   'cloud-agents': 'cloud',
   accounts: 'user',
@@ -616,7 +618,6 @@ function CapabilitiesSection({
   const floatRow = floatDrafts && onToggleFloatDrafts;
   const decisionRow = decisionMode && onToggleDecisionMode;
   const gridRow = experimental?.grid && onToggleExperimental;
-  const swarmRow = experimental?.swarm && onToggleExperimental;
   return (
     <>
       {(boardRow || stepsRow || decisionRow || scheduledRow || codeReviewRow) && (
@@ -734,7 +735,7 @@ function CapabilitiesSection({
           </div>
         </section>
       )}
-      {(gridRow || swarmRow || broRow || floatRow) && (
+      {(gridRow || (experimental?.swarm && onToggleExperimental) || broRow || floatRow) && (
         <section className="ib-sgroup" data-settings-experimental="" aria-labelledby="ib-g-experimental">
           <h2 id="ib-g-experimental" ref={experimentalHeading} tabIndex={-1}>
             Experimental
@@ -755,7 +756,7 @@ function CapabilitiesSection({
                 </span>
               </div>
             )}
-            {swarmRow && experimental?.swarm && <SwarmSettingsRow value={experimental.swarm} onToggle={(next) => onToggleExperimental(next, 'swarm')} />}
+            <SwarmSettingsRow experimental={experimental} onToggleExperimental={onToggleExperimental} />
             {broRow && (
               <div className="ib-prow" data-settings-bro="">
                 <span className="ib-txt">
@@ -968,6 +969,7 @@ const LEDE: Record<SettingsSection, string> = {
   general: 'How the Inbox looks, and how it gets your attention.',
   // Rows draws its own lede, with Undo and Reset beside it (RowsSettings.tsx).
   rows: '',
+  reviews: 'How a review reads, here and in code review. A change made in either holds in both.',
   agents: "How each agent on this computer reaches the Inbox and learns when to use it. A change applies to that agent's next session; sessions already running keep what they started with.",
   'cloud-agents': 'An agent in the cloud or on a server, such as a Claude Code routine, Grok Bot, Muse, Hermes Agent or OpenClaw, that reads and writes across this Inbox.',
   accounts: '',
@@ -1080,9 +1082,7 @@ export function SettingsPage(props: SettingsPageProps) {
   if (props.landOnExperimental && !landAsked.current) landing.current = true;
   landAsked.current = props.landOnExperimental === true;
   if (section !== 'capabilities') landing.current = false;
-  const experimentalShown =
-    section === 'capabilities' &&
-    ((!!(settings?.experimental?.grid || settings?.experimental?.swarm) && !!props.onToggleExperimental) || (!!settings?.bro && !!props.onToggleBro) || (!!settings?.float_drafts && !!props.onToggleFloatDrafts));
+  const experimentalShown = section === 'capabilities' && ((!!(settings?.experimental?.grid || settings?.experimental?.swarm) && !!props.onToggleExperimental) || (!!settings?.bro && !!props.onToggleBro) || (!!settings?.float_drafts && !!props.onToggleFloatDrafts));
   useEffect(() => {
     if (!landing.current || !experimentalShown || !experimentalHeading.current) return;
     landing.current = false;
@@ -1108,8 +1108,9 @@ export function SettingsPage(props: SettingsPageProps) {
   const linkedMachines = machines.filter((machine) => !machine.self);
   const voice = useVoiceSettings();
   const [look] = useListLook();
+  const reviewsShown = useReviewsShown(settings);
   const sections = SETTINGS_SECTIONS.filter(
-    (id) => (id !== 'capabilities' || board !== null || steps !== null || decisionMode !== null || scheduled !== null || codeReview !== null || bro !== null || floatDrafts !== null || experimental !== null) && (id !== 'cloud-agents' || cloud.shown === true) && (id !== 'machines' || machines.length > 0) && (id !== 'voice' || voice !== null),
+    (id) => (id !== 'reviews' || reviewsShown) && (id !== 'capabilities' || board !== null || steps !== null || decisionMode !== null || scheduled !== null || codeReview !== null || bro !== null || floatDrafts !== null || experimental !== null) && (id !== 'cloud-agents' || cloud.shown === true) && (id !== 'machines' || machines.length > 0) && (id !== 'voice' || voice !== null),
   );
   /** The phone's list of sections, in its groups: settings (Capabilities last of them), then your data and Plannotator. */
   const phoneGroups: { label: string; ids: SettingsSection[] }[] = [
@@ -1161,6 +1162,7 @@ export function SettingsPage(props: SettingsPageProps) {
       case 'rows':
         return rowsSummary(look);
       case 'accounts':
+      case 'reviews':
         return '';
       case 'prompts':
         return settings.prompts ? promptsSummary(settings.prompts) : '';
@@ -1209,6 +1211,9 @@ export function SettingsPage(props: SettingsPageProps) {
         break;
       case 'rows':
         body = <RowsSection phone={phone} onGeneral={() => onSection?.('general')} {...props.rowsPreview} />;
+        break;
+      case 'reviews':
+        body = <ReviewsSection phone={phone} />;
         break;
       case 'agents':
         body = <AgentsSection settings={settings} context={context} onToggleTool={onToggleTool} agents={props.agents} onAgents={props.onAgents} />;

@@ -19,6 +19,7 @@ export const SCHEMA_SOURCES = [
   'packages/core/inbox-combine.ts',
   'packages/core/inbox-delivery.ts',
   'packages/core/inbox-door-version.ts',
+  'packages/core/inbox-file-missing-words.ts',
   'packages/core/inbox-git-url.ts',
   'packages/core/inbox-initiatives.ts',
   'packages/core/inbox-launch-choice.ts',

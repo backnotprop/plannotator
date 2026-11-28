@@ -34,7 +34,7 @@ import { applyStreamRecord } from './data/apply/stream';
 import { useRowWrites, type RowDrawing } from './data/actions/rows';
 import { keepSavedQuestions } from './data/actions/picks';
 import { useSettingsSaves } from './data/actions/settings';
-import { useListShown } from './app/useListView';
+import { leaveRecentViewOnEscape, useListShown } from './app/useListView';
 import { useListTags } from './app/useListTags';
 import { useDecideSitting, type DecideSitting } from './app/useDecideSitting';
 import { decideAwayToast, tuckDecide } from './app/decideTuck';
@@ -73,7 +73,8 @@ import { newRecordBatch, noteOwnRecord, noteRecord } from './openThreadReads';
 import { archivedRowPatch, patchShownRow, readRowPatch, shownRowOf } from './rowActions';
 import { createOwnSaves } from './ownSaves';
 import { createKeyedSignal } from './signal';
-import { keepSame } from './listSame';
+import { newDecisionWatch } from './decisions/model';
+import { readKeptDecisions } from './decisions/keptRead';
 import { draftsReadOwed, replyDraftsDiffer, unsentThreads } from './draftsReads';
 import { machinesModel, rowSnoozes, snoozeBlockedBy, threadAwayLine } from './machines';
 import { ASK_AGENT_TO_UPDATE, ASK_AGENT_TO_UPDATE_THREAD, MachineUpdateDialog } from './components/MachineUpdate';
@@ -81,7 +82,7 @@ import { discardPreparedInboxEvents, prepareInboxEvents } from './sharedEvents';
 import { readListView, useListView, type ListSort } from './listView';
 import { useShowLight } from './showLight';
 import { useHeldRead } from './app/useHeldRead';
-import { ListFilterEmpty, clearedFrom } from './components/ListFilter';
+import { ListFilterEmpty, RecentViewEmpty, clearedFrom } from './components/ListFilter';
 import { addOwnThreads, drawnSection, listGroups, markHeldRowArchived, putReadRowBack, putRowBack, refreshHeldRows, replaceHeldRow, goneRows, hasRows, settleOwn, settlesOnBack, settleThread, showBroughtIn, snoozeChangedRows, shownAfter, waitingCount, type OpenThread, priorityChangedRows } from './held';
 import { deliveriesReadList } from './rowDelivery';
 import { inboxAgentsWatched, setInboxAgents, inboxAgentsNow } from './agentsList';
@@ -142,7 +143,7 @@ import { systemShown } from './system/gate';
 import { useSystemProjects } from './system/projects';
 import { systemDropped, systemEscapeTo, systemKept } from './system/route';
 import { feedbackCopiedToast, feedbackPrompt } from './feedbackPrompt';
-import { connectLineNews, noteQuestionRows } from './agents';
+import { agentsRead, connectLineNews, noteQuestionRows } from './agents';
 import { ScheduledRoute, useScheduledOn } from './scheduled/ScheduledPage';
 import { PlansRoute, usePlansOn } from './plans/PlansPage';
 import { GridRoute, useGridOn } from './grid/GridPage';
@@ -239,7 +240,7 @@ import { type SheetLayout } from './prs/tableModel';
 import { repoLabels } from './pulls/labels';
 import { pullFilterOf, type PullFilter } from './pulls/model';
 import { reviewsOnYou } from './pulls/reviewsModel';
-import { appReviewView } from './app/reviewView';
+import { useAppReviewView } from './app/reviewView';
 import { BoardOff } from './board/BoardOff';
 import { BoardIntro } from './board/BoardIntro';
 import { BroIntro } from './components/BroIntro';
@@ -253,6 +254,7 @@ import { PersonalAgentsIntro, usePersonalAgentsBanner } from './components/Perso
 import { usePriorityReveal } from './components/usePriorityReveal';
 import { rulesSet, wantRulesEditor } from './agentRules';
 import { StarAskCard } from '@plannotator/ui/components/StarAskCard';
+import { InboxLaunchDialog } from './launchDialog';
 import { CodeReviewOffer } from './components/CodeReviewOffer';
 import { useCodeReviewOffer } from './codeReviewOffer';
 import { TabIconChoice } from './components/TabIconChoice';
@@ -363,11 +365,9 @@ function Inbox() {
     void inboxApi.dismissOutbox(key).catch(() => {});
   }, []);
   /**
-   * Decision mode (experimental, approval "inbox-decision-mode"): the
-   * projection while the feature is on, and the sitting (open, or tucked
-   * into its pill behind a thread). Off, nothing of it renders. Thread only
-   * (owner, 2026-10-27): a sitting is one thread's decisions (`thread`), opened
-   * from that thread's open-questions list; there is no global way in.
+   * Decision mode (approval "inbox-decision-mode"): the watched threads' decisions while it is on, and the sitting
+   * (open, or tucked into its pill behind a thread). Off, nothing of it renders. Thread only (owner, 2026-10-27): a
+   * sitting is one thread's decisions (`thread`), opened from its open-questions list; there is no global way in.
    */
   const [decisions, setDecisions] = useState<InboxDecision[] | null>(null);
   // `startNonce`: a new start while the sitting is open moves it to that card.
@@ -375,7 +375,7 @@ function Inbox() {
   /** What opened decision mode: focus goes back there when the sitting ends. */
   const decideOpener = useRef<HTMLElement | null>(null);
   const [decideLeft, setDecideLeft] = useState(0);
-  const decisionModeOnRef = useRef(false);
+  const decisionWatch = useRef(newDecisionWatch());
   const questionListeners = useRef(new Set<(question: InboxQuestion) => void>());
   /**
    * Thread steps' changes (approval "inbox-thread-steps"): a `steps` record names its thread; presence moving
@@ -406,16 +406,8 @@ function Inbox() {
     questionListeners.current.add(listener);
     return () => void questionListeners.current.delete(listener);
   }, []);
-  const refreshDecisions = useCallback(async () => {
-    if (!decisionModeOnRef.current) return;
-    try {
-      const next = await inboxApi.decisions();
-      // A read that brought nothing new keeps the decisions drawn (listSame.ts `keepSame`): nothing is drawn again.
-      if (decisionModeOnRef.current) setDecisions((current) => keepSame(current, next.decisions));
-    } catch {
-      // Off on the server (another window turned it off): the next settings read says so.
-    }
-  }, []);
+  // Only the watched threads' decisions are held (the read lists the whole store's): decisions/keptRead.ts.
+  const refreshDecisions = useCallback(() => readKeptDecisions(inboxApi.decisions, decisionWatch.current, setDecisions), []);
   /** The latest list read's sections, for the event stream's `deliveries` (which reads again only while a delivery can move). */
   const latestSectionsRef = useRef<ListModel['sections'] | null>(null);
   latestSectionsRef.current = latest?.sections ?? null;
@@ -1363,7 +1355,7 @@ function Inbox() {
   const refreshAgents = useCallback(async () => {
     try {
       const mine = ++agentsSeq.current;
-      const next = await inboxApi.agents();
+      const next = agentsRead(await inboxApi.agents());
       if (mine === agentsSeq.current) setAgentsState(next);
       return next;
     } catch {
@@ -1578,9 +1570,8 @@ function Inbox() {
             cardsTimer = setTimeout(() => void refreshCards(), 60);
             return;
           }
-          // A thread's steps (approval "inbox-thread-steps"): silent. Never a notification, unread, or a list or thread
-          // read: only the open thread's checklist reads them again. The checklist lives only in its thread (owner,
-          // 2026-11-09): no list row or Board card shows it.
+          // A thread's steps (approval "inbox-thread-steps"; a linked machine's come by `onSteps`): silent, only the open
+          // thread's checklist reads them again. It lives only in its thread (owner, 2026-11-09): no row or card shows it.
           if (event?.kind === 'steps') {
             stepsBus.emit(event.thread_id);
             return;
@@ -1649,6 +1640,7 @@ function Inbox() {
         },
         // A thread's tags changed (here, in another window): read the list's `tags` again (approval "inbox-thread-tags").
         onTags: () => listAfterEvents(60),
+        onSteps: (threadId) => stepsBus.emit(threadId),
         // A linked machine's cards changed (its Board was read again here): the merged Board is read, as for a card record.
         onCards: () => {
           if (cardsTimer) clearTimeout(cardsTimer);
@@ -2043,8 +2035,8 @@ function Inbox() {
         closeTo(systemBack);
         return;
       }
-      // An open file owns Escape (the HTML viewer's ladder, the composers).
-      if (event.key !== 'Escape' || !routeRef.current.thread || routeRef.current.file) return;
+      // An open file owns Escape (the HTML viewer's ladder, the composers). With no thread open, the list's last rung: Recent activity's view goes.
+      if (event.key !== 'Escape' || !routeRef.current.thread || routeRef.current.file) return leaveRecentViewOnEscape(event, routeRef.current);
       // Something inside the thread already used this Escape (the reply's choice at Send goes back to the reply).
       if (event.defaultPrevented) return;
       const target = event.target as HTMLElement | null;
@@ -2822,12 +2814,10 @@ function Inbox() {
 
   /**
    * Mark unread (the owner's ask, 2026-10-31; markRead.ts `canMarkUnread`):
-   * the thread's latest agent message is new again, so its row is New and
-   * bold, as if the person had not opened it. Nothing is sent to the agent,
-   * and a Mark read stands, so Move back still reopens what it closed. From
-   * the open thread the thread closes, as a mail app's Mark unread does: left
-   * open, its next look would read it again, and the list shows the row back
-   * in New. Undo is a look capped at the message Mark unread took back, so it
+   * the latest agent message is new again: the row is bold in New (or, with questions waiting, in their group, its
+   * questions as they were), as if never opened. Nothing is sent to the agent, and a Mark read stands, so Move back
+   * still reopens what it closed. From the open thread the thread closes, as a mail app's Mark unread does: left
+   * open, its next look would read it again, and the list shows the row where it now goes. Undo is a look capped at the message Mark unread took back, so it
    * puts back exactly what was there and leaves anything that arrived since
    * new. When the server wrote nothing (a stale row: the thread was new
    * already, an agent having written there behind "N new") the row on screen
@@ -2874,14 +2864,14 @@ function Inbox() {
       return;
     }
     await afterWrite([threadId]);
-    // The open thread closes and the list settles with its row in New; any other row is bold where it is (R7).
+    // The open thread closes and the list settles with its row in New (or its questions' group); any other is bold where it is (R7).
     const wasOpen = routeRef.current.thread === threadId;
     if (wasOpen) {
       if (fromCard) backToCard();
       else close({ ...routeRef.current, thread: null, file: null });
     }
     showToast({
-      ...markUnreadToast(before ?? { subject: null }, wasOpen),
+      ...markUnreadToast(before ?? { subject: null }, wasOpen && written.thread.section === 'new'),
       icon: 'unread',
       onUndo: () => {
         dismissToast();
@@ -3652,7 +3642,7 @@ function Inbox() {
    */
   const ownProjects = useMemo(() => projects.filter((p) => !p.machine || p.machine === selfMachineId()), [projects]);
   useCombinedHead(route, projects);
-  const { listSortShown, latestSections, latestGroups, latestRows, pinsOn, pinRows, pinnedIds, listedOpenRow, openThreadRow, listShown, snoozeOn, projectsReadable, projectCounts, latestProjectActivity, filterProject, filterMachine, windowRows, threadAgentContext, filterAgent, projectNames, sidebarMachineCounts, filterList, listFilterPicks, setListFilter, listFilterScoped, filterShown, listFilterRows, listSections, listFilterEmpty, listHeld, listTitle, notice, filterTag, threadTagsHost, sidebarTags, listColours } = useListShown({
+  const { recentEmpty, listSortShown, latestSections, latestGroups, latestRows, pinsOn, pinRows, pinnedIds, listedOpenRow, openThreadRow, listShown, snoozeOn, projectsReadable, projectCounts, latestProjectActivity, filterProject, filterMachine, windowRows, threadAgentContext, filterAgent, projectNames, sidebarMachineCounts, filterList, listFilterPicks, setListFilter, listFilterScoped, filterShown, listFilterRows, listSections, listFilterEmpty, listHeld, listTitle, notice, filterTag, threadTagsHost, sidebarTags, listColours } = useListShown({
     latest, projects, route, thread, threadRow, rowPatches, pinPatches, looking, shown, machines, hideAway, openedHere, heldOpen, heldRead, listSort, combining: bulk.combines.waiting,
     tags: {
       listTags,
@@ -3668,7 +3658,7 @@ function Inbox() {
       },
     },
   });
-  const { decisionModeOn, decideInThread, sittingDecisions, closeDecide, decisionsTouched } = useDecideSitting({ settings, decisions, setDecisions, decide, setDecide, decideOpener, decisionModeOnRef, refreshDecisions, refreshList, route });
+  const { decisionModeOn, decideInThread, sittingDecisions, sittingRead, closeDecide, decisionsTouched } = useDecideSitting({ settings, decisions, setDecisions, decide, setDecide, decideOpener, decisionWatch, refreshDecisions, refreshList, route });
   const snoozeBack = useSnoozeBack({ thread, route, listedOpenRow, looking, openThreadCovered, lookRef: paneReads.activeLook, trackLook, refreshList, snoozed: latest?.snoozed, refreshSnoozes, seen: inboxApi.seen });
   // The list's Archived group (approval "inbox-archived-group") and Settings → Archived's Unarchive.
   const archivedFilter = useCallback((rows: readonly InboxListRow[]) => filterShown([{ id: 'archived', label: 'Archived', threads: [...rows] }])[0]?.threads ?? rows, [filterShown]);
@@ -4572,7 +4562,7 @@ function Inbox() {
     const news = connectLineNews(agents);
     if (!news) return;
     setConnectLine(news);
-    void inboxApi.agentsSeen(news.report?.at ?? null, news.notes).then(setAgents, () => {});
+    void inboxApi.agentsSeen(news.report?.at ?? null, news.notes).then(agentsRead).then(setAgents, () => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agents, agentsSettled, settings?.via, connectLine]);
   const connectLineEl =
@@ -4944,7 +4934,7 @@ function Inbox() {
     />
   );
 
-  const reviewView = appReviewView({ route, pulls, pullsShown, thread, projectNames, go });
+  const reviewView = useAppReviewView({ route, pulls, pullsShown, thread, projectNames, go });
   // The Reviews list: on its own page, or beside a thread opened from it (the thread pane is the Inbox's own).
   const reviewsList = (project: string | null, view: PullFilter, threadId: string | null) => {
     // A PR opened from a project's drawing closes back to it (its own page only).
@@ -5282,7 +5272,7 @@ function Inbox() {
     const stack = stacks.find((s) => s.id === route.stack || s.layers.some((l) => l.key === route.stack)) ?? null;
     main = (
       <StackPage
-        stack={stack && stack.layers.some(inboxPullIsOpen) ? stack : null}
+        stack={stack && stack.layers.some(inboxPullIsOpen) ? stack : null} id={route.stack}
         loading={!sheetPulls.model} board={sheetPulls.model}
         repoLabel={stack ? (repoLabels(stacks).get(`${stack.host}/${stack.repo}`.toLowerCase()) ?? stack.repo) : null}
         phone={phone}
@@ -5495,7 +5485,7 @@ function Inbox() {
           phone={phone}
           reconnecting={streamDead}
           empty={
-            listHeld ? null : listFilterEmpty ? (
+            listHeld ? null : recentEmpty ? <RecentViewEmpty /> : listFilterEmpty ? (
               <ListFilterEmpty onClear={() => setListFilter(clearedFrom(listFilterPicks, listFilterScoped, filterTag !== null))} />
             ) : filterTag ? (
               <div className="ib-empty-list" data-tag-empty="">
@@ -5659,9 +5649,8 @@ function Inbox() {
                 ? void refreshInbox(null, route.thread !== null)
                 : leave({ page: 'inbox', project: null, machine: machineId, thread: null })
             }
-            // The Agents section (approval "inbox-agents-section"): an agent filters the list to its threads, as a
-            // machine does (a second click shows everything again); Add agent is New message with a new session chosen
-            // (plain New message where nothing can be started from here), and Add machine is Settings → Machines.
+            // The Agents section (approval "inbox-agents-section"): an agent filters the list to its threads, as a machine does (a second click shows
+            // everything again); Add agent is New message with a new session chosen (plain New message where nothing can start here); Add machine, Settings → Machines.
             agentRows={windowRows}
             // Picked: its list, as a machine's (no thread open). Cleared: everything, the thread on screen kept.
             onAgentFilter={(agentId) =>
@@ -5670,6 +5659,7 @@ function Inbox() {
                 : leave({ page: 'inbox', project: null, machine: null, agent: null, thread: route.page === 'inbox' ? route.thread : null })
             }
             onMessageAgent={(session, opener) => openCompose({ session }, opener)}
+            agentNewMessage={{ linked: plusOn }}
             onAddAgent={(opener) => openCompose(plusOn ? { launch: { agent: composeLastAgent } } : {}, opener)}
             onAddMachine={machines.self ? () => leave({ page: 'settings', project: null, thread: null, section: 'machines' }) : undefined}
             projectNames={projectNames}
@@ -5916,14 +5906,13 @@ function Inbox() {
         <GrillMeTip phone={phone} onClose={grillMeTipReveal.close} />
       )}
       {starReveal.stage === 'open' && (
-        <StarAskCard
-          shape="corner"
-          canStar={starReveal.canStar}
+        <StarAskCard shape="corner" canStar={starReveal.canStar} onLeave={starReveal.close}
           onStar={() => inboxApi.starAskStar().then((answer) => answer.starred === true)}
           onAnswer={(answer) => void inboxApi.starAskAnswer(answer)}
-          onLeave={starReveal.close}
         />
       )}
+      {/* The launch dialog (launchDialog.tsx): ahead of every other one-time dialog, once per computer. */}
+      <InboxLaunchDialog due={settings?.reveal?.launch === true} ready={latest !== null && !firstRun && !tourOn && soonClear} heldBack={oneTimeHeldBack} />
       {sidebarTip.stage === 'open' && <SidebarTipCard gone={!sidebarDocked || !listIntroClear || sidebarCustomizing} onSay={say} onLeave={sidebarTip.close} />}
       {listViewChoiceOpen && (
         <ListViewIntro
@@ -6149,9 +6138,9 @@ function Inbox() {
       {ask.layer}
       {toast && !toast.hidden && soundDialog !== 'open' && !agentNoteOpen && <InboxToast toast={toast} phone={phone} onDismiss={dismissToast} onHold={holdToast} />}
       <SearchHost
-        mounted={searchMounted}
-        open={searchOpen}
-        phone={phone}
+        mounted={searchMounted} open={searchOpen}
+        phone={phone} onSettingsStale={refreshSettings}
+        searchTip={settings?.reveal?.search_tip === true && !tourOn && !firstRun && !revealBlocked && !lineBusy}
         tintOf={listColours?.tintOfThread}
         currentProject={route.page === 'inbox' ? route.project : null}
         projects={projects} projectLabels={anyMachineLinked ? projectNames : undefined} linkedMachines={machines.linked}
@@ -6221,6 +6210,8 @@ function Inbox() {
         <DecisionMode
           open={!decide.tucked}
           decisions={sittingDecisions}
+          readFailed={sittingRead.failed}
+          onReadAgain={sittingRead.retry}
           scope={decide.title}
           rows={latestRows}
           start={decide.start}
@@ -6240,9 +6231,9 @@ function Inbox() {
         {said}
       </div>
       {guideMessage && thread && (
-        // Every guide or review an agent sends opens the full-window review (approval "inbox-one-review-screen");
-        // what Code review brings shows only while it is on.
+        // Every guide or review an agent sends opens the full-window review (approval "inbox-one-review-screen").
         <ReviewPane
+          outbox={outbox}
           key={guideMessage.id}
           thread={thread}
           message={guideMessage}

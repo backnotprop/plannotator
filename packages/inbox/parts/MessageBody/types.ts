@@ -43,6 +43,11 @@ export interface MessageBodyProps {
    * that is a path, a bare path, a picture that did not load) opens beside the thread. Absent: as before.
    */
   onOpenFileRef?: (ref: FileRef) => void;
+  /**
+   * A skill the person's sent message used (its chip in the words, its name on the skills line) opens its file
+   * beside the thread (SkillFilePane). Absent: the chips and names are plain, as before.
+   */
+  onOpenSkill?: (name: string) => void;
   /** An image the body shows was clicked (or pressed): its captured file (`inline_images`) opens in the viewer. */
   onOpenInlineImage?: (image: InboxInlineImage) => void;
   /**

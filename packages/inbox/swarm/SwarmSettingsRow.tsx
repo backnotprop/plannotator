@@ -1,11 +1,22 @@
+import type { InboxExperimentalSettings } from '../api';
 import { Switch } from '../components/SoundRow';
 
 /**
  * Settings → Capabilities → Experimental → Swarm (docs/agent-guides/inbox-swarm.md), after Grid: one set across linked
  * computers, like every switch there. Locked while PLANNOTATOR_EXPERIMENTAL decides it, which its words then say.
  * The words are the owner's, approved 2026-11-25 (`.product/approved/inbox-swarm-settings-row`).
+ * Nothing while the Inbox reports no Swarm or Settings has no switch to give it (as Grid's row beside it).
  */
-export function SwarmSettingsRow({ value, onToggle }: { value: { on: boolean; env: boolean | null }; onToggle: (next: boolean) => void }) {
+export function SwarmSettingsRow({
+  experimental,
+  onToggleExperimental,
+}: {
+  experimental: InboxExperimentalSettings | null;
+  onToggleExperimental?: (next: boolean, feature?: 'grid' | 'swarm') => void;
+}) {
+  const value = experimental?.swarm;
+  if (!value || !onToggleExperimental) return null;
+  const onToggle = (next: boolean) => onToggleExperimental(next, 'swarm');
   return (
     <div className="ib-prow" data-settings-swarm="">
       <span className="ib-txt">

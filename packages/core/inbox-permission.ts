@@ -562,7 +562,7 @@ export function readInboxPermissionBody(body: string): InboxPermissionBody {
 
 /** Claude Code's PermissionRequest decision (`hookSpecificOutput.decision`). */
 export type InboxPermissionDecision =
-  | { behavior: "allow"; updatedInput: Record<string, unknown>; updatedPermissions?: Record<string, unknown>[] }
+  | { behavior: "allow"; updatedPermissions?: Record<string, unknown>[] }
   | { behavior: "deny"; message: string };
 
 /** What the agent is told on a Deny: never to retry, and to go on; the person's reason when they gave one. */
@@ -617,8 +617,11 @@ const setMode = (mode: "auto" | "bypassPermissions") => ({ type: "setMode", mode
 
 /**
  * The decision Claude Code reads, built by the hook from ITS OWN event: the
- * tool input unchanged; for "session" the update Claude Code itself suggested
- * (destination `session`); for "auto" Auto mode for this session; for "full"
+ * tool input unchanged, so no `updatedInput` (on Claude Code 2.1.332 an
+ * allow that carries one is ignored where Claude's own check wants a person,
+ * EnterWorktree into a worktree outside .claude/worktrees/ for one, and its
+ * dialog waits in Terminal; the same allow without it counts); for "session"
+ * the update Claude Code itself suggested (destination `session`); for "auto" Auto mode for this session; for "full"
  * Full permissions (`bypassPermissions`) for this session, only when the
  * hook's own launch allows them (`fullPermissions`). Null for "terminal" (the
  * person approves in Claude Code's own dialog) and when the answer cannot be
@@ -630,13 +633,13 @@ export function inboxPermissionDecisionFor(
   answer: { choice?: unknown; reason?: unknown },
   options: { fullPermissions?: boolean } = {},
 ): InboxPermissionDecision | null {
-  if (answer.choice === "once") return { behavior: "allow", updatedInput: event.tool_input };
+  if (answer.choice === "once") return { behavior: "allow" };
   if (answer.choice === "session") {
     const session = inboxPermissionSessionChoice(event);
-    return session ? { behavior: "allow", updatedInput: event.tool_input, updatedPermissions: [session.update] } : null;
+    return session ? { behavior: "allow", updatedPermissions: [session.update] } : null;
   }
-  if (answer.choice === "auto") return { behavior: "allow", updatedInput: event.tool_input, updatedPermissions: [setMode("auto")] };
-  if (answer.choice === "full") return options.fullPermissions ? { behavior: "allow", updatedInput: event.tool_input, updatedPermissions: [setMode("bypassPermissions")] } : null;
+  if (answer.choice === "auto") return { behavior: "allow", updatedPermissions: [setMode("auto")] };
+  if (answer.choice === "full") return options.fullPermissions ? { behavior: "allow", updatedPermissions: [setMode("bypassPermissions")] } : null;
   if (answer.choice === "deny") {
     const reason = typeof answer.reason === "string" ? answer.reason.slice(0, INBOX_PERMISSION_REASON_MAX) : null;
     return { behavior: "deny", message: inboxPermissionDenyMessage(reason) };

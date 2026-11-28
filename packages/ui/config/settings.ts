@@ -1024,6 +1024,25 @@ export const SETTINGS = {
     },
   },
   /**
+   * Whether an HTML page or live app opens in Annotate (pinpoint armed) or in
+   * Interact. Default on, as sessions always opened. Synced to config.json
+   * like the other Display settings (`displayOptions.htmlAnnotateOnStartup`),
+   * so every browser and computer that opens a session gets the same start.
+   */
+  htmlAnnotateOnStartup: {
+    defaultValue: true as boolean,
+    fromCookie: () => parseBooleanCookie('plannotator-html-annotate-on-startup'),
+    toCookie: (value: boolean) =>
+      storage.setItem('plannotator-html-annotate-on-startup', String(value)),
+    serverKey: 'displayOptions',
+    fromServer: (sc: Record<string, unknown>) => {
+      const v = displayOption(sc, 'htmlAnnotateOnStartup');
+      return typeof v === 'boolean' ? v : undefined;
+    },
+    toServer: (value: boolean) => ({ displayOptions: { htmlAnnotateOnStartup: value } }),
+  },
+
+  /**
    * Where the annotate-mode Agent TUI docks: 'left' (where it always docked),
    * 'right', or 'hidden' (no slot until the user opens it for the session).
    *

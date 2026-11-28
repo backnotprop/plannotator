@@ -883,7 +883,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
           queued: cause.outbox.state === 'queued',
           machineName: cause.machine?.name ?? startMachineName ?? targetMachineName ?? 'the other machine',
           asleep: cause.machine ? cause.machine.state === 'offline' : startAsleep,
-          agentName: start ? start.name : hostLabel(target!.host),
+          agentName: start ? start.name : hostLabel(target!.host, target!.runtime),
           // E9: what that machine does first when it's back.
           ...(start?.clone ? { first: `clones ${start.clone.slug}` } : start?.create ? { first: `makes ${start.project.name}` } : {}),
           draftId: draft?.id ?? null,
@@ -1197,7 +1197,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const noAgent = !!model && !anyLive && !canStart && !endedNote;
   const toValue = target ? target.session : start ? 'start' : endedNote ? 'ended' : 'choose';
   const toName = target
-    ? `To: ${hostLabel(target.host)}${target.label ? `, ${target.label},` : ''} in ${target.project.name}${targetMachineName ? `, on ${targetMachineName}` : ''}. Change`
+    ? `To: ${hostLabel(target.host, target.runtime)}${target.label ? `, ${target.label},` : ''} in ${target.project.name}${targetMachineName ? `, on ${targetMachineName}` : ''}. Change`
     : start
       ? `To: a new ${start.name} session. Change`
       : endedNote
@@ -1241,7 +1241,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
           ) : target ? (
             <>
               <HostMark host={target.host} agent={target.session} />
-              <b>{hostLabel(target.host)}</b>
+              <b>{hostLabel(target.host, target.runtime)}</b>
               {/* Another machine's agent names its machine, as a start there does ("· kiln-render · Atlas"). */}
               <SessionDetail name={target.project.name} root={target.project.root} label={target.label} suffix={targetMachineName ?? undefined} />
             </>
@@ -1287,7 +1287,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
       host={start ? start.agent : target ? target.host : endedNote ? endedNote.host : undefined}
       agent={start ? null : (target?.session ?? endedNote?.session ?? null)}
       // A new session: the agent's name alone; the line over the row says "New <agent> session in <folder>".
-      label={start ? start.name : target ? (target.label ?? hostLabel(target.host)) : endedNote ? hostLabel(endedNote.host) : model ? 'Choose an agent' : 'Looking for live agents…'}
+      label={start ? start.name : target ? (target.label ?? hostLabel(target.host, target.runtime)) : endedNote ? hostLabel(endedNote.host) : model ? 'Choose an agent' : 'Looking for live agents…'}
       detail={endedNote && !target && !start ? 'ended' : null}
       struck={!!endedNote && !target && !start}
       ask={!start && !target && !endedNote && !loading}

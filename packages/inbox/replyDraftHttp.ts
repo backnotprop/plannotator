@@ -7,9 +7,10 @@
  * with other storage (Workspaces, bytes private to the person until Send) swaps
  * them, and the box's behavior stays the same.
  */
-import type { DraftFileUploader, ReplyDraftSaveInput, ReplyDraftStore } from '@plannotator/core/inbox-reply-draft';
+import type { DraftFileUploader, ReplyDraftNotLanded, ReplyDraftSaveInput, ReplyDraftStore } from '@plannotator/core/inbox-reply-draft';
 import { inboxApi, pageServerSession, replyDraftSaveBody, reuseAttachment, uploadFile } from './api';
-import { inboxUrl } from './inboxUrl';
+import { inboxUrl, machineOf } from './inboxUrl';
+import { noteLostDraftFiles } from './lostDraftFiles';
 
 /**
  * A browser takes at most 64 KiB of keepalive bodies in flight (more is refused at once), so the save sent as the
@@ -36,22 +37,40 @@ const saveBody = (input: ReplyDraftSaveInput) => replyDraftSaveBody(input.body, 
 
 /** Reply drafts on this computer's Inbox. */
 export const httpReplyDraftStore: ReplyDraftStore = {
-  read: async (threadId) => (await inboxApi.replyDraft(threadId)).draft ?? null,
+  read: async (threadId) => {
+    const answer = await inboxApi.replyDraft(threadId);
+    notLandedSeen.set(threadId, answer.not_landed ?? null);
+    noteLostDraftFiles(threadId, answer.not_landed?.files);
+    return answer.draft ?? null;
+  },
+  notLanded: (threadId) => notLandedSeen.get(threadId) ?? null,
   save: async (threadId, input, options) => {
     if (!options.keepalive) return inboxApi.saveReplyDraft(threadId, input.body, input.base, input.baseBody, input.files, input.recipients, input.quote, input.mentions);
-    // As the page goes: its answer is never read (the window reads the draft back when it comes back).
+    // As the page goes: its answer is never read (the window reads the draft back when it comes back). A linked
+    // machine's thread goes through the forward, keyed and named as every write there is.
     const session = pageServerSession();
-    void fetch(inboxUrl(`/threads/${encodeURIComponent(threadId)}/draft`), {
+    const machine = machineOf(threadId);
+    void fetch(inboxUrl(`/threads/${encodeURIComponent(threadId)}/draft`, undefined, machine), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      ...keepaliveBody({ ...saveBody(input), ...(session ? { serverSession: session } : {}) }),
+      headers: { 'Content-Type': 'application/json', ...(machine ? { 'X-Plannotator-Thread': threadId } : {}) },
+      ...keepaliveBody({ ...saveBody(input), ...(session ? { serverSession: session } : {}), ...(machine ? { idempotency_key: crypto.randomUUID() } : {}) }),
     }).catch(() => {});
     return { draft: null };
   },
-  discard: async (threadId) => {
-    await inboxApi.discardReplyDraft(threadId);
+  // A linked machine's thread: the version thrown away goes with it, so one changed there since stays (this Inbox's own
+  // Discard is as it always was).
+  discard: async (threadId, options = {}) => {
+    const far = machineOf(threadId) !== null;
+    if (options.notLanded !== undefined) {
+      if (far) await inboxApi.discardReplyDraft(threadId, { not_landed: options.notLanded });
+      return;
+    }
+    await inboxApi.discardReplyDraft(threadId, far && options.base !== undefined ? { base: options.base, ...(options.baseBody !== undefined ? { base_body: options.baseBody } : {}) } : {});
   },
 };
+
+/** Per thread: the person's words the last read found the draft there does not hold (`not_landed`). */
+const notLandedSeen = new Map<string, ReplyDraftNotLanded | null>();
 
 /** A file's bytes as a pending upload on this Inbox, or (`machine`) on the linked machine whose thread it is. */
 export function httpDraftFileUploader(machine: () => string | null): DraftFileUploader {

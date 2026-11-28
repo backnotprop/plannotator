@@ -50,7 +50,7 @@
  */
 
 import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join, win32 } from "node:path";
 import {
   INBOX_ANTIGRAVITY_DATA_DIRS,
   INBOX_ANTIGRAVITY_HOST,
@@ -115,6 +115,41 @@ function answerOf(stdout: string): { response?: Record<string, unknown>; error?:
   }
 }
 
+/**
+ * Antigravity on Windows writes a two-line `bin/agentapi.bat` forwarding `%*` to
+ * `"<install>\resources\bin\language_server.exe" agentapi %*`. Spawning a `.bat`/`.cmd`
+ * through `cmd.exe` cannot carry multi-line `send-message` text (and `planAgentJobSpawn`
+ * refuses it as unsafe). When the shim is a plain single-line wrapper around an existing
+ * absolute `.exe`, return that native binary and its fixed leading subcommand directly so
+ * `environment.run` spawns it without `cmd.exe`.
+ */
+export function unwrapWindowsAgentApiShim(
+  shimPath: string,
+  exists: (path: string) => boolean = existsSync,
+  readText: (path: string) => string = (path) => readFileSync(path, "utf8"),
+): string[] | null {
+  if (!/\.(?:bat|cmd)$/i.test(shimPath)) return null;
+  let text: string;
+  try {
+    text = readText(shimPath);
+  } catch {
+    return null;
+  }
+  if (text.length > 8192) return null;
+  const lines = text
+    .replace(/^\uFEFF/, "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !/^@?echo\s+off$/i.test(line) && !/^rem(?:\s|$)/i.test(line) && !line.startsWith("::") && !/^@?(?:setlocal|endlocal)\b/i.test(line));
+  if (lines.length !== 1) return null;
+  const line = lines[0]!.replace(/^@/, "").replace(/^call\s+/i, "").trim();
+  const match = /^(?:"([^"\r\n]+\.exe)"|([^\s"\r\n]+\.exe))(?:\s+(agentapi))?\s+%\*$/i.exec(line);
+  if (!match) return null;
+  const exe = match[1] ?? match[2];
+  if (!exe || (!isAbsolute(exe) && !win32.isAbsolute(exe)) || !exists(exe)) return null;
+  return match[3] ? [exe, match[3]] : [exe];
+}
+
 /** The end of a file, as text (at most `max` bytes); null when it cannot be read. */
 function tailOf(path: string, max: number): string | null {
   let fd: number | null = null;
@@ -175,20 +210,33 @@ export function createInboxAntigravityWake(options: {
   const homeOk = () => agentHomeAllowed(environment);
 
   // ── The client ──
+  const defaultAppClients = (): string[] => {
+    if (process.env.PLANNOTATOR_TEST_SANDBOX) return [];
+    if (environment.platform === "darwin") return [INBOX_ANTIGRAVITY_APP_CLIENT];
+    if (environment.platform === "win32") {
+      const localAppData =
+        Object.entries(environment.env).find(([key, value]) => key.toLowerCase() === "localappdata" && value?.trim())?.[1]?.trim() ||
+        join(environment.homeDir, "AppData", "Local");
+      return [join(localAppData, "Programs", "antigravity", "resources", "bin", "language_server.exe")];
+    }
+    return [];
+  };
   const clientFor = (product: InboxAntigravityProduct | null): string[] | null => {
-    const shims = environment.platform === "win32" ? ["agentapi.cmd", "agentapi.bat", "agentapi.exe"] : ["agentapi"];
+    const shims = environment.platform === "win32" ? ["agentapi.exe", "agentapi.cmd", "agentapi.bat"] : ["agentapi"];
     const order: InboxAntigravityProduct[] = product ? [product, ...(["cli", "app", "ide"] as const).filter((p) => p !== product)] : ["cli", "app", "ide"];
     if (homeOk()) {
       for (const p of order) {
         for (const name of shims) {
           const path = join(dataDirOf(p), "bin", name);
-          if (existsSync(path)) return environment.platform === "win32" ? [path] : ["/bin/sh", path];
+          if (!existsSync(path)) continue;
+          if (environment.platform === "win32") return unwrapWindowsAgentApiShim(path) ?? [path];
+          return ["/bin/sh", path];
         }
       }
     }
     const agy = environment.which("agy") ?? (homeOk() ? [join(environment.homeDir, ".local", "bin", "agy")].find((path) => existsSync(path)) ?? null : null);
     if (agy) return [agy, "agentapi"];
-    const apps = options.appClients ?? (environment.platform === "darwin" && !process.env.PLANNOTATOR_TEST_SANDBOX ? [INBOX_ANTIGRAVITY_APP_CLIENT] : []);
+    const apps = options.appClients ?? defaultAppClients();
     const app = apps.find((path) => existsSync(path));
     return app ? [app, "agentapi"] : null;
   };

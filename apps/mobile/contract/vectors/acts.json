@@ -638,6 +638,43 @@
       }
     },
     {
+      "thread_id": "msg_R0000000000000000000000018",
+      "mark_read": {
+        "open": {
+          "lead": "Marked read",
+          "phoneLead": "Read",
+          "detail": "Moves to Quiet",
+          "warn": false
+        },
+        "held": {
+          "lead": "Marked read",
+          "phoneLead": "Read",
+          "detail": "“Which changelog tone for the release?”",
+          "warn": false
+        },
+        "list": {
+          "lead": "Moved to Quiet",
+          "detail": "“Which changelog tone for the release?”",
+          "warn": false
+        }
+      },
+      "mark_unread": {
+        "stays": {
+          "lead": "Marked unread",
+          "detail": "“Which changelog tone for the release?”"
+        },
+        "moved": {
+          "lead": "Marked unread",
+          "detail": "“Which changelog tone for the release?” · back in New"
+        }
+      },
+      "set_aside": {
+        "title": "Set aside 2 open questions?",
+        "body": "Mark read closes them unanswered and tells the agent not to wait on them.",
+        "go": "Mark read"
+      }
+    },
+    {
       "thread_id": "msg_R0000000000000000000000090",
       "mark_read": {
         "open": {

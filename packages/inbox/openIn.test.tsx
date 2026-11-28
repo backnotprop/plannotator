@@ -8,8 +8,8 @@
  * app, Finder; anything else: Finder only), a pick launches through the
  * server and is remembered, a tile's ⋯ sits beside the tile's own control
  * (never inside it) with the same list, a missing file disables the apps but
- * not Copy path, and a page that came through the tailnet gets only "Open in
- * new tab" for HTML and images.
+ * not Copy path, and a page that came through the tailnet gets no app: a new
+ * tab for HTML and images, and Copy path, which launches nothing.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -281,22 +281,30 @@ test.skipIf(!hasDom)('a file no longer on disk: the apps are disabled and say Mi
   expect(launches().length).toBe(before);
 });
 
-test.skipIf(!hasDom)('through the tailnet: one Open in new tab icon for HTML and images, nothing for the rest, no tile ⋯', async () => {
+test.skipIf(!hasDom)('through the tailnet: a new tab for HTML and images and Copy path, Copy path alone for the rest, no app and no tile ⋯', async () => {
   viaTailnet = true;
   const el = await renderApp(fileHash('page.html'));
   const ids = world.openIn.ids;
-  await until(() => pane(el).querySelector('[data-open-in-tab]') !== null, 'the new-tab icon');
-  const tab = pane(el).querySelector<HTMLAnchorElement>('[data-open-in-tab]')!;
+  await until(() => pane(el).querySelector('a[data-open-in-primary="browser"]') !== null, "the page's new tab");
+  const tab = pane(el).querySelector<HTMLAnchorElement>('a[data-open-in-primary="browser"]')!;
   expect(tab.getAttribute('href')).toBe(`/api/inbox/attachments/${ids['page.html']}/page`);
-  expect(tab.getAttribute('aria-label')).toBe('Open in new tab');
   expect(tab.getAttribute('target')).toBe('_blank');
-  expect(el.querySelector('[data-open-in]')).toBeNull();
+  expect(itemsOf(await openMenu(pane(el), '[data-open-in-caret]', ids['page.html']!))).toEqual(['browser', 'copy-path']);
+  await act(async () => document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+  await until(() => menuOf(ids['page.html']!) === null || !menuOf(ids['page.html']!)!.isConnected, 'the menu closed');
   expect(el.querySelector('[data-open-in-more]')).toBeNull();
-  // An image: its own route in a new tab; markdown: nothing.
+  // An image: its own route in a new tab; markdown: Copy path alone, which copies the record's path and launches nothing.
   window.location.hash = fileHash('shot.png');
-  await until(() => pane(el).querySelector('[data-open-in-tab]')?.getAttribute('href') === `/api/inbox/attachments/${ids['shot.png']}/image`, 'the image tab');
+  await until(() => pane(el).querySelector('a[data-open-in-primary="browser"]')?.getAttribute('href') === `/api/inbox/attachments/${ids['shot.png']}/image`, 'the image tab');
   window.location.hash = fileHash('plan.md');
   await until(() => el.querySelector('[data-attachment-pane]')?.getAttribute('data-attachment-pane') === ids['plan.md'], 'the markdown file');
-  expect(pane(el).querySelector('[data-open-in-tab]')).toBeNull();
-  expect(el.querySelector('[data-open-in]')).toBeNull();
+  await until(() => pane(el).querySelector('[data-open-in-copy-path]') !== null, 'the Copy path button');
+  expect(pane(el).querySelector('a[data-open-in-primary]')).toBeNull();
+  const copied: string[] = [];
+  Object.defineProperty(navigator, 'clipboard', { value: { writeText: async (text: string) => void copied.push(text) }, configurable: true });
+  const before = launches().length;
+  await act(async () => pane(el).querySelector<HTMLButtonElement>('[data-open-in-copy-path]')!.click());
+  await until(() => copied.length === 1, 'the path copied');
+  expect(copied[0]!.endsWith('/plan.md')).toBe(true);
+  expect(launches().length).toBe(before);
 });

@@ -59,4 +59,6 @@ export interface ThreadLoad {
   error: string;
   /** Failed only because linked machines have not sent their lists yet: what it waits for, said in place of the error. */
   waiting?: string | null;
+  /** The thread on screen is no longer in the Inbox (deleted elsewhere): it stays as it was, says so, and is not read again. */
+  gone?: true;
 }

@@ -27,11 +27,11 @@
     },
     "apps/cline-plugin": {
       "name": "@plannotator/cline",
-      "version": "0.29.4",
+      "version": "0.29.6",
     },
     "apps/dsh-plugin": {
       "name": "@plannotator/dsh",
-      "version": "0.29.4",
+      "version": "0.29.6",
     },
     "apps/feedback-service": {
       "name": "@plannotator/feedback-service",
@@ -134,11 +134,11 @@
     },
     "apps/openclaw-plugin": {
       "name": "@plannotator/openclaw",
-      "version": "0.29.4",
+      "version": "0.29.6",
     },
     "apps/opencode-plugin": {
       "name": "@plannotator/opencode",
-      "version": "0.29.4",
+      "version": "0.29.6",
       "devDependencies": {
         "@opencode-ai/plugin": "1.19.3",
         "@opencode/plugin": "2.0.32",
@@ -157,7 +157,7 @@
     },
     "apps/pi-extension": {
       "name": "@plannotator/pi-extension",
-      "version": "0.29.4",
+      "version": "0.29.6",
       "dependencies": {
         "@joplin/turndown-plugin-gfm": "^1.0.68",
         "@pierre/diffs": "1.7.0-beta.3",
@@ -297,7 +297,7 @@
     },
     "packages/core": {
       "name": "@plannotator/core",
-      "version": "0.25.34",
+      "version": "0.25.35",
       "dependencies": {
         "croner": "11.0.0",
       },
@@ -416,7 +416,7 @@
     },
     "packages/server": {
       "name": "@plannotator/server",
-      "version": "0.29.4",
+      "version": "0.29.6",
       "dependencies": {
         "@modelcontextprotocol/server": "2.3.1",
         "@pierre/diffs": "1.7.0-beta.3",
@@ -492,7 +492,7 @@
     },
     "packages/ui": {
       "name": "@plannotator/ui",
-      "version": "0.65.0",
+      "version": "0.67.0",
       "dependencies": {
         "@base-ui/react": "^1.9.0",
         "@codemirror/autocomplete": "^6.20.3",
@@ -514,7 +514,7 @@
         "@lezer/highlight": "^1.2.5",
         "@pierre/diffs": "1.7.0-beta.3",
         "@plannotator/atomic-editor": "^0.9.0",
-        "@plannotator/core": "0.25.32",
+        "@plannotator/core": "0.25.35",
         "@plannotator/markdown-editor": "^0.5.0",
         "@plannotator/web-highlighter": "^0.8.2",
         "@tanstack/react-table": "^8.21.3",
@@ -528,7 +528,7 @@
         "marked": "^17.0.6",
         "mermaid": "12.2.0",
         "motion": "^14.4.0",
-        "pele": "1.3.0",
+        "pele": "1.13.0",
         "perfect-freehand": "^1.2.2",
         "tailwind-merge": "^3.7.0",
         "unique-username-generator": "^1.5.1",
@@ -2601,7 +2601,7 @@
 
     "pathe": ["pathe@2.0.3", "", {}, "sha512-WUjGcAqP1gQacoQe+OBJsFA7Ld4DyXuUIjZ5cc75cLHvJ7dtNsTugphxIADwspS+AraAUePCKrSVtPLFj/F88w=="],
 
-    "pele": ["pele@1.3.0", "", {}, "sha512-Jz3SW2OYo4yLkrrNuQwfg93el1SEGsFVTd7c/XVvZEry6UfR8ncvxoZqAefEpXOFpJRwhmXwWq17aGHg8W0vuA=="],
+    "pele": ["pele@1.13.0", "", {}, "sha512-Ie8UKY9x00MsuR3jO6AzUwzK2Z6MIV3Tf4EDdITiuk8Uaz8K7g0R082WqsqNaSU8DdgkrRvZThzhit83mi/uiw=="],
 
     "pend": ["pend@1.2.0", "", {}, "sha512-F3asv42UuXchdzt+xXqfW1OGlVBe+mxa2mqI0pg5yAHZPvFmY3Y6drSf/GQ1A86WgWEN9Kzh/WrgKa6iGcHXLg=="],
 

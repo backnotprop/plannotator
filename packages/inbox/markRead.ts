@@ -75,21 +75,24 @@ export function seenHeldInNew(row: Pick<InboxListRow, 'section' | 'resolved_at'>
 
 /**
  * Mark unread (the owner's ask, 2026-10-31) is offered on the thread: it is
- * read (not bold, nothing waits on the person), not archived, and an agent
- * wrote after the person's last reply (`sent` is null; a reply is a look, so
- * there would be nothing to make new). The store's `markUnread` makes the
- * latest agent message new again: the row goes to New, bold. Never on a row
- * that waits on the person (Mark read's). A seen update the list still holds
- * in New takes it too, on the row's hover action and the header's read button
- * (the owner, 2026-11-02); its Mark read stays in the row menu and on `E`. A
- * phone has neither the row menu nor `E` (nor a read button in its bar), so
- * its thread ⋯ sheet offers Mark read and Mark unread there.
+ * read (not bold: the person has seen its latest agent message, `unseen` 0),
+ * not archived, and an agent wrote after the person's last reply (`sent` is
+ * null; a reply is a look, so there would be nothing to make new). The
+ * store's `markUnread` makes the latest agent message new again, so the row
+ * is bold: a row in New or Quiet goes to New; a row with questions still
+ * waiting (Stopped on you, Holding up work, Waiting on you) stays in its
+ * group with its questions and counts, bold again. That includes a thread
+ * with open questions the person has opened (the owner, 2026-11-25: on an
+ * opened thread with questions the row's button says Mark unread, like every
+ * other opened thread); one not opened yet is bold and keeps Mark read. On a
+ * read row that waits on the person, Mark read stays in the row menu, the
+ * header's ⋯ and on `E`. A seen update the list still holds in New takes it
+ * too (the owner, 2026-11-02); its Mark read stays in the row menu and on
+ * `E`. A phone has neither the row menu nor `E`, so its thread ⋯ sheet
+ * offers Mark read and Mark unread there.
  */
-export function canMarkUnread(
-  row: Pick<InboxListRow, 'section' | 'unseen' | 'answered_not_sent' | 'resolved_at' | 'unread' | 'sent'> & { read_at?: string | null },
-): boolean {
-  if (row.resolved_at !== null || row.unread) return false;
-  if (waitsOnPerson(row)) return false;
+export function canMarkUnread(row: Pick<InboxListRow, 'unseen' | 'resolved_at' | 'unread' | 'sent'>): boolean {
+  if (row.resolved_at !== null || row.unread || row.unseen > 0) return false;
   return row.sent === null;
 }
 

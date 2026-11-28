@@ -1477,9 +1477,9 @@ test('a window with its own stream (no Web Locks): the same watch reopens it fro
   }
 });
 
-// Review of #2565, finding 6: a linked machine's threads show no steps here, so its steps line must not reach the
-// window (onMachine rings a live record and re-reads the open thread when it is that machine's).
-test("a linked machine's steps line never reaches the window; its other records still do", () => {
+// Review of #2565, finding 6: a linked machine's steps line must not ring or re-read the open thread (onMachine does
+// both for a live record of that machine's); it only reads that thread's checklist again (linkedReads.test.ts).
+test("a linked machine's steps line never reaches onMachine; its other records still do", () => {
   const got: unknown[] = [];
   const handlers: InboxEventHandlers = { onRecord: () => {}, onStatus: () => {}, onMachine: (frame) => void got.push(frame.record) };
   const machineFrame = (record: unknown): InboxEventFrame => ({ name: 'machine', id: null, data: JSON.stringify({ machine: 'mac_far', seq: 9, live: true, record }) });

@@ -33,6 +33,8 @@ import { bodyShowsLocalImages, captureInboxInlineImages, INBOX_INLINE_IMAGES_MAX
 import { inboxMessageImageRefsInOrder, inboxMessageRemoteImageRefsInOrder } from "@plannotator/shared/inbox/message-images";
 import { inboxInlineMediaKind } from "@plannotator/core/inbox-inline-media";
 import { MEDIA_NOT_SHOWN_MAX, mediaNotShown, mediaNotShownText, type MediaNotShown } from "./inbox-media-not-shown";
+import { LINKS_NOT_FOUND_MAX, linksNotFound, linksNotFoundText, type InboxSendLinkPulls, type LinkNotFound } from "./inbox-links-not-found";
+import { SEND_WARNINGS_MAX, pagesNotShown, pagesNotShownText, questionMediaNotShown, questionMediaNotShownText, type PageNotShown, type QuestionMediaNotShown } from "./inbox-send-warnings";
 import { questionsWithoutPictureChoices } from "./inbox-picture-choices";
 import { attachedImagesNotInBody, attachedImagesNotInBodyText } from "@plannotator/shared/inbox/attached-images";
 import { readInboxAttachmentQuestions } from "@plannotator/shared/inbox/attachment-questions";
@@ -296,6 +298,8 @@ export interface InboxMcpContext extends InboxSnoozeMcpContext, InboxScheduledMc
    * attachments are refused.
    */
   recordAttachments?: (paths: readonly string[], project: InboxProject, base: string) => Promise<InboxAttachment[]>;
+  /** A thread's PRs and a file's text at one as kept in memory, for `links_not_found` (never a forge read at send). Absent: no PR is asked. */
+  linkPulls?: InboxSendLinkPulls;
   /**
    * A question's running-app prototypes (`Prototype: http://localhost:…`): checked and probed before anything is
    * written (inbox-live.ts `checkPrototypeApps`); a refusal names the question and the option. Absent: a body that
@@ -897,7 +901,7 @@ export async function sendAgentMessage(
   input: AgentSendInput,
   guide?: InboxGuideRef,
   wakes = false,
-): Promise<{ structured: Record<string, unknown>; replayed: boolean; notFramed: string[]; questions: number; asked: { key: string; prompt: string }[]; attachments: number; superseded: number; actions: number; done: number; imagesNotShown: ImageNotShown[]; mediaNotShown: MediaNotShown[]; attachedImagesNotInBody: string[]; questionOpenersWithText: QuestionOpenerWithText[]; noStakes: number; recommendedInLabel: number; questionsToCheck: InboxQuestionToCheck[]; choicesWithoutPictures: { keys: string[]; pictures: number }; naming: InboxSendResult["naming"] | null; priority: boolean | null }> {
+): Promise<{ structured: Record<string, unknown>; replayed: boolean; notFramed: string[]; questions: number; asked: { key: string; prompt: string }[]; attachments: number; superseded: number; actions: number; done: number; imagesNotShown: ImageNotShown[]; mediaNotShown: MediaNotShown[]; linksNotFound: LinkNotFound[]; questionMediaNotShown: QuestionMediaNotShown[]; pagesNotShown: PageNotShown[]; attachedImagesNotInBody: string[]; questionOpenersWithText: QuestionOpenerWithText[]; noStakes: number; recommendedInLabel: number; questionsToCheck: InboxQuestionToCheck[]; choicesWithoutPictures: { keys: string[]; pictures: number }; naming: InboxSendResult["naming"] | null; priority: boolean | null }> {
   const { store } = context;
   refuseIdShapedThread(input.thread, input.reply_to);
   refuseBadSubject(input.subject);
@@ -1008,6 +1012,11 @@ export async function sendAgentMessage(
   const markedDone = result.done ?? [];
   const notShown = imagesNotShown(input.body, captured?.failures ?? []);
   const notPlayed = await mediaNotShown(input.body, { root: project.root, base: basePath });
+  // Links to a file that opens nothing in the window (a session on another computer names its own disk: not checked).
+  // The message is already stored: a check that fails is left out, never an error for a sent message.
+  const notFound = farAuthor ? [] : await linksNotFound(store, message, undefined, context.linkPulls).catch(() => []);
+  const questionMedia = questionMediaNotShown(input.body);
+  const bigPages = pagesNotShown(message.attachments);
   // Pictures sent only as attachments (tiles at the bottom, away from the words about them):
   // the result advises the next message; the send and what the person sees are unchanged.
   // The message is already stored: advice that fails is left out, never an error for a sent message.
@@ -1048,6 +1057,9 @@ export async function sendAgentMessage(
     notFramed,
     imagesNotShown: notShown,
     mediaNotShown: notPlayed,
+    linksNotFound: notFound,
+    questionMediaNotShown: questionMedia,
+    pagesNotShown: bigPages,
     attachedImagesNotInBody: attachedOnly,
     questionOpenersWithText: openers,
     noStakes: noStakes.length,
@@ -1093,6 +1105,15 @@ export async function sendAgentMessage(
       ...(notShown.length > IMAGES_NOT_SHOWN_MAX ? { images_not_shown_more: notShown.length - IMAGES_NOT_SHOWN_MAX } : {}),
       ...(notPlayed.length > 0 ? { media_not_shown: notPlayed.slice(0, MEDIA_NOT_SHOWN_MAX) } : {}),
       ...(notPlayed.length > MEDIA_NOT_SHOWN_MAX ? { media_not_shown_more: notPlayed.length - MEDIA_NOT_SHOWN_MAX } : {}),
+      /** Links in the body to a file that opens nothing: none where the window looks (`path`: the message's own folder), none attached in the thread. */
+      ...(notFound.length > 0 ? { links_not_found: notFound.slice(0, LINKS_NOT_FOUND_MAX) } : {}),
+      ...(notFound.length > LINKS_NOT_FOUND_MAX ? { links_not_found_more: notFound.length - LINKS_NOT_FOUND_MAX } : {}),
+      /** Sounds and videos written inside a question (`question`: its key): the card shows them as text. */
+      ...(questionMedia.length > 0 ? { question_media_not_shown: questionMedia.slice(0, SEND_WARNINGS_MAX) } : {}),
+      ...(questionMedia.length > SEND_WARNINGS_MAX ? { question_media_not_shown_more: questionMedia.length - SEND_WARNINGS_MAX } : {}),
+      /** Attached HTML pages whose own bytes are past what the page route keeps (`limit`; inbox-send-warnings.ts: a lower bound). */
+      ...(bigPages.length > 0 ? { pages_not_shown: bigPages.slice(0, SEND_WARNINGS_MAX) } : {}),
+      ...(bigPages.length > SEND_WARNINGS_MAX ? { pages_not_shown_more: bigPages.length - SEND_WARNINGS_MAX } : {}),
       /** Attached pictures the body does not show with `![alt](path)`, as written (a nudge; the message was sent). */
       ...(attachedOnly.length > 0 ? { attached_images_not_in_body: attachedOnly } : {}),
       /** Lines that start with a question directive and text after it, so they opened no block (a warning; the message was sent). */
@@ -1406,6 +1427,9 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
         const hints = [
           imagesNotShownText(sent.imagesNotShown),
           mediaNotShownText(sent.mediaNotShown),
+          linksNotFoundText(sent.linksNotFound),
+          questionMediaNotShownText(sent.questionMediaNotShown),
+          pagesNotShownText(sent.pagesNotShown),
           attachedImagesNotInBodyText(sent.attachedImagesNotInBody.length),
           noStakesText(sent.noStakes),
           recommendedInLabelText(sent.recommendedInLabel),

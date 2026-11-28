@@ -135,6 +135,8 @@ export type CallFlowResponse =
       from: string;
       to: string;
       message?: string;
+      /** Shown above the results when the analysis read only part of the repository. */
+      notice?: string;
       /** Canonical colorless CallDiff rendering, including source locations. */
       raw: string;
       trees: CallFlowTree[];
@@ -154,6 +156,8 @@ export interface ParsedCallDiffWorkerResult {
   from: string;
   to: string;
   message?: string;
+  /** Set by Plannotator, never by the worker: see selectCallFlowPaths. */
+  notice?: string;
   /** Canonical colorless CallDiff rendering, including source locations. */
   raw: string;
   trees: CallFlowTree[];
