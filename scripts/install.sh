@@ -2305,12 +2305,15 @@ update_pi_extension_if_present() {
 # (can1357/oh-my-pi packages/coding-agent/src/cli/plugin-cli.ts, 7f38fc6) and
 # neither prompts. Installed means the package is in OMP's plugin manifest:
 # `<plugins>/package.json` dependencies, `<plugins>` being
-# $XDG_DATA_HOME/omp/plugins when OMP set that folder up, else ~/.omp/plugins
-# (docs/plugin-manager-installer-plumbing.md); a listed package whose own
+# $XDG_DATA_HOME/omp/plugins once $XDG_DATA_HOME/omp exists (Linux and macOS),
+# else ~/.omp/plugins (packages/utils/src/dirs.ts); a listed package whose own
 # package.json can't be read is installed again. An exact version in the
 # manifest (`omp plugin install @plannotator/pi-extension@0.28.60`) is the
 # person's pin, left as is, as the Pi step leaves one in Pi's settings; so is
-# a local build (a `link:`, `file:`, path, git or `workspace:` spec). Each
+# a local build: `<plugins>/node_modules/@plannotator/pi-extension` is a
+# symlink, all `omp plugin link <path>` and `omp plugin install <path>` write
+# besides a lock entry, with nothing in the manifest (plugins/manager.ts
+# `link`), or the manifest holds a git spec. Each
 # call is time-bounded (its process group, so omp's bun or npm stops too), with
 # stdin from /dev/null, run in the home folder (never a project's plugin
 # scope); a failure or a hang never fails the install: it prints the command
@@ -2325,18 +2328,25 @@ omp_extension_state="none"
 # The command the closing section prints when the step could not finish.
 omp_extension_manual="omp plugin install ${OMP_EXTENSION_PACKAGE}"
 
-# OMP's plugin folders, the one it uses first.
+# OMP's plugin folder: the XDG one once $XDG_DATA_HOME/omp exists, as OMP picks.
 omp_plugin_dirs() {
-    if [ -n "${XDG_DATA_HOME:-}" ] && [ -d "$XDG_DATA_HOME/omp/plugins" ]; then
+    if [ -n "${XDG_DATA_HOME:-}" ] && [ -d "$XDG_DATA_HOME/omp" ]; then
         printf '%s\n' "$XDG_DATA_HOME/omp/plugins"
+    else
+        printf '%s\n' "$HOME/.omp/plugins"
     fi
-    printf '%s\n' "$HOME/.omp/plugins"
 }
 
-# The manifest's spec for the extension ("^0.29.1", "0.28.60"), or "" when
-# OMP's manifest does not list it.
+# The manifest's spec for the extension ("^0.29.1", "0.28.60"), the target of
+# a linked local build (a path), or "" when OMP has neither.
 omp_extension_spec() {
     omp_plugin_dirs | while IFS= read -r _omp_dir; do
+        _omp_entry="$_omp_dir/node_modules/@plannotator/pi-extension"
+        if [ -L "$_omp_entry" ]; then
+            _omp_s=$(readlink "$_omp_entry" 2>/dev/null)
+            printf '%s\n' "${_omp_s:-$_omp_entry}"
+            break
+        fi
         if [ -f "$_omp_dir/package.json" ] && grep -q '"@plannotator/pi-extension"[[:space:]]*:' "$_omp_dir/package.json" 2>/dev/null; then
             _omp_s=$(tr -d '\n' < "$_omp_dir/package.json" 2>/dev/null | grep -o '"@plannotator/pi-extension"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n 1 | sed 's/.*"\([^"]*\)"$/\1/')
             printf '%s\n' "${_omp_s:-listed}"
@@ -2399,7 +2409,7 @@ update_omp_extension_if_present() {
     _omp_target="${latest_tag#v}"
     _omp_spec=$(omp_extension_spec)
     _omp_before=$(omp_extension_version)
-    # A local build (`link:`, `file:`, a path, a git URL, `workspace:`): an npm range or tag never holds ":", "/"
+    # A local build (a linked folder's path, a git URL): an npm range or tag never holds ":", "/"
     # or "\" and never starts with ".". The person's own, never installed or upgraded over.
     case "$_omp_spec" in
         *:*|*/*|*\\*|.*)

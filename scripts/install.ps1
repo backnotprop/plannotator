@@ -1501,9 +1501,13 @@ function Update-PiExtensionIfPresent {
 # commands: `omp plugin install <npm name>` and `omp plugin upgrade <name>`
 # (can1357/oh-my-pi packages/coding-agent/src/cli/plugin-cli.ts, 7f38fc6;
 # neither prompts). Installed means the package is in OMP's plugin manifest,
-# <plugins>\package.json (<plugins>: $env:XDG_DATA_HOME\omp\plugins when OMP
-# set it up, else ~\.omp\plugins); one whose package can't be read is installed
-# again, and an exact version in the manifest (the person's pin) is left as is.
+# <plugins>\package.json (<plugins>: ~\.omp\plugins; OMP reads XDG folders on
+# Linux and macOS only, packages/utils/src/dirs.ts); one whose package can't be
+# read is installed again, and an exact version in the manifest (the person's
+# pin) is left as is. So is a local build: <plugins>\node_modules\@plannotator\
+# pi-extension is a junction or symlink, all `omp plugin link <path>` and
+# `omp plugin install <path>` write besides a lock entry, with nothing in the
+# manifest (plugins/manager.ts `link`, directory-link.ts), or a git spec.
 # Time-bounded (the process tree), stdin closed, run in the home folder; a
 # failure never fails the install and prints the command. A pinned run installs
 # nothing in OMP (OMP would record that exact version as a pin): it prints the
@@ -1516,15 +1520,18 @@ $script:ompExtensionState = "none"
 $script:ompExtensionManual = "omp plugin install $ompExtensionPackage"
 
 # OMP's plugin manifest that lists the extension, with its spec ("^0.29.1",
-# "0.28.60"), or $null when none does.
+# "0.28.60"), or a linked local build with the link's target as its spec, or
+# $null when neither.
 function Get-OmpExtensionEntry {
-    $dirs = @()
-    if ($env:XDG_DATA_HOME) {
-        $xdg = Join-Path (Join-Path $env:XDG_DATA_HOME "omp") "plugins"
-        if (Test-Path -LiteralPath $xdg -PathType Container) { $dirs += $xdg }
-    }
-    $dirs += (Join-Path (Join-Path $env:USERPROFILE ".omp") "plugins")
+    $dirs = @(Join-Path (Join-Path $env:USERPROFILE ".omp") "plugins")
     foreach ($dir in $dirs) {
+        $link = Join-Path (Join-Path (Join-Path $dir "node_modules") "@plannotator") "pi-extension"
+        $item = Get-Item -LiteralPath $link -Force -ErrorAction SilentlyContinue
+        if ($item -and ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+            $target = [string](@($item.Target) | Select-Object -First 1)
+            if (-not $target) { $target = $link }
+            return @{ Dir = $dir; Spec = $target }
+        }
         $text = ""
         try { $text = [string](Get-Content -LiteralPath (Join-Path $dir "package.json") -Raw -ErrorAction Stop) } catch { continue }
         if ($text -notmatch '"@plannotator/pi-extension"\s*:\s*"([^"]*)"') {
@@ -1615,7 +1622,7 @@ function Update-OmpExtensionIfPresent {
     if ([int]::TryParse([string]$env:PLANNOTATOR_OMP_PLUGIN_TIMEOUT, [ref]$n) -and $n -gt 0) { $secs = $n }
     $target = $latestTag.TrimStart('v')
     $entry = Get-OmpExtensionEntry
-    # A local build (link:, file:, a path, a git URL, workspace:): an npm range or tag never holds ":", "/" or "\"
+    # A local build (a linked folder's path, a git URL): an npm range or tag never holds ":", "/" or "\"
     # and never starts with ".". The person's own, never installed or upgraded over.
     if ($entry -and ([string]$entry.Spec -ne "listed") -and (([string]$entry.Spec -match '[:/\\]') -or ([string]$entry.Spec).StartsWith('.'))) {
         $script:ompExtensionState = "pinned"

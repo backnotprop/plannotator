@@ -2523,9 +2523,7 @@ export const INBOX_TOOL_OMP_DEFAULT = true;
  * person's replies (the wake), in Pi or in Oh My Pi. Both read `inboxTool.pi`
  * and PLANNOTATOR_INBOX_TOOL exactly as resolveInboxTool does; only the
  * default differs, as the `plannotator` agent tool's does: off on Pi, on in
- * Oh My Pi (INBOX_TOOL_OMP_DEFAULT), which lists an extension
- * tool as one short `xd://` line and loads its schema only when the model
- * reads it. The Inbox's connect step installs the extension in OMP with
+ * Oh My Pi (INBOX_TOOL_OMP_DEFAULT). The Inbox's connect step installs the extension in OMP with
  * `omp plugin install` and writes no `inboxTool` key for it, since that key
  * is Pi's too (inbox-agents.ts, the "oh-my-pi" agent).
  */

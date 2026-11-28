@@ -8,7 +8,7 @@
  * real omp is run.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createFakeAgents, type FakeAgents } from "../../tests/helpers/fake-agents";
 import { INBOX_TOOL_OMP_DEFAULT, loadConfig, resolveInboxTool } from "@plannotator/shared/config";
@@ -20,6 +20,7 @@ import {
   forgetOmpToolBeforeOff,
   formatConnectReport,
   inboxAgentReach,
+  ompPluginDirs,
   readInboxAgents,
   setInboxAgentReach,
   type AgentEnvironment,
@@ -65,6 +66,25 @@ function ompHas(version: string, opts: { spec?: string; feature?: boolean } = {}
   writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "omp-plugins", private: true, dependencies: { [PKG]: opts.spec ?? `^${version}` } }));
   const features = opts.feature === false ? {} : { plannotator: { features: [OMP_EXTENSION_FEATURE] } };
   writeFileSync(pkgFile(), JSON.stringify({ name: PKG, version, ...features }));
+}
+
+/**
+ * A local build as OMP records it: `omp plugin link <path>` (and `omp plugin install <path>`) writes a symlink at
+ * `<plugins>/node_modules/@plannotator/pi-extension` and a lock entry, and nothing in the manifest (oh-my-pi
+ * plugins/manager.ts `link`, directory-link.ts).
+ */
+function ompLinked(version: string, opts: { feature?: boolean; manifest?: boolean } = {}): string {
+  const dir = join(fake.home, ".omp", "plugins");
+  const checkout = join(fake.root, "work", "plannotator", "apps", "pi-extension");
+  mkdirSync(checkout, { recursive: true });
+  const features = opts.feature === false ? {} : { plannotator: { features: [OMP_EXTENSION_FEATURE] } };
+  writeFileSync(join(checkout, "package.json"), JSON.stringify({ name: PKG, version, ...features }));
+  mkdirSync(join(dir, "node_modules", "@plannotator"), { recursive: true });
+  const entry = join(dir, "node_modules", "@plannotator", "pi-extension");
+  if (!existsSync(entry)) symlinkSync(checkout, entry, "dir");
+  if (opts.manifest !== false) writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "omp-plugins", private: true, dependencies: {} }));
+  writeFileSync(join(dir, "omp-plugins.lock.json"), JSON.stringify({ plugins: { [PKG]: { version, enabledFeatures: null, enabled: true } }, settings: {} }));
+  return checkout;
 }
 
 function installedVersion(): string | null {
@@ -177,24 +197,48 @@ describe("Oh My Pi", () => {
     expect((await inboxAgentReach("oh-my-pi", options())).on).toBe(true);
   });
 
-  test("a local build in OMP (link:, file:, git) is never installed or upgraded over; Settings says so", async () => {
+  test("a local build in OMP (omp plugin link: a symlink and a lock entry, no manifest entry) is never installed or upgraded over; Settings says so", async () => {
     fake.install("omp");
-    for (const spec of ["link:../plannotator/apps/pi-extension", "file:/work/plannotator/apps/pi-extension", "git+https://github.com/backnotprop/plannotator.git"]) {
+    for (const manifest of [true, false]) {
       // Without the OMP default: off, with the line, nothing run, also from Settings' switch.
-      ompHas("0.28.60", { spec, feature: false });
+      const checkout = ompLinked("0.28.60", { feature: false, manifest });
       expect((await start()).added).not.toContain("oh-my-pi");
       const reach = await inboxAgentReach("oh-my-pi", options());
       expect({ on: reach.on, state: reach.state, reason: reach.reason }).toEqual({ on: false, state: "off", reason: "A local build is installed in Oh My Pi, left as is." });
       expect(await setInboxAgentReach("oh-my-pi", true, options())).toBeNull();
       // With it: on, still said.
-      ompHas("0.29.1", { spec });
+      ompLinked("0.29.1", { manifest });
       const current = await inboxAgentReach("oh-my-pi", options());
       expect({ on: current.on, reason: current.reason }).toEqual({ on: true, reason: "A local build is installed in Oh My Pi, left as is." });
-      // Its package unreadable (a link to a folder that moved): still not installed over.
-      rmSync(pkgFile());
+      // Its package unreadable (the checkout moved): still not installed over.
+      renameSync(checkout, `${checkout}-moved`);
       await start({}, { version: "0.29.3" });
+      rmSync(join(fake.root, "work"), { recursive: true, force: true });
+      rmSync(join(fake.home, ".omp"), { recursive: true, force: true });
+      rmSync(join(dataDir, "inbox"), { recursive: true, force: true });
     }
     expect(ompCalls()).toEqual([]);
+  });
+
+  test("a git spec in OMP's manifest is a local build too: never installed or upgraded over", async () => {
+    fake.install("omp");
+    ompHas("0.28.60", { spec: "git+https://github.com/backnotprop/plannotator.git", feature: false });
+    await start();
+    const reach = await inboxAgentReach("oh-my-pi", options());
+    expect({ on: reach.on, reason: reach.reason }).toEqual({ on: false, reason: "A local build is installed in Oh My Pi, left as is." });
+    expect(ompCalls()).toEqual([]);
+  });
+
+  test("OMP's plugin folder: $XDG_DATA_HOME/omp/plugins once $XDG_DATA_HOME/omp exists, on Linux and macOS only", () => {
+    const xdg = join(fake.root, "xdg");
+    const home = join(fake.home, ".omp", "plugins");
+    const dirsOn = (platform: NodeJS.Platform) => ompPluginDirs(createAgentEnvironmentFor({ platform, homeDir: fake.home, env: { ...fake.env, XDG_DATA_HOME: xdg } }));
+    expect(dirsOn("linux")).toEqual([home]);
+    // omp switches on the omp folder, before it has a plugins folder.
+    mkdirSync(join(xdg, "omp"), { recursive: true });
+    expect(dirsOn("linux")).toEqual([join(xdg, "omp", "plugins")]);
+    expect(dirsOn("darwin")).toEqual([join(xdg, "omp", "plugins")]);
+    expect(dirsOn("win32")).toEqual([home]);
   });
 
   test("a pin whose package can't be read is still the person's pin: not installed over, said once with why", async () => {

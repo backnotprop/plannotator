@@ -31,7 +31,7 @@
  * CLIs; the real agent CLIs are never run by a test.
  */
 
-import { accessSync, constants as fsConstants, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
+import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { spawn as spawnChild } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
@@ -714,22 +714,23 @@ export const OMP_EXTENSION_PACKAGE = "@plannotator/pi-extension";
 export const OMP_EXTENSION_FEATURE = "omp-inbox-tool-default";
 
 /**
- * Oh My Pi's plugin folders, the one it uses first: `$XDG_DATA_HOME/omp/plugins` when OMP set that folder up,
- * else `~/.omp/plugins` (can1357/oh-my-pi docs/plugin-manager-installer-plumbing.md).
+ * Oh My Pi's plugin folder, as OMP picks it: `$XDG_DATA_HOME/omp/plugins` once `$XDG_DATA_HOME/omp` exists, on Linux
+ * and macOS only, else `~/.omp/plugins` (can1357/oh-my-pi packages/utils/src/dirs.ts, DirResolver).
  */
 export function ompPluginDirs(e: AgentEnvironment): string[] {
-  const xdg = envDir(e, "XDG_DATA_HOME");
-  const dirs = xdg && isDir(join(xdg, "omp", "plugins")) ? [join(xdg, "omp", "plugins")] : [];
-  return [...dirs, join(e.homeDir, ".omp", "plugins")];
+  const xdg = e.platform === "linux" || e.platform === "darwin" ? envDir(e, "XDG_DATA_HOME") : null;
+  return [xdg && isDir(join(xdg, "omp")) ? join(xdg, "omp", "plugins") : join(e.homeDir, ".omp", "plugins")];
 }
 
 /**
  * Plannotator's extension as Oh My Pi installed it, read only. Null: OMP's plugin manifest (`<plugins>/package.json`
  * dependencies) does not list it. `version` "": listed, but the package's own package.json can't be read (an install
  * cut short: treated as not installed, so it is installed again). `pinned`: the manifest holds an exact version
- * (`omp plugin install @plannotator/pi-extension@0.28.60`), left as it is. `local`: the manifest holds a spec that is
- * not an npm range or tag (`link:`, `file:`, a path, a git URL, `workspace:`): a local build, never installed or
- * upgraded over, whatever its package says. `current`: its Inbox tool is on in OMP.
+ * (`omp plugin install @plannotator/pi-extension@0.28.60`), left as it is. `local`: a local build, never installed or
+ * upgraded over, whatever its package says: `<plugins>/node_modules/@plannotator/pi-extension` is a symlink (a junction
+ * on Windows), which is all `omp plugin link <path>` and `omp plugin install <path>` write besides a lock entry, with
+ * nothing in the manifest (oh-my-pi plugins/manager.ts `link`, directory-link.ts); or the manifest holds a spec that is
+ * not an npm range or tag (a git URL). `spec` is then the link's target. `current`: its Inbox tool is on in OMP.
  */
 export interface OmpExtension {
   version: string;
@@ -742,6 +743,9 @@ export interface OmpExtension {
 
 export function ompExtension(e: AgentEnvironment): OmpExtension | null {
   for (const dir of ompPluginDirs(e)) {
+    const entry = join(dir, "node_modules", ...OMP_EXTENSION_PACKAGE.split("/"));
+    const link = symlinkTarget(entry);
+    if (link !== null) return { ...ompPackageState(entry), spec: link, pinned: false, local: true, dir };
     const manifest = readAgentFile(join(dir, "package.json"));
     if (manifest.kind !== "file") continue;
     let spec: unknown;
@@ -755,22 +759,33 @@ export function ompExtension(e: AgentEnvironment): OmpExtension | null {
     const text = typeof spec === "string" ? spec.trim() : "";
     const pinned = /^v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(text);
     const local = ompSpecIsLocal(text);
-    const pkg = readAgentFile(join(dir, "node_modules", ...OMP_EXTENSION_PACKAGE.split("/"), "package.json"));
-    let version = "";
-    let current = false;
-    if (pkg.kind === "file") {
-      try {
-        const parsed = JSON.parse(pkg.text) as { version?: unknown; plannotator?: { features?: unknown } };
-        if (typeof parsed.version === "string") version = parsed.version;
-        const features = parsed.plannotator?.features;
-        current = version !== "" && Array.isArray(features) && features.includes(OMP_EXTENSION_FEATURE);
-      } catch {
-        version = "";
-      }
-    }
-    return { version, spec: text, pinned, local, current, dir };
+    return { ...ompPackageState(entry), spec: text, pinned, local, dir };
   }
   return null;
+}
+
+/** The target of a symlink or junction at `path`, null when `path` is not one. */
+function symlinkTarget(path: string): string | null {
+  try {
+    if (!lstatSync(path).isSymbolicLink()) return null;
+    return readlinkSync(path);
+  } catch {
+    return null;
+  }
+}
+
+/** The installed package's version ("" when unreadable) and whether its Inbox tool is on in OMP. */
+function ompPackageState(entry: string): { version: string; current: boolean } {
+  const pkg = readAgentFile(join(entry, "package.json"));
+  if (pkg.kind !== "file") return { version: "", current: false };
+  try {
+    const parsed = JSON.parse(pkg.text) as { version?: unknown; plannotator?: { features?: unknown } };
+    const version = typeof parsed.version === "string" ? parsed.version : "";
+    const features = parsed.plannotator?.features;
+    return { version, current: version !== "" && Array.isArray(features) && features.includes(OMP_EXTENSION_FEATURE) };
+  } catch {
+    return { version: "", current: false };
+  }
 }
 
 /**

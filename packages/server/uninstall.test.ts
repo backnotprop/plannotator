@@ -2066,6 +2066,18 @@ describe("host and platform integrations", () => {
       expect(kept.warnings).toContain(`Left as is: Oh My Pi extension @plannotator/pi-extension is a local build (${spec}). To remove it, run \`omp plugin uninstall @plannotator/pi-extension\`.`);
       expect(kept.errors.filter((line) => line.includes("Oh My Pi"))).toEqual([]);
     }
+    // So is one `omp plugin link` made: a symlink and a lock entry, nothing in the manifest (oh-my-pi plugins/manager.ts `link`).
+    const linked = createFixture();
+    const checkout = join(linked.homeDir, "work", "plannotator", "apps", "pi-extension");
+    writeJson(join(checkout, "package.json"), { name: "@plannotator/pi-extension", version: "0.29.1" });
+    writeJson(manifest(linked.homeDir), { name: "omp-plugins", private: true, dependencies: {} });
+    writeJson(join(linked.homeDir, ".omp", "plugins", "omp-plugins.lock.json"), { plugins: { "@plannotator/pi-extension": { version: "0.29.1", enabledFeatures: null, enabled: true } }, settings: {} });
+    mkdirSync(join(linked.homeDir, ".omp", "plugins", "node_modules", "@plannotator"), { recursive: true });
+    symlinkSync(checkout, join(linked.homeDir, ".omp", "plugins", "node_modules", "@plannotator", "pi-extension"), "dir");
+    const leftLinked = await runPlannotatorUninstall({ purge: false, dryRun: false }, { ...linked.environment, which: (command) => (command === "omp" ? "/fake/omp" : null) });
+    expect(linked.commandCalls.filter((call) => call.command === "/fake/omp")).toEqual([]);
+    expect(leftLinked.warnings).toContain(`Left as is: Oh My Pi extension @plannotator/pi-extension is a local build (${checkout}). To remove it, run \`omp plugin uninstall @plannotator/pi-extension\`.`);
+    expect(existsSync(join(checkout, "package.json"))).toBe(true);
   });
 
   test("allows Claude to remove its plugin data during purge", async () => {

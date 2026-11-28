@@ -230,7 +230,7 @@ Nothing to do. The Plannotator installer installs the Pi extension in Oh My Pi w
 
 Oh My Pi reads Pi's setting: `{ "inboxTool": { "pi": false } }` in `~/.plannotator/config.json`, or `PLANNOTATOR_INBOX_TOOL=0`, turns the tool off in both. In the Inbox's Settings, Oh My Pi and Pi share this switch.
 
-If Oh My Pi also has the Inbox's MCP server, its tool calls are signed as the Oh My Pi session that runs it, so a reply to them wakes that session too. While a subagent runs in the same Oh My Pi process, messages sent over MCP may be filed under the subagent, and a reply to them may not wake the main session.
+While a subagent runs in the same Oh My Pi process, messages sent over MCP may be filed under the subagent, and a reply to them may not wake the main session.
 
 ### OpenCode
 

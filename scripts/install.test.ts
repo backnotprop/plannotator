@@ -16,6 +16,7 @@ import {
   readFileSync,
   readdirSync,
   realpathSync,
+  renameSync,
   rmSync,
   symlinkSync,
   utimesSync,
@@ -5724,6 +5725,23 @@ function setupOmpSandbox(sc: OmpScenario) {
   return { sandbox, env, calls, cwds, version };
 }
 
+/**
+ * A local build as OMP records it: `omp plugin link <path>` (and `omp plugin install <path>`) writes a symlink (a
+ * junction on Windows) at <plugins>/node_modules/@plannotator/pi-extension and a lock entry, and nothing in the
+ * manifest (oh-my-pi plugins/manager.ts `link`, directory-link.ts). Returns the linked checkout.
+ */
+function ompLinkLocalBuild(s: ReturnType<typeof setupOmpSandbox>, version: string, manifest: boolean): string {
+  const dir = join(s.sandbox.home, ".omp", "plugins");
+  const checkout = join(s.sandbox.home, "work", "plannotator", "apps", "pi-extension");
+  mkdirSync(checkout, { recursive: true });
+  writeFileSync(join(checkout, "package.json"), JSON.stringify({ name: OMP_PKG, version }));
+  mkdirSync(join(dir, "node_modules", "@plannotator"), { recursive: true });
+  symlinkSync(checkout, join(dir, "node_modules", "@plannotator", "pi-extension"), "dir");
+  if (manifest) writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "omp-plugins", private: true, dependencies: {} }));
+  writeFileSync(join(dir, "omp-plugins.lock.json"), JSON.stringify({ plugins: { [OMP_PKG]: { version, enabledFeatures: null, enabled: true } }, settings: {} }));
+  return checkout;
+}
+
 type OmpRunner = "install.sh" | "install.ps1" | "install.cmd";
 
 /** install.ps1's OMP region: from $ompExtensionPackage through Update-OmpExtensionIfPresent. */
@@ -5843,21 +5861,32 @@ function ompStepTests(runner: OmpRunner) {
     expect(r.out).not.toContain("pinned to");
   }, timeout);
 
-  test(`${runner}: a local build in OMP (link:, file:, git) is left as is, never installed or upgraded over`, () => {
-    for (const spec of ["link:../plannotator/apps/pi-extension", "file:/work/plannotator/apps/pi-extension", "git+https://github.com/backnotprop/plannotator.git"]) {
-      const s = setupOmpSandbox({ installed: PI_OLDER, spec });
+  test(`${runner}: a local build in OMP (omp plugin link: a link and a lock entry, no manifest entry) is left as is, never installed or upgraded over`, () => {
+    for (const manifest of [true, false]) {
+      const s = setupOmpSandbox({ installed: null });
+      const checkout = ompLinkLocalBuild(s, PI_OLDER, manifest);
       const r = runOmpStep(runner, s);
       expect(r.code).toBe(0);
       expect(s.calls()).toEqual([]);
       expect(s.version()).toBe(PI_OLDER);
-      expect(r.out).toContain(`Oh My Pi: Plannotator extension is a local build in OMP (${spec}), left as is.\n`);
+      expect(r.out).toContain(`Oh My Pi: Plannotator extension is a local build in OMP (${checkout}), left as is.\n`);
     }
-    // Even when its package can't be read (a link to a folder that moved): not installed over.
-    const moved = setupOmpSandbox({ installed: PI_OLDER, spec: "link:../gone" });
-    rmSync(join(moved.sandbox.home, ".omp", "plugins", "node_modules"), { recursive: true, force: true });
+    // Even when its package can't be read (the checkout moved): not installed over.
+    const moved = setupOmpSandbox({ installed: null });
+    const gone = ompLinkLocalBuild(moved, PI_OLDER, true);
+    renameSync(gone, `${gone}-moved`);
     expect(runOmpStep(runner, moved).code).toBe(0);
     expect(moved.calls()).toEqual([]);
-  }, timeout * 2);
+  }, timeout * 3);
+
+  test(`${runner}: a git spec in OMP's manifest is a local build too: left as is`, () => {
+    const spec = "git+https://github.com/backnotprop/plannotator.git";
+    const s = setupOmpSandbox({ installed: PI_OLDER, spec });
+    const r = runOmpStep(runner, s);
+    expect(r.code).toBe(0);
+    expect(s.calls()).toEqual([]);
+    expect(r.out).toContain(`Oh My Pi: Plannotator extension is a local build in OMP (${spec}), left as is.\n`);
+  }, timeout);
 
   test(`${runner}: listed but its package can't be read: installed again`, () => {
     const s = setupOmpSandbox({ installed: PI_OLDER });

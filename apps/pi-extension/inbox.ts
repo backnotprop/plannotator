@@ -7,8 +7,7 @@
  * Found or not, decided once at extension load: only where the inbox tool
  * switch allows it for Pi (`PLANNOTATOR_INBOX_TOOL` / `inboxTool.pi`, off by
  * default on Pi, which sends every tool's full definition with each request;
- * on by default in Oh My Pi, which lists it as one `xd://` line:
- * `resolvePiInboxTool`) AND
+ * on by default in Oh My Pi: `resolvePiInboxTool`) AND
  * `inbox/inbox.json` exists (the person ran the Inbox once). Otherwise nothing
  * is registered, nothing polls, and nothing is said; only the session claim
  * (`claimPiSessions`) is kept wherever `inbox/inbox.json` exists.
