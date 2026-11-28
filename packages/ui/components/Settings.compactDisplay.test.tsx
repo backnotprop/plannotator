@@ -3,13 +3,6 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Settings } from './Settings';
 
-/**
- * The compact review shell renders a session-only unified diff, so the
- * Display tab's Split/Unified control had no effect there while still writing
- * the persisted DESKTOP preference. Hide it on compact and say what the phone
- * is doing; leave the desktop control exactly as it was.
- */
-
 const hasDom = typeof document !== 'undefined';
 let host: HTMLDivElement | null = null;
 let root: Root | null = null;
@@ -31,7 +24,7 @@ async function openDisplayTab(isCompactTouchLayout: boolean): Promise<void> {
   });
 
   const displayTab = Array.from(document.querySelectorAll<HTMLButtonElement>('button'))
-    .find((button) => button.textContent?.trim() === 'Editor');
+    .find((button) => button.textContent?.trim() === 'Reviews');
   if (!displayTab) throw new Error('review display tab did not render');
   await act(async () => displayTab.click());
 }
@@ -49,21 +42,27 @@ afterEach(async () => {
   if (hasDom) document.body.replaceChildren();
 });
 
-describe.if(hasDom)('review Display tab diff style', () => {
-  test('desktop keeps the Split/Unified control', async () => {
+const displaySection = () => document.querySelector('[data-review-settings-section="display"]');
+
+// Settings → Reviews holds everything about reading a review (owner, 2026-11-25),
+// so desktop offers Split or Unified and the gear's rows too.
+describe.if(hasDom)('review Reviews tab diff display', () => {
+  test('desktop offers Split or Unified and the gear rows, with no session note', async () => {
     await openDisplayTab(false);
 
-    const options = styleControlButtons();
-    expect(options.map((button) => button.textContent?.trim()).sort()).toEqual(['Split', 'Unified']);
+    expect(styleControlButtons()).toHaveLength(2);
+    expect(displaySection()?.textContent).toContain('the gear above the diff');
+    const wrap = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="switch"]')).find((b) => b.textContent?.includes('Wrap long lines'));
+    expect(wrap).toBeDefined();
     expect(document.body.textContent).not.toContain('unified diffs for the session');
   });
 
-  test('compact hides the control and explains the session behavior', async () => {
+  test('a phone has no gear, so the same options sit in Settings, with the session note and no Split/Unified', async () => {
     await openDisplayTab(true);
 
     expect(styleControlButtons()).toHaveLength(0);
     expect(document.body.textContent).toContain('unified diffs for the session');
-    // The rest of the tab is unaffected.
-    expect(document.body.textContent).toContain('Diff Style');
+    const wrap = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="switch"]')).find((b) => b.textContent?.includes('Wrap long lines'));
+    expect(wrap).toBeDefined();
   });
 });

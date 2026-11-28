@@ -190,6 +190,31 @@ for (const serverCase of serverCases) {
       }
     });
 
+    test("renames a saved guide, title and guide alike, and refuses an empty title", async () => {
+      useTempDataDir();
+      saveGuide(repoKey, "1000-persisted-guide", envelope());
+      const server = await serverCase.start();
+      try {
+        const rename = (title: unknown, id = "1000-persisted-guide") =>
+          fetch(`${server.url}/api/guides/${id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ title }),
+          });
+        expect((await rename("  Auth rewrite,\n\tread first ")).status).toBe(200);
+        const saved = loadGuide(repoKey, "1000-persisted-guide")!;
+        expect(saved.title).toBe("Auth rewrite, read first");
+        expect(saved.guide.title).toBe("Auth rewrite, read first");
+        expect((await rename("   ")).status).toBe(400);
+        expect((await rename("x".repeat(201))).status).toBe(400);
+        expect((await rename("Fine", "2000-missing")).status).toBe(404);
+        const list = (await (await fetch(`${server.url}/api/guides`)).json()) as Array<Record<string, unknown>>;
+        expect(list[0].title).toBe("Auth rewrite, read first");
+      } finally {
+        server.stop();
+      }
+    });
+
     test("exports a saved guide as portable HTML pinned to the viewer, and refuses one whose diff was not retained", async () => {
       useTempDataDir();
       const patch = "diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-old\n+new\n";

@@ -28,8 +28,8 @@ name: Inbox window e2e
 #  - On a PR, only with the `ci:e2e` label (or `ci:e2e-all`), for a risky PR,
 #    and then only when the Inbox, the ui and the guide viewer it composes, the
 #    plan editor, the plan and annotate servers, the binary entry or the build
-#    could have changed. Every PR runs the smoke slice instead
-#    (browser-smoke.yml). `ci:full` does not start this workflow.
+#    could have changed. A PR that touches these paths runs the smoke slice
+#    instead (browser-smoke.yml, which reads this path list).
 # The Pi servers are not listed: these specs drive only the compiled Bun
 # binary, and test.yml runs the Pi mirrors of the same scenarios.
 #
@@ -431,6 +431,20 @@ jobs:
           name: inbox-window-proof-${{ matrix.shard }}
           path: .local/proof/
           if-no-files-found: ignore
+
+      # A failed test's page as Playwright left it: error-context.md (the page's
+      # accessibility snapshot) and its screenshot, nothing a passing test wrote.
+      # The pages are the specs' sandboxed Inboxes; the test step has no token.
+      - name: Keep the failed tests' snapshots
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-failed-tests-${{ matrix.shard }}-${{ github.run_attempt }}
+          path: |
+            .local/test-results/**/error-context.md
+            .local/test-results/**/test-failed-*.png
+          if-no-files-found: ignore
+          retention-days: 7
 
       # Off a PR: the spec files this shard failed, for the blame job.
       - name: Record the specs this shard failed

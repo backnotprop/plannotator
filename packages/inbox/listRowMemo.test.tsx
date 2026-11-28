@@ -18,6 +18,7 @@ import * as format from './format';
 const hasDom = typeof document !== 'undefined';
 const { InboxList } = (hasDom ? await import('./components/InboxList') : {}) as typeof import('./components/InboxList');
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
+const { ThreadTagsContext } = await import('./threadTags');
 
 function row(n: number): InboxListRow {
   return {
@@ -153,6 +154,51 @@ test.skipIf(!hasDom)("opening a row's right-click menu renders only that row aga
     });
     expect(document.querySelector('[data-row-menu]')).toBeNull();
     expect(host.querySelector('[data-row="msg_5"]')!.hasAttribute('data-menu')).toBe(false);
+    expect(shortTime.mock.calls.length).toBe(1);
+  } finally {
+    shortTime.mockRestore();
+  }
+});
+
+test.skipIf(!hasDom)("a list read with tags (a new tags host each read, the filter's Tag group reading it) renders only the rows that changed", () => {
+  host = document.createElement('div');
+  document.body.append(host);
+  root = createRoot(host);
+  const RELEASE = { id: 'ini_release', name: 'Release', created_at: '', created_by: { kind: 'person' as const }, updated_at: '', deleted_at: null };
+  const drawTagged = (sections: InboxListSection[]) =>
+    act(() => {
+      const rows = sections.flatMap((s) => s.threads);
+      root!.render(
+        // App's host is a new object on every list read (its rows, counts and patches).
+        <ThreadTagsContext.Provider value={{ tags: [RELEASE], tagsOf: () => [], counts: new Map(), can: () => true, set: () => {}, createAndSet: () => {}, listed: null, rows, rowTags: (r) => r.tags ?? [] }}>
+          <SidebarProvider>
+            <div className="pn-inbox">
+              <InboxList
+                title="Inbox"
+                path={null}
+                sections={sections}
+                filtered={false}
+                narrow={false}
+                selectedThreadId={null}
+                notice={null}
+                onShowNew={() => {}}
+                onOpen={() => {}}
+                listFilter={{ rows, scoped: false, names: new Map(), filter: { projects: [], updated: null, agents: [], pulls: [], notSeen: false, tags: [], routines: [] }, onChange: () => {} }}
+              />
+            </div>
+          </SidebarProvider>
+        </ThreadTagsContext.Provider>,
+      );
+    });
+  const tagged = (rows: InboxListRow[]) => {
+    for (const r of rows.slice(0, 5)) r.tags = ['ini_release'];
+  };
+  drawTagged(read(tagged));
+  const shortTime = spyOn(format, 'shortTime');
+  try {
+    drawTagged(read(tagged));
+    expect(shortTime.mock.calls.length).toBe(0);
+    drawTagged(read((rows) => { tagged(rows); rows[2]!.subject = 'Thread 2, revised'; }));
     expect(shortTime.mock.calls.length).toBe(1);
   } finally {
     shortTime.mockRestore();

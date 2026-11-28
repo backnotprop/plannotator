@@ -1,0 +1,20 @@
+/* A touch tablet's bar under the open file (touchStepBar.ts, approval "inbox-touch-file-stepping"): the stepper's
+   ‹ › are 56 × 44 at the bar's two ends and its label, 44 tall, sits between them. Keyed on the attribute the pane
+   sets only on a touch tablet, so a mouse and a phone draw what they always did. */
+.pn-inbox .ib-vfoot[data-touch-bar] { box-sizing: border-box; flex-wrap: nowrap; min-height: 60px; padding: 8px; }
+.ib-vfoot[data-touch-bar] .ib-stepper { flex: 1; min-width: 0; }
+.ib-vfoot[data-touch-bar] .ib-stepbox { flex: 1; justify-content: space-between; gap: 8px; padding: 0; border: 0; border-radius: 0; background: none; }
+.pn-inbox .ib-vfoot[data-touch-bar] .ib-stepbtn { width: 56px; height: 44px; border-radius: 10px; background: var(--muted); color: var(--foreground); -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+.pn-inbox .ib-vfoot[data-touch-bar] .ib-stepbtn[aria-disabled="true"] { background: var(--muted); color: var(--muted-foreground); }
+.ib-vfoot[data-touch-bar] .ib-stepbtn svg { width: 20px; height: 20px; }
+.pn-inbox .ib-vfoot[data-touch-bar] .ib-steppos { height: 44px; padding: 0 14px; border-radius: 10px; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+/* "Last file in this thread": over the bar's middle for a moment, where the label is. */
+.ib-vfoot[data-touch-bar] .ib-endnote { position: absolute; left: 50%; bottom: calc(100% + 8px); transform: translateX(-50%); }
+.ib-vfoot[data-touch-bar] .ib-filepeek { left: 50%; transform: translateX(-50%); }
+/* The on-screen keyboard is up: the bar would sit under it, so it hides until the keyboard goes down. */
+.ib-vfoot[data-touch-bar="typing"] { display: none; }
+
+/* Full screen: the window's file ends at the bar's top, so what floats at the file's foot (the comment box, the
+   corner control, the notes) stays above the bar, which hangs below it. */
+.ib-view.ib-full:has(> .ib-vfoot[data-touch-bar="shown"]) { bottom: calc(60px + env(safe-area-inset-bottom)); }
+.pn-inbox .ib-view.ib-full > .ib-vfoot[data-touch-bar] { position: absolute; left: 0; right: 0; top: 100%; height: calc(60px + env(safe-area-inset-bottom)); padding: 8px calc(8px + env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) calc(8px + env(safe-area-inset-left)); }

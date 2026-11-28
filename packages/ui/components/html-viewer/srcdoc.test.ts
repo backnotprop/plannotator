@@ -20,10 +20,16 @@ import {
   DIFF_HIGHLIGHT_CSS,
   buildSrcdocInjection,
   buildThemeTokenPayload,
+  NO_NETWORK_CSP_META,
   hasHostThemeOptIn,
+  hasNoNetworkMarker,
   injectIntoHead,
+  injectLinkGuard,
+  injectNoNetworkCsp,
   injectPrintDefaults,
+  injectSandboxShim,
 } from "./srcdoc";
+import { linkGuardScriptTag } from "./linkGuard";
 
 const HOST_TOKENS = {
   "--background": "oklch(0.15 0.02 260)",
@@ -127,6 +133,90 @@ describe("hasHostThemeOptIn", () => {
   });
 });
 
+// The link guard (linkGuard.ts) must run before every script in the document,
+// a page's own head script included: it owns the only port the host takes
+// links on, and a script before it could take that port.
+describe("link guard placement", () => {
+  const KEY = "0123456789abcdef0123456789abcdef";
+  const GUARD = linkGuardScriptTag(KEY);
+  const INJECTION = "<style></style><script>bridge()</script>";
+
+  // Placement read by a spec parser, page tricks included: packages/shared/link-guard-placement.test.ts.
+  test("right after the doctype: before the sandbox shim, the page's head script and the bridge", () => {
+    const page = `<!DOCTYPE html><html><head><script>window.headScript = 1</script></head><body></body></html>`;
+    const out = injectLinkGuard(injectSandboxShim(injectIntoHead(page, INJECTION)), KEY);
+    const at = out.indexOf(GUARD);
+    expect(out.startsWith(`<!DOCTYPE html>${GUARD}<html><head>`)).toBe(true);
+    expect(at).toBeLessThan(out.indexOf("plannotatorSandboxShim"));
+    expect(at).toBeLessThan(out.indexOf("window.headScript"));
+    expect(at).toBeLessThan(out.indexOf("bridge()"));
+  });
+
+  test("a script ahead of <head>, or no <head> at all: still first", () => {
+    const early = injectLinkGuard(`<!doctype html><script>window.early = 1</script><html><head></head></html>`, KEY);
+    expect(early.indexOf(GUARD)).toBe("<!doctype html>".length);
+    const bare = injectLinkGuard(`<p>hi</p><script>window.late = 1</script>`, KEY);
+    expect(bare.startsWith(GUARD)).toBe(true);
+  });
+
+  test("a marked page keeps its policy first, then the guard", () => {
+    const out = injectNoNetworkCsp(injectLinkGuard(`<!DOCTYPE html><html><head><script>fetch("/x")</script></head></html>`, KEY));
+    expect(out.indexOf(NO_NETWORK_CSP_META)).toBe("<!DOCTYPE html>".length);
+    expect(out.indexOf(NO_NETWORK_CSP_META)).toBeLessThan(out.indexOf(GUARD));
+    expect(out.indexOf(GUARD)).toBeLessThan(out.indexOf('fetch("/x")'));
+  });
+});
+
+// A document its server opened outside the session's roots carries the
+// no-network marker (packages/shared HTML_NO_NETWORK_MARKER); the srcdoc then
+// starts with `connect-src 'none'`, ahead of every page script.
+describe("no-network documents", () => {
+  const MARKER = '<meta name="plannotator-network" content="none">';
+  const INJECTION = "<style></style><script>bridge()</script>";
+
+  test("the marker is read across attribute order and quoting, wherever the page put text around it", () => {
+    expect(hasNoNetworkMarker(`<!DOCTYPE html><html><head>${MARKER}</head></html>`)).toBe(true);
+    expect(hasNoNetworkMarker("<meta content='none' name='plannotator-network'/>")).toBe(true);
+    expect(hasNoNetworkMarker("<meta name=plannotator-network content=none>")).toBe(true);
+    // Inside a comment or a script string the page opened before it: still read.
+    expect(hasNoNetworkMarker(`<!-- ${MARKER} -->`)).toBe(true);
+    expect(hasNoNetworkMarker(`<script>var s = "${MARKER.replace(/"/g, "'")}";</script>`)).toBe(true);
+  });
+
+  test("no marker, another name or another value: no policy", () => {
+    expect(hasNoNetworkMarker("<!DOCTYPE html><html><body><p>hi</p></body></html>")).toBe(false);
+    expect(hasNoNetworkMarker('<meta name="plannotator-theme" content="none">')).toBe(false);
+    expect(hasNoNetworkMarker('<meta name="plannotator-network" content="all">')).toBe(false);
+  });
+
+  test("the policy goes right after the doctype, before any page script", () => {
+    const page = `<!DOCTYPE html><html lang="en"><head><script>fetch("/x")</script></head><body></body></html>`;
+    const out = injectNoNetworkCsp(page);
+    expect(out.startsWith(`<!DOCTYPE html>${NO_NETWORK_CSP_META}<html lang="en">`)).toBe(true);
+    expect(out.indexOf(NO_NETWORK_CSP_META)).toBeLessThan(out.indexOf("<script>"));
+    expect(NO_NETWORK_CSP_META).toContain(`content="connect-src 'none'"`);
+  });
+
+  test("comments and a BOM before the doctype stay before it; no doctype puts the policy first", () => {
+    expect(injectNoNetworkCsp("\uFEFF <!-- built --> <!doctype html><p>x</p>"))
+      .toBe(`\uFEFF <!-- built --> <!doctype html>${NO_NETWORK_CSP_META}<p>x</p>`);
+    expect(injectNoNetworkCsp("<script>fetch('/x')</script><p>x</p>"))
+      .toBe(`${NO_NETWORK_CSP_META}<script>fetch('/x')</script><p>x</p>`);
+    // A "</head>" in an early script string does not move it.
+    const tricky = `<!DOCTYPE html><html><head><script>var s = "</head>"; fetch("/x")</script></head></html>`;
+    expect(injectNoNetworkCsp(tricky).indexOf(NO_NETWORK_CSP_META)).toBe("<!DOCTYPE html>".length);
+  });
+
+  test("the page's own CSP is still removed, and the viewer's survives the head injection", () => {
+    const page = `<!DOCTYPE html><html><head>${MARKER}<meta http-equiv="Content-Security-Policy" content="default-src 'none'"></head><body></body></html>`;
+    const out = injectNoNetworkCsp(injectIntoHead(page, INJECTION));
+    expect(out).not.toContain("default-src 'none'");
+    expect(out.split("Content-Security-Policy").length - 1).toBe(1);
+    expect(out).toContain(NO_NETWORK_CSP_META);
+    expect(out).toContain(INJECTION);
+  });
+});
+
 // Exercises the real bridge theme handler (the inline-setProperty site): on a
 // host theme flip, nothing may land on the author's documentElement except
 // --pn-* properties — no bare tokens, no `light` class — unless the document
@@ -145,6 +235,13 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
    * the overlay host holds an SVG marker button (environment bug — see
    * bumpDomGeneration), so observer-scope tests assert the observed target
    * and drive the captured callback with synthetic records directly. */
+  /**
+   * The link guard the bridge hands a followed click to (linkGuard.ts; tested
+   * in linkGuard.test.ts). Here a recorder stands in for it, installed before
+   * the bridge runs as the inline guard is: what the bridge decides to follow.
+   */
+  const guardFollows: Array<Record<string, unknown>> = [];
+  const guardKinds: string[] = [];
   const capturedObservers: Array<{
     callback: (mutations: MutationRecord[], observer: MutationObserver) => void;
     targets: Node[];
@@ -165,6 +262,16 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
           super.observe(target, options);
         }
       };
+    Object.defineProperty(window, "__plannotatorLinkGuard", {
+      configurable: true,
+      value: {
+        follow: (kind: string, msg: Record<string, unknown>) => {
+          guardKinds.push(kind);
+          guardFollows.push({ ...msg });
+          return true;
+        },
+      },
+    });
     try {
       new Function(BRIDGE_SCRIPT)();
     } finally {
@@ -947,6 +1054,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
       type: "plannotator-bridge-set-input-method",
       method: "pinpoint",
     });
+    postBridge({ type: "plannotator-bridge-set-annotate-mode", active: true });
     // Mode affordance: crosshair cursor attribute while pinpoint is active.
     expect(document.body.hasAttribute("data-plannotator-pinpoint-cursor")).toBe(true);
 
@@ -4566,14 +4674,20 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
   // app itself: the whole editor rendered inside the annotated document.
   // The bridge must therefore never let this frame navigate.
   describe("link navigation", () => {
-    let capturedLinkPosts: Array<Record<string, unknown>> = [];
+    /** Link-clicks the bridge handed to the link guard. */
+    let capturedLinkPosts: Array<Record<string, unknown>> = guardFollows;
+    /** Link-clicks posted on the window, where the host never takes them. */
+    let windowLinkPosts: Array<Record<string, unknown>> = [];
     let stopCapture: (() => void) | null = null;
 
     function startCapture() {
-      capturedLinkPosts = [];
+      guardFollows.length = 0;
+      guardKinds.length = 0;
+      capturedLinkPosts = guardFollows;
+      windowLinkPosts = [];
       const capture = (event: MessageEvent) => {
         const data = bridgeMessageData(event);
-        if (data && data.type === "plannotator-bridge-link-click") capturedLinkPosts.push(data);
+        if (data && data.type === "plannotator-bridge-link-click") windowLinkPosts.push(data);
       };
       window.addEventListener("message", capture);
       stopCapture = () => window.removeEventListener("message", capture);
@@ -4618,6 +4732,15 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
       // The default action is what would load the app into this frame.
       expect(event.defaultPrevented).toBe(true);
       expect(capturedLinkPosts.map((p) => p.href)).toEqual(["01-entry-point.html"]);
+    });
+
+    test("a person's click goes to the link guard as a link, never on the window a page script shares", async () => {
+      setUp('<a id="rel" href="next.html">Next</a>', false);
+      clickLink("#rel");
+      await flushPosts();
+      expect(capturedLinkPosts.map((p) => p.href)).toEqual(["next.html"]);
+      expect(guardKinds).toEqual(["link"]);
+      expect(windowLinkPosts).toEqual([]);
     });
 
     test("Interact: the RAW href travels — resolution belongs to the parent", async () => {
@@ -5110,5 +5233,72 @@ describe("injectPrintDefaults", () => {
     expect(css).not.toContain("break-inside");
     expect(css).not.toContain("break-after");
     expect(css).not.toContain("min-height");
+  });
+});
+
+describe.if(hasDom)("bridge start mode (the srcdoc tag)", () => {
+  /** Run the bridge the way a framed srcdoc page does: the script element
+   * buildSrcdocInjection wrote is the document's currentScript while it runs.
+   * Its own frame, so it never meets the shared bridge above. */
+  function startBridge(startInteract: boolean | undefined) {
+    const posts: Array<Record<string, unknown>> = [];
+    const fakeParent = {
+      postMessage(data: unknown) {
+        if (data && typeof data === "object") posts.push(data as Record<string, unknown>);
+      },
+    };
+    const frame = document.createElement("iframe");
+    document.documentElement.appendChild(frame);
+    const win = frame.contentWindow!;
+    const doc = frame.contentDocument!;
+    const holder = doc.createElement("template");
+    holder.innerHTML = buildSrcdocInjection({ tokens: {}, isLight: true, hostTheme: false, diffActive: false, startInteract });
+    const script = holder.content.querySelector("script")!;
+    Object.defineProperty(doc, "currentScript", { configurable: true, get: () => script });
+    new Function("window", "document", "location", "history", "parent", "top", script.textContent!)(
+      win, doc, win.location, win.history, fakeParent, fakeParent,
+    );
+    Object.defineProperty(doc, "currentScript", { configurable: true, get: () => null });
+    if (!posts.some((p) => p.type === "plannotator-bridge-ready")) doc.dispatchEvent(new Event("DOMContentLoaded"));
+    const post = (data: Record<string, unknown>) => win.dispatchEvent(new MessageEvent("message", {
+      data, source: fakeParent as unknown as Window,
+    }));
+    const target = doc.createElement("p");
+    target.textContent = "A paragraph on the page";
+    doc.body.appendChild(target);
+    const click = () => {
+      const before = posts.filter((p) => p.type === "plannotator-bridge-selection").length;
+      const event = new MouseEvent("click", { bubbles: true, cancelable: true });
+      target.dispatchEvent(event);
+      return { prevented: event.defaultPrevented, selections: posts.filter((p) => p.type === "plannotator-bridge-selection").length - before };
+    };
+    const cursor = () => doc.body.hasAttribute("data-plannotator-pinpoint-cursor");
+    return { frame, post, click, cursor };
+  }
+
+  test("by default the page is armed from the first message: no Interact gap before set-annotate-mode", () => {
+    const bridge = startBridge(undefined);
+    try {
+      // The parent's first message is the input method; set-annotate-mode comes after it.
+      bridge.post({ type: "plannotator-bridge-set-input-method", method: "pinpoint" });
+      expect(bridge.cursor()).toBe(true);
+      expect(bridge.click()).toEqual({ prevented: true, selections: 1 });
+    } finally {
+      bridge.frame.remove();
+    }
+  });
+
+  test("with startInteract the page starts in Interact until the parent arms it", () => {
+    const bridge = startBridge(true);
+    try {
+      bridge.post({ type: "plannotator-bridge-set-input-method", method: "pinpoint" });
+      expect(bridge.cursor()).toBe(false);
+      expect(bridge.click()).toEqual({ prevented: false, selections: 0 });
+      bridge.post({ type: "plannotator-bridge-set-annotate-mode", active: true });
+      expect(bridge.cursor()).toBe(true);
+      expect(bridge.click()).toEqual({ prevented: true, selections: 1 });
+    } finally {
+      bridge.frame.remove();
+    }
   });
 });

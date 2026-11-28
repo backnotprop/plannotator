@@ -44,6 +44,8 @@ let frames: Map<string, (event: MessageEvent<string>) => void>;
 let seq = 1_000_000;
 let saves = 0;
 let reads: string[] = [];
+/** Every request answered, `METHOD /path` in the order the answers came: what the open waits on. */
+let answered: string[] = [];
 /** The agents reads since the window opened, never cleared by a test: the load reads them twice (App.tsx `refreshAgents`). */
 let agentsReads = 0;
 let slow = false;
@@ -119,6 +121,7 @@ beforeEach(() => {
   world = worlds.shift()!;
   saves = 0;
   reads = [];
+  answered = [];
   agentsReads = 0;
   slow = false;
   hang = false;
@@ -132,6 +135,7 @@ beforeEach(() => {
     const path = String(input);
     const method = init?.method ?? 'GET';
     const answer = await loopback(path, method, init?.body ? String(init.body) : undefined);
+    answered.push(`${method} ${path.split('?')[0]}`);
     if (method === 'POST' && path.endsWith('/picks') && answer.status === 200) {
       saves += 1;
       lastPicked = (JSON.parse(answer.text) as { questions: object[] }).questions[0] ?? null;
@@ -199,6 +203,10 @@ async function open() {
   const field = () => host!.querySelector<HTMLTextAreaElement>('textarea[aria-label^="Other answer"]');
   await until(() => field() !== null, 'the question card');
   await until(() => frames.has('record'), 'the stream');
+  // The thread opening records the look and then reads the list (App.tsx `usePaneOpening`). That read belongs to the
+  // load, but on a slow runner it lands after the card shows and was counted as the saves' (2 for 1): wait for it.
+  const seen = `POST ${threadRoute()}/seen`;
+  await until(() => answered.includes(seen) && answered.slice(answered.lastIndexOf(seen) + 1).includes('GET /api/inbox/threads'), "the look's list read");
   await wait(200);
   reads = [];
   return field()!;
@@ -292,13 +300,22 @@ test.skipIf(!hasDom)("a save's record that comes after its answer reads nothing 
 
 test.skipIf(!hasDom)('a record that is not a question line is read at once, whatever is saving', async () => {
   const field = await open();
+  // The thread's own message as the Inbox sends it, for a later message of the same agent.
+  const { thread } = JSON.parse((await loopback(threadRoute())).text) as { thread: { messages: Record<string, unknown>[] } };
+  const { questions: _q, actions: _a, subject: _s, subject_question: _sq, seq: _seq, ...root } = thread.messages[0]!;
+  const words = 'Meanwhile the refund worker passed on staging.';
   hang = true;
   type(field, 'a');
   await until(() => saves === 1, 'the save');
-  // An agent wrote meanwhile: the thread is read now, with the save still out.
+  reads = [];
+  // An agent wrote meanwhile: its message shows in the open thread and the list is read now, with the save still out.
+  // The window takes the message into the thread it holds (data/apply/stream.ts), so the thread itself is read again
+  // only when that cannot show everything (openThreadReads.ts): a read of it is not what proves the record was heard.
   seq += 1;
-  frame('record', { seq, kind: 'message', first: false, message: { id: 'msg_x', thread_id: world.waiting, author: { kind: 'agent' }, body: '' } });
-  await until(() => count(threadRoute()) === 1, 'the read of that record');
+  frame('record', { seq, kind: 'message', first: false, message: { ...root, id: 'msg_01MEANWHILE000000000000000', body: words } });
+  await until(() => (host!.textContent ?? '').includes(words), 'the message in the open thread');
+  await until(() => count('/api/inbox/threads') === 1, 'the list read for that record');
+  expect(saves).toBe(1);
 });
 
 const ownQuestion = async () => {

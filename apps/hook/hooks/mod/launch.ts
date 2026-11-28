@@ -12,6 +12,7 @@
  *   stdout/stderr  the CLI's own output (startup errors land in stderr)
  *   pid          the CLI's pid, for the liveness check
  *   exit         the CLI's exit code, written after it exits
+ *   scope-started  Linux: the CLI's own systemd scope began (a failing systemd-run must not launch it twice)
  *   revision.json / revision.json.ack   plan revisions pushed into an open review
  *   messages.json  PLANNOTATOR_HOST_MESSAGES_FILE: `last`'s recent assistant messages, for the picker
  *   watcher.json   which Claude Code process watches this launch (`{ owner, at, touchedAt }`, a heartbeat)
@@ -27,17 +28,75 @@ import { splitShellWords } from './shell-words'
 import { PLAN_APPROVALS_DIR } from './plan'
 import { looksLikeFilePath, plannotatorBundleSubject, plannotatorTargetSubject, type PlannotatorTarget } from './tool'
 
-/** The wrapper. `$1` is the launch directory; the CLI argv follows. */
-export const LAUNCH_SCRIPT = [
-  'dir=$1; shift',
-  '(',
-  "  trap '' HUP",
+const LAUNCH_WORKER = [
   '  nohup "$@" < "$dir/stdin" > "$dir/stdout" 2> "$dir/stderr" &',
   '  child=$!',
   '  echo "$child" > "$dir/pid"',
   '  wait "$child"',
   '  code=$?',
   '  echo "$code" > "$dir/exit.tmp" && mv "$dir/exit.tmp" "$dir/exit"',
+]
+
+// The scoped shell must keep the waiter with the CLI, so the exit file survives too.
+// systemd-run (254 and later) expands `$NAME`, `${NAME}` and `$$` in the command
+// it runs, so the launch directory and the CLI argv never go on its command
+// line: they travel in PLANNOTATOR_SCOPE_ARG_<n> (environment is passed through
+// unexpanded) and are put back, byte for byte, as "$@" here. This text sits in
+// single quotes in LAUNCH_SCRIPT and systemd-run reads it as a word, so it must
+// never contain a single quote, `${` or `$$` (launch.test.ts checks).
+export const SCOPED_WORKER = [
+  'n=$PLANNOTATOR_SCOPE_ARGC; i=0',
+  'set --',
+  'while [ "$i" -lt "$n" ]; do',
+  '  eval "set -- \\"\\$@\\" \\"\\$PLANNOTATOR_SCOPE_ARG_$i\\""',
+  '  unset "PLANNOTATOR_SCOPE_ARG_$i"',
+  '  i=$((i + 1))',
+  'done',
+  'unset PLANNOTATOR_SCOPE_ARGC',
+  'dir=$1; shift',
+  ': > "$dir/scope-started" || exit 1',
+  ...LAUNCH_WORKER,
+].join('\n')
+
+/**
+ * The wrapper. `$1` is the launch directory; the CLI argv follows.
+ *
+ * On Linux, when the wrapper runs in some unit other than a login session
+ * (T3 Code's per-thread scope, a user service, a desktop app's scope), a
+ * manager may stop that unit and kill everything in it, so the CLI starts in a
+ * scope of its own through `systemd-run`, falling back to the plain launch when
+ * that fails. In a login session (`session-*.scope`: SSH, a console, screen or
+ * tmux started there) or when /proc/self/cgroup cannot be read, it takes the
+ * plain launch exactly as before: a server there survives logout, which a
+ * scope in the user manager would not without lingering.
+ * PLANNOTATOR_MOD_CGROUP_FILE stands in for /proc/self/cgroup in tests.
+ */
+export const LAUNCH_SCRIPT = [
+  'dir=$1; shift',
+  '(',
+  "  trap '' HUP",
+  '  scoped=',
+  '  if [ "$(uname -s 2>/dev/null)" = Linux ] && command -v systemd-run >/dev/null 2>&1; then',
+  '    cg=${PLANNOTATOR_MOD_CGROUP_FILE:-/proc/self/cgroup}',
+  '    if [ -r "$cg" ]; then',
+  '      while IFS= read -r line; do',
+  '        case $line in',
+  '          0::*|*:name=systemd:*) case ${line##*/} in session-*.scope) scoped=; break ;; *) scoped=1 ;; esac ;;',
+  '        esac',
+  '      done < "$cg"',
+  '    fi',
+  '  fi',
+  '  if [ -n "$scoped" ]; then',
+  '    rm -f "$dir/scope-started"',
+  '    (',
+  '      n=0',
+  '      for a in "$dir" "$@"; do export "PLANNOTATOR_SCOPE_ARG_$n=$a"; n=$((n + 1)); done',
+  '      export PLANNOTATOR_SCOPE_ARGC=$n',
+  `      exec systemd-run --user --scope --quiet --collect -- /bin/sh -c '${SCOPED_WORKER}' plannotator-scope`,
+  '    ) && exit 0',
+  '    { [ -e "$dir/scope-started" ] || [ ! -e "$dir/stdin" ]; } && exit 0',
+  '  fi',
+  ...LAUNCH_WORKER,
   ') < /dev/null > /dev/null 2>&1 &',
 ].join('\n')
 
@@ -254,7 +313,7 @@ export function cleanupArgv(dir: string): string[] {
       'exit 0',
     ].join('\n'),
     'plannotator-cleanup',
-    [dir, ...names, 'revision.json.ack', 'exit.tmp'],
+    [dir, ...names, 'revision.json.ack', 'exit.tmp', 'scope-started'],
   )
 }
 
@@ -408,6 +467,16 @@ export const DEBUG_APPEND_SCRIPT = [
 
 export function debugAppendArgv(path: string): string[] {
   return shellArgv('debug-append', DEBUG_APPEND_SCRIPT, 'plannotator-debug', [path])
+}
+
+/**
+ * Prints the pid of the process that started the script: the Claude Code
+ * process running the mod. The review CLI reads it from the launch's lease
+ * (`watcher.json`) to tell a quit session from a live one whose timer stalled.
+ * Git Bash prints nothing: MSYS numbers processes its own way.
+ */
+export function hostPidArgv(): string[] {
+  return shellArgv('host-pid', 'printf \'%s\\n\' "$PPID"', 'plannotator-host-pid', [])
 }
 
 /** Liveness probe through the shell's own `kill` (no /bin/kill on every system). */
@@ -588,7 +657,7 @@ export function cliArgvFor(kind: Exclude<SessionKind, 'plan'>, args: string | re
     case 'last':
       // `last` takes no words but `--tailscale` (the tool's `tailscale`, or a
       // person who typed it after /plannotator-last).
-      return ['plannotator', 'annotate-last', '--stdin', ...(words.includes('--tailscale') ? ['--tailscale'] : [])]
+      return ['plannotator', 'annotate-last', '--stdin', ...(words.includes('--tailscale') ? ['--tailscale'] : words.includes('--cloudflare-access') ? ['--cloudflare-access'] : [])]
   }
 }
 

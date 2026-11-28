@@ -1982,7 +1982,7 @@ describe("annotate server: durable submit records (#678)", () => {
 
       // Draft is gone AFTER the record exists.
       const draft = await fetch(`${server.url}/api/draft`);
-      expect(draft.status).toBe(404);
+      expect(draft.status).toBe(204);
     } finally {
       server.stop();
       rmSync(dir, { recursive: true, force: true });
@@ -2057,7 +2057,7 @@ describe("annotate server: durable submit records (#678)", () => {
       expect(existsSync(join(getPlannotatorDataDir(), "history", project))).toBe(false);
       // Legacy behavior preserved: the draft is still deleted on submit.
       const draft = await fetch(`${server.url}/api/draft`);
-      expect(draft.status).toBe(404);
+      expect(draft.status).toBe(204);
     } finally {
       server.stop();
       rmSync(dir, { recursive: true, force: true });
@@ -2133,7 +2133,7 @@ describe("annotate server: durable submit records (#678)", () => {
       expect(await response.json()).toEqual({ ok: true });
       // Legacy behavior: draft deleted, no record (nothing persistable).
       const draft = await fetch(`${server.url}/api/draft`);
-      expect(draft.status).toBe(404);
+      expect(draft.status).toBe(204);
       expect(existsSync(submissionsDir(project, docPath))).toBe(false);
     } finally {
       server.stop();
@@ -2361,7 +2361,7 @@ describe("annotate server: live app mode (annotate-app)", () => {
 
     async function loadDraft(server: { url: string }): Promise<{ feedback?: string } | null> {
       const res = await fetch(`${server.url}/api/draft`);
-      if (res.status === 404) return null;
+      if (res.status === 204) return null;
       expect(res.status).toBe(200);
       return (await res.json()) as { feedback?: string };
     }

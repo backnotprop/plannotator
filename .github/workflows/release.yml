@@ -4,10 +4,26 @@ on:
   push:
     tags:
       - 'v*'
+  # On a PR the dry run (test, build, binaries, smokes, packages, release
+  # security; nothing publishes) runs when the release tooling or packaging can
+  # have changed. Every other PR skips the workflow; the tag runs it all.
   pull_request:
     branches:
       - main
-    types: [opened, synchronize, reopened, labeled]
+    paths:
+      - '.github/workflows/release.yml'
+      - 'scripts/release-*'
+      - 'scripts/release-security/**'
+      - 'scripts/check-*'
+      - 'scripts/install.*'
+      - 'scripts/smoke-*'
+      - 'scripts/page-digests.ts'
+      - 'scripts/ci-install-bun.sh'
+      - 'build/**'
+      - '**/package.json'
+      - 'bun.lock'
+      - 'apps/pi-extension/vendor.sh'
+      - 'apps/paste-service/targets/**'
   workflow_dispatch:
     inputs:
       dry-run:
@@ -18,13 +34,10 @@ on:
 permissions:
   contents: read
 
-# On a PR the dry run is part of the full tier: it runs only once the PR has
-# the `ci:full` label (see windows.yml). A new push to a PR cancels that PR's
-# older dry run. Tag pushes and manual runs get a group of their own, so a
-# release is never cancelled; so does a run started by adding any other label
-# (it skips every job), so it cannot cancel the real dry run.
+# A new push to a PR cancels that PR's older dry run. Tag pushes and manual
+# runs get a group of their own, so a release is never cancelled.
 concurrency:
-  group: release-${{ github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name != 'ci:full' && format('run-{0}', github.run_id) || github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  group: release-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -57,10 +70,7 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
         run: node scripts/check-release-version.mjs --tag "$RELEASE_TAG"
 
-  # Every other job of a PR dry run needs this one, so its `if` is the whole
-  # dry run's label gate.
   test:
-    if: github.event_name != 'pull_request' || (contains(github.event.pull_request.labels.*.name, 'ci:full') && (github.event.action != 'labeled' || github.event.label.name == 'ci:full'))
     runs-on: ubuntu-24.04
     # actions: read lists the Test runs on main for the reuse check below.
     permissions:
@@ -268,7 +278,7 @@ jobs:
       # with byte for byte. Its own artifact: never a release asset.
       - name: Record embedded page digests
         shell: bash
-        run: bun scripts/page-digests.ts apps/hook/dist/index.html apps/hook/dist/review.html apps/hook/dist/inbox.html apps/hook/dist/shape.html apps/hook/dist/diagram-engine/*.js | tee page-digests.txt
+        run: bun scripts/page-digests.ts apps/hook/dist/index.html apps/hook/dist/review.html apps/hook/dist/inbox.html apps/hook/dist/diagram-engine/*.js | tee page-digests.txt
 
       - name: Upload embedded page digests
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -1677,20 +1687,3 @@ jobs:
         continue-on-error: true
         timeout-minutes: 10
         run: npm publish ./npm-packages/plannotator-openclaw.tgz --ignore-scripts --provenance --access public
-
-  # The merge script merges a PR only when every `Full CI (all green)` check on
-  # its head succeeded. A skipped job counts as passed elsewhere, so this job
-  # passes only when every job of the dry run ran and succeeded.
-  full-ci:
-    name: Full CI (all green)
-    needs: [test, build, smoke-binaries, pi-extension-ai-runtime-windows, install-script-smoke, npm-package, release-security]
-    if: ${{ !cancelled() && github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:full') && (github.event.action != 'labeled' || github.event.label.name == 'ci:full') }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - name: Every job above succeeded
-        env:
-          NEEDS: ${{ toJSON(needs) }}
-        run: |
-          jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<< "$NEEDS"
-          jq -e 'all(.[]; .result == "success")' <<< "$NEEDS" > /dev/null

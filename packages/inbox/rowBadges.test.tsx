@@ -375,8 +375,10 @@ describe.if(hasDom)('the marks in the list', () => {
   test("the row's name stays short; the card's words are its description", () => {
     const el = mount();
     const r = el.querySelector<HTMLElement>('[data-thread-id="msg_stop"]')!;
+    // The card's words alone: this list has no row actions, so no drag and no drag help (listDrops.tsx).
     const id = r.getAttribute('aria-describedby')!;
     expect(id).toBeTruthy();
+    expect(r.hasAttribute('aria-roledescription')).toBe(false);
     const words = document.getElementById(id)!;
     expect(words.hidden).toBe(true);
     expect(words.textContent).toBe(badgeDescription(STOP));

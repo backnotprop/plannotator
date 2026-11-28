@@ -17,12 +17,21 @@
  * An envelope is kept in parts of at most PART characters, one row each: a
  * SQLite-backed object refuses a row above 2 MB, and the relay sets no item
  * size of its own.
+ *
+ * Relay 1.1 (contract section 4, "Relay 1.1"): a device's own socket, told
+ * only `{ n }` when an item is stored for it; a held command the phone takes
+ * back before the Inbox has it; the APNs topic per device; a Live Activity
+ * token and the `live` push of counts. Sockets are told apart by their tags
+ * (`inbox`, or `device` and `device:<id>`), which survive hibernation; a
+ * socket with no tag, accepted before 1.1, is the Inbox's.
  */
 import { DurableObject } from "cloudflare:workers";
 import type { CreateBrake } from "./create-brake";
-import { sendPush, type ApnsEnvironment } from "./apns";
+import { apnsBody, sendPush, type ApnsEnvironment } from "./apns";
 import { FcmAuthError, parseServiceAccount, sendFcm } from "./fcm";
 import { HELD_COMMANDS_MAX, HELD_COMMAND_BYTES_MAX, heldMaxAgeMs, SIGNAL_LIMIT, SIGNAL_WINDOW_MS } from "./limits";
+import { liveBody, readLive } from "./live";
+import { allowedTopics, deviceTopic, isBundleId, liveTopic, RELAY_VERSION } from "./topics";
 
 export interface Env {
   MAILBOX: DurableObjectNamespace<Mailbox>;
@@ -42,6 +51,8 @@ export interface Env {
   FCM_ORIGIN?: string;
   FCM_OAUTH_ORIGIN?: string;
   HELD_MAX_AGE_SECONDS?: string;
+  /** The bundle ids a phone may name as its APNs topic, comma-separated (src/topics.ts). Unset: `ai.plannotator.app` alone. */
+  APNS_TOPICS?: string;
 }
 
 interface DeviceRow {
@@ -56,8 +67,17 @@ interface DeviceRow {
   agent: number;
   signal_sha256: string | null;
   signal: string | null;
+  /** The bundle id the phone named with its APNs token (1.1); null: the legacy topic. */
+  apns_topic: string | null;
+  /** The Live Activity push token and its environment (1.1). */
+  live_token: string | null;
+  live_environment: string | null;
   [key: string]: SqlStorageValue;
 }
+
+/** Close codes on a device's socket: a newer socket for the same device, and the device removed or started over. */
+const DEVICE_SOCKET_REPLACED = 4000;
+const DEVICE_SOCKET_REMOVED = 4001;
 
 /** One row's share of an envelope: well under the 2 MB a SQLite-backed object allows a row. */
 const PART = 1_000_000;
@@ -157,6 +177,8 @@ export class Mailbox extends DurableObject<Env> {
     if (!columns.includes("agent")) this.sql.exec("ALTER TABLE devices ADD COLUMN agent INTEGER NOT NULL DEFAULT 0");
     if (!columns.includes("signal_sha256")) this.sql.exec("ALTER TABLE devices ADD COLUMN signal_sha256 TEXT");
     if (!columns.includes("signal")) this.sql.exec("ALTER TABLE devices ADD COLUMN signal TEXT");
+    // Relay 1.1: the topic named with the APNs token, and the Live Activity token. Added columns only, so 1.0's code reads and writes these tables as before (a rollback keeps working).
+    for (const column of ["apns_topic", "live_token", "live_environment"]) if (!columns.includes(column)) this.sql.exec(`ALTER TABLE devices ADD COLUMN ${column} TEXT`);
     // Down items: `cursor` is the record's store seq, null for a result.
     this.sql.exec("CREATE TABLE IF NOT EXISTS items (device_id TEXT NOT NULL, n INTEGER NOT NULL, part INTEGER NOT NULL, cursor INTEGER, data TEXT NOT NULL, PRIMARY KEY (device_id, n, part))");
     // Commands up, in the order they arrived (`seq`).
@@ -167,6 +189,13 @@ export class Mailbox extends DurableObject<Env> {
         this.sql.exec(`ALTER TABLE ${table} ADD COLUMN held_at INTEGER`);
         this.sql.exec(`UPDATE ${table} SET held_at = ? WHERE held_at IS NULL`, Date.now());
       }
+    }
+    // Relay 1.1: a command handed to an Inbox socket at least once can no longer be taken back. The column
+    // defaults to handed, so a row any code that knows no `handed` writes (1.0, before this, or during a rollback
+    // to it) counts as handed: 1.0 may have handed it already. 1.1 inserts `handed = 0` itself (`command()`).
+    const commandColumns = this.sql.exec<{ name: string }>("PRAGMA table_info(commands)").toArray().map((c) => c.name);
+    if (!commandColumns.includes("handed")) {
+      this.sql.exec("ALTER TABLE commands ADD COLUMN handed INTEGER NOT NULL DEFAULT 1");
     }
     this.schemaReady = true;
   }
@@ -187,37 +216,75 @@ export class Mailbox extends DurableObject<Env> {
     this.sql.exec("DELETE FROM devices WHERE id = ?", id);
     this.sql.exec("DELETE FROM items WHERE device_id = ?", id);
     this.sql.exec("DELETE FROM commands WHERE device_id = ?", id);
+    this.closeDeviceSockets(id, DEVICE_SOCKET_REMOVED, "removed");
   }
 
   private online(): boolean {
     return this.sockets().length > 0;
   }
 
+  /** A device's own sockets (1.1), found by their tag, so they are found again after the object hibernates. */
+  private deviceSockets(id: string): WebSocket[] {
+    return this.ctx.getWebSockets(`device:${id}`);
+  }
+
+  private closeDeviceSockets(id: string, code: number, reason: string): void {
+    for (const socket of this.deviceSockets(id)) {
+      try {
+        socket.close(code, reason);
+      } catch {
+        // Already closing.
+      }
+    }
+  }
+
+  /** Tell a device's sockets that item `n` is stored for it: the number only, nothing else travels there. */
+  private notifyDevice(id: string, n: number): void {
+    const text = JSON.stringify({ n });
+    for (const socket of this.deviceSockets(id)) {
+      try {
+        socket.send(text);
+      } catch {
+        // A closing socket: the phone polls `items` when it opens a new one.
+      }
+    }
+  }
+
+  private isDeviceSocket(socket: WebSocket): boolean {
+    return this.ctx.getTags(socket).includes("device");
+  }
+
   private device(id: string): DeviceRow | null {
     return this.sql.exec<DeviceRow>("SELECT * FROM devices WHERE id = ?", id).toArray()[0] ?? null;
   }
 
-  /** The Inbox's socket, if one is connected. */
+  /** The Inbox's socket, if one is connected: every socket but a device's (one accepted before 1.1 has no tag). */
   private sockets(): WebSocket[] {
-    return this.ctx.getWebSockets();
+    return this.ctx.getWebSockets().filter((socket) => !this.isDeviceSocket(socket));
   }
 
-  private toInbox(frame: unknown): void {
+  /** Sends a frame to the Inbox's socket; true when one took it. */
+  private toInbox(frame: unknown): boolean {
     const text = JSON.stringify(frame);
+    let sent = false;
     for (const socket of this.sockets()) {
       try {
         socket.send(text);
+        sent = true;
       } catch {
         // A closing socket: the Inbox reads the state again from `hello`.
       }
     }
+    return sent;
   }
 
   private hello() {
     const devices = this.sql.exec<DeviceRow>("SELECT * FROM devices ORDER BY id").toArray();
     return {
       type: "hello",
-      devices: devices.map((d) => ({ device_id: d.id, cursor: d.cursor, carriage: d.carriage === 1, apns: d.apns_token !== null, fcm: d.fcm_token !== null, ...(d.agent === 1 ? { agent: true } : {}) })),
+      // Relay 1.1 says its version; an Inbox that reads none is talking to 1.0.
+      version: RELAY_VERSION,
+      devices: devices.map((d) => ({ device_id: d.id, cursor: d.cursor, carriage: d.carriage === 1, apns: d.apns_token !== null, fcm: d.fcm_token !== null, topic: d.apns_topic !== null, ...(d.agent === 1 ? { agent: true } : {}) })),
     };
   }
 
@@ -243,10 +310,17 @@ export class Mailbox extends DurableObject<Env> {
     const signal = /^\/signals\/([^/]+)$/.exec(path);
     if (signal && req.method === "GET") return this.readSignal(signal[1]!);
 
-    const match = /^\/devices\/([^/]+)(?:\/(carriage|apns|fcm|items|ack|commands|signal))?$/.exec(path);
+    const match = /^\/devices\/([^/]+)(?:\/(carriage|apns|fcm|items|ack|commands|signal|socket|liveactivity)(?:\/([^/]+))?)?$/.exec(path);
     if (!match || !DEVICE_ID.test(match[1]!)) return refuse(404, "not_found");
     const deviceId = match[1]!;
     const sub = match[2];
+    // Relay 1.1: `DELETE .../commands/:id`, the only route with a third part.
+    if (match[3] !== undefined) {
+      if (sub !== "commands" || req.method !== "DELETE") return refuse(404, "not_found");
+      const device = await this.deviceOf(req, deviceId);
+      if (!device) return refuse(401, "unauthorized");
+      return this.cancelCommand(device, match[3]);
+    }
 
     if (!sub && req.method === "PUT") {
       if (!(await inbox())) return refuse(401, "unauthorized");
@@ -261,21 +335,29 @@ export class Mailbox extends DurableObject<Env> {
       if (!(await inbox())) return refuse(401, "unauthorized");
       return this.bumpSignal(deviceId);
     }
-    const method = sub === "carriage" || sub === "apns" || sub === "fcm" ? "PUT" : sub === "items" ? "GET" : "POST";
+    const method = sub === "carriage" || sub === "apns" || sub === "fcm" || sub === "liveactivity" ? "PUT" : sub === "items" || sub === "socket" ? "GET" : "POST";
     if (sub && sub !== "signal" && req.method === method) {
-      const token = bearer(req);
-      const presented = token === null ? null : await sha256Hex(token);
-      const device = this.device(deviceId);
-      if (presented === null || !device || presented !== device.secret_sha256) return refuse(401, "unauthorized");
-      if (device.agent === 1 && (sub === "carriage" || sub === "apns" || sub === "fcm")) return refuse(403, "agent_device", "A cloud agent's device gets answers to its own commands only.");
+      const device = await this.deviceOf(req, deviceId);
+      if (!device) return refuse(401, "unauthorized");
+      if (device.agent === 1 && (sub === "carriage" || sub === "apns" || sub === "fcm" || sub === "liveactivity")) return refuse(403, "agent_device", "A cloud agent's device gets answers to its own commands only.");
       if (sub === "carriage") return this.carriage(req, device);
       if (sub === "apns") return this.apns(req, device);
       if (sub === "fcm") return this.fcm(req, device);
+      if (sub === "liveactivity") return this.liveActivity(req, device);
       if (sub === "items") return this.items(new URL(req.url), device);
+      if (sub === "socket") return this.deviceSocket(req, device);
       if (sub === "ack") return this.ack(req, device);
       return this.command(req, device);
     }
     return refuse(404, "not_found");
+  }
+
+  /** The device in the path when the request carries its bearer; null for a wrong bearer and for a device the mailbox does not hold alike. */
+  private async deviceOf(req: Request, deviceId: string): Promise<DeviceRow | null> {
+    const token = bearer(req);
+    const presented = token === null ? null : await sha256Hex(token);
+    const device = this.device(deviceId);
+    return presented !== null && device && presented === device.secret_sha256 ? device : null;
   }
 
   /**
@@ -305,6 +387,8 @@ export class Mailbox extends DurableObject<Env> {
     const existing = this.device(deviceId);
     if (existing?.secret_sha256 !== hash || existing.agent !== agent || existing.signal_sha256 !== signalHash) {
       this.deleteDevice(deviceId);
+      // Started over: no topic until its app names one again, and the Inbox is told so (it would still count a 1.1 app).
+      if (existing) this.topicChanged(existing, null);
       this.sql.exec(
         "INSERT INTO devices (id, secret_sha256, carriage, cursor, apns_token, apns_environment, next_n, fcm_token, agent, signal_sha256, signal) VALUES (?, ?, ?, ?, NULL, NULL, 1, NULL, ?, ?, ?)",
         deviceId,
@@ -335,19 +419,89 @@ export class Mailbox extends DurableObject<Env> {
     return new Response(null, { status: 204 });
   }
 
-  /** `PUT .../apns` (7.29): the phone's APNs token and its environment; `token: null` removes it. A device holds one push token: this clears its FCM token. */
+  /**
+   * `PUT .../apns` (7.29): the phone's APNs token and its environment; `token: null` removes it. A device holds one push token: this clears its FCM token.
+   * Relay 1.1: `topic`, the app build's bundle id, one of `APNS_TOPICS` (`400 topic_not_allowed` otherwise); absent, the legacy topic, as 1.0.
+   */
   private async apns(req: Request, device: DeviceRow): Promise<Response> {
     const input = await body(req);
     if (input?.token === null) {
-      this.sql.exec("UPDATE devices SET apns_token = NULL, apns_environment = NULL WHERE id = ?", device.id);
+      this.sql.exec("UPDATE devices SET apns_token = NULL, apns_environment = NULL, apns_topic = NULL WHERE id = ?", device.id);
+      this.topicChanged(device, null);
       return new Response(null, { status: 204 });
     }
     const token = input?.token;
     const environment = input?.environment;
+    const topic = input?.topic ?? null;
     if (typeof token !== "string" || !APNS_TOKEN.test(token)) return refuse(400, "bad_request", "token: the APNs device token as hex, or null.");
     if (environment !== "sandbox" && environment !== "production") return refuse(400, "bad_request", 'environment: "sandbox" or "production".');
-    this.sql.exec("UPDATE devices SET apns_token = ?, apns_environment = ?, fcm_token = NULL WHERE id = ?", token.toLowerCase(), environment, device.id);
+    if (topic !== null && !isBundleId(topic)) return refuse(400, "bad_request", "topic: the app's bundle id.");
+    if (topic !== null && !allowedTopics(this.env.APNS_TOPICS).has(topic)) return refuse(400, "topic_not_allowed", "This relay does not push to that app.");
+    this.sql.exec("UPDATE devices SET apns_token = ?, apns_environment = ?, apns_topic = ?, fcm_token = NULL WHERE id = ?", token.toLowerCase(), environment, topic, device.id);
+    this.topicChanged(device, topic);
     return new Response(null, { status: 204 });
+  }
+
+  /**
+   * Relay 1.1: tells the Inbox's socket when a phone starts or stops naming its app's topic, as `hello` lists it
+   * (`topic`). Only an app that registers through the 1.1 route names one, and the Inbox sends the kinds of push
+   * that came with it (a new thread, a failed turn) only to such a phone. An Inbox from before ignores the frame.
+   */
+  private topicChanged(device: DeviceRow, topic: string | null): void {
+    if ((device.apns_topic !== null) !== (topic !== null)) this.toInbox({ type: "topic", device_id: device.id, topic: topic !== null });
+  }
+
+  /** `PUT .../liveactivity` (1.1): the token of the phone's Live Activity, `{ token, environment? }` (the APNs token's environment when absent); `token: null` removes it. */
+  private async liveActivity(req: Request, device: DeviceRow): Promise<Response> {
+    const input = await body(req);
+    if (input?.token === null) {
+      this.sql.exec("UPDATE devices SET live_token = NULL, live_environment = NULL WHERE id = ?", device.id);
+      return new Response(null, { status: 204 });
+    }
+    const token = input?.token;
+    const environment = input?.environment ?? device.apns_environment;
+    if (typeof token !== "string" || !APNS_TOKEN.test(token)) return refuse(400, "bad_request", "token: the Live Activity push token as hex, or null.");
+    if (environment !== "sandbox" && environment !== "production") return refuse(400, "bad_request", 'environment: "sandbox" or "production" (or an APNs token registered first).');
+    this.sql.exec("UPDATE devices SET live_token = ?, live_environment = ? WHERE id = ?", token.toLowerCase(), environment, device.id);
+    return new Response(null, { status: 204 });
+  }
+
+  /**
+   * `DELETE .../commands/:id` (1.1): Cancel on a held write. Removed while no
+   * Inbox socket has had it (`204`); once one has, the Inbox may have applied
+   * it, so it stays (`409 already_handed`) and its result tells. `404
+   * command_not_found` when it is not held: never posted, or applied and gone.
+   */
+  private cancelCommand(device: DeviceRow, raw: string): Response {
+    let id: string;
+    try {
+      id = decodeURIComponent(raw);
+    } catch {
+      return refuse(400, "bad_request", "The command id.");
+    }
+    if (!COMMAND_ID.test(id)) return refuse(400, "bad_request", "The command id.");
+    const held = this.sql.exec<{ handed: number | null }>("SELECT MAX(handed) AS handed FROM commands WHERE device_id = ? AND id = ?", device.id, id).one();
+    if (held.handed === null) return refuse(404, "command_not_found", "No command with this id is held: it was never sent, or the computer has applied it.");
+    if (held.handed === 1) return refuse(409, "already_handed", "The computer already has this command.");
+    this.sql.exec("DELETE FROM commands WHERE device_id = ? AND id = ?", device.id, id);
+    console.log(`relay: command ${device.id} taken back`);
+    return new Response(null, { status: 204 });
+  }
+
+  /**
+   * `GET .../devices/:dev/socket` (1.1): the phone's live feed while it is in
+   * front with no direct path. Hibernating; the relay sends `{ n }` when an item
+   * is stored for this device, and nothing else; the phone then reads `items`.
+   * Anything the phone sends on it is ignored. One per device: a newer one
+   * closes the older with 4000; removing the device closes it with 4001.
+   */
+  private deviceSocket(req: Request, device: DeviceRow): Response {
+    if (req.headers.get("upgrade")?.toLowerCase() !== "websocket") return refuse(400, "bad_request", "A WebSocket upgrade is required.");
+    this.closeDeviceSockets(device.id, DEVICE_SOCKET_REPLACED, "replaced");
+    const pair = new WebSocketPair();
+    const [client, server] = Object.values(pair) as [WebSocket, WebSocket];
+    this.ctx.acceptWebSocket(server, ["device", `device:${device.id}`]);
+    return new Response(null, { status: 101, webSocket: client });
   }
 
   /** `PUT .../fcm` (10.1): the phone's FCM registration token; `token: null` removes it. A device holds one push token: this clears its APNs token. */
@@ -359,7 +513,8 @@ export class Mailbox extends DurableObject<Env> {
     }
     const token = input?.token;
     if (typeof token !== "string" || !FCM_TOKEN.test(token)) return refuse(400, "bad_request", "token: the FCM registration token, or null.");
-    this.sql.exec("UPDATE devices SET fcm_token = ?, apns_token = NULL, apns_environment = NULL WHERE id = ?", token, device.id);
+    this.sql.exec("UPDATE devices SET fcm_token = ?, apns_token = NULL, apns_environment = NULL, apns_topic = NULL, live_token = NULL, live_environment = NULL WHERE id = ?", token, device.id);
+    this.topicChanged(device, null);
     return new Response(null, { status: 204 });
   }
 
@@ -418,16 +573,21 @@ export class Mailbox extends DurableObject<Env> {
     }
     const seq = (this.sql.exec<{ seq: number }>("SELECT COALESCE(MAX(seq), 0) + 1 AS seq FROM commands").one().seq);
     const at = Date.now();
-    parts(envelope).forEach((data, part) => this.sql.exec("INSERT INTO commands (seq, device_id, id, part, data, held_at) VALUES (?, ?, ?, ?, ?, ?)", seq, device.id, id, part, data, at));
+    parts(envelope).forEach((data, part) => this.sql.exec("INSERT INTO commands (seq, device_id, id, part, data, held_at, handed) VALUES (?, ?, ?, ?, ?, ?, 0)", seq, device.id, id, part, data, at));
     await this.armExpiry();
     console.log(`relay: command ${device.id} queued`);
-    this.toInbox({ type: "command", device_id: device.id, id, ciphertext: envelope });
+    if (this.toInbox({ type: "command", device_id: device.id, id, ciphertext: envelope })) this.sql.exec("UPDATE commands SET handed = 1 WHERE device_id = ? AND id = ?", device.id, id);
     return json({ queued: true, inbox_online: this.online() }, 202);
   }
 
-  /** `POST .../push` (7.30): one push to one device, to whichever token it holds; the envelope passed to Apple or Google and never kept. */
+  /**
+   * `POST .../push` (7.30): one push to one device, to whichever token it holds; the envelope passed to Apple or Google and never kept.
+   * Relay 1.1: `kind: "live"` with `live` instead is a Live Activity update (src/live.ts); `kind` absent or `"alert"` is the sealed push.
+   */
   private async push(req: Request): Promise<Response> {
     const input = await body(req);
+    if (input?.kind === "live") return this.pushLive(input);
+    if (input?.kind !== undefined && input.kind !== "alert") return refuse(400, "bad_request", 'kind: "alert" (the default) or "live".');
     const deviceId = input?.device_id;
     const collapseId = input?.collapse_id;
     const envelope = input?.ciphertext;
@@ -440,20 +600,21 @@ export class Mailbox extends DurableObject<Env> {
     if (device.agent === 1) return refuse(403, "agent_device", "A cloud agent's device gets no pushes.");
     if (device.fcm_token) return this.pushFcm(device, device.fcm_token, collapseId, envelope);
     if (!device.apns_token) return json({ sent: false, reason: "no_push_token" });
-    const { APNS_KEY, APNS_KEY_ID, APNS_TEAM_ID } = this.env;
-    if (!APNS_KEY || !APNS_KEY_ID || !APNS_TEAM_ID) {
-      if (!missingKeyLogged) console.log("relay: no APNs key; pushes answer no_apns_key");
-      missingKeyLogged = true;
-      return json({ sent: false, reason: "no_apns_key" });
-    }
+    const topic = deviceTopic(device.apns_topic);
+    // The list may have changed since the token was registered (a bundle id taken off it).
+    if (!allowedTopics(this.env.APNS_TOPICS).has(topic)) return json({ sent: false, reason: "topic_not_allowed" });
+    const apns = this.apnsKey();
+    if (!apns) return json({ sent: false, reason: "no_apns_key" });
     let result: { status: number; reason: string | null };
     try {
       result = await sendPush({
-        apns: { key: APNS_KEY, keyId: APNS_KEY_ID, teamId: APNS_TEAM_ID },
+        apns,
         token: device.apns_token,
         environment: device.apns_environment as ApnsEnvironment,
+        topic,
+        pushType: "alert",
         collapseId,
-        envelope,
+        body: apnsBody(envelope),
         origin: this.env.APNS_ORIGIN,
       });
     } catch (error) {
@@ -463,8 +624,60 @@ export class Mailbox extends DurableObject<Env> {
     console.log(`relay: push ${device.id} ${result.status}`);
     if (result.status === 200) return json({ sent: true }, 202);
     if (result.status === 410) {
-      this.sql.exec("UPDATE devices SET apns_token = NULL, apns_environment = NULL WHERE id = ?", device.id);
+      // Only the token Apple refused: one registered while this push was on its way stays.
+      this.sql.exec("UPDATE devices SET apns_token = NULL, apns_environment = NULL WHERE id = ? AND apns_token = ?", device.id, device.apns_token);
       return json({ sent: false, reason: "apns_gone" });
+    }
+    return json({ error: `APNs answered ${result.status}${result.reason ? ` ${result.reason}` : ""}.`, code: "apns_failed", apns_status: result.status, apns_reason: result.reason }, 502);
+  }
+
+  private apnsKey(): { key: string; keyId: string; teamId: string } | null {
+    const { APNS_KEY, APNS_KEY_ID, APNS_TEAM_ID } = this.env;
+    if (APNS_KEY && APNS_KEY_ID && APNS_TEAM_ID) return { key: APNS_KEY, keyId: APNS_KEY_ID, teamId: APNS_TEAM_ID };
+    if (!missingKeyLogged) console.log("relay: no APNs key; pushes answer no_apns_key");
+    missingKeyLogged = true;
+    return null;
+  }
+
+  /**
+   * A Live Activity update (1.1): counts only, checked field by field and
+   * rebuilt (src/live.ts), under the device's topic with
+   * `.push-type.liveactivity`. `no_live_token` when the phone registered none
+   * (an FCM phone never does); Apple's 410 deletes the token (`live_gone`).
+   */
+  private async pushLive(input: Record<string, unknown>): Promise<Response> {
+    const deviceId = input.device_id;
+    const live = readLive(input.live);
+    if (typeof deviceId !== "string" || !live) return refuse(400, "bad_request", '{ device_id, kind: "live", live: { timestamp, event, content-state: { working, stopped_on_you, ended } } }.');
+    const device = this.device(deviceId);
+    if (!device) return refuse(404, "device_not_found");
+    if (device.agent === 1) return refuse(403, "agent_device", "A cloud agent's device gets no pushes.");
+    if (!device.live_token || !device.live_environment) return json({ sent: false, reason: "no_live_token" });
+    if (!allowedTopics(this.env.APNS_TOPICS).has(deviceTopic(device.apns_topic))) return json({ sent: false, reason: "topic_not_allowed" });
+    const apns = this.apnsKey();
+    if (!apns) return json({ sent: false, reason: "no_apns_key" });
+    const token = device.live_token;
+    let result: { status: number; reason: string | null };
+    try {
+      result = await sendPush({
+        apns,
+        token,
+        environment: device.live_environment as ApnsEnvironment,
+        topic: liveTopic(device.apns_topic),
+        pushType: "liveactivity",
+        collapseId: null,
+        body: liveBody(live),
+        origin: this.env.APNS_ORIGIN,
+      });
+    } catch (error) {
+      console.log(`relay: live ${device.id} transport failed`);
+      return json({ error: `APNs could not be reached: ${error instanceof Error ? error.message : String(error)}`, code: "apns_failed" }, 502);
+    }
+    console.log(`relay: live ${device.id} ${result.status}`);
+    if (result.status === 200) return json({ sent: true }, 202);
+    if (result.status === 410) {
+      this.sql.exec("UPDATE devices SET live_token = NULL, live_environment = NULL WHERE id = ? AND live_token = ?", device.id, token);
+      return json({ sent: false, reason: "live_gone" });
     }
     return json({ error: `APNs answered ${result.status}${result.reason ? ` ${result.reason}` : ""}.`, code: "apns_failed", apns_status: result.status, apns_reason: result.reason }, 502);
   }
@@ -506,10 +719,11 @@ export class Mailbox extends DurableObject<Env> {
     }
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair) as [WebSocket, WebSocket];
-    this.ctx.acceptWebSocket(server);
+    this.ctx.acceptWebSocket(server, ["inbox"]);
     server.send(JSON.stringify(this.hello()));
-    // Then every held command, in the order it arrived, until the Inbox reports it applied.
+    // Then every held command, in the order it arrived, until the Inbox reports it applied. From here none can be taken back.
     for (const held of this.heldCommands()) server.send(JSON.stringify({ type: "command", ...held }));
+    this.sql.exec("UPDATE commands SET handed = 1 WHERE handed = 0");
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -518,8 +732,9 @@ export class Mailbox extends DurableObject<Env> {
    * carriage on (dropped otherwise), with the store cursor raised to it.
    * `applied`: the command is done, so it is deleted. Anything else is ignored.
    */
-  async webSocketMessage(_socket: WebSocket, message: string | ArrayBuffer): Promise<void> {
-    if (typeof message !== "string") return;
+  async webSocketMessage(socket: WebSocket, message: string | ArrayBuffer): Promise<void> {
+    // A device's socket carries nothing up: whatever a phone sends there, shaped like the Inbox's frames or not, changes nothing.
+    if (typeof message !== "string" || this.isDeviceSocket(socket)) return;
     let frame: Record<string, unknown>;
     try {
       frame = JSON.parse(message);
@@ -542,6 +757,7 @@ export class Mailbox extends DurableObject<Env> {
     parts(frame.ciphertext).forEach((data, part) => this.sql.exec("INSERT INTO items (device_id, n, part, cursor, data, held_at) VALUES (?, ?, ?, ?, ?, ?)", device.id, n, part, cursor, data, at));
     this.sql.exec("UPDATE devices SET next_n = ?, cursor = MAX(cursor, ?) WHERE id = ?", n + 1, cursor ?? device.cursor, device.id);
     await this.armExpiry();
+    this.notifyDevice(device.id, n);
   }
 
   private readonly signalReads = new Map<string, { since: number; count: number }>();

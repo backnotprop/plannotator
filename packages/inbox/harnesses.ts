@@ -17,6 +17,7 @@ export type HarnessId =
   | 'vscode'
   | 'windsurf'
   | 'gemini'
+  | 'antigravity'
   | 'qwen'
   | 'goose'
   | 'amp'
@@ -46,6 +47,7 @@ export const HARNESSES: readonly Harness[] = [
   { id: 'vscode', label: 'VS Code' },
   { id: 'windsurf', label: 'Windsurf / Devin' },
   { id: 'gemini', label: 'Gemini CLI' },
+  { id: 'antigravity', label: 'Antigravity' },
   { id: 'qwen', label: 'Qwen Code' },
   { id: 'goose', label: 'Goose' },
   { id: 'amp', label: 'Amp' },
@@ -218,6 +220,11 @@ export function harnessPanel(id: HarnessId, ctx: ConnectContext): HarnessPanel {
       return {
         artefacts: [{ kind: 'code', text: `gemini mcp add -s user ${SERVER} ${cmd}` }],
         note: 'Adds it to Gemini CLI in every project.',
+      };
+    case 'antigravity':
+      return {
+        artefacts: [{ kind: 'code', label: '~/.gemini/config/mcp_config.json', text: mcpServersSnippet(ctx) }],
+        note: 'Merge it into mcpServers. The Antigravity App, the IDE and agy all read this file; restart the App or the IDE.',
       };
     case 'qwen':
       // After NonoElRobot's fork (c6a02a0): the settings.json entry. Not `qwen mcp add`: it writes the

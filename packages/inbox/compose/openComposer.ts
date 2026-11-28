@@ -7,7 +7,7 @@
  * prop threaded from App.tsx; App listens once (`useComposerOpener`) and opens compose (compose/ComposeDialog.tsx).
  */
 import { useEffect, useRef } from 'react';
-import type { ComposeRequest } from './ComposeDialog';
+import type { ComposeHeld, ComposeRequest, ComposeSent } from './ComposeDialog';
 
 export interface ComposerPrefill {
   /** The new thread's name, as if the person had typed it. */
@@ -22,6 +22,11 @@ export interface ComposerPrefill {
    * started last. `{ session }`: that running agent. Default `pick`.
    */
   to?: 'pick' | 'new' | { session: string };
+  /**
+   * Told once the message is sent (its new thread): a plan's Send marks its comments sent and keeps the thread. Held
+   * for another machine (`{ held }`, its outbox entry's key): it is told when that entry is delivered.
+   */
+  onSent?: (sent: ComposeSent | { held: ComposeHeld }) => void;
 }
 
 export const OPEN_COMPOSER_EVENT = 'plannotator-inbox:open-composer';
@@ -39,6 +44,7 @@ export function composeRequestOf(prefill: ComposerPrefill, lastAgent: string | n
     ...(prefill.subject ? { threadName: prefill.subject } : {}),
     ...(prefill.files?.length ? { files: prefill.files } : {}),
     ...(to === 'pick' ? { pickTo: true } : to === 'new' ? { launch: { agent: lastAgent } } : { session: to.session }),
+    ...(prefill.onSent ? { onSent: prefill.onSent } : {}),
   };
 }
 

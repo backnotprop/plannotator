@@ -1,0 +1,53 @@
+{
+  "name": "@pierre/layouts",
+  "version": "0.0.0",
+  "private": true,
+  "license": "apache-2.0",
+  "type": "module",
+  "sideEffects": [
+    "./src/styles.css",
+    "./src/overlays.css"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./react": {
+      "types": "./dist/react/index.d.ts",
+      "import": "./dist/react/index.js"
+    },
+    "./overlays": {
+      "types": "./dist/overlays/index.d.ts",
+      "import": "./dist/overlays/index.js"
+    },
+    "./react/overlays": {
+      "types": "./dist/react/overlays.d.ts",
+      "import": "./dist/react/overlays.js"
+    },
+    "./styles.css": "./src/styles.css",
+    "./overlays.css": "./src/overlays.css"
+  },
+  "devDependencies": {
+    "@pierre/diffs": "workspace:*",
+    "@pierre/trees": "workspace:*",
+    "@playwright/test": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@xterm/addon-fit": "catalog:",
+    "@xterm/xterm": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "tsdown": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  }
+}

@@ -7,6 +7,13 @@ const isElement = (node: unknown): node is { type: string; props: { children?: u
 const types = (nodes: unknown[]) => nodes.map((node) => (isElement(node) ? node.type : typeof node));
 
 describe("renderInlineMarkdown", () => {
+  it("marks a bare URL as a ref written in prose, never a labelled link (a click on a pasted PR URL opens its card)", () => {
+    const anchors = renderInlineMarkdown("See https://github.com/acme/widgets/pull/12 and [the PR](https://github.com/acme/widgets/pull/12).")
+      .filter(isElement)
+      .filter((node) => node.type === "a") as { props: Record<string, unknown> }[];
+    expect(anchors.map((a) => "data-ref-card-prose" in a.props)).toEqual([true, false]);
+  });
+
   it("renders underscore emphasis", () => {
     const nodes = renderInlineMarkdown("_text_");
     expect(nodes).toHaveLength(1);
@@ -41,5 +48,26 @@ describe("renderInlineMarkdown", () => {
     const linkNodes = renderInlineMarkdown("[link](https://example.com)_italic_");
     expect(types(linkNodes)).toEqual(["a", "em"]);
     expect((linkNodes[1] as { type: string; props: { children?: unknown } }).props.children).toBe("italic");
+  });
+
+  it("keeps a balanced closing paren inside a link destination", () => {
+    const nodes = renderInlineMarkdown("See [Foo](https://en.wikipedia.org/wiki/Foo_(bar)) now");
+    expect(types(nodes)).toEqual(["string", "a", "string"]);
+    const link = nodes.find(isElement) as { props: { href?: string; children?: unknown } };
+    expect(link.props.href).toBe("https://en.wikipedia.org/wiki/Foo_(bar)");
+    expect(link.props.children).toBe("Foo");
+    expect(nodes.filter((node) => typeof node === "string").join("")).toBe("See  now");
+  });
+
+  it("keeps a balanced closing paren inside an image source", () => {
+    const nodes = renderInlineMarkdown("![shot](https://example.com/a_(1).png)");
+    expect(types(nodes)).toEqual(["img"]);
+    expect((nodes[0] as { props: { src?: string } }).props.src).toBe("https://example.com/a_(1).png");
+  });
+
+  it("drops a destination title instead of folding it into the source", () => {
+    const nodes = renderInlineMarkdown('![shot](https://example.com/a.png "Figure 1")');
+    expect(types(nodes)).toEqual(["img"]);
+    expect((nodes[0] as { props: { src?: string } }).props.src).toBe("https://example.com/a.png");
   });
 });

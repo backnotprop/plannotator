@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/pi-extension",
-  "version": "0.28.64",
+  "version": "0.29.6",
   "type": "module",
   "description": "Plannotator Pi extension - interactive plan review with annotations, annotate agent messages, and review code/PRs",
   "author": "backnotprop",
@@ -60,19 +60,21 @@
     "README.md",
     "plannotator.html",
     "review-editor.html",
-    "diagram-engine/"
+    "diagram-engine/",
+    "sem-diff/"
   ],
   "scripts": {
-    "build": "cp ../hook/dist/index.html plannotator.html && cp ../hook/dist/review.html review-editor.html && rm -rf diagram-engine && cp -R ../hook/dist/diagram-engine diagram-engine && bash vendor.sh",
+    "build": "cp ../hook/dist/index.html plannotator.html && cp ../hook/dist/review.html review-editor.html && rm -rf diagram-engine && cp -R ../hook/dist/diagram-engine diagram-engine && rm -rf sem-diff && cp -R ../hook/dist/sem-diff sem-diff && bash vendor.sh",
     "prepublishOnly": "cd ../.. && bun run build:viewer-pin && bun run build:pi"
   },
   "dependencies": {
     "@joplin/turndown-plugin-gfm": "^1.0.68",
-    "@pierre/diffs": "1.6.4",
+    "@pierre/diffs": "1.7.0-beta.3",
     "@plannotator/webtui": "0.1.0",
     "chokidar": "^5.0.0",
     "diff": "^8.0.4",
     "parse5": "^7.3.0",
+    "picomatch": "4.0.7",
     "turndown": "^7.2.4"
   },
   "peerDependencies": {
@@ -80,10 +82,12 @@
   },
   "//engines": "No engines field on purpose (#902): for a bare or range install npm passes over a release whose engines the running Node misses, so Pi on an older Node silently stayed on an old Plannotator. runtime-tls.ts warns once per start instead. package-engines.test.ts fails if a node engines field comes back.",
   "devDependencies": {
+    "@plannotator/sem-jiff": "0.2.0",
     "glimpseui": "^0.8.0",
     "@earendil-works/pi-coding-agent": ">=0.79.1",
     "@earendil-works/pi-agent-core": ">=0.79.1",
     "@earendil-works/pi-ai": ">=0.79.1",
-    "@earendil-works/pi-tui": ">=0.79.1"
+    "@earendil-works/pi-tui": ">=0.79.1",
+    "@types/picomatch": "^4.0.2"
   }
 }

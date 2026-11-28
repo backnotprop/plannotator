@@ -16,6 +16,8 @@ import {
   openSync,
   writeSync,
   closeSync,
+  fsyncSync,
+  utimesSync,
   statSync,
   unlinkSync,
   renameSync,
@@ -23,13 +25,14 @@ import {
 } from "fs";
 import { execSync } from "child_process";
 
-import type { DefaultDiffType, DiffLineBgIntensity, DiffOptions, JjDefaultDiffType, ReviewDefaults, ThemeConfig } from '@plannotator/core/config-types';
+import type { DefaultDiffType, DiffLineBgIntensity, DiffOptions, DisplayOptions, JjDefaultDiffType, ReviewDefaults, ThemeConfig } from '@plannotator/core/config-types';
 import { isFaviconStyle, type FaviconStyle } from './favicon';
 import { isAnnotateAgentTerminalSide, type AnnotateAgentTerminalSide } from './agent-terminal';
 import { parseAgentSwitchConfig, agentSwitchConfigValue, type AgentSwitchConfigValue } from './agent-switch';
 import { isLocalhostSubdomain } from './loopback-host';
 import { INBOX_TOOL_NAME, inboxReminderCustomText, inboxReminderFor, inboxReminderRulesText } from './inbox/connection';
-export type { DefaultDiffType, DiffLineBgIntensity, DiffOptions, JjDefaultDiffType, ReviewDefaults, ThemeConfig, FaviconStyle };
+import { parseAnnotateView, type AnnotateView } from '@plannotator/core/config-types';
+export type { DefaultDiffType, DiffLineBgIntensity, DiffOptions, DisplayOptions, JjDefaultDiffType, ReviewDefaults, ThemeConfig, FaviconStyle };
 
 /** Single conventional comment label entry stored in config.json */
 export interface CCLabelConfig {
@@ -167,11 +170,12 @@ function mergeInboxPromptConfig(current: unknown, partial: unknown): PromptConfi
 export interface PlannotatorConfig {
   displayName?: string;
   diffOptions?: DiffOptions;
+  /** The plan / annotate Display settings and the markdown selection mode. */
+  displayOptions?: DisplayOptions;
   /** Saved review defaults for a VCS other than Git (today: `jj`). Unknown keys are kept. */
   reviewDefaults?: ReviewDefaults;
   /** Optional analysis layers used by code review. */
   reviewAnalysis?: {
-    /** Named-entity semantic diff. Enabled by default for backwards compatibility. */
     semanticDiff?: boolean;
     /** Call-stack impact analysis powered by the optional CallDiff runtime. */
     callFlow?: boolean;
@@ -269,6 +273,14 @@ export interface PlannotatorConfig {
    */
   annotateHistory?: boolean;
   /**
+   * The view an annotate session opens in: "wide", "focus" or "edit" (the
+   * document toolbar's Wide | Focus | Edit). Unset or invalid keeps today's
+   * default (panels as they are, not editing); a view the document cannot
+   * use falls back to that default too. Config only: a click in the toolbar
+   * changes the view for that session and is never written back here.
+   */
+  annotateView?: AnnotateView;
+  /**
    * Durably archive every submitted review under ~/.plannotator/feedback/
    * (or PLANNOTATOR_DATA_DIR): one append-only JSONL record per submission
    * plus a markdown sidecar for the ones that carry content. NOTE: this
@@ -347,10 +359,13 @@ export interface PlannotatorConfig {
    */
   planReview?: boolean;
   /**
-   * Pi only: when the Plannotator extension on disk is newer than the one this
+   * Pi: when the Plannotator extension on disk is newer than the one this
    * Pi loaded, Pi reloads itself once the session is quiet (no run, no open
    * review, question or dialog, nothing typed for a while, an empty editor).
    * `false` turns it off: Pi then shows the one-line note with `/reload`.
+   * Claude Code (the mod): an idle session runs `/reload-plugins plannotator`
+   * when the Inbox says a newer plugin is installed. `false` turns it off: the
+   * Inbox tool stays, and the Inbox shows its manual `/reload-plugins` notice.
    * PLANNOTATOR_AUTO_RELOAD wins over this key. Unset: AUTO_RELOAD_DEFAULT.
    */
   autoReload?: boolean;
@@ -394,7 +409,7 @@ export interface PlannotatorConfig {
     allowedOrigin?: string | null;
   };
   /**
-   * The Plannotator Inbox's question sound ("Ding-dong"), set from the Inbox
+   * The Plannotator Inbox's sound ("Ding-dong"), set from the Inbox
    * page (its Settings row and its one-time dialog), kept here for the same
    * reason as `inboxNotifications`: the Inbox's port, and so its origin, can
    * change. `enabled`: ring at all (unset: on). `volume`: 10 to 100 (unset:
@@ -415,13 +430,19 @@ export interface PlannotatorConfig {
   /**
    * The Inbox reaction tray's saved emoji (approval "inbox-reaction-tray"):
    * up to 5, each with the person's name for it (optional), in the order
-   * saved. Unset: none saved. Written by the tray's + through POST
+   * saved, each with its skill (optional: a skill name, approval
+   * "inbox-reactions-every-message"). Unset: none saved. Written by the tray's + through POST
    * /api/inbox/settings `{ reactions }`; an entry that is not an emoji is
-   * dropped on read.
+   * dropped on read, and so is a skill that is not a skill name.
    */
-  inboxReactions?: { emoji: string; label?: string }[];
+  inboxReactions?: { emoji: string; label?: string; skill?: string }[];
   /** How many times `inboxReactions` was saved: windows take a list only when it is newer than the last they took. */
   inboxReactionsRev?: number;
+  /**
+   * This Inbox has synced `inboxReactions` with a linked machine before: until then a linked machine's set is merged
+   * with this one instead of the newer replacing the older (server/inbox-reactions-shared.ts).
+   */
+  inboxReactionsSynced?: boolean;
   /**
    * How the Inbox list's rows look: the names of the row options that are on
    * (core `INBOX_ROWS_OPTIONS`), every other one off. Unset: none written yet
@@ -432,6 +453,18 @@ export interface PlannotatorConfig {
   inboxRows?: string[];
   /** How many times `inboxRows` was saved: windows take a look only when it is newer than the last they took. */
   inboxRowsRev?: number;
+  /**
+   * The list's "Show archived" switch (⋮ menu, POST /api/inbox/settings `{ show_archived }`), kept the same on every
+   * linked machine: `rev` counts saves across them, `by` is the machine that saved it. Unset: off.
+   */
+  inboxShowArchived?: { on: boolean; rev: number; by: string | null };
+  /**
+   * When the person last flipped each Settings → Capabilities switch (`board`, `steps`, …, `grid`; ms since 1970) and
+   * on which Inbox (`ibx_…`): the newer flip wins on every linked computer (packages/server/inbox-capability-set.ts).
+   * A switch with no entry was never flipped since this was kept. The switches themselves stay in their own keys. A
+   * save names only the switches it stamps: the others are kept (saveConfig merges it key by key).
+   */
+  inboxCapabilityFlips?: Record<string, { at: number; by: string | null }>;
   /**
    * The defaults `inboxRows` was saved under (core `INBOX_ROWS_DEFAULTS_VERSION`, 2: smaller thread names on).
    * Unset: saved before that, so an empty `inboxRows` is read as today's defaults (core `inboxRowsSaved`).
@@ -467,9 +500,20 @@ export interface PlannotatorConfig {
    * flag the person turns on). Read through `resolveExperimental`;
    * PLANNOTATOR_EXPERIMENTAL wins over this key. Written by the Inbox's
    * Settings → Capabilities → Experimental through POST /api/inbox/settings
-   * `{ experimental: { decision_mode } }`.
+   * `{ experimental: { grid } }`. `grid`: the Inbox's Grid page
+   * (approval "inbox-agent-grid"). `decisionMode`: the old place of Decision
+   * mode's switch, now `inboxDecisionMode`; read only as its fallback
+   * (`inboxDecisionModeOn`), never written.
    */
-  experimental?: { decisionMode?: boolean };
+  experimental?: { decisionMode?: boolean; grid?: boolean };
+  /**
+   * Decision mode (the owner, 2026-11-24: "default on, switch off in capabilities, no longer experimental"): on
+   * unless false. On: a thread's open questions offer "Decide", one question at a time in a focused dialog, answers
+   * saved as drafts and sent only with the person's Send. A window feature only: nothing an agent
+   * reads. Written by Settings → Capabilities (`POST /api/inbox/settings` `{ decision_mode: { on } }`), read on every
+   * request through `inboxDecisionModeOn`.
+   */
+  inboxDecisionMode?: boolean;
   /**
    * The Board's one-time first-visit dialog (approval "inbox-board", intro
    * amendment): `shownAt` once a page on this computer or the owner's phone
@@ -519,6 +563,8 @@ export interface PlannotatorConfig {
    * 2026-11-04).
    */
   inboxBoard?: boolean;
+  /** Routines (packages/server/inbox-scheduled.ts): off unless the person turned them on. Not offered on Windows. */
+  inboxScheduledThreads?: boolean;
   /**
    * Thread steps (approval "inbox-thread-steps", 2026-11-03): something the
    * person turns on, off by default. On: the thread's steps button, the
@@ -536,6 +582,13 @@ export interface PlannotatorConfig {
    */
   inboxBro?: boolean;
   /**
+   * Agent status (owner, 2026-11-18; off by default): the status mark on every agent's icon in the Inbox (working,
+   * waiting on you in the Inbox or in the agent; no idle mark). Off or unset: only agents in a Rex pane
+   * carry one, as before. Written by Settings → General → Appearance and the list's ⋮ menu
+   * (`POST /api/inbox/settings` `{ agent_status: { on } }`), read on every list.
+   */
+  inboxAgentStatus?: boolean;
+  /**
    * Floating reply drafts (approval "inbox-reply-floaters"; the owner, 2026-11-08: off by default). On: a reply draft
    * set aside or left behind floats in the Inbox's bottom right corner. Off or unset: it stays in Drafts. Written by
    * Settings → Capabilities → Experimental (`POST /api/inbox/settings` `{ float_drafts: { on } }`), read on every request.
@@ -551,7 +604,7 @@ export interface PlannotatorConfig {
   /**
    * The warning before a Mark read that sets questions aside (the owner's ask, 2026-11-10). On unless false: false
    * once the person ticked "Don't show this again" in it. Written by the warning and by Settings → General → When an
-   * agent asks you (`POST /api/inbox/settings` `{ mark_read_warning: { on } }`), read on every request.
+   * agent sends you something (`POST /api/inbox/settings` `{ mark_read_warning: { on } }`), read on every request.
    */
   inboxMarkReadWarning?: boolean;
   /**
@@ -573,6 +626,12 @@ export interface PlannotatorConfig {
     canStar?: boolean;
   };
   /**
+   * The launch switch's one-time dialog (packages/shared/launch-switch.ts reads and writes it, nothing else does),
+   * per campaign: `shownAt` once a surface showed it, so none shows it again on this computer; `answer`: `opened`
+   * (the launch link opened) or `dismissed`.
+   */
+  launch?: Record<string, { shownAt?: string; answer?: "opened" | "dismissed"; answeredAt?: string }>;
+  /**
    * Code review in the Inbox (approval "inbox-code-review-direction",
    * 2026-11-03): something the person turns on, off by default. On: the
    * review skills in the reply box's "/" list, the review card and its
@@ -590,8 +649,9 @@ export interface PlannotatorConfig {
    * each new pull request against them. Empty or unset `rules`: nothing runs.
    * Written by the dialog (`POST /api/inbox/pulls/risk`), read on every request.
    * The rules are the person's own words: never logged, never sent in telemetry.
+   * `branches` (Branch reviews): rank the branches agents report too; off unless `true`.
    */
-  inboxPullRisk?: { rules?: string; provider?: string | null; model?: string | null };
+  inboxPullRisk?: { rules?: string; provider?: string | null; model?: string | null; branches?: boolean };
   /**
    * Chapter diagrams, under Code review (Settings → Capabilities → Chapter diagrams): on unless `false`. On, the
    * guide brief and the review skills offer agents one diagram per chapter (`sections[].diagram`). Off, no agent
@@ -600,21 +660,45 @@ export interface PlannotatorConfig {
    */
   inboxChapterDiagrams?: boolean;
   /**
-   * Shape in the Inbox (approval "shape-inbox-placement"): living boards an
-   * agent draws and keeps current. Off unless the person turns it on. On: the
-   * thread header's Pebble, the sidebar's Shape row (3+ boards), the Shape
-   * group in the search, the `/api/shapes` routes and the shape skill in the
-   * reply box's "/" list. Off: none of it, and no agent is told of it. Three
-   * readings, like the Board's: unset (off), `true`, `false`. Written by
-   * Settings → Capabilities (`POST /api/inbox/settings` `{ shape: { on } }`).
+   * Plans in the Inbox (packages/shared/plans/switch.ts): the plan library of every plan plan review handled. Off
+   * unless the person turns it on (`plannotator plans`, or `POST /api/inbox/settings` `{ plans: { on } }` from the
+   * window); `plannotator plans off` turns it off and keeps the library. Off: no `/api/plans` route, no import and
+   * no read of the library. Read on every request.
    */
-  inboxShape?: boolean;
+  inboxPlans?: boolean;
+  /** The Spaces home's view, the person's choice (`POST /api/plans/view`): "cards" unless they chose "list". */
+  inboxSpacesView?: "cards" | "list";
+  /**
+   * Share this space (packages/shared/spaces/): the Share button on a plan's page in the Inbox, which puts a copy of
+   * the plan in a hosted space. Off unless set to `true` here (config only: no Settings row, no command); it also
+   * needs `inboxPlans`, and `PLANNOTATOR_SHARE=disabled` (or `share: "disabled"`) turns it off with every other
+   * share. Off: no share route, no button, no call to any host.
+   */
+  inboxSpaceShare?: boolean;
+  /**
+   * The Spaces origin a plan is shared to (`resolveSpacesUrl` in packages/shared/spaces/url.ts). Overridden by the
+   * PLANNOTATOR_SPACES_URL env var. `https`, or `http` on this computer only.
+   */
+  spacesUrl?: string;
   /**
    * System in the Inbox (approval "system-inbox"): a drawing of each project's code, kept current by an agent.
    * Shown only while Code review is on. Off unless turned on; config only until Settings → Capabilities' switch
    * lands. Read on every request.
    */
   inboxSystem?: boolean;
+  /**
+   * A preview of the Inbox's second thread pane ("Open to the side" in a row's menu): off unless `true`. Config only, no
+   * Settings row; the settings read carries `split_view` only while on. Read on every request.
+   */
+  inboxSplitView?: boolean;
+  /**
+   * Branch reviews in the Inbox (docs/agent-guides/inbox-files-and-guides.md, "Branch reviews"): agents report a branch
+   * ready for review (`send_message`'s `branch`), each report one review thread per project and branch in Reviews, and
+   * the by-hand list of branches nobody reported. Off unless `true`, and only while Code review is on. Config only, no
+   * Settings row; the Reviews read (`GET /api/inbox/reviews`) carries `branch_reviews` only while on. Read on every
+   * request.
+   */
+  inboxBranchReviews?: boolean;
   /**
    * Who the one-time "themes" dialog is for (approval "inbox-theme-chooser";
    * packages/shared/inbox/theme-chooser.ts). Written only by the Inbox server,
@@ -650,9 +734,13 @@ export interface PlannotatorConfig {
     notNowAt?: string;
     shownLoad?: string;
     agentNote?: { shownFor?: string[] };
-    waitingSince?: { theme_chooser?: string; code_review?: string; sound?: string; list_intro?: string; voice?: string; tab_icon?: string; snooze?: string; bro?: string; grill_me_tip?: string; board?: string; steps?: string; agent_rules?: string; list_view?: string; personal_agents?: string; priority?: string };
-    /** Code review's day-0 offer (approval "code-review-offer-card"): claimed once, as the Board's. */
-    code_review?: { shownAt?: string; key?: string };
+    waitingSince?: { theme_chooser?: string; code_review?: string; sound?: string; list_intro?: string; voice?: string; tab_icon?: string; snooze?: string; bro?: string; grill_me_tip?: string; board?: string; steps?: string; agent_rules?: string; list_view?: string; view_choice?: string; personal_agents?: string; priority?: string; routines?: string };
+    /**
+     * Code review's one-time offer (approval "inbox-code-review-offer"), decided as the tab icon's: `dueAt` for someone
+     * who used an earlier Inbox, `freshAt` for a fresh install (never due), both written at the first release start that
+     * shows it (packages/server/inbox-code-review-offer.ts); then claimed once, as the Board's.
+     */
+    code_review?: { dueAt?: string; freshAt?: string; shownAt?: string; key?: string };
     board?: { shownAt?: string; key?: string };
     steps?: { shownAt?: string; key?: string };
     agent_rules?: { shownAt?: string; key?: string };
@@ -665,11 +753,16 @@ export interface PlannotatorConfig {
     priority?: { shownAt?: string; key?: string; dueAt?: string };
     /** The Bro mode offer (approval "bro-mode"): claimed once, as the Board's. */
     bro?: { shownAt?: string; key?: string };
+    /** The Routines intro (reveals.ts `routines`): claimed once, as the Board's; its "Turn on" writes `inboxScheduledThreads`. */
+    routines?: { shownAt?: string; key?: string };
     /** The grill-me tip (shared/inbox/grill-me-tip.ts): claimed once, as the Board's; nothing to turn on. */
     grill_me_tip?: { shownAt?: string; key?: string };
     /** The "Star the repo" ask's claim in the line (config.json `starAsk` is its record across surfaces). */
     star?: { shownAt?: string; key?: string };
+    /** List view's two-choice dialog, retired (its entry left the line): kept as written, read by nothing. */
     list_view?: { shownAt?: string; key?: string };
+    /** "Which view do you prefer?" (reveals.ts `view_choice`): claimed once, as the Board's; a pick sets the browser's view. */
+    view_choice?: { shownAt?: string; key?: string };
     /**
      * The tab icon dialog (an update-day dialog): `dueAt` for someone who used an earlier Inbox, `freshAt` for a fresh
      * install (never due), both written at the first release start of the version that ships it; then claimed once.
@@ -681,10 +774,17 @@ export interface PlannotatorConfig {
     launch_tip?: { shownAt?: string; key?: string; launchedAt?: string };
     /** The Sidebar tip (packages/shared/inbox/sidebar-tip.ts): stamped once when shown, outside the line. */
     sidebar_tip?: { shownAt?: string; key?: string };
+    /** The Group tip (packages/shared/inbox/band-tip.ts): stamped once when shown, or when a band's menu was opened first. */
+    band_tip?: { shownAt?: string; key?: string; usedAt?: string };
+    /** The Search tip (packages/shared/inbox/search-tip.ts): stamped once when shown, outside the line. */
+    search_tip?: { shownAt?: string; key?: string };
   };
+  /** `enabled` / `volume` are settings (config.json); `dialogDueFor` / `dialogShownFor` are machine state (state.json). */
   inboxSound?: {
     enabled?: boolean;
     volume?: number;
+    /** What rings it: "messages" (any new agent message; the default when absent) or "asks" (only an agent asking). */
+    when?: "messages" | "asks";
     dialogDueFor?: string;
     dialogShownFor?: string;
   };
@@ -733,6 +833,28 @@ export interface PlannotatorConfig {
    * a tagged machine, which has no owner. Config only. Default: none.
    */
   inboxTailscaleAllow?: string[];
+  inboxCloudflareAccess?: {
+    on?: boolean;
+    host?: string;
+    team?: string;
+    aud?: string;
+    allow?: string[];
+    port?: number;
+    account?: string;
+    zone?: string;
+    tunnel?: string;
+    app?: string;
+    dnsRecord?: string;
+  };
+  /**
+   * Exact origins of an app on this computer that may show the Plannotator
+   * Inbox window in a frame (#3299), e.g. "app://myapp" or
+   * "http://localhost:5173": loopback http(s) (no port means the default port only), or an app scheme.
+   * Anything else is dropped (packages/server/inbox-framing.ts). Applies to
+   * the window's own port only, never the tailnet. Config only, read once
+   * when the Inbox starts. Default: none (nothing may frame it).
+   */
+  inboxFrameAncestors?: string[];
   gitlabHosts?: string[];
   /**
    * Launch agents from the Inbox (New message's "New session" rows;
@@ -746,9 +868,11 @@ export interface PlannotatorConfig {
    * is not a plain model name is ignored. `scratchDir`: Settings → Agents'
    * "Scratch folders", where "New scratch folder" makes each new folder (an
    * absolute path; default `<dataDir>/scratch`). Moving it applies to new
-   * folders only.
+   * folders only. `startIn`: Settings → Agents' "Start new agents in": `rex` starts each new agent that can run in
+   * Rex in a tab of Rex (superlogical.com/rex) when Rex is on this computer; anything else (the default) runs it in
+   * the background.
    */
-  inboxLaunch?: { enabled?: boolean; fullPermissions?: boolean; model?: string; settingsFile?: string; scratchDir?: string };
+  inboxLaunch?: { enabled?: boolean; fullPermissions?: boolean; model?: string; settingsFile?: string; scratchDir?: string; startIn?: "inbox" | "rex" };
   /**
    * Inject a Plannotator Flavored Markdown reminder into every EnterPlanMode
    * call so the agent is aware it can enrich plans with code-file links,
@@ -803,6 +927,18 @@ export interface PlannotatorConfig {
    */
   bitbucketTokenCommand?: string[];
   /**
+   * API tokens for Forgejo / Gitea instances, keyed by origin: scheme, host and
+   * port as they appear in the PR URL (`"https://forgejo.example.com"`,
+   * `"http://forgejo.lan:3000"`). A token is sent only to the origin it is keyed
+   * to, so a link to any other host, or to the same host over another scheme,
+   * never receives it. Scopes: `read:repository` and `read:issue` to read a PR and its
+   * attachments, `write:repository` to post a review.
+   * Stored in plain text in config.json, so prefer PLANNOTATOR_FORGEJO_TOKEN
+   * with PLANNOTATOR_FORGEJO_URL. Never sent to the browser: getServerConfig()
+   * allowlists its keys.
+   */
+  forgejoTokens?: Record<string, string>;
+  /**
    * Pass `--sandbox enabled` when launching Cursor's `agent` CLI for review
    * jobs. When true (default), review jobs run with Cursor's sandbox forced
    * on as part of their read-only posture. Set to false on systems where
@@ -813,7 +949,7 @@ export interface PlannotatorConfig {
    */
   cursorSandbox?: boolean;
   /**
-   * Let Claude Code agent jobs (code review, Code Tour, Guided Review) run
+   * Let Claude Code agent jobs (code review, Guided Review) run
    * under the user's own Claude Code sandbox setting. When true (default),
    * Plannotator passes nothing sandbox-related and the user's settings decide.
    * Set to false on systems where Claude Code's sandbox cannot start (Linux
@@ -926,6 +1062,39 @@ export function parsePackageChangesConfig(value: unknown): PlannotatorConfig["pa
   return Object.keys(result).length > 0 ? result : undefined;
 }
 
+const DISPLAY_OPTION_TYPES = {
+  textSize: "number",
+  fontFamily: "string",
+  showGrid: "boolean",
+  diagramShadow: "number",
+  autoOpenSidebar: "boolean",
+  stickyActions: "boolean",
+  planWidth: "string",
+  taterMode: "boolean",
+  inputMethod: "string",
+  htmlAnnotateOnStartup: "boolean",
+} as const satisfies Record<keyof DisplayOptions, "number" | "string" | "boolean">;
+
+/**
+ * Parse `displayOptions`: a plain object, or undefined (the route answers 400).
+ * Only the known keys with the right primitive type are kept; the UI checks
+ * each value against its own choices (shared cannot import packages/ui).
+ */
+export function parseDisplayOptionsConfig(value: unknown): DisplayOptions | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const input = value as Record<string, unknown>;
+  const result: Record<string, unknown> = {};
+  for (const [key, type] of Object.entries(DISPLAY_OPTION_TYPES)) {
+    if (typeof input[key] === type) result[key] = input[key];
+  }
+  return result as DisplayOptions;
+}
+
+/** Whether HTML pages and live apps start in Interact ("Start in Annotate mode" turned off). */
+export function resolveHtmlStartsInInteract(config: PlannotatorConfig): boolean {
+  return parseDisplayOptionsConfig(config.displayOptions)?.htmlAnnotateOnStartup === false;
+}
+
 /** PLANNOTATOR_PACKAGE_LOOKUP: `0` / `false` / `off` / `disabled` is a hard off; anything else decides nothing. */
 export function parsePackageLookupEnv(env: NodeJS.ProcessEnv = process.env): false | undefined {
   const v = env.PLANNOTATOR_PACKAGE_LOOKUP?.trim().toLowerCase();
@@ -948,6 +1117,205 @@ function getConfigDir(): string {
 function getConfigPath(): string {
   return join(getConfigDir(), "config.json");
 }
+function getStatePath(): string {
+  return join(getConfigDir(), "state.json");
+}
+
+/**
+ * Machine state (#2852): records the server writes by itself (one-time dialogs, their claims and version
+ * stamps), kept in `state.json` beside config.json so config.json changes only when the person changes a
+ * setting and can live in a dotfiles repo. loadConfig returns both files as one; saveConfig writes these keys
+ * to state.json only. A copy still in config.json (an older version, another machine sharing the file, a test
+ * seed) is never removed or rewritten: other machines and older versions keep reading it, and loadConfig merges
+ * it with state.json's (mergeMachineRecord).
+ */
+const MACHINE_STATE_KEYS = [
+  "inboxAgentNotes", "inboxTour", "inboxBoardIntro", "inboxListIntro", "inboxVoiceIntro", "inboxSnoozeIntro",
+  "inboxReveals", "starAsk", "inboxThemeChooser", "inboxPriorityIntro", "launch",
+] as const;
+type MachineStateKey = (typeof MACHINE_STATE_KEYS)[number];
+/** Machine-state fields inside a key whose other fields are settings (`inboxSound.enabled` / `volume`). */
+const MACHINE_STATE_FIELDS: Readonly<Record<string, readonly string[]>> = { inboxSound: ["dialogDueFor", "dialogShownFor"] };
+
+function pickFields(value: Record<string, unknown>, fields: readonly string[], keep: boolean): Record<string, unknown> | undefined {
+  return withoutUndefined(Object.fromEntries(Object.entries(value).filter(([field]) => fields.includes(field) === keep)));
+}
+
+const STATE_IS_FOLDER = "it is a folder";
+
+/**
+ * Write state.json, under saveConfig's lock. One that exists but holds no state this version can read is set aside
+ * first (state.json.corrupt-<time>, never deleted) with one warning, so the records in it can still be recovered; a
+ * folder there is left alone and the write refused with a warning naming it. Returns whether state.json holds `state`.
+ */
+function writeState(state: Record<string, unknown>, read: ReturnType<typeof readState>): boolean {
+  const statePath = getStatePath();
+  try {
+    if (read.problem === STATE_IS_FOLDER) {
+      process.stderr.write(`[plannotator] Warning: not saving state.json because ${read.problem}; remove ${statePath} to save the Inbox's dialog records again.\n`);
+      return false;
+    }
+    if (read.problem) {
+      const aside = `${statePath}.corrupt-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+      forgetConfigRead(statePath);
+      renameSync(statePath, aside);
+      process.stderr.write(`[plannotator] Warning: state.json could not be used (${read.problem}); kept it as ${aside} and started a new one.\n`);
+    }
+    const text = JSON.stringify(state, null, 2) + "\n";
+    if (text !== read.raw) writeConfigAtomic(statePath, text);
+    return true;
+  } catch (e) {
+    process.stderr.write(`[plannotator] Warning: failed to write state.json: ${e}\n`);
+    return false;
+  }
+}
+
+/**
+ * state.json as text and object. Missing or empty: no state. `problem`: it exists but holds no state this version
+ * can read (not JSON, not an object, unreadable, a folder); it reads as no state, and a save sets it aside first.
+ */
+function readState(): { raw: string | null; state: Record<string, unknown>; problem?: string } {
+  let raw: string;
+  try {
+    raw = readForLoad(getStatePath());
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException)?.code;
+    if (code === "ENOENT") return { raw: null, state: {} };
+    return { raw: null, state: {}, problem: code === "EISDIR" ? STATE_IS_FOLDER : `it could not be read (${code ?? String(e)})` };
+  }
+  const text = raw.replace(/^﻿/, "");
+  if (text.trim() === "") return { raw, state: {} };
+  try {
+    const state = plainRecord(JSON.parse(text));
+    return state ? { raw, state } : { raw, state: {}, problem: "it is not a JSON object" };
+  } catch {
+    return { raw, state: {}, problem: "it is not valid JSON" };
+  }
+}
+
+/** An ISO time (`2026-11-06T…`): a stamp, compared as text. */
+const STAMP = /^\d{4}-\d{2}-\d{2}T/;
+/** Stamps whose earliest value is the true one: when a reveal first became next, Snooze's first use. */
+const EARLIEST_STAMPS = new Set(["waitingSince", "firstUseAt"]);
+
+/**
+ * One record that both files hold, field by field, so the more protective copy wins: a list is the union (an agent
+ * asked anywhere stays asked), a stamp beats no stamp (a dialog shown anywhere stays shown) and the later stamp beats
+ * the earlier (the spacing clocks run from the last dialog; EARLIEST_STAMPS the other way), `true` beats `false`,
+ * the larger number wins. Anything else, or two kinds that differ: state.json's.
+ */
+function mergeStamps(fromConfig: unknown, fromState: unknown, earliest = false): unknown {
+  if (fromConfig === undefined || fromConfig === null) return fromState ?? fromConfig;
+  if (fromState === undefined || fromState === null) return fromConfig;
+  if (Array.isArray(fromConfig) && Array.isArray(fromState)) {
+    const seen = new Set(fromState.map((item) => JSON.stringify(item)));
+    return [...fromState, ...fromConfig.filter((item) => !seen.has(JSON.stringify(item)))];
+  }
+  const a = plainRecord(fromConfig);
+  const b = plainRecord(fromState);
+  if (a && b) {
+    const out: Record<string, unknown> = {};
+    for (const key of new Set([...Object.keys(b), ...Object.keys(a)])) out[key] = mergeStamps(a[key], b[key], earliest || EARLIEST_STAMPS.has(key));
+    return out;
+  }
+  if (typeof fromConfig === "string" && typeof fromState === "string" && STAMP.test(fromConfig) && STAMP.test(fromState)) {
+    return (earliest ? fromConfig < fromState : fromConfig > fromState) ? fromConfig : fromState;
+  }
+  if (typeof fromConfig === "boolean" && typeof fromState === "boolean") return fromConfig || fromState;
+  if (typeof fromConfig === "number" && typeof fromState === "number") return Math.max(fromConfig, fromState);
+  return fromState;
+}
+
+/** A record's version (`inboxListIntro`: none is version 1). */
+const recordVersion = (record: Record<string, unknown>, none?: number) => (typeof record.version === "number" ? record.version : none);
+
+/** Which copy a starAsk record is further along in: answered, then shown, then only checked. */
+const starAskRank = (record: Record<string, unknown>) => (record.answer ? 2 : record.shownAt ? 1 : 0);
+const starAskTime = (record: Record<string, unknown>) => String(record.answeredAt ?? record.shownAt ?? record.checkedAt ?? "");
+
+/**
+ * When config.json still holds a record that state.json holds too: an older Plannotator (an older Pi extension, a
+ * downgrade) or another machine sharing config.json may have written it after this one wrote state.json, so neither
+ * copy simply wins. Per key:
+ *
+ * | key                                     | both files hold it                                                      |
+ * | --------------------------------------- | ----------------------------------------------------------------------- |
+ * | inboxAgentNotes                         | `asked` union, `offered` either; `auto` (notes not yet said): state.json |
+ * | inboxTour                               | higher `version` whole; same: stamps (mergeStamps), `notify_again` state |
+ * | inboxListIntro                          | higher `version` whole (none: 1); same: stamps                          |
+ * | starAsk                                 | the copy further along (answered, shown, checked) whole; tie: later     |
+ * | inboxReveals                            | stamps: later spacing clocks, earliest `waitingSince`, `shownFor` union |
+ * | inboxSnoozeIntro                        | stamps, earliest `firstUseAt`                                           |
+ * | inboxBoardIntro, inboxVoiceIntro,       | stamps: shown, skipped, used or not-needed anywhere stays so            |
+ * | inboxThemeChooser, inboxPriorityIntro   |                                                                         |
+ * | launch                                  | stamps per campaign: shown anywhere stays shown                         |
+ * | inboxSound dialog fields                | newer `dialogShownFor` and `dialogDueFor`; due only while the due       |
+ * |                                         | version is newer than the shown one (soundDialog)                       |
+ */
+function mergeMachineRecord(key: MachineStateKey, fromConfig: unknown, fromState: unknown): unknown {
+  const a = plainRecord(fromConfig);
+  const b = plainRecord(fromState);
+  if (!a || !b) return fromState ?? fromConfig;
+  if (key === "starAsk") {
+    const order = starAskRank(a) - starAskRank(b) || (starAskTime(a) > starAskTime(b) ? 1 : 0);
+    return order > 0 ? a : b;
+  }
+  if (key === "inboxTour" || key === "inboxListIntro") {
+    const none = key === "inboxListIntro" ? 1 : undefined;
+    const va = recordVersion(a, none);
+    const vb = recordVersion(b, none);
+    if (va !== undefined && vb !== undefined && va !== vb) return va > vb ? a : b;
+  }
+  const merged = mergeStamps(a, b) as Record<string, unknown>;
+  if (key === "inboxTour") merged.notify_again = b.notify_again;
+  if (key === "inboxAgentNotes") merged.auto = b.auto;
+  return withoutUndefined(merged) ?? {};
+}
+
+/** `1.2.3` against `1.2.4`: negative, zero or positive; null when either is not a version. */
+function compareVersions(a: string, b: string): number | null {
+  const parse = (v: string) => /^(\d+)\.(\d+)\.(\d+)/.exec(v)?.slice(1).map(Number);
+  const pa = parse(a);
+  const pb = parse(b);
+  if (!pa || !pb) return null;
+  return pa[0] - pb[0] || pa[1] - pb[1] || pa[2] - pb[2];
+}
+function newerVersion(fromConfig: unknown, fromState: unknown): string | undefined {
+  const a = typeof fromConfig === "string" && fromConfig !== "" ? fromConfig : undefined;
+  const b = typeof fromState === "string" && fromState !== "" ? fromState : undefined;
+  if (a === undefined || b === undefined) return b ?? a;
+  return (compareVersions(a, b) ?? 0) > 0 ? a : b;
+}
+
+/**
+ * The sound dialog's fields from both files: the newer of each, and due only while the due version is newer than the
+ * shown one, so an old `dialogShownFor` left in config.json never hides a dialog that is due. Versions that cannot be
+ * compared: state.json's own fields.
+ */
+function soundDialog(fromConfig: Record<string, unknown>, fromState: Record<string, unknown>): Record<string, unknown> {
+  const shown = newerVersion(fromConfig.dialogShownFor, fromState.dialogShownFor);
+  const due = newerVersion(fromConfig.dialogDueFor, fromState.dialogDueFor);
+  if (due === undefined) return shown === undefined ? {} : { dialogShownFor: shown };
+  if (shown === undefined) return { dialogDueFor: due };
+  const order = compareVersions(due, shown);
+  if (order === null) return pickFields(fromState, MACHINE_STATE_FIELDS.inboxSound, true) ?? {};
+  return order > 0 ? { dialogDueFor: due } : { dialogShownFor: shown };
+}
+
+/** config.json's settings with state.json's machine state merged in (mergeMachineRecord). */
+function withMachineState(config: Record<string, unknown>, state: Record<string, unknown>): PlannotatorConfig {
+  const merged: Record<string, unknown> = { ...config };
+  for (const key of MACHINE_STATE_KEYS) {
+    if (state[key] !== undefined) merged[key] = config[key] === undefined ? state[key] : mergeMachineRecord(key, config[key], state[key]);
+  }
+  for (const [key, fields] of Object.entries(MACHINE_STATE_FIELDS)) {
+    const saved = plainRecord(state[key]);
+    if (!saved) continue;
+    const kept = plainRecord(config[key]) ?? {};
+    merged[key] = withoutUndefined({ ...pickFields(kept, fields, false), ...soundDialog(pickFields(kept, fields, true) ?? {}, saved) });
+  }
+  return merged as PlannotatorConfig;
+}
 
 /** Chapter diagrams (config.json `inboxChapterDiagrams`): on unless the person turned it off. */
 export function inboxChapterDiagramsOn(config: Pick<PlannotatorConfig, "inboxChapterDiagrams">): boolean {
@@ -955,19 +1323,110 @@ export function inboxChapterDiagramsOn(config: Pick<PlannotatorConfig, "inboxCha
 }
 
 /**
- * Load config from ~/.plannotator/config.json.
+ * Load config from ~/.plannotator/config.json, with the machine state in
+ * state.json beside it (MACHINE_STATE_KEYS).
  * Returns {} on missing file or malformed JSON. `quiet`: no warning for a
  * malformed file (a read that must not add a line to what a command printed
  * before it existed: a later read in the same command still warns).
  */
 export function loadConfig(options: { quiet?: boolean } = {}): PlannotatorConfig {
+  return withMachineState(loadSettings(options), loadState());
+}
+
+// --- config.json / state.json read cache --------------------------------------
+//
+// loadConfig is called many times per request (one settings read asks it ~80
+// times), so each file's parse is kept, keyed by its path and its stat: an
+// unchanged file costs one stat per call and no read. The key is mtime, ctime,
+// size, device and inode (the pattern of inbox-launch.ts's config cache, with
+// ctime and device added: a copy that keeps the old mtime still changes
+// ctime), so a hand edit,
+// an editor's rename over the file, a delete or a write by another process is
+// read on the next call. A parse is kept only once the file is older than any
+// filesystem's timestamp tick (CONFIG_READ_SETTLE_MS: HFS+ 1 s, FAT 2 s, and
+// a margin for the lag at a tick's edge), so
+// two writes in one tick with the same size can never hide the second one. A
+// write from this process (writeConfigAtomic, writeState's set-aside) drops
+// the entry at once. Only a good parse is kept: a missing, unreadable or
+// invalid file is read again on every call, as before, with its warning.
+// Every call gets its own copy, so a caller that changes what it got changes
+// nothing for the next one.
+
+const CONFIG_READ_SETTLE_MS = 3000;
+const CONFIG_READ_CACHE_LIMIT = 8;
+const configReadCache = new Map<string, { key: string; value: Record<string, unknown> }>();
+
+let statForLoad: (path: string) => { mtimeMs: number; ctimeMs: number; size: number; dev: number; ino: number; isFile(): boolean } = (path) => statSync(path);
+let readForLoad: (path: string) => string = (path) => readFileSync(path, "utf-8");
+let nowForLoad: () => number = Date.now;
+
+/**
+ * Test-only seam: replaces the stat, the read and the clock loadConfig uses, so a test can count the reads and
+ * stats, or let a file it just wrote count as settled. Null, or a field left out, restores the real one.
+ */
+export function __setConfigReadForTest(
+  seams: { stat?: typeof statForLoad; read?: (path: string) => string; now?: () => number } | null,
+): void {
+  statForLoad = seams?.stat ?? ((path) => statSync(path));
+  readForLoad = seams?.read ?? ((path) => readFileSync(path, "utf-8"));
+  nowForLoad = seams?.now ?? Date.now;
+  configReadCache.clear();
+}
+
+/** The file's stat as a cache key, and whether it is old enough to keep a parse under. "absent": no stat (not there, or not reachable); null: not a regular file (read as before, never kept). */
+function configFileSignature(path: string): { key: string; settled: boolean } | "absent" | null {
+  let stat: ReturnType<typeof statForLoad>;
+  try {
+    stat = statForLoad(path);
+  } catch {
+    return "absent";
+  }
+  if (!stat.isFile()) return null;
+  return {
+    key: `${stat.mtimeMs}:${stat.ctimeMs}:${stat.size}:${stat.dev}:${stat.ino}`,
+    settled: nowForLoad() - Math.max(stat.mtimeMs, stat.ctimeMs) >= CONFIG_READ_SETTLE_MS,
+  };
+}
+
+function rememberConfigRead(path: string, signature: { key: string; settled: boolean }, value: Record<string, unknown>): void {
+  configReadCache.delete(path);
+  if (!signature.settled) return;
+  configReadCache.set(path, { key: signature.key, value: copyJson(value) });
+  if (configReadCache.size > CONFIG_READ_CACHE_LIMIT) configReadCache.delete(configReadCache.keys().next().value!);
+}
+
+/** A write to `path` from this process: the next load reads it again. */
+function forgetConfigRead(path: string): void {
+  configReadCache.delete(path);
+}
+
+/** A parsed JSON value, copied all the way down (own keys kept as own keys, `__proto__` included). */
+function copyJson<T>(value: T): T {
+  if (Array.isArray(value)) return value.map(copyJson) as T;
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, inner]) => [key, copyJson(inner)])) as T;
+  }
+  return value;
+}
+
+function loadSettings(options: { quiet?: boolean }): Record<string, unknown> {
   try {
     const configPath = getConfigPath();
-    if (!existsSync(configPath)) return {};
+    // Not there (or not reachable): {}, as existsSync said before.
+    const signature = configFileSignature(configPath);
+    if (signature === "absent") {
+      forgetConfigRead(configPath);
+      return {};
+    }
+    const kept = signature && configReadCache.get(configPath);
+    if (kept && kept.key === signature.key) return copyJson(kept.value);
+    if (kept) forgetConfigRead(configPath);
     // A UTF-8 BOM (Notepad's "UTF-8 with BOM") is not part of the JSON.
-    const raw = readFileSync(configPath, "utf-8").replace(/^\uFEFF/, "");
-    const parsed = JSON.parse(raw);
-    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? parsed : {};
+    const raw = readForLoad(configPath).replace(/^\uFEFF/, "");
+    const settings = plainRecord(JSON.parse(raw));
+    if (!settings) return {};
+    if (signature) rememberConfigRead(configPath, signature, settings);
+    return settings;
   } catch (e) {
     if (!options.quiet) process.stderr.write(`[plannotator] Warning: failed to read config.json: ${e}\n`);
     return {};
@@ -975,9 +1434,33 @@ export function loadConfig(options: { quiet?: boolean } = {}): PlannotatorConfig
 }
 
 /**
- * config.json as saveConfig reads it before a merge. A missing file (or one
- * holding only whitespace) is an empty config, so a first save creates it as
- * before. A file that exists but cannot be read, or is not a JSON object, is
+ * state.json's records for loadConfig, through the read cache. saveConfig reads it with readState, never from here.
+ * Any failure (no data dir to name, as readState's own) reads as no state, without a warning, as readState did.
+ */
+function loadState(): Record<string, unknown> {
+  try {
+    const statePath = getStatePath();
+    const signature = configFileSignature(statePath);
+    if (signature === "absent") {
+      forgetConfigRead(statePath);
+      return {};
+    }
+    const kept = signature && configReadCache.get(statePath);
+    if (kept && kept.key === signature.key) return copyJson(kept.value);
+    if (kept) forgetConfigRead(statePath);
+    const read = readState();
+    if (signature && read.raw !== null && !read.problem) rememberConfigRead(statePath, signature, read.state);
+    return read.state;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * config.json as saveConfig reads it before a merge. A missing file, or one
+ * holding only whitespace, is an empty config: there is nothing in it to lose,
+ * so a save writes it (writeConfigAtomic never leaves one empty). A file that
+ * exists but cannot be read, or whose content is not a JSON object, is
  * refused: merging onto loadConfig's `{}` and writing would replace every
  * setting in it with the one key being saved.
  */
@@ -1120,14 +1603,53 @@ function releaseConfigLock(lockPath: string): void {
   } catch { /* already gone (stale takeover by another writer): nothing to do */ }
 }
 
+/** Rename errors Windows gives while another program (antivirus, a sync client, an indexer) holds the file for a moment. */
+const RENAME_RETRY_CODES = new Set(["EPERM", "EACCES", "EBUSY"]);
+/** Backoff between rename tries: about 2 s in all. The config lock is touched before each wait so it never looks stale meanwhile. */
+const RENAME_RETRY_DELAYS_MS = [10, 20, 40, 80, 160, 320, 500, 500, 500];
+/** fsync errors that mean "this filesystem has no fsync", not "the data did not reach the disk". */
+const FSYNC_UNSUPPORTED_CODES = new Set(["EINVAL", "ENOTSUP", "EOPNOTSUPP"]);
+
+let renameForWrite: (from: string, to: string) => void = renameSync;
+let fsyncForWrite: (handle: number) => void = fsyncSync;
+let sleepForRetry: (ms: number) => void = sleepSync;
 /**
- * Write config.json in one step so a concurrent reader never observes a
- * half-written file: readers deliberately take no lock, and loadConfig treats
- * malformed JSON as an empty config, which would silently present as "all
- * settings reset". Writes through an existing symlink rather than replacing
- * it, so a dotfile-managed config.json keeps its link.
+ * Test-only seam: replaces the rename, fsync and retry wait writeConfigAtomic uses, so a test can make them fail
+ * (or skip the real waits) without a broken disk. Null, or a field left out, restores the real one.
+ */
+export function __setConfigWriteForTest(
+  seams: { rename?: (from: string, to: string) => void; fsync?: (handle: number) => void; sleep?: (ms: number) => void } | null,
+): void {
+  renameForWrite = seams?.rename ?? renameSync;
+  fsyncForWrite = seams?.fsync ?? fsyncSync;
+  sleepForRetry = seams?.sleep ?? sleepSync;
+}
+
+/**
+ * Write config.json (or state.json) in one step so a concurrent reader never observes a half-written file: readers
+ * deliberately take no lock, and loadConfig treats malformed JSON as an empty config, which would silently present
+ * as "all settings reset". Writes through an existing symlink rather than replacing it, so a dotfile-managed
+ * config.json keeps its link: the temp file goes beside the link's target, in the target's folder, so the rename
+ * never crosses a device.
+ *
+ * The file itself is never written in place. A plain write empties it first, so one that stopped partway (disk full,
+ * an I/O error, the process killed) left config.json empty, and the next save then wrote only its own keys. The temp
+ * file is fsynced before the rename, and an fsync error (a full disk or quota on a network home can show up only
+ * there) stops the write before the rename, unless it only says the filesystem has no fsync. A rename that fails
+ * with a Windows lock error is retried for about 2 s; when the temp file cannot be written, synced or renamed (a
+ * folder that is not writable, a full disk, a file still held after the retries), this throws and the file keeps
+ * its old bytes, and the caller reports the save as failed.
  */
 function writeConfigAtomic(configPath: string, contents: string): void {
+  try {
+    writeConfigFile(configPath, contents);
+  } finally {
+    // Written or not, the next load reads the file again.
+    forgetConfigRead(configPath);
+  }
+}
+
+function writeConfigFile(configPath: string, contents: string): void {
   let targetPath = configPath;
   try {
     if (existsSync(configPath)) targetPath = realpathSync(configPath);
@@ -1139,16 +1661,45 @@ function writeConfigAtomic(configPath: string, contents: string): void {
     if (existsSync(targetPath)) mode = statSync(targetPath).mode & 0o777;
   } catch { /* new file: keep the private default */ }
   const tempPath = `${targetPath}.${process.pid}.${Math.random().toString(36).slice(2, 10)}.tmp`;
+  let handle: number | null = null;
   try {
-    writeFileSync(tempPath, contents, { encoding: "utf-8", mode });
-    renameSync(tempPath, targetPath);
-  } catch {
+    handle = openSync(tempPath, "wx", mode);
+    writeFileSync(handle, contents, "utf-8");
+    // On disk before the rename, so a crash right after it cannot leave a renamed but empty file, and a write-back
+    // error (ENOSPC, EDQUOT, EIO) that only fsync reports never renames a short temp file over config.json.
+    try {
+      fsyncForWrite(handle);
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException)?.code;
+      if (!code || !FSYNC_UNSUPPORTED_CODES.has(code)) throw e;
+    }
+    closeSync(handle);
+    handle = null;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        renameForWrite(tempPath, targetPath);
+        break;
+      } catch (e) {
+        const code = (e as NodeJS.ErrnoException)?.code;
+        if (attempt >= RENAME_RETRY_DELAYS_MS.length || !code || !RENAME_RETRY_CODES.has(code)) throw e;
+        // The wait runs under saveConfig's lock: keep it fresh so no other writer takes it over as stale.
+        try {
+          const now = new Date();
+          utimesSync(getConfigLockPath(), now, now);
+        } catch { /* no lock held (writing unlocked): nothing to refresh */ }
+        sleepForRetry(RENAME_RETRY_DELAYS_MS[attempt]);
+      }
+    }
+  } catch (e) {
+    if (handle !== null) {
+      try {
+        closeSync(handle);
+      } catch { /* already closed */ }
+    }
     try {
       unlinkSync(tempPath);
     } catch { /* nothing to clean up */ }
-    // Same-directory rename should not fail, but a write that lands is better
-    // than a settings change that is lost to an exotic filesystem.
-    writeFileSync(targetPath, contents, "utf-8");
+    throw e;
   }
 }
 
@@ -1164,10 +1715,26 @@ function writeConfigAtomic(configPath: string, contents: string): void {
  * A config.json that exists but cannot be read or is not a JSON object is
  * never written over (readConfigForSave): the save is refused with a warning
  * and the file is left in place, so fixing it brings every setting back.
- * Returns whether the file was written; callers that report a save check it
+ * Machine state goes to state.json instead (MACHINE_STATE_KEYS), and
+ * config.json is rewritten only when its settings change.
+ * Returns whether the save landed; callers that report a save check it
  * (or read the value back).
  */
 export function saveConfig(partial: Partial<PlannotatorConfig>): boolean {
+  return saveConfigLocked(partial) === "saved";
+}
+
+/**
+ * saveConfig as a compare-and-set: `decide` runs inside the lock, with the config as both files hold it now, and
+ * returns what to save, or null to save nothing (`declined`). The check and its write are one critical section, so two
+ * processes sharing the data dir cannot both pass the check (the launch switch's one-time stamp). `failed`: decided,
+ * but the save did not land.
+ */
+export function saveConfigIf(decide: (current: PlannotatorConfig) => Partial<PlannotatorConfig> | null): "saved" | "declined" | "failed" {
+  return saveConfigLocked(decide);
+}
+
+function saveConfigLocked(input: Partial<PlannotatorConfig> | ((current: PlannotatorConfig) => Partial<PlannotatorConfig> | null)): "saved" | "declined" | "failed" {
   let lockPath: string | null = null;
   let locked = false;
   let saved = false;
@@ -1188,10 +1755,17 @@ export function saveConfig(partial: Partial<PlannotatorConfig>): boolean {
         `[plannotator] Warning: not saving config.json because ${read.reason}; `
         + `the settings in it are kept. Fix or remove ${getConfigPath()} to save settings again.\n`,
       );
-      return false;
+      return "failed";
     }
     const current = read.config;
     configSaveMergeWindowHook?.();
+    const stateRead = readState();
+    let partial: Partial<PlannotatorConfig>;
+    if (typeof input === "function") {
+      const decided = input(withMachineState(current as Record<string, unknown>, stateRead.state));
+      if (decided === null) return "declined";
+      partial = decided;
+    } else partial = input;
     // The nested settings merge key by key (one experimental switch saved keeps the others), but a
     // hand-edited config.json may hold anything there. A key the write does not name is kept verbatim,
     // whatever it holds; one it names merges only when both sides are plain objects, else the write's
@@ -1199,7 +1773,7 @@ export function saveConfig(partial: Partial<PlannotatorConfig>): boolean {
     const plain = (value: unknown): value is Record<string, unknown> =>
       !!value && typeof value === "object" && !Array.isArray(value);
     const merged: Record<string, unknown> = { ...current, ...partial };
-    const nested = (key: "experimental" | "diffOptions" | "reviewDefaults" | "theme" | "reviewAnalysis" | "prompts" | "packageChanges" | "inboxLaunch") => {
+    const nested = (key: "experimental" | "diffOptions" | "displayOptions" | "reviewDefaults" | "theme" | "reviewAnalysis" | "prompts" | "packageChanges" | "inboxLaunch" | "inboxCapabilityFlips") => {
       const cur = (current as Record<string, unknown>)[key];
       const par = (partial as Record<string, unknown>)[key];
       if (par === undefined) {
@@ -1212,15 +1786,44 @@ export function saveConfig(partial: Partial<PlannotatorConfig>): boolean {
       }
       merged[key] = key === "prompts" ? mergePromptConfig(cur as PromptConfig, par as PromptConfig) : { ...cur, ...par };
     };
-    for (const key of ["experimental", "diffOptions", "reviewDefaults", "theme", "reviewAnalysis", "prompts", "packageChanges", "inboxLaunch"] as const) nested(key);
-    writeConfigAtomic(getConfigPath(), JSON.stringify(merged, null, 2) + "\n");
-    saved = true;
+    // `inboxCapabilityFlips` too: a switch's flip time saved never drops another's saved meanwhile.
+    for (const key of ["experimental", "diffOptions", "displayOptions", "reviewDefaults", "theme", "reviewAnalysis", "prompts", "packageChanges", "inboxLaunch", "inboxCapabilityFlips"] as const) nested(key);
+    // Machine state named by the save goes to state.json only (MACHINE_STATE_KEYS): config.json's copy, if any, is
+    // kept as it is, for other machines and older versions that read it.
+    const state = { ...stateRead.state };
+    let stateNamed = false;
+    for (const key of MACHINE_STATE_KEYS) {
+      if (!(key in partial)) continue;
+      stateNamed = true;
+      state[key] = (partial as Record<string, unknown>)[key];
+      merged[key] = (current as Record<string, unknown>)[key];
+    }
+    for (const [key, fields] of Object.entries(MACHINE_STATE_FIELDS)) {
+      if (!(key in partial)) continue;
+      stateNamed = true;
+      const par = (partial as Record<string, unknown>)[key];
+      const cur = plainRecord((current as Record<string, unknown>)[key]);
+      const parFields = plainRecord(par);
+      state[key] = parFields && pickFields(parFields, fields, true);
+      if (parFields || par === undefined) {
+        // The settings fields from the save, each in its place; config.json's own dialog fields kept.
+        const next: Record<string, unknown> = {};
+        for (const [field, value] of Object.entries(cur ?? {})) next[field] = fields.includes(field) ? value : parFields?.[field];
+        for (const [field, value] of Object.entries(parFields ?? {})) if (!fields.includes(field) && !(field in next)) next[field] = value;
+        merged[key] = withoutUndefined(next);
+      }
+    }
+    let stateSaved = true;
+    if (stateNamed) stateSaved = writeState(state, stateRead);
+    // config.json is written only when its settings change: a save of machine state alone never touches it.
+    if (JSON.stringify(merged) !== JSON.stringify(current)) writeConfigAtomic(getConfigPath(), JSON.stringify(merged, null, 2) + "\n");
+    saved = stateSaved;
   } catch (e) {
     process.stderr.write(`[plannotator] Warning: failed to write config.json: ${e}\n`);
   } finally {
     if (locked && lockPath) releaseConfigLock(lockPath);
   }
-  return saved;
+  return saved ? "saved" : "failed";
 }
 
 /**
@@ -1248,6 +1851,7 @@ export function getServerConfig(
 ): {
   displayName?: string;
   diffOptions?: DiffOptions;
+  displayOptions?: DisplayOptions;
   reviewDefaults?: ReviewDefaults;
   theme?: ThemeConfig;
   favicon?: FaviconStyle;
@@ -1258,6 +1862,7 @@ export function getServerConfig(
   agentTerminalSide?: PlannotatorConfig["agentTerminalSide"];
   agentTerminalDefaultAgent?: string;
   agentSwitch?: AgentSwitchConfigValue;
+  annotateView?: AnnotateView;
   autoUpdate: boolean;
   autoUpdateEnv?: boolean;
   updateCheck: boolean;
@@ -1276,9 +1881,11 @@ export function getServerConfig(
   const updateCheckEnv = parseUpdateCheckEnv();
   const agentToolEnv = parseAgentToolEnv();
   const agentToolHost = agentToolHostOf(agentToolIntegration);
+  const annotateView = parseAnnotateView(cfg.annotateView);
   return {
     displayName: cfg.displayName,
     diffOptions: cfg.diffOptions,
+    ...displayOptionsAdvert(cfg.displayOptions),
     ...(cfg.reviewDefaults !== undefined && { reviewDefaults: cfg.reviewDefaults }),
     ...(cfg.theme !== undefined && { theme: cfg.theme }),
     ...(isFaviconStyle(cfg.favicon) && { favicon: cfg.favicon }),
@@ -1298,6 +1905,8 @@ export function getServerConfig(
         agentTerminalDefaultAgent: cfg.agentTerminalDefaultAgent,
       }),
     ...agentSwitchAdvert(cfg.agentSwitch),
+    // Only a known view is advertised; a typo leaves the page on today's default.
+    ...(annotateView !== undefined && { annotateView }),
     // Always explicit (the config-file value, default false) so a stale
     // cookie can never show the toggle on while the config says off.
     // autoUpdateEnv carries PLANNOTATOR_AUTO_UPDATE when it overrides the file.
@@ -1318,6 +1927,12 @@ export function getServerConfig(
     // Settings' "Open Plannotator at plannotator.localhost" (#2184), only where the server says it is local.
     ...(options.cookieHost === true && { cookieHost: cookieHostState(cfg) }),
   };
+}
+
+/** displayOptions as getServerConfig advertises it: the parsed known keys, left out when none remain. */
+function displayOptionsAdvert(value: unknown): { displayOptions?: DisplayOptions } {
+  const parsed = parseDisplayOptionsConfig(value);
+  return parsed && Object.keys(parsed).length > 0 ? { displayOptions: parsed } : {};
 }
 
 /**
@@ -1446,12 +2061,13 @@ function parseLaunchFlag(value: unknown): boolean | undefined {
  * in `enabled` or as `inboxLaunch` itself, is off. A config.json that does not parse reads as `{}` (`loadConfig`),
  * so as the default. `model` only when it is a plain model name;
  * `settingsFile` (Claude settings file) as typed, read at each start;
- * `scratchDir` only when it is an absolute path other than `/` (null: the default, `<dataDir>/scratch`).
+ * `scratchDir` only when it is an absolute path other than `/` (null: the default, `<dataDir>/scratch`);
+ * `startIn` `rex` only when it says exactly that (anything else: `inbox`).
  */
 export function resolveInboxLaunch(
   config: PlannotatorConfig,
   platform: NodeJS.Platform = process.platform,
-): { enabled: boolean; fullPermissions: boolean | null; model: string | null; settingsFile: string | null; scratchDir: string | null } {
+): { enabled: boolean; fullPermissions: boolean | null; model: string | null; settingsFile: string | null; scratchDir: string | null; startIn: "inbox" | "rex" } {
   const raw: unknown = config.inboxLaunch;
   const value = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as NonNullable<PlannotatorConfig["inboxLaunch"]>) : {};
   // `"inboxLaunch": false` (or "off") by hand: the whole feature off.
@@ -1463,6 +2079,7 @@ export function resolveInboxLaunch(
     model: typeof value.model === "string" && LAUNCH_MODEL.test(value.model) ? value.model : null,
     settingsFile: typeof value.settingsFile === "string" && value.settingsFile.trim() ? value.settingsFile.trim() : null,
     scratchDir: typeof value.scratchDir === "string" && isAbsolute(value.scratchDir) && resolve(value.scratchDir) !== resolve("/") ? resolve(value.scratchDir) : null,
+    startIn: value.startIn === "rex" ? "rex" : "inbox",
   };
 }
 
@@ -1472,7 +2089,7 @@ export function resolveInboxLaunch(
  * a string and would fail `=== false` checks downstream. Accepts real booleans
  * plus "true"/"false"/"1"/"0" strings; anything else falls back to the default.
  */
-function coerceConfigBoolean(value: unknown, fallback: boolean): boolean {
+export function coerceConfigBoolean(value: unknown, fallback: boolean): boolean {
   return parseConfigBoolean(value) ?? fallback;
 }
 
@@ -1718,15 +2335,16 @@ export function parseAgentToolEnv(env: NodeJS.ProcessEnv = process.env): boolean
 }
 
 /**
- * Whether Pi reloads itself for an updated Plannotator when neither the env
- * var nor config.json decides (owner's call 2026-10-29: on). The one place to
- * flip the default.
+ * Whether Pi and the Claude Code mod reload an updated Plannotator when neither
+ * the env var nor config.json decides (owner's call 2026-10-29: on). The one
+ * place to flip the default (the mod's mirror: apps/hook/hooks/mod/enabled.ts).
  */
 export const AUTO_RELOAD_DEFAULT = true;
 
 /**
- * Whether Pi reloads itself to load an updated Plannotator extension (see
- * `autoReload`, apps/pi-extension/auto-reload.ts).
+ * Whether Pi or the Claude Code mod reloads itself to load an updated
+ * Plannotator (see `autoReload`, apps/pi-extension/auto-reload.ts and
+ * apps/hook/hooks/mod/auto-reload.ts).
  *
  * Priority (highest wins):
  *   PLANNOTATOR_AUTO_RELOAD env var  →  config.autoReload  →  AUTO_RELOAD_DEFAULT
@@ -1939,7 +2557,7 @@ export function resolveInboxPhones(
  * separate piece of work and can grow out of this table.
  */
 export const EXPERIMENTAL_FEATURES = {
-  "decision-mode": "decisionMode",
+  grid: "grid",
 } as const;
 
 export type ExperimentalFeature = keyof typeof EXPERIMENTAL_FEATURES;
@@ -1947,7 +2565,7 @@ export type ExperimentalFeature = keyof typeof EXPERIMENTAL_FEATURES;
 /**
  * What PLANNOTATOR_EXPERIMENTAL says about one feature, or undefined when it
  * says nothing. The variable is a comma list of feature names: a name listed
- * turns that feature on, a name with a leading `-` turns it off (`-decision-mode`);
+ * turns that feature on, a name with a leading `-` turns it off (`-grid`);
  * names are trimmed and compared case-insensitively, and unknown names are ignored.
  */
 export function parseExperimentalEnv(name: ExperimentalFeature, env: NodeJS.ProcessEnv = process.env): boolean | undefined {
@@ -1975,9 +2593,38 @@ export function resolveExperimental(
 ): boolean {
   const fromEnv = parseExperimentalEnv(name, env);
   if (fromEnv !== undefined) return fromEnv;
+  return savedExperimental(config, name) ?? false;
+}
+
+/** The person's saved choice for an experimental feature (config.json `experimental`), or undefined at its default. */
+export function savedExperimental(config: PlannotatorConfig, name: ExperimentalFeature): boolean | undefined {
   const saved = config.experimental;
-  if (!saved || typeof saved !== "object" || Array.isArray(saved)) return false;
-  return parseConfigBoolean((saved as Record<string, unknown>)[EXPERIMENTAL_FEATURES[name]]) ?? false;
+  if (!saved || typeof saved !== "object" || Array.isArray(saved)) return undefined;
+  return parseConfigBoolean((saved as Record<string, unknown>)[EXPERIMENTAL_FEATURES[name]]);
+}
+
+/**
+ * Whether PLANNOTATOR_EXPERIMENTAL turns Decision mode off: its documented "minus" form (`-decision-mode`, any case,
+ * anywhere in the comma list) still does, now that the feature left Experimental. Any other mention of it (the plain
+ * `decision-mode`) is ignored, without error: it is on by default.
+ */
+export function inboxDecisionModeEnvOff(env: NodeJS.ProcessEnv = process.env): boolean {
+  const raw = env.PLANNOTATOR_EXPERIMENTAL;
+  return !!raw && raw.split(",").some((part) => part.trim().toLowerCase() === "-decision-mode");
+}
+
+/**
+ * Whether the Inbox's Decision mode is on: off when PLANNOTATOR_EXPERIMENTAL says `-decision-mode`; else config.json
+ * `inboxDecisionMode` when it is a boolean; else the old experimental switch (`experimental.decisionMode`), so a
+ * choice made there is kept (false stays off, true stays on); else on.
+ */
+export function inboxDecisionModeOn(config: PlannotatorConfig, env: NodeJS.ProcessEnv = process.env): boolean {
+  if (inboxDecisionModeEnvOff(env)) return false;
+  const saved = parseConfigBoolean(config.inboxDecisionMode);
+  if (saved !== undefined) return saved;
+  const old = config.experimental;
+  const legacy = old && typeof old === "object" && !Array.isArray(old) ? parseConfigBoolean((old as Record<string, unknown>).decisionMode) : undefined;
+  return legacy ?? true;
 }
 
 /** The PLANNOTATOR_INBOX_TAILSCALE override, or undefined when it does not decide. */
@@ -2526,6 +3173,56 @@ export function resolveBitbucketTokenCommand(
   if (!Array.isArray(argv) || argv.length === 0 || !argv.every((part) => typeof part === "string" && part !== "")) return null;
   const email = typeof config.bitbucketEmail === "string" && config.bitbucketEmail.trim() !== "" ? config.bitbucketEmail.trim() : undefined;
   return { argv: [...argv], ...(email ? { email } : {}) };
+}
+
+/**
+ * The origin of an http(s) URL in its canonical form (lower-case host, default
+ * port dropped), or null for anything else, including a URL with credentials.
+ * Forgejo tokens are matched on this, so `https://Forgejo.Example.com:443` and
+ * `https://forgejo.example.com` are one instance.
+ */
+export function normalizeForgejoOrigin(value: string): string | null {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+    if (url.username || url.password) return null;
+    return url.origin.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The API token for one Forgejo / Gitea instance, or null. A token goes only to
+ * the origin it is configured for (scheme, host and port), so a PR or a link
+ * naming any other host, or the same host over http, gets none.
+ *
+ * Priority (highest wins):
+ *   PLANNOTATOR_FORGEJO_TOKEN, used only for the origin named by
+ *   PLANNOTATOR_FORGEJO_URL  →  config.forgejoTokens[origin]
+ *
+ * Empty values count as unset. Never log the result.
+ */
+export function resolveForgejoToken(
+  config: PlannotatorConfig,
+  origin: string,
+  env: Record<string, string | undefined> = process.env,
+): string | null {
+  const wanted = normalizeForgejoOrigin(origin);
+  if (!wanted) return null;
+  const clean = (v: unknown): string | undefined =>
+    typeof v === "string" && v.trim() !== "" ? v.trim() : undefined;
+  const envToken = clean(env.PLANNOTATOR_FORGEJO_TOKEN);
+  const envUrl = clean(env.PLANNOTATOR_FORGEJO_URL);
+  if (envToken && envUrl && normalizeForgejoOrigin(envUrl) === wanted) return envToken;
+  const tokens = config.forgejoTokens;
+  if (tokens && typeof tokens === "object" && !Array.isArray(tokens)) {
+    for (const [key, value] of Object.entries(tokens)) {
+      const token = clean(value);
+      if (token && normalizeForgejoOrigin(key) === wanted) return token;
+    }
+  }
+  return null;
 }
 
 /**

@@ -26,7 +26,7 @@
  * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
  */
 
-import { expect, test, webkit, type Browser, type BrowserContext, type Locator, type Page } from '@playwright/test';
+import { expect, test, webkit, type Browser, type BrowserContext, type Locator, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -252,6 +252,10 @@ test('a word double-clicked in the message (selected, nothing to comment on) doe
 
 test('a range selected in the reply box before a pick is not replaced: the dictation goes after it', async () => {
   await page.goto(`${url}#thread=${threadId}`);
+  // The two tests before saved this thread's draft from other pages. This page's box, typed in by the first test and
+  // never reloaded, offers that draft and its next edit takes it in, the edit's words after it (replyDraft.ts: never
+  // lost). A reload reads it into the box as opening the thread does, so the box holds only what is written next.
+  await page.reload();
   const box = page.locator('section.ib-pane .ib-rbox textarea');
   await openReply(page);
   await box.fill('Keep these words.');

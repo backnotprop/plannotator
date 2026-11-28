@@ -16,7 +16,7 @@
  * Runs in the playwright config's `webkit` project. Build the binary first (see
  * inbox.spec.ts), then `bun run test:e2e:inbox`.
  */
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -156,7 +156,13 @@ for (const screen of SCREENS) {
     }
     expect((await state(page)).highlights).toEqual([]);
     await fire(page, 'touchend', 0);
-    await expect.poll(async () => (await state(page)).highlights.length).toBe(1);
+    // The marks go into the text at once; the toolbar comes a render later
+    // (AnnotationToolbar draws nothing until its effect has placed it). Wait
+    // for both, not the marks alone: read in between, the toolbar is not up yet.
+    await expect.poll(async () => {
+      const { highlights, toolbar } = await state(page);
+      return { highlights: highlights.length, toolbar };
+    }).toEqual({ highlights: 1, toolbar: true });
     const done = await state(page);
     expect(done.highlighted).toBe(FIRST.slice(4, 60));
     expect(done.toolbar).toBe(true);

@@ -49,8 +49,9 @@ describe("vendored review-args parity", () => {
       expect(target("look at the api/users code").directory).toBeUndefined();
       expect(target("look at ./notes.txt please").ignored).toContain("./notes.txt");
       expect(target("look at ./backend please").directory).toBe(join(root, "backend"));
-      expect(() => target("./backnd")).toThrow("does not exist");
-      expect(() => target("./notes.txt")).toThrow("not a directory");
+      expect(() => target("./backnd")).toThrow("Did you mean ./backend? Run: plannotator review ./backend");
+      expect(() => target("backnd")).toThrow(`No folder "backnd" in ${root}; nothing was opened.`);
+      expect(() => target("./notes.txt")).toThrow("is a file, not a folder");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

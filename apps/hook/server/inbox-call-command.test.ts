@@ -99,6 +99,7 @@ async function world() {
     binaryPath: null,
     board: true,
     steps: true,
+    scheduled: true,
     storeNow: () => new Date(Date.now() - clock.behind),
     agentEnvironment: createAgentEnvironmentFor({ platform: process.platform, homeDir: agentsHome, env: { HOME: agentsHome, PATH: "" } }),
     codexWake: { extraClis: [] },
@@ -216,7 +217,9 @@ describe("what a script gets", () => {
 
   test("an Inbox started without the test sandbox still reaches only a stub", async () => {
     const box = sandbox();
-    const { PLANNOTATOR_TEST_SANDBOX: _sandbox, ...env } = box.env;
+    const { PLANNOTATOR_TEST_SANDBOX: _sandbox, ...rest } = box.env;
+    // Without the sandbox marker only the test knob makes this scratch data dir count as turned on (turned-on.ts).
+    const env = { ...rest, PLANNOTATOR_TEST_INBOX_ON: "1" };
     const sent = await cli({ ...box, env }, ["send_message", '{"body":"From a Codex thread."}'], { env: { CODEX_THREAD_ID: CODEX_THREAD } });
     const inbox = inboxEntryOf(box.dataDir);
     if (inbox) detached.push({ entry: inbox, root: box.root });

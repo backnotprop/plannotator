@@ -59,7 +59,6 @@ export function CloudAgentsSection() {
         ))}
         {adding ? (
           <CloudPairForm
-            projects={model.projects}
             onCancel={() => {
               setAdding(false);
               requestAnimationFrame(() => addButton.current?.focus());
@@ -75,7 +74,7 @@ export function CloudAgentsSection() {
             <HostMark host="cloud" big />
             <span className="ib-txt">
               <span className="ib-l">No cloud agent paired yet</span>
-              <span className="ib-desc">Each one posts under its own name and sees only the threads it is given.</span>
+              <span className="ib-desc">Each one posts under its own name and can read and write across this Inbox.</span>
             </span>
             <span className="ib-ctl">
               <button ref={addButton} type="button" className="ib-btn ib-pri" onClick={() => setAdding(true)} data-cloud-pair-start="">

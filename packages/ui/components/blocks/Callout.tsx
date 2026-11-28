@@ -1,8 +1,11 @@
 import React from 'react';
+import type { Block } from '../../types';
+import { sourceLineAttrs } from '../../utils/sourceLineAttrs';
 import { renderProseBody } from './proseBody';
 
 interface CalloutProps {
   blockId: string;
+  sourceBlock?: Block;
   kind: string;
   body: string;
   containerClassName: string;
@@ -19,6 +22,7 @@ interface CalloutProps {
 
 export const Callout: React.FC<CalloutProps> = ({
   blockId,
+  sourceBlock,
   kind,
   body,
   containerClassName,
@@ -36,10 +40,11 @@ export const Callout: React.FC<CalloutProps> = ({
     blockType === 'alert' ? { 'data-alert-kind': kindAttribute } : { 'data-directive-kind': kindAttribute };
   return (
     <div
-      className={containerClassName}
+      className={`${containerClassName} relative [overflow-wrap:anywhere]`}
       data-block-id={blockId}
       data-block-type={blockType}
       {...kindAttr}
+      {...sourceLineAttrs(sourceBlock)}
     >
       <div className={`${blockType}-title text-xs font-semibold uppercase tracking-wide mb-1`}>
         {kind}

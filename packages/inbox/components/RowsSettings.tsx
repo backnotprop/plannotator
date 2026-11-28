@@ -13,8 +13,9 @@
  * and is saved for the person (config.json `inboxRows`), and every list in every window takes it. The page reads the
  * look and never writes it on open; only a press writes.
  */
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { RowMarksScope } from '../letterMarks';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { RowMarksScope, hueOf, projectLetters } from '../letterMarks';
+import { ProjectTile, projectSeed } from '../agents/projectFace';
 import type { InboxListGroupId, InboxListRow } from '@plannotator/core/inbox-types';
 import { INBOX_HOST_NAMES } from '@plannotator/core/inbox-types';
 import { LIST_LOOK_DEFAULT, LIST_LOOK_KEYS, isDefaultListLook, listLookClasses, lookWithChange, onAgentRowsChange, useListLook, type ListLook } from '../listLook';
@@ -228,13 +229,20 @@ function LookList({ rows, look, phone, examples, projectNames, awayMachines, cla
   );
 }
 
+/** Agent icons' first two choices show what they draw: an agent's own mark, and a project's tile (the examples' project). */
+const SAMPLE_TILE = { label: 'storefront', letters: projectLetters('storefront'), hue: hueOf(projectSeed('storefront')) };
+const SEG_ICONS: Partial<Record<RowsControlId, Partial<Record<string, ReactNode>>>> = {
+  agents: { own: <HostMark host="claude-code" />, project: <ProjectTile tile={SAMPLE_TILE} host={null} badge={false} /> },
+};
+
 /** A segmented choice: a radio group named by its row's label, as Settings → General's Theme and Text size. */
-function Seg({ name, labelledBy, describedBy, value, choices, onChange }: { name: string; labelledBy: string; describedBy?: string; value: string | null; choices: readonly { id: string; label: string }[]; onChange: (next: string) => void }) {
+function Seg({ name, labelledBy, describedBy, value, choices, icons, onChange }: { name: string; labelledBy: string; describedBy?: string; value: string | null; choices: readonly { id: string; label: string }[]; icons?: Partial<Record<string, ReactNode>>; onChange: (next: string) => void }) {
   return (
     <span className="ib-seg" role="radiogroup" aria-labelledby={labelledBy} aria-describedby={describedBy}>
       {choices.map((choice) => (
         <label key={choice.id} className="ib-seg-o" data-on={value === choice.id ? '' : undefined}>
           <input type="radio" name={name} value={choice.id} checked={value === choice.id} onChange={() => onChange(choice.id)} />
+          {icons?.[choice.id] && <span className="ib-seg-ic" aria-hidden="true">{icons[choice.id]}</span>}
           {choice.label}
         </label>
       ))}
@@ -263,7 +271,7 @@ function ControlRow({ control, look, onChoice }: { control: RowsControl; look: L
         {control.kind === 'switch' ? (
           <button type="button" role="switch" className="ib-sw" aria-checked={control.get(look)} aria-labelledby={id} aria-describedby={descId} onClick={() => onChoice(control, !control.get(look))} />
         ) : (
-          <Seg name={id} labelledBy={id} describedBy={descId} value={control.get(look)} choices={control.choices} onChange={(next) => onChoice(control, next)} />
+          <Seg name={id} labelledBy={id} describedBy={descId} value={control.get(look)} choices={control.choices} icons={SEG_ICONS[control.id]} onChange={(next) => onChoice(control, next)} />
         )}
       </span>
     </div>

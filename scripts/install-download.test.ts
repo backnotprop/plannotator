@@ -220,7 +220,6 @@ async function runInstallSh(server: ReleaseServer, env: Record<string, string> =
         PLANNOTATOR_BROWSER: NO_BROWSER,
         PLANNOTATOR_TEST_SANDBOX: "1",
         PLANNOTATOR_INSTALL_NOTIFY: "0",
-        PLANNOTATOR_SKIP_SEM_INSTALL: "1",
         PLANNOTATOR_SKIP_AGENT_TERMINAL_INSTALL: "1",
         PLANNOTATOR_DOWNLOAD_RETRY_DELAY: "0",
         STUB_CURL_LOG: log,
@@ -454,6 +453,35 @@ describe.skipIf(process.platform === "win32" || !REAL_CURL || !BASH)("install.sh
     expect(server.requests.some((q) => PACKED_NAME.test(q.path))).toBe(false);
     expect(r.installed.equals(BINARY)).toBe(true);
   }, 30_000);
+});
+
+describe.skipIf(process.platform === "win32" || !REAL_CURL || !BASH)("install.sh downloads from PLANNOTATOR_RELEASE_DOWNLOAD_URL (real curl, local server)", () => {
+  // Padded with spaces too: update-prepare trims the value before it fetches the
+  // pinned .sha256, so install.sh must read the same mirror out of it.
+  for (const pad of ["", "  "]) {
+    test(`a loopback mirror serves the binary and its .sha256; github.com is never asked${pad ? " (value padded with spaces)" : ""}`, async () => {
+      const server = await startReleaseServer([]);
+      const r = await runInstallSh(server, { PLANNOTATOR_RELEASE_DOWNLOAD_URL: `${pad}${server.origin}/mirror/releases/download/${pad}` });
+      expect(r.code).toBe(0);
+      expect(r.installed.equals(BINARY)).toBe(true);
+      const releasePaths = server.requests.map((q) => q.path).filter((path) => path.includes("/releases/download/"));
+      expect(releasePaths.some((path) => path.endsWith(".sha256"))).toBe(true);
+      expect(server.attempts()).toHaveLength(1);
+      expect(releasePaths.every((path) => path.startsWith("/mirror/releases/download/v99.9.9/plannotator-"))).toBe(true);
+      expect(r.curlCalls.some((call) => call.includes("github.com"))).toBe(false);
+    }, 30_000);
+  }
+
+  test("a value Plannotator itself refuses (plain http off loopback, a user name) leaves the download on GitHub", async () => {
+    for (const refused of ["http://mirror.example/dl", "https://user@mirror.example/dl", "ftp://127.0.0.1/dl"]) {
+      const server = await startReleaseServer([]);
+      const r = await runInstallSh(server, { PLANNOTATOR_RELEASE_DOWNLOAD_URL: refused });
+      expect(r.code).toBe(0);
+      expect(r.installed.equals(BINARY)).toBe(true);
+      expect(r.curlCalls.some((call) => call.includes("https://github.com/backnotprop/plannotator/releases/download/v99.9.9/"))).toBe(true);
+      expect(r.curlCalls.some((call) => call.includes("mirror.example") || call.includes("ftp://"))).toBe(false);
+    }
+  }, 90_000);
 });
 
 // ---------------------------------------------------------------------------

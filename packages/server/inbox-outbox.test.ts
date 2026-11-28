@@ -8,9 +8,9 @@ import { appendFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmS
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InboxMessage } from "@plannotator/core/inbox-types";
-import { doorRouteNames, doorWriteRoutes } from "./inbox-devices";
-import { forwardedReadSearch, outboxView, startsAgentThere } from "./inbox-machines";
-import { classifyAnswer, DOOR_WRITES, doorWriteKind, InboxOutbox, OUTBOX_KEEP_SETTLED_MS, OUTBOX_MAX_SERVER_ERRORS, replyIsStale, type OutboxAnswer, type OutboxEntry } from "./inbox-outbox";
+import { doorRouteNames, doorRouteOf, doorWriteRoutes } from "./inbox-devices";
+import { outboxView, startsAgentThere } from "./inbox-machines";
+import { classifyAnswer, DOOR_WRITES, doorRefusesBare, doorWriteKind, forwardsNow, InboxOutbox, OUTBOX_KEEP_SETTLED_MS, OUTBOX_MAX_SERVER_ERRORS, replyIsStale, type OutboxAnswer, type OutboxEntry } from "./inbox-outbox";
 
 const B = "ibx_01K00000000000000000000000";
 const C = "ibx_01K00000000000000000000001";
@@ -175,22 +175,17 @@ describe("Cancel: a write still waiting that never left (a launch held for a mac
 });
 
 describe("remote launch: which forwarded writes start, stop or trust an agent", () => {
-  test("a new message that starts an agent, and a launch's Stop, Try again, Trust folder and Delete; nothing else", () => {
+  test("a new message or a reply that starts an agent, and a launch's Stop, Try again, Trust folder and Delete; nothing else", () => {
     expect(startsAgentThere("messages", { to: { launch: { agent: "claude-code", project_id: "prj_1" } } })).toBe(true);
     expect(startsAgentThere("messages", { to: { launch: { agent: "claude-code", scratch: true } } })).toBe(true);
     for (const action of ["stop", "retry", "trust", "delete"]) expect(startsAgentThere(`launch/lch_1/${action}`, {})).toBe(true);
     expect(startsAgentThere("messages", { to: { host: "claude-code", session: "ses_1" } })).toBe(false);
-    expect(startsAgentThere("messages/m1/reply", { to: { launch: {} } })).toBe(false);
+    // A reply sent to a new session in place of one that ended starts an agent there; a reply to a session does not.
+    expect(startsAgentThere("messages/m1/reply", { to: { launch: { agent: "claude-code", project_id: "prj_1" } } })).toBe(true);
+    expect(startsAgentThere("messages/m1/reply", { to: { host: "claude-code", session: "ses_1" } })).toBe(false);
+    expect(startsAgentThere("messages/m1/reply/extra", { to: { launch: {} } })).toBe(false);
     expect(startsAgentThere("launch/lch_1/open", {})).toBe(false);
     expect(startsAgentThere("launch/settings", {})).toBe(false);
-  });
-
-  test("a tailnet guest's read through the forward never asks for the other machine's folder-trust facts; the owner's does", () => {
-    const asked = "?trust_agent=claude-code&trust_project=prj_1&thread=thr_1";
-    expect(forwardedReadSearch(asked, true)).toBe("?thread=thr_1");
-    expect(forwardedReadSearch("?trust_agent=claude-code&trust_project=prj_1", true)).toBe("");
-    expect(forwardedReadSearch(asked, false)).toBe(asked);
-    expect(forwardedReadSearch("?thread=thr_1", true)).toBe("?thread=thr_1");
   });
 });
 
@@ -415,6 +410,15 @@ describe("rule 11: late words are refused by what the person saw", () => {
   });
 });
 
+describe("Re-ask all is this Inbox's own: the door does not take it", () => {
+  test("a phone or a linked machine asking POST threads/:id/reask finds no route; the per-message Re-ask is still there", () => {
+    for (const machine of [false, true]) {
+      expect(doorRouteOf("POST", "threads/msg_01K7000000000000000000ABCD/reask", machine)).toBeNull();
+      expect(doorRouteOf("POST", "messages/msg_01K7000000000000000000ABCD/reask", machine)?.windowPath).toBe("/api/inbox/messages/msg_01K7000000000000000000ABCD/reask");
+    }
+  });
+});
+
 describe("rule 8: every door write is classified, and only small JSON is held", () => {
   /** The door's POST routes in words, each `(a|b|c)` of plain words split into one name per word. */
   const doorWrites = () =>
@@ -463,6 +467,46 @@ describe("rule 8: every door write is classified, and only small JSON is held", 
     // A thread's tag lives on the thread's own machine, and a tag's rename, delete and Undo on each machine holding it.
     expect(doorWriteKind("threads/msg_1/tags")).toBe("set");
     expect(doorWriteKind("initiatives/ini_1")).toBe("set");
+    // A Board card lives on its project's machine: its writes are held and sent there. The lane marks run gh, and stay here.
+    expect(doorWriteKind("cards/crd_1")).toBe("set");
+    expect(doorWriteKind("cards/seen")).toBe("set");
+    expect(doorWriteKind("cards/dropped/seen")).toBe("set");
+    expect(doorWriteKind("cards/marks")).toBeNull();
+    expect(doorWriteKind("cards")).toBeNull();
+    // A linked machine's PR: closed, reopened or merged by that machine's gh / glab, never held. A thread's PRs are held.
+    // A review thread started there keeps its PRs there, never held either.
+    for (const verb of ["close", "reopen", "merge", "owner"]) expect(doorWriteKind(`pulls/${verb}`)).toBe("forge");
+    expect(doorWriteKind("pulls/review")).toBeNull();
+    expect(doorWriteKind("pulls/risk")).toBeNull();
+    expect(doorWriteKind("threads/msg_1/pulls")).toBe("set");
+    // A Combine, and a Tidy with the person's words, go now from the window or not at all: one held for days would
+    // archive or change threads nobody is looking at. A Tidy without words, a Combine's Stop and Undo are held.
+    expect(doorWriteKind("combine")).toBe("now");
+    expect(forwardsNow("combine", {})).toBe(true);
+    expect(forwardsNow("tidy", { words: "Close what shipped" })).toBe(true);
+    expect(forwardsNow("tidy", { words: "   " })).toBe(false);
+    expect(forwardsNow("tidy", {})).toBe(false);
+    expect(doorWriteKind("tidy")).toBe("append");
+    expect(forwardsNow("combine/cmb_01M7EQBR93W3RGJF4AA831AJ12/undo", {})).toBe(false);
+    expect(doorWriteKind("combine/cmb_01M7EQBR93W3RGJF4AA831AJ12/cancel")).toBe("set");
+    expect(forwardsNow("open-in/file/attach", {})).toBe(true);
+  });
+
+  test("the receiving door refuses a Combine or a worded Tidy without the window's mark, and nothing else", () => {
+    const bare = { window: false };
+    const pressed = { window: true };
+    expect(doorRefusesBare(bare, "combine", {})).toBe(true);
+    expect(doorRefusesBare(bare, "tidy", { words: "Close what shipped" })).toBe(true);
+    // A press in the other machine's window passes; so does any call not through the door (this Inbox's own window).
+    expect(doorRefusesBare(pressed, "combine", {})).toBe(false);
+    expect(doorRefusesBare(pressed, "tidy", { words: "Close what shipped" })).toBe(false);
+    expect(doorRefusesBare(null, "combine", {})).toBe(false);
+    // A Tidy without words is held and replayed without the mark: never refused.
+    expect(doorRefusesBare(bare, "tidy", { words: "   " })).toBe(false);
+    expect(doorRefusesBare(bare, "tidy", {})).toBe(false);
+    // A Combine's Stop and Undo are held too; the file attach has its own check (inbox-open-in.ts).
+    expect(doorRefusesBare(bare, "combine/cmb_01M7EQBR93W3RGJF4AA831AJ12/undo", {})).toBe(false);
+    expect(doorRefusesBare(bare, "open-in/file/attach", {})).toBe(false);
   });
 
   test("an Inbox that never holds a write keeps no outbox folder", () => {

@@ -18,8 +18,6 @@ export const VOICE_INTRO_MOMENT_MS = 60_000;
 export interface VoiceIntroLoad {
   /** The Inbox has it due (settings `voice.intro_due`), as the load's latch holds it (reveal.ts `useLineLatch`). */
   due: boolean;
-  /** The page is this computer's or its owner's over the tailnet (not a tailnet guest's). */
-  owner: boolean;
   listLoaded: boolean;
   firstRun: boolean;
   /** The list options dialog was due when this load began: it goes first, and voice waits a load. */
@@ -36,7 +34,7 @@ export interface VoiceIntroLoad {
 }
 
 export function voiceIntroWanted(load: VoiceIntroLoad): boolean {
-  return load.due && load.owner && load.listLoaded && !load.firstRun && !load.listIntroDue && !load.tourThisLoad && !load.otherDialogThisLoad;
+  return load.due && load.listLoaded && !load.firstRun && !load.listIntroDue && !load.tourThisLoad && !load.otherDialogThisLoad;
 }
 
 export function voiceIntroMayAsk(load: VoiceIntroLoad, settled: boolean): boolean {

@@ -21,6 +21,10 @@ describe("applyReplyDraftFileOps: a save's file changes on the draft's files as 
     expect(ids(once)).toEqual(['a', 'b']);
     expect(applyReplyDraftFileOps(once, ops([f('a'), f('b')], ['gone']))).toEqual(once);
   });
+  test("the box's files keep its order whichever upload finished first; another window's file keeps its place, and a save with no order (an older window) appends as before", () => {
+    expect(ids(applyReplyDraftFileOps([f('theirs'), f('second')], { ...ops([f('first')]), order: ['first', 'second'] }))).toEqual(['theirs', 'first', 'second']);
+    expect(ids(applyReplyDraftFileOps([f('theirs'), f('second')], ops([f('first')])))).toEqual(['theirs', 'second', 'first']);
+  });
   test("a long paste still there takes its new place; a place for a file not there does nothing", () => {
     expect(applyReplyDraftFileOps([f('p', 3), f('x')], ops([], [], [{ upload_id: 'p', pasted: { at: 9, preview: 'p' } }, { upload_id: 'q', pasted: { at: 1, preview: 'q' } }]))).toEqual([
       f('p', 9),
@@ -31,7 +35,7 @@ describe("applyReplyDraftFileOps: a save's file changes on the draft's files as 
 
 describe('diffReplyDraftFiles and composeReplyDraftFileOps: what a box changed, kept until it lands', () => {
   test('the box against what it last held: added files and removed ids', () => {
-    expect(diffReplyDraftFiles(['a', 'b'], [f('b'), f('c')])).toEqual(ops([f('c')], ['a']));
+    expect(diffReplyDraftFiles(['a', 'b'], [f('b'), f('c')])).toEqual({ ...ops([f('c')], ['a']), order: ['b', 'c'] });
   });
   test('two changes in a row are one: the later says last for an id (added then removed is removed)', () => {
     const first = ops([f('c')], ['a']);

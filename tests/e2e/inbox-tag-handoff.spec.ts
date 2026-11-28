@@ -16,7 +16,7 @@
  * in PLANNOTATOR_TAG_HANDOFF_SHOTS when it names a folder.
  */
 
-import { expect, test, type Browser, type BrowserContext, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Locator, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -196,7 +196,7 @@ test('Ask, unchanged: the line offers the switches, and Send with none clicked i
   expect(world.errors).toEqual([]);
 });
 
-test('Add: the agent joins with the added wake, the thread says so, and a later plain reply reaches it too', async () => {
+test('Add: the agent joins with the added wake, the thread says so, and a later plain reply to the owner reaches the owner alone', async () => {
   const { page } = world;
   const box = await openReply(page, world.tags.ids.t3);
   await box.pressSequentially('Keep an eye on this. ');
@@ -218,16 +218,20 @@ test('Add: the agent joins with the added wake, the thread says so, and a later 
   await expect.poll(() => !!handed(S.opencode, sent.id), { timeout: 15_000 }).toBe(true);
   expect(handed(S.opencode, sent.id)).toMatchObject({ added: true, tagged: { owner: 'Claude Code' } });
   expect(inboxWakeText(handed(S.opencode, sent.id)!).split('\n')[1]).toBe(INBOX_ADDED_INSTRUCTION);
-  // The owner keeps the thread: a plain reply, no tag typed, goes to it and to the added session.
+  // The owner keeps the thread: a plain reply, no tag typed, goes to the owner the box names, and to nobody else.
   const again = await openReply(page, world.tags.ids.t3);
   await again.pressSequentially('Also check the retry counts.');
   await expect(line(page)).toHaveCount(0);
   await send(page);
   await expect.poll(async () => (await lastPersonMessage(world.tags.ids.t3)).body).toBe('Also check the retry counts.');
   const later = await lastPersonMessage(world.tags.ids.t3);
-  expect(later.tags?.map((t) => t.session)).toEqual([S.opencode]);
-  await expect.poll(() => !!handed(S.opencode, later.id), { timeout: 15_000 }).toBe(true);
+  expect(later.tags).toBeUndefined();
   await expect.poll(() => !!handed(S.owner, later.id), { timeout: 15_000 }).toBe(true);
+  expect(handed(S.owner, later.id)!.also_tagged).toBeUndefined();
+  // The added session's connection kept polling all along and was never handed it; the sent reply has one line, the owner's.
+  await page.waitForTimeout(2_000);
+  expect(handed(S.opencode, later.id)).toBeUndefined();
+  await expect(page.locator(`[data-tag-line="${S.opencode}"]`)).toHaveCount(0);
   expect(world.errors).toEqual([]);
 });
 

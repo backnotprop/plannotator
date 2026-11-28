@@ -33,6 +33,7 @@ import type { InboxPull, InboxPullLink, InboxPullsAnswer } from '@plannotator/co
 import type { PlatformPostProps } from '../guide/platform-post-types';
 import { SidebarProvider } from '../shell/sidebar';
 
+import { GLOBAL, LINE } from './pullReviewFixtures';
 const hasDom = typeof document !== 'undefined';
 interface ReaderProps {
   comments?: { annotations?: { id: string }[]; onSave: (annotation: unknown) => unknown; onDelete?: (id: string) => void };
@@ -43,6 +44,7 @@ let reader: ReaderProps | undefined;
 let readerMounts = 0;
 if (hasDom) {
   mock.module('#guide-reader', () => ({
+    PullChangesTree: () => null,
     default: (props: ReaderProps) => {
       reader = props;
       useEffect(() => {
@@ -51,11 +53,7 @@ if (hasDom) {
       return null;
     },
   }));
-  // The real review-app dialog and submit, by a path in a variable (the window's strict typecheck must not follow it).
-  const seam: string = '../guide/PlatformPost.tsx';
-  const real = (await import(seam)) as Record<string, unknown>;
-  mock.module('#platform-post', () => real);
-  await (await import('../threadDrawReady')).diffDrawReady(['typescript']);
+  await (await import('./platformPostSeam')).realPlatformPost();
 }
 const { PullReview } = (hasDom ? await import('./PullReview') : {}) as typeof import('./PullReview');
 
@@ -63,8 +61,6 @@ const A = 'a'.repeat(40);
 const B = 'b'.repeat(40);
 const STORE = 'plannotator-inbox-pull-review:';
 const PATH = 'src/retry.ts';
-const GLOBAL = { id: 'g1', type: 'comment', scope: 'general', filePath: '', lineStart: 0, lineEnd: 0, side: 'new', text: 'Split this PR.', createdAt: 1 };
-const LINE = { id: 'l1', type: 'comment', scope: 'line', filePath: PATH, lineStart: 12, lineEnd: 12, side: 'new', text: 'Cap the backoff.', createdAt: 2 };
 
 // The window remembers diffs it read by layer: each test has layers of its own.
 let nextNumber = 100;

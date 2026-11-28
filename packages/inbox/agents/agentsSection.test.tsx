@@ -12,7 +12,7 @@
  * Web Animations and IntersectionObserver are stood in for (happy-dom has neither to watch). DOM-gated: runs under
  * DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt. Fetch is mocked: no server.
  */
-import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { afterEach, beforeEach, expect, jest, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxAgent, InboxAgentsGroup, InboxComposeLaunch, InboxListRow } from '@plannotator/core/inbox-types';
@@ -231,6 +231,148 @@ test.skipIf(!hasDom)("Agents takes Machines' place above Projects: each machine 
   expect(surface()!.querySelector(`[data-machine="${MAC}"]`)!.getAttribute('aria-current')).toBe('page');
 });
 
+test.skipIf(!hasDom)('a list whose agent has a name that is not text (another machine, another version) still draws that row, by the next name', () => {
+  const bad = { ...agent('ses_bad'), label: 7, title: { x: 1 }, first_thread: { id: 'thr_1', name: null } } as unknown as InboxAgent;
+  setInboxAgents([group([bad, agent('ses_ok', { title: 'Ledger sync' })])]);
+  mount(<Sidebar {...sidebarProps({ machines: machinesModel(null) })} />);
+  const names = [...surface()!.querySelectorAll<HTMLElement>('[data-sidebar-agent]')].map((r) => [r.getAttribute('data-sidebar-agent'), r.querySelector('.ib-proj .ib-name')!.textContent]);
+  expect(names).toEqual([
+    ['ses_bad', 'billing-svc'],
+    ['ses_ok', 'Ledger sync'],
+  ]);
+});
+
+test.skipIf(!hasDom)('an agent waiting on the person keeps its place, and its row looks and reads like any other (no mark: the owner, 2026-11-15)', () => {
+  const listed = (waits: boolean) => [group([agent('ses_a'), agent('ses_b', waits ? { state: 'waiting', waiting: 2 } : { state: 'working' }), agent('ses_c')])];
+  const rows = () => [...surface()!.querySelectorAll<HTMLElement>('[data-sidebar-agent]')];
+  const drawn = () => rows().map((r) => [r.getAttribute('data-sidebar-agent'), r.querySelector('.ib-proj')!.innerHTML.replace(/ses_[abc]/g, 'ID')]);
+  setInboxAgents(listed(false));
+  mount(<Sidebar {...sidebarProps({ machines: machinesModel(null) })} />);
+  const before = drawn();
+  act(() => setInboxAgents(listed(true)));
+  expect(drawn()).toEqual(before);
+  expect(rows()[1]!.querySelector('.ib-proj .ib-sr')!.textContent).toBe(', Claude Code');
+});
+
+test.skipIf(!hasDom)('Show agent status sorts waiting then working and puts the waiting count on the Agents heading, including linked machines', () => {
+  const local = [
+    agent('ses_idle_1'),
+    agent('ses_working', { status_mark: { state: 'working' } }),
+    agent('ses_waiting_1', { status_mark: { state: 'blocked', where: 'inbox' } }),
+    agent('ses_idle_2'),
+  ];
+  const linked = [
+    agent('ses_waiting_2', { status_mark: { state: 'blocked', kind: 'question', where: 'terminal' } }),
+    agent('ses_linked_idle'),
+  ];
+  setInboxAgents([{ ...group(local, SELF), status_marks: true }, group(linked, MAC)]);
+  mount(<Sidebar {...sidebarProps({ machines: machinesModel([view(SELF, 'Studio'), view(MAC, 'MacBook')]) })} />);
+  const groups = [...surface()!.querySelectorAll<HTMLElement>('[data-agents-machine]')];
+  expect([...groups[0]!.querySelectorAll<HTMLElement>('[data-sidebar-agent]')].map((row) => row.dataset.sidebarAgent)).toEqual([
+    'ses_waiting_1',
+    'ses_working',
+    'ses_idle_1',
+    'ses_idle_2',
+  ]);
+  expect([...groups[1]!.querySelectorAll<HTMLElement>('[data-sidebar-agent]')].map((row) => row.dataset.sidebarAgent)).toEqual(['ses_waiting_2', 'ses_linked_idle']);
+  expect(document.querySelector('[data-sidebar-section="agents"]')!.textContent).toContain('2 waiting');
+});
+
+test.skipIf(!hasDom)('with the pointer on the list no row moves when an agent starts waiting; leaving it lets the waiting agent up', () => {
+  const listed = (waits: boolean) => [{ ...group([agent('ses_a'), agent('ses_b'), agent('ses_c', waits ? { status_mark: { state: 'blocked', where: 'inbox' } } : {})]), status_marks: true }];
+  const order = () => [...surface()!.querySelectorAll<HTMLElement>('[data-sidebar-agent]')].map((row) => row.dataset.sidebarAgent);
+  setInboxAgents(listed(false));
+  mount(<Sidebar {...sidebarProps({ machines: machinesModel(null) })} />);
+  expect(order()).toEqual(['ses_a', 'ses_b', 'ses_c']);
+  // React's pointer enter and leave come from pointerover / pointerout with the element left or entered.
+  act(() => void surface()!.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, relatedTarget: document.body })));
+  act(() => setInboxAgents(listed(true)));
+  expect(order()).toEqual(['ses_a', 'ses_b', 'ses_c']);
+  expect(document.querySelector('[data-sidebar-section="agents"]')!.textContent).toContain('1 waiting');
+  act(() => void surface()!.dispatchEvent(new PointerEvent('pointerout', { bubbles: true, relatedTarget: document.body })));
+  expect(order()).toEqual(['ses_c', 'ses_a', 'ses_b']);
+});
+
+/** The list held by a resting pointer, and an agent that has just started waiting (held below the others). */
+function heldWithAWaitingAgent() {
+  const listed = (waits: boolean) => [{ ...group([agent('ses_a'), agent('ses_b'), agent('ses_c', waits ? { status_mark: { state: 'blocked', where: 'inbox' } } : {})]), status_marks: true }];
+  const order = () => [...surface()!.querySelectorAll<HTMLElement>('[data-sidebar-agent]')].map((row) => row.dataset.sidebarAgent);
+  setInboxAgents(listed(false));
+  mount(<Sidebar {...sidebarProps({ machines: machinesModel(null) })} />);
+  act(() => void surface()!.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, relatedTarget: document.body })));
+  act(() => setInboxAgents(listed(true)));
+  expect(order()).toEqual(['ses_a', 'ses_b', 'ses_c']);
+  return order;
+}
+
+test.skipIf(!hasDom)('the window losing focus lets go of a held order (an app switch with the mouse resting on the list)', () => {
+  const order = heldWithAWaitingAgent();
+  act(() => void window.dispatchEvent(new Event('blur')));
+  expect(order()).toEqual(['ses_c', 'ses_a', 'ses_b']);
+});
+
+test.skipIf(!hasDom)('the tab going hidden lets go of a held order', () => {
+  const order = heldWithAWaitingAgent();
+  const own = Object.getOwnPropertyDescriptor(document, 'visibilityState');
+  Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+  try {
+    act(() => void document.dispatchEvent(new Event('visibilitychange')));
+  } finally {
+    if (own) Object.defineProperty(document, 'visibilityState', own);
+    else delete (document as unknown as { visibilityState?: unknown }).visibilityState;
+  }
+  expect(order()).toEqual(['ses_c', 'ses_a', 'ses_b']);
+});
+
+test.skipIf(!hasDom)('a pointer resting still holds the order at most 4 seconds; moving on the list holds it again', () => {
+  jest.useFakeTimers();
+  try {
+    const order = heldWithAWaitingAgent();
+    act(() => void jest.advanceTimersByTime(3_000));
+    act(() => void surface()!.dispatchEvent(new PointerEvent('pointermove', { bubbles: true })));
+    act(() => void jest.advanceTimersByTime(3_999));
+    expect(order()).toEqual(['ses_a', 'ses_b', 'ses_c']);
+    act(() => void jest.advanceTimersByTime(1));
+    expect(order()).toEqual(['ses_c', 'ses_a', 'ses_b']);
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
+test.skipIf(!hasDom)('unmounting the list leaves no hold timer and no blur or visibility listener behind', () => {
+  const added: Array<[EventTarget, string, unknown]> = [];
+  const removed: Array<[EventTarget, string, unknown]> = [];
+  const undo: Array<() => void> = [];
+  for (const target of [window, document] as EventTarget[]) {
+    const add = target.addEventListener;
+    const remove = target.removeEventListener;
+    target.addEventListener = function (this: EventTarget, type: string, fn: unknown, opts?: unknown) {
+      added.push([target, type, fn]);
+      return add.call(this, type, fn as EventListener, opts as AddEventListenerOptions);
+    } as typeof add;
+    target.removeEventListener = function (this: EventTarget, type: string, fn: unknown, opts?: unknown) {
+      removed.push([target, type, fn]);
+      return remove.call(this, type, fn as EventListener, opts as EventListenerOptions);
+    } as typeof remove;
+    undo.push(() => {
+      target.addEventListener = add;
+      target.removeEventListener = remove;
+    });
+  }
+  jest.useFakeTimers();
+  try {
+    heldWithAWaitingAgent();
+    const watched = added.filter(([target, type]) => (target === window && type === 'blur') || (target === document && type === 'visibilitychange'));
+    expect(watched.length).toBeGreaterThan(0);
+    unmountAll();
+    for (const [target, type, fn] of watched) expect(removed.some(([t, ty, f]) => t === target && ty === type && f === fn)).toBe(true);
+    expect(jest.getTimerCount()).toBe(0);
+  } finally {
+    jest.useRealTimers();
+    for (const step of undo) step();
+  }
+});
+
 test.skipIf(!hasDom)('with no machine linked the agents are one flat list; an Inbox with no agents field and no link has no section', () => {
   const alone = machinesModel([view(SELF, 'Studio')]);
   mount(<Sidebar {...sidebarProps({ machines: alone })} />);
@@ -245,7 +387,7 @@ test.skipIf(!hasDom)('with no machine linked the agents are one flat list; an In
 });
 
 test.skipIf(!hasDom)('Add machine and Add agent are the heading\'s buttons, each with its own route; an agent row filters the list, or messages a live agent with no thread', () => {
-  setInboxAgents([group([agent('ses_s1'), agent('ses_s2')], SELF)]);
+  setInboxAgents([group([agent('ses_s1', { first_thread: { id: 'thr_1', name: 'Invoice retries' } }), agent('ses_s2')], SELF)]);
   const calls: string[] = [];
   let opener: HTMLElement | null = null;
   const rows = [threadRow('thr_1', 'ses_s1', 'Invoice retries')];
@@ -284,7 +426,7 @@ test.skipIf(!hasDom)('Add machine and Add agent are the heading\'s buttons, each
 test.skipIf(!hasDom)("a starred thread that is also an agent's thread shows under Starred and under Agents: the star opens it, the agent filters to it", () => {
   // The phone sheet's mock listed such a thread under Starred only; the owner did not approve that (approval
   // "inbox-phone-sidebar-sheet", NOT approved): Agents stays a list of every agent.
-  setInboxAgents([group([agent('ses_s1'), agent('ses_s2')])]);
+  setInboxAgents([group([agent('ses_s1', { first_thread: { id: 'thr_star', name: 'Starred and running' } }), agent('ses_s2', { first_thread: { id: 'thr_other', name: 'Only running' } })])]);
   const starred = { ...threadRow('thr_star', 'ses_s1', 'Starred and running'), project: { id: 'prj_bill', name: 'billing-svc' }, section: 'waiting', unread: false, unseen: 0, read_at: null, resolved_at: null, questions: { open: 2, holds_up: [] } } as unknown as InboxListRow;
   const opened: string[] = [];
   mount(<Sidebar {...sidebarProps({ pins: [starred], agentRows: [starred, threadRow('thr_other', 'ses_s2', 'Only running')], onOpenPin: (row) => opened.push(`pin:${row.thread_id}`), onAgentFilter: (id) => opened.push(`agent:${id}`) })} />);

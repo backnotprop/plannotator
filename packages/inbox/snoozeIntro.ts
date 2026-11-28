@@ -78,7 +78,7 @@ const targetRow = (rows: readonly InboxListRow[], threadId: string | null) => ro
 
 /** What one load knows (`due`: the load's latch, reveal.ts `useLineLatch`) and what holds now. */
 export interface SnoozeIntroGate {
-  /** The Inbox has it due for this page (settings `snooze_intro.due`; never for a tailnet guest), as the load's latch holds it. */
+  /** The Inbox has it due for this page (settings `snooze_intro.due`), as the load's latch holds it. */
   due: boolean;
   listLoaded: boolean;
   firstRun: boolean;

@@ -98,3 +98,33 @@ export function whenCodeLineRendered(
 
   return stop;
 }
+
+/** The element's parent, or its shadow root's host (Pierre draws lines in a shadow root). */
+function parentAcross(node: Element): HTMLElement | null {
+  if (node.parentElement) return node.parentElement;
+  const root = node.getRootNode();
+  return typeof ShadowRoot !== 'undefined' && root instanceof ShadowRoot && root.host instanceof HTMLElement ? root.host : null;
+}
+
+/**
+ * Bring a code line to the middle of the view, vertically only. `scrollIntoView` alone also slides a line wider than
+ * the view sideways (by the gutter's width), even in a short file with nothing to scroll down. The nearest ancestor
+ * that scrolls vertically (across Pierre's shadow root) moves; with none, `scrollIntoView` brings the line on screen
+ * (the page may move) and every ancestor's sideways position is put back as it was.
+ */
+export function scrollCodeLineIntoView(row: HTMLElement, options: { smooth?: boolean } = {}): void {
+  const sideways: [HTMLElement, number][] = [];
+  for (let node = parentAcross(row); node; node = parentAcross(node)) {
+    if (node.scrollHeight > node.clientHeight && /(auto|scroll)/.test(getComputedStyle(node).overflowY)) {
+      const box = node.getBoundingClientRect();
+      const rect = row.getBoundingClientRect();
+      const top = node.scrollTop + rect.top - (box.top + box.height / 2) + rect.height / 2;
+      if (options.smooth && typeof node.scrollTo === 'function') node.scrollTo({ top, behavior: 'smooth' });
+      else node.scrollTop = top;
+      return;
+    }
+    sideways.push([node, node.scrollLeft]);
+  }
+  row.scrollIntoView({ block: 'center', inline: 'nearest' });
+  for (const [node, left] of sideways) if (node.scrollLeft !== left) node.scrollLeft = left;
+}

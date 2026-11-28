@@ -273,7 +273,7 @@ describe.if(hasDom)('DiffViewer compact-touch line selection (DOM)', () => {
     } as unknown as Selection);
 
     try {
-      const diffContainer = host!.querySelector('.p-4') as HTMLElement;
+      const diffContainer = host!.querySelector('[data-diff-content]') as HTMLElement;
       diffContainer.dispatchEvent(new Event('pointerdown', { bubbles: true }));
 
       const middleLineRange: SelectedLineRange = { start: 3, end: 3, side: 'additions' };
@@ -302,7 +302,7 @@ describe.if(hasDom)('DiffViewer compact-touch line selection (DOM)', () => {
     } as unknown as Selection);
 
     try {
-      const diffContainer = host!.querySelector('.p-4') as HTMLElement;
+      const diffContainer = host!.querySelector('[data-diff-content]') as HTMLElement;
       diffContainer.dispatchEvent(new Event('pointerdown', { bubbles: true }));
 
       const singleLineRange: SelectedLineRange = { start: 3, end: 3, side: 'additions' };

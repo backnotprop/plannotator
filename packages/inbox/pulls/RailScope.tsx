@@ -1,11 +1,11 @@
 /**
  * The PR page rail's Changes | All files (the owner's take A on #2639): the review app's switch over its file tree
  * (review-editor's `ScopeSwitch`, its classes and words), at the head of the rail. Changes is the PR's own files
- * (`RailTree`); All files the repository at the head the patch on screen was read at, from the Inbox's
+ * (`guide/PullChangesTree.tsx`, the review app's Changes tree); All files the repository at the head the patch on screen was read at, from the Inbox's
  * `/api/inbox/pulls/repo-files`, drawn by the review app's own tree (`guide/PullRepoParts.tsx`).
  */
 import type { TreeScope } from '@plannotator/ui/hooks/useTreeScope';
-import { inboxUrl } from '../inboxUrl';
+import { pullUrl } from './pullMachines';
 
 const FOCUS =
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70 focus-visible:ring-offset-1 focus-visible:ring-offset-background';
@@ -44,6 +44,17 @@ export function RailScopeSwitch({ scope, changed, onSelect }: { scope: TreeScope
   );
 }
 
+export function focusScopeWhenLost(rail: HTMLElement | null, scope: TreeScope, frames = 12): void {
+  const attempt = (left: number) => {
+    const active = document.activeElement;
+    if (active && active !== document.body && active.isConnected) return;
+    const button = rail?.querySelector<HTMLElement>(`[data-tree-scope="${scope}"]`);
+    if (button) button.focus({ preventScroll: true });
+    else if (left > 0) requestAnimationFrame(() => attempt(left - 1));
+  };
+  requestAnimationFrame(() => attempt(frames));
+}
+
 /**
  * The review app's reads (`/api/repo-files?…`, `/api/repo-file?…`, as its `useRepoFiles` and `useRepoFileText` ask)
  * sent to the Inbox's routes for one PR, the rest of the query as it was. Anything else is refused, never fetched.
@@ -53,6 +64,6 @@ export function pullRepoFetch(key: string): typeof fetch {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     const asked = /^\/api\/(repo-files|repo-file)\?(.*)$/.exec(url);
     if (!asked) return Promise.reject(new Error('The repository could not be listed.'));
-    return globalThis.fetch(inboxUrl(`/pulls/${asked[1]}`, `key=${encodeURIComponent(key)}&${asked[2]}`), init);
+    return globalThis.fetch(pullUrl(`/pulls/${asked[1]}`, key, asked[2]), init);
   }) as typeof fetch;
 }

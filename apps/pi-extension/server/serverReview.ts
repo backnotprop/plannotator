@@ -3,6 +3,7 @@ import { schedulePiDailyPing } from "./daily-ping.ts";
 import { createPackageChangesService, MAX_PACKAGE_FILE_BYTES, PACKAGE_CHECKOUT_WAIT_MS, prSettingsSource, REMOTE_PACKAGE_READS, waitAtMost } from "../generated/package-changes-service.ts";
 import { parseDiffToFiles } from "../generated/diff-files.ts";
 import { isSameOriginOrNoOrigin } from "../generated/request-origin.ts";
+import { decodePathSegment, MALFORMED_PATH_ERROR } from "../generated/path-segment.ts";
 import { likelyAppHtmlEncoding, prewarmAppHtml } from "../generated/app-html.ts";
 import { openPackedApp } from "../generated/packed-app.ts";
 import {
@@ -11,6 +12,14 @@ import {
 	isDiagramEngineRequest,
 	type DiagramEngineSource,
 } from "../generated/diagram-engine-assets.ts";
+import {
+	answerSemDiffRequest,
+	createSemDiffAssets,
+	isSemDiffRequest,
+	type SemDiffSource,
+} from "../generated/sem-diff-assets.ts";
+import { answerSemDiffOpinionRequest, isSemDiffOpinionRequest } from "../generated/sem-diff-opinion.ts";
+import { getPlannotatorDataDir as semDiffOpinionDataDir } from "../generated/data-dir.ts";
 import { readFileSync, existsSync } from "node:fs";
 import { createServer } from "node:http";
 import os from "node:os";
@@ -19,13 +28,14 @@ import { basename, dirname as dirnamePath, join as joinPath, resolve as resolveP
 import { SingleFlight } from "../generated/single-flight.ts";
 import { contentHash } from "../generated/draft.ts";
 import { countUnsentDraftComments, hostSessionClosedEvent } from "../generated/host-control.ts";
+import { agentRefusal, type AgentPresence } from "../generated/review-agent-gone.ts";
 import { checkServerSession, createServerSessionNonce, serverSessionMismatchBody } from "../generated/server-session.ts";
 import { handleHostControl, resolveHostControlToken, type HostControl } from "./host-control.ts";
 import { createPiRefCards, handleRefCards, type RefRunner } from "./ref-cards.ts";
 import { createRequestHostGuard } from "./request-host-guard.ts";
 import { refuseCrossOriginWrite } from "./request-origin-guard.ts";
 import { createReviewDraftSession, localGitDraftTargetKey, localReviewDraftKeys, prDraftTargetKey, type ReviewDraftKeys } from "../generated/review-draft.ts";
-import { agentSwitchConfigToSave, agentToolSaveFailed, cookieHostConfigWrite, loadConfig, saveConfig, detectGitUser, getServerConfig, parsePackageChangesConfig, parseReviewAnalysisConfig, resolveAIEnabled, resolvePackageLookup, resolveSharingEnabled, resolveClaudeSandbox, resolveCursorSandbox, resolveFeedbackHistory, resolveGuideHistory, resolveGuideShareUrl, resolveGitRemoteCheck, resolveReviewProgress } from "../generated/config.ts";
+import { agentSwitchConfigToSave, agentToolSaveFailed, cookieHostConfigWrite, loadConfig, saveConfig, detectGitUser, getServerConfig, parseDisplayOptionsConfig, parsePackageChangesConfig, parseReviewAnalysisConfig, resolveAIEnabled, resolvePackageLookup, resolveSharingEnabled, resolveClaudeSandbox, resolveCursorSandbox, resolveFeedbackHistory, resolveGuideHistory, resolveGuideShareUrl, resolveGitRemoteCheck, resolveReviewProgress } from "../generated/config.ts";
 import { currentPiHost } from "../pi-host.ts";
 import { appendFeedbackRecord, countChangedFiles, deriveFeedbackProject, type FeedbackDecision, type FeedbackReviewTarget } from "../generated/feedback-archive.ts";
 import { isFaviconStyle, type FaviconStyle } from "../generated/favicon.ts";
@@ -109,9 +119,12 @@ import { createReviewRepoWatch } from "./review-repo-watch.ts";
 import {
 	REVIEW_IMAGE_ENDPOINT,
 	REVIEW_IMAGE_READ_CONCURRENCY,
+	REVIEW_IMAGE_SIZES_ENDPOINT,
 	createConcurrencyLimiter,
 	handleReviewImageRequest,
+	handleReviewImageSizesRequest,
 	readPRImageSide,
+	reviewImageSizesAdvert,
 } from "../generated/review-image.ts";
 import {
 	REVIEW_MARKDOWN_IMAGE_ENDPOINT,
@@ -152,14 +165,20 @@ import { type AgentJobInfo, REVIEW_OUTPUT_FAILED, getAgentJobAnnotationContext, 
 import { createExternalAnnotationHandler } from "./external-annotations.ts";
 import {
 	handleReviewDraftRequest,
+	handleCustomThemesScript,
+	customThemesPage,
 	handleFavicon,
 	handleImageRequest,
 	handleStarAskRequest,
+	handleLaunchSwitchRequest,
+	piLaunchSwitch,
 	readDraftGenerationFromBody,
 	readDraftGenerationFromUrl,
 	handleUploadRequest,
 } from "./handlers.ts";
 import { handleApiNotFound, serveApp, json, parseBody, parseJsonBody, readBody, requestUrl, send } from "./helpers.ts";
+import { createReviewLiveRoute } from "./review-live-route.ts";
+import type { ReviewLiveTarget } from "../generated/review-live.ts";
 import { captureReviewProgress, handleReviewProgress } from "../generated/review-progress.ts";
 import { createPiAIRuntime, handlePiAIRequest } from "./ai-runtime.ts";
 import type { SessionBridge } from "../generated/ai/session-bridge.ts";
@@ -198,10 +217,9 @@ import {
 	parseClaudeStreamOutput,
 	transformClaudeFindings,
 } from "../generated/claude-review.ts";
-import { createTourSession, TOUR_EMPTY_OUTPUT_ERROR } from "../generated/tour-review.ts";
 import { createGuideSession, GUIDE_EMPTY_OUTPUT_ERROR } from "../generated/guide-review.ts";
 import { GuideShareError, shareGuide, unshareBeforeDelete, unshareGuide } from "../generated/guide-share.ts";
-import { createGuideStoreSession, SAVED_GUIDE_ID_PREFIX, updateGuideShare } from "../generated/guide-store.ts";
+import { createGuideStoreSession, normalizeGuideTitle, SAVED_GUIDE_ID_PREFIX, updateGuideShare } from "../generated/guide-store.ts";
 import {
 	buildGuideSnapshot,
 	createGuideHtml,
@@ -240,16 +258,6 @@ import {
 import { readRepoFile, repoFileErrorBody, REPO_FILE_ERROR_STATUS } from "../generated/repo-file.ts";
 import { piCodeNavRuntime } from "./code-nav-runtime.ts";
 import { readRepoWorkingTreeFile } from "../generated/repo-files-node.ts";
-import {
-	createDefaultSemanticDiffRuntime,
-	getSemanticDiffAvailability,
-	getSemanticDiffScratchCwd,
-	runSemanticDiff,
-	semanticDiffCacheKey,
-	semanticDiffFileExtsFromSearchParams,
-	SemanticDiffResponseCache,
-} from "../generated/semantic-diff.ts";
-import type { SemanticDiffAvailability, SemanticDiffResponse } from "../generated/semantic-diff-types.ts";
 import { CallFlowService } from "../generated/call-flow.ts";
 import { CallFlowInstallCoordinator, callFlowInstallOriginAllowed } from "../generated/call-flow-install.ts";
 import type { CallFlowInstallCoordinatorOptions } from "../generated/call-flow-install.ts";
@@ -360,9 +368,13 @@ export async function startReviewServer(options: {
 	 * show as code.
 	 */
 	diagramEngine?: DiagramEngineSource;
+	semDiff?: SemDiffSource;
 	origin?: string;
 	diffType?: DiffType | WorkspaceDiffType;
 	gitContext?: GitContext;
+	liveReviewAgent?: ReviewLiveTarget | null;
+	liveReviewDataDir?: string;
+	liveReviewKey?: { key: string; title: string } | null;
 	/**
 	 * Initial base branch the caller used to compute `rawPatch`. When a caller
 	 * overrides the detected default (e.g. `openCodeReview({ defaultBranch })`),
@@ -437,6 +449,13 @@ export async function startReviewServer(options: {
 	onCleanup?: () => void | Promise<void>;
 	/** Called when server starts with the URL, remote status, and port */
 	onReady?: (url: string, isRemote: boolean, port: number) => void;
+	/**
+	 * Whether a Pi session can still receive this review's decision
+	 * (packages/shared/review-agent-gone.ts, mirrors packages/server/review.ts).
+	 * "gone" answers Send and Approve with `410 agent_gone` and keeps the
+	 * draft, unarchived. Absent: every decision is taken as before.
+	 */
+	agentPresence?: () => AgentPresence;
 }): Promise<ReviewServerResult> {
 	// The daily ping (server/daily-ping.ts): in the background, never awaited.
 	schedulePiDailyPing("review");
@@ -451,6 +470,18 @@ export async function startReviewServer(options: {
 	const hasLocalAccess = !!options.gitContext;
 	const sessionVcsType = options.gitContext?.vcsType;
 	let clientGitContext = options.gitContext;
+	const liveRoute = createReviewLiveRoute({
+		...(options.liveReviewDataDir ? { dataDir: options.liveReviewDataDir } : {}),
+		launchedBy: options.liveReviewAgent ?? null,
+		projectPath: () => clientGitContext?.root ?? clientGitContext?.cwd ?? options.gitContext?.root ?? options.gitContext?.cwd ?? options.agentCwd ?? process.cwd(),
+		review: () =>
+			options.liveReviewKey ??
+			(prMeta?.url
+				? { key: `pr:${prMeta.url}`, title: prMeta.title || prMeta.url }
+				: clientGitContext?.currentBranch
+					? { key: `branch:${clientGitContext.currentBranch}`, title: clientGitContext.currentBranch }
+					: null),
+	});
 	const isRemote = isRemoteSession();
 	const wslFlag = detectWSL();
 	let prRef = prMeta ? prRefFromMetadata(prMeta) : null;
@@ -1153,7 +1184,6 @@ export async function startReviewServer(options: {
 			true,
 		);
 	}
-	const tour = createTourSession();
 	const guide = createGuideSession();
 	// Durable guide persistence (#1112): autosaves validated guides to
 	// ${PLANNOTATOR_DATA_DIR}/guides/{repo-key}/ and serves them back through
@@ -1214,91 +1244,7 @@ export async function startReviewServer(options: {
 		}
 		return guideStore.getJobGuideSnapshot(jobId);
 	}
-	const semanticDiffScratchCwd = getSemanticDiffScratchCwd();
-	function resolveSemanticDiffCwd(diffType: DiffType = currentDiffType as DiffType): string {
-		if (workspace) return workspace.root;
-		if (options.worktreePool && prMeta) {
-			const poolPath = options.worktreePool.resolve(prMeta.url);
-			if (poolPath) return poolPath;
-		}
-		if (options.agentCwd) return options.agentCwd;
-		if (options.gitContext) {
-			const vcsCwd = resolveVcsCwd(diffType, options.gitContext.cwd);
-			if (vcsCwd) return vcsCwd;
-			if (options.gitContext.cwd) return options.gitContext.cwd;
-		}
-		return semanticDiffScratchCwd;
-	}
-	const semanticDiffCache = new SemanticDiffResponseCache();
-	const semanticDiffAvailabilityCache = new Map<string, Promise<SemanticDiffAvailability>>();
-
-	const semanticDiffEnabled = (): boolean => loadConfig().reviewAnalysis?.semanticDiff !== false;
 	const callFlowEnabled = (): boolean => loadConfig().reviewAnalysis?.callFlow === true;
-
-	function createSemanticDiffRuntime(cwd: string) {
-		return {
-			...createDefaultSemanticDiffRuntime(),
-			cwd,
-		};
-	}
-
-	function getSemanticDiffAvailabilityForCwd(cwd: string): Promise<SemanticDiffAvailability> {
-		const cached = semanticDiffAvailabilityCache.get(cwd);
-		if (cached) return cached;
-
-		const next: Promise<SemanticDiffAvailability> = getSemanticDiffAvailability(createSemanticDiffRuntime(cwd)).catch((error) => ({
-			available: false,
-			reason: "sem-probe-failed",
-			message: error instanceof Error ? error.message : String(error),
-		}));
-		semanticDiffAvailabilityCache.set(cwd, next);
-		return next;
-	}
-
-	async function getSemanticDiffAdvert(
-		diffType: DiffType = currentDiffType as DiffType,
-		enabled = semanticDiffEnabled(),
-	) {
-		if (!enabled) return { available: false, enabled: false };
-		if (isGitButlerCommittedView(diffType)) return { available: false };
-		const availability = await getSemanticDiffAvailabilityForCwd(resolveSemanticDiffCwd(diffType));
-		return {
-			available: availability.available,
-			...(availability.semVersion ? { semVersion: availability.semVersion } : {}),
-			...(availability.semSource ? { semSource: availability.semSource } : {}),
-		};
-	}
-
-	async function getSemanticDiff(url: URL): Promise<SemanticDiffResponse> {
-		if (!semanticDiffEnabled()) {
-			return { status: "unavailable", reason: "disabled", message: "Semantic diff is disabled in Settings → Analysis." };
-		}
-		if (isGitButlerCommittedView()) {
-			return {
-				status: "unavailable",
-				reason: "gitbutler-committed-view",
-				message: "Semantic diff is unavailable for committed GitButler views because the live workspace may contain other layers.",
-			};
-		}
-		const cwd = resolveSemanticDiffCwd();
-		const fileExts = semanticDiffFileExtsFromSearchParams(url.searchParams);
-		const cacheKey = semanticDiffCacheKey({ rawPatch: currentPatch, cwd, fileExts });
-		const cached = semanticDiffCache.get(cacheKey, currentPatch);
-		if (cached) return cached;
-
-		const result = await runSemanticDiff(
-			{ rawPatch: currentPatch, cwd, fileExts },
-			createSemanticDiffRuntime(cwd),
-		);
-		if (result.status === "ok") {
-			semanticDiffCache.set(cacheKey, currentPatch, result);
-		} else if (result.status === "error") {
-			// Cooldown-memoized: request rate (file badges remount on scroll) must
-			// not drive sem execution rate when it's failing.
-			semanticDiffCache.setFailure(cacheKey, currentPatch, result);
-		}
-		return result;
-	}
 
 	function getCallFlowAdvert(
 		diffType: DiffType = currentDiffType as DiffType,
@@ -1316,7 +1262,7 @@ export async function startReviewServer(options: {
 			return { status: "stale", reason: "snapshot-mismatch", message: "The review changed before call flow could start. Refresh and try again." };
 		}
 		if (!callFlowEnabled()) {
-			return { status: "disabled", reason: "disabled", message: "Call flow is disabled in Settings → Analysis." };
+			return { status: "disabled", reason: "disabled", message: "Call flow is disabled in Settings → Reviews." };
 		}
 		if (workspace) {
 			return { status: "unsupported", reason: "workspace-unsupported", message: "Call flow does not yet support multi-repository workspace reviews." };
@@ -1451,18 +1397,6 @@ export async function startReviewServer(options: {
 							snapshotId: launchSnapshotId,
 						}),
 					};
-
-			if (provider === "tour") {
-				const built = await tour.buildCommand({
-					cwd,
-					patch: launchPatch,
-					diffType: launchDiffType as DiffType,
-					options: userMessageOptions,
-					prMetadata: launchPrMeta,
-					config,
-				});
-				return built ? { ...built, prUrl: launchPrUrl, diffScope: launchDiffScope, diffContext, reviewProfileId: reviewProfile.id, reviewProfileLabel: reviewProfile.label } : built;
-			}
 
 			if (provider === "guide") {
 				// Snapshot ALL launch-relevant mutable closure state into locals
@@ -1803,7 +1737,7 @@ export async function startReviewServer(options: {
 			// FAIL-CLOSED: marker output is prompt-enforced (no schema flag), so any
 			// missing/malformed/schema/transform/insertion failure must MUTATE the job
 			// to failed — NEVER throw (agent-jobs.ts swallows throws, silently leaving
-			// an exit-0 job marked done). Mirrors the Tour fail-closed pattern below.
+			// an exit-0 job marked done). Mirrors the guide fail-closed pattern below.
 			// Findings carry nullable file/line, classified into line/whole-file/
 			// general by transformMarkerFindings — nothing is dropped (same as Claude).
 			const markerEngine = MARKER_ENGINES[job.provider as MarkerEngineId];
@@ -1856,20 +1790,6 @@ export async function startReviewServer(options: {
 				return;
 			}
 
-			if (job.provider === "tour") {
-				const { summary } = await tour.onJobComplete({ job, meta });
-				if (summary) {
-					job.summary = summary;
-				} else {
-					// The process exited 0 but the model returned empty or malformed output
-					// and nothing was stored. Flip status so the client doesn't auto-open
-					// a successful-looking card that 404s on /api/tour/:id.
-					job.status = "failed";
-					job.error = TOUR_EMPTY_OUTPUT_ERROR;
-				}
-				return;
-			}
-
 			if (job.provider === "guide") {
 				// Validate refs against the LAUNCH-time changed-file set (snapshotted
 				// on the job at buildCommand time), not the current patch — the model
@@ -1892,7 +1812,7 @@ export async function startReviewServer(options: {
 					const validated = guide.getGuide(job.id);
 					if (validated) await guideStore.saveForJob(guideSaveJob(job), validated, job.guideContext, meta.launchReview);
 				} else {
-					// Same fail-closed precedent as Tour: an exit-0 job with empty,
+					// Fail closed: an exit-0 job with empty,
 					// malformed, or fully-invalidated output must not look like a
 					// successful card that 404s on /api/guide/:id.
 					job.status = "failed";
@@ -1987,6 +1907,8 @@ export async function startReviewServer(options: {
 	// Hashed off the request path, so `/api/diff` finds it ready.
 	const diagramEngineAssets = createDiagramEngineAssets(options.diagramEngine);
 	diagramEngineAssets.warm();
+	const semDiffAssets = createSemDiffAssets(options.semDiff);
+	semDiffAssets.warm();
 	// Where the current mode reads one side of a repository path, as bytes:
 	// shared by /api/review-image (#1598) and the Markdown preview's
 	// /api/review-markdown-image, mirroring packages/server/review.ts.
@@ -2033,6 +1955,12 @@ export async function startReviewServer(options: {
 		}
 		return { kind: "unavailable" };
 	};
+	const imageSizesAdvert = (patch: string) =>
+		reviewImageSizesAdvert({
+			available: imagePreviewSupported,
+			patch,
+			readSide: (side, filePath, oldPath, maxBytes, signal) => runImageRead(() => readReviewSide(side, filePath, oldPath, maxBytes, signal), signal),
+		});
 	const sourceKindAdvert = isStaticPatchMode
 		? ({ sourceKind: "patch" } as const)
 		: ({} as Record<string, never>);
@@ -2285,8 +2213,10 @@ export async function startReviewServer(options: {
 		env: process.env,
 	});
 
-	const app = openPackedApp(options.htmlContent);
+	const app = openPackedApp(options.htmlContent, { page: (html) => customThemesPage(html) });
 	const requestHostGuard = createRequestHostGuard();
+	// The launch switch's reader (generated/launch-switch.ts): in the background, never awaited.
+	piLaunchSwitch().start();
 	const server = createServer(async (req, res) => {
 		// Host allowlist first, before any route (request-host-guard.ts).
 		if (requestHostGuard.refuse(req, res)) return;
@@ -2295,38 +2225,17 @@ export async function startReviewServer(options: {
 		const url = requestUrl(req);
 
 		if (handleHostControl(req, res, url, { token: hostControlToken, getServerPort: () => boundPort, control: hostControl })) return;
+		if (await liveRoute(req, res, url)) return;
 		if (await handleRefCards(req, res, url, refCards, serverSession)) return;
-
-		// API: Get tour result
-		if (url.pathname.match(/^\/api\/tour\/[^/]+$/) && req.method === "GET") {
-			const jobId = url.pathname.slice("/api/tour/".length);
-			const result = tour.getTour(jobId);
-			if (!result) {
-				json(res, { error: "Tour not found" }, 404);
-				return;
-			}
-			json(res, result);
-			return;
-		}
-
-		// API: Save tour checklist state
-		const checklistMatch = url.pathname.match(/^\/api\/tour\/([^/]+)\/checklist$/);
-		if (checklistMatch && req.method === "PUT") {
-			const jobId = checklistMatch[1];
-			try {
-				const body = await parseBody(req) as { checked: boolean[] };
-				if (Array.isArray(body.checked)) tour.saveChecklist(jobId, body.checked);
-				json(res, { ok: true });
-			} catch {
-				json(res, { error: "Invalid JSON" }, 400);
-			}
-			return;
-		}
 
 		// API: Get guide result — live job ids, or `saved:{id}` for a
 		// persisted guide loaded from the on-disk store (#1112).
 		if (url.pathname.match(/^\/api\/guide\/[^/]+$/) && req.method === "GET") {
-			const jobId = decodeURIComponent(url.pathname.slice("/api/guide/".length));
+			const jobId = decodePathSegment(url.pathname.slice("/api/guide/".length));
+			if (jobId === null) {
+				json(res, { error: MALFORMED_PATH_ERROR }, 400);
+				return;
+			}
 			if (jobId.startsWith(SAVED_GUIDE_ID_PREFIX)) {
 				const saved = await guideStore.getSavedGuideData(jobId.slice(SAVED_GUIDE_ID_PREFIX.length));
 				if (!saved) {
@@ -2349,7 +2258,11 @@ export async function startReviewServer(options: {
 		// the job's autosaved file; `saved:{id}` ids persist directly.
 		const reviewedMatch = url.pathname.match(/^\/api\/guide\/([^/]+)\/reviewed$/);
 		if (reviewedMatch && req.method === "PUT") {
-			const jobId = decodeURIComponent(reviewedMatch[1]);
+			const jobId = decodePathSegment(reviewedMatch[1]);
+			if (jobId === null) {
+				json(res, { error: MALFORMED_PATH_ERROR }, 400);
+				return;
+			}
 			try {
 				const body = await parseBody(req) as { reviewed: boolean[] };
 				if (Array.isArray(body.reviewed)) {
@@ -2374,7 +2287,11 @@ export async function startReviewServer(options: {
 		// API: Portable export of a guide (decision record D1/D9). Mirrors packages/server/review.ts.
 		const guideExportMatch = url.pathname.match(/^\/api\/guide\/([^/]+)\/(export|export-info)$/);
 		if (guideExportMatch && req.method === "GET") {
-			const jobId = decodeURIComponent(guideExportMatch[1]);
+			const jobId = decodePathSegment(guideExportMatch[1]);
+			if (jobId === null) {
+				json(res, { error: MALFORMED_PATH_ERROR }, 400);
+				return;
+			}
 			// Unlike Bun.serve, node:http does not turn a thrown error into a
 			// 500 — an unguarded throw here would take the extension host down.
 			let snapshot: GuideSnapshot | null;
@@ -2416,7 +2333,11 @@ export async function startReviewServer(options: {
 		// any existing link. Mutating verbs carry the cross-origin guard.
 		const guideShareMatch = url.pathname.match(/^\/api\/guide\/([^/]+)\/(share|share-info)$/);
 		if (guideShareMatch && guideShareMatch[2] === "share-info" && req.method === "GET") {
-			const jobId = decodeURIComponent(guideShareMatch[1]);
+			const jobId = decodePathSegment(guideShareMatch[1]);
+			if (jobId === null) {
+				json(res, { error: MALFORMED_PATH_ERROR }, 400);
+				return;
+			}
 			const config = loadConfig();
 			const existing = (await guideStore.locateEnvelope(jobId))?.envelope.share;
 			json(res, {
@@ -2431,7 +2352,11 @@ export async function startReviewServer(options: {
 				json(res, { error: "Cross-origin share requests are not allowed" }, 403);
 				return;
 			}
-			const jobId = decodeURIComponent(guideShareMatch[1]);
+			const jobId = decodePathSegment(guideShareMatch[1]);
+			if (jobId === null) {
+				json(res, { error: MALFORMED_PATH_ERROR }, 400);
+				return;
+			}
 			const config = loadConfig();
 			const serviceUrl = resolveGuideShareUrl(config);
 			if (req.method === "POST") {
@@ -2537,9 +2462,39 @@ export async function startReviewServer(options: {
 		// effort: the envelope is the only copy of the delete token.
 		const savedGuideDeleteMatch = url.pathname.match(/^\/api\/guides\/([^/]+)$/);
 		if (savedGuideDeleteMatch && req.method === "DELETE") {
-			const savedId = decodeURIComponent(savedGuideDeleteMatch[1]);
+			const savedId = decodePathSegment(savedGuideDeleteMatch[1]);
+			if (savedId === null) {
+				json(res, { error: MALFORMED_PATH_ERROR }, 400);
+				return;
+			}
 			await unshareBeforeDelete((await guideStore.locateEnvelope(`${SAVED_GUIDE_ID_PREFIX}${savedId}`))?.envelope.share);
 			const ok = await guideStore.deleteSaved(savedId);
+			if (!ok) {
+				json(res, { error: "Guide not found" }, 404);
+				return;
+			}
+			json(res, { ok: true });
+			return;
+		}
+
+		if (savedGuideDeleteMatch && req.method === "PATCH") {
+			const savedId = decodePathSegment(savedGuideDeleteMatch[1]);
+			if (savedId === null) {
+				json(res, { error: MALFORMED_PATH_ERROR }, 400);
+				return;
+			}
+			let body: { title?: unknown };
+			try {
+				body = (await parseBody(req)) as { title?: unknown };
+			} catch {
+				json(res, { error: "Invalid JSON" }, 400);
+				return;
+			}
+			if (!normalizeGuideTitle(body?.title)) {
+				json(res, { error: "A title is 1 to 200 characters." }, 400);
+				return;
+			}
+			const ok = await guideStore.renameSaved(savedId, body.title as string);
 			if (!ok) {
 				json(res, { error: "Guide not found" }, 404);
 				return;
@@ -2646,10 +2601,12 @@ export async function startReviewServer(options: {
 				approvalNotesSupported,
 				serverSession,
 				imagePreviewSupported,
+				...(await imageSizesAdvert(servedPatch)),
 				markdownPreviewSupported,
 				repoFilesSupported,
 				// Session-constant, read once by the page at mount.
 				diagramEngine: await diagramEngineAssets.advert(),
+				semDiff: await semDiffAssets.advert(),
 				...sourceKindAdvert,
 				// Mount is the only place the pin matters, so it rides /api/diff
 				// alone (not the switch endpoints).
@@ -2686,7 +2643,6 @@ export async function startReviewServer(options: {
 				...(generatedFiles && { generatedFiles }),
 				...(baseBehindRemote && { baseBehindRemote: true }),
 				...(servedError && { error: servedError }),
-				semanticDiff: await getSemanticDiffAdvert(servedDiffType as DiffType),
 				callFlow: await getCallFlowAdvert(servedDiffType as DiffType),
 				serverConfig: getServerConfig(gitUser, currentPiHost(), { cookieHost: !isRemoteSession() }),
 				...piUpdateAdvert(options.origin),
@@ -2780,8 +2736,6 @@ export async function startReviewServer(options: {
 				...(baseBehindRemote && { baseBehindRemote: true }),
 				...prCwdAdvert,
 			});
-		} else if (url.pathname === "/api/semantic-diff" && req.method === "GET") {
-			json(res, await getSemanticDiff(url));
 		} else if (url.pathname === "/api/call-flow" && req.method === "GET") {
 			// A throw here must never escape the handler: on Node it becomes an
 			// unhandled rejection, and Pi's process-level handler exits the whole
@@ -2844,10 +2798,7 @@ export async function startReviewServer(options: {
 			const analysisEpoch = reviewAnalysisEpoch;
 			const viewEpoch = diffSwitchEpoch;
 			const scopeEpoch = prScopeEpoch;
-			const [semanticDiff, callFlow] = await Promise.all([
-				getSemanticDiffAdvert(),
-				getCallFlowAdvert(),
-			]);
+			const callFlow = await getCallFlowAdvert();
 			if (
 				analysisEpoch !== reviewAnalysisEpoch
 				|| reviewAnalysisMutationEpoch !== null
@@ -2857,7 +2808,7 @@ export async function startReviewServer(options: {
 				return json(res, { superseded: true });
 			}
 			res.setHeader("Cache-Control", "no-store");
-			json(res, { semanticDiff, callFlow });
+			json(res, { callFlow });
 		} else if (url.pathname === "/api/review-analysis" && req.method === "POST") {
 			const analysisEpoch = ++reviewAnalysisEpoch;
 			reviewAnalysisMutationEpoch = analysisEpoch;
@@ -2867,12 +2818,8 @@ export async function startReviewServer(options: {
 				const reviewAnalysis = parseReviewAnalysisConfig(await parseBody(req));
 				if (!reviewAnalysis) return json(res, { error: "Invalid analysis settings" }, 400);
 				if (analysisEpoch !== reviewAnalysisEpoch) return json(res, { superseded: true });
-				const nextSemanticDiffEnabled = reviewAnalysis.semanticDiff ?? semanticDiffEnabled();
 				const nextCallFlowEnabled = reviewAnalysis.callFlow ?? callFlowEnabled();
-				const [semanticDiff, callFlow] = await Promise.all([
-					getSemanticDiffAdvert(currentDiffType as DiffType, nextSemanticDiffEnabled),
-					getCallFlowAdvert(currentDiffType as DiffType, nextCallFlowEnabled),
-				]);
+				const callFlow = await getCallFlowAdvert(currentDiffType as DiffType, nextCallFlowEnabled);
 				if (
 					analysisEpoch !== reviewAnalysisEpoch
 					|| viewEpoch !== diffSwitchEpoch
@@ -2882,7 +2829,7 @@ export async function startReviewServer(options: {
 				}
 				if (!saveConfig({ reviewAnalysis })) return json(res, { error: "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it." }, 500);
 				if (!nextCallFlowEnabled) callFlowService.cancelAll();
-				json(res, { semanticDiff, callFlow });
+				json(res, { callFlow });
 			} catch {
 				json(res, { error: "Invalid request" }, 400);
 			} finally {
@@ -2994,6 +2941,7 @@ export async function startReviewServer(options: {
 						approvalNotesSupported,
 						serverSession,
 						imagePreviewSupported,
+						...(await imageSizesAdvert(currentPatch)),
 						markdownPreviewSupported,
 						repoFilesSupported,
 						...sourceKindAdvert,
@@ -3001,7 +2949,6 @@ export async function startReviewServer(options: {
 						diffOptions: workspace.diffOptions,
 						hideWhitespace: currentHideWhitespace,
 						...(currentError ? { error: currentError } : {}),
-						semanticDiff: await getSemanticDiffAdvert(),
 						callFlow: await getCallFlowAdvert(),
 					});
 					return;
@@ -3088,8 +3035,7 @@ export async function startReviewServer(options: {
 				const sections = await buildSectionsSidecar(nextBase, newType as string);
 				const commitInfo = await buildCommitInfoSidecar(newType as string);
 				const generatedFiles = await buildGeneratedFilesSidecar(result.patch, newType as string);
-				const [switchSemanticDiff, switchCallFlow, nextDraftTarget] = await Promise.all([
-					getSemanticDiffAdvert(newType as DiffType),
+				const [switchCallFlow, nextDraftTarget] = await Promise.all([
 					getCallFlowAdvert(newType as DiffType),
 					isPRMode ? null : localGitDraftTargetKey({
 						diffType: newType, base: nextBase, cwd: options.gitContext?.cwd ?? process.cwd(),
@@ -3156,6 +3102,7 @@ export async function startReviewServer(options: {
 					approvalNotesSupported,
 					serverSession,
 					imagePreviewSupported,
+					...(await imageSizesAdvert(currentPatch)),
 					markdownPreviewSupported,
 					repoFilesSupported,
 					...sourceKindAdvert,
@@ -3187,7 +3134,6 @@ export async function startReviewServer(options: {
 						}
 						: {}),
 					...(currentError ? { error: currentError } : {}),
-					semanticDiff: switchSemanticDiff,
 					callFlow: switchCallFlow,
 				});
 			} catch (err) {
@@ -3211,10 +3157,7 @@ export async function startReviewServer(options: {
 				// parked on an await: drop this request's writes and return the
 				// newest state so the client converges on it.
 				const respondSuperseded = async () => {
-					const [semanticDiff, callFlow] = await Promise.all([
-						getSemanticDiffAdvert(),
-						getCallFlowAdvert(),
-					]);
+					const callFlow = await getCallFlowAdvert();
 					json(res, {
 						rawPatch: currentPatch,
 						aiReviewContext: buildCurrentAiReviewContext(),
@@ -3224,13 +3167,13 @@ export async function startReviewServer(options: {
 						approvalNotesSupported,
 						serverSession,
 						imagePreviewSupported,
+						...(await imageSizesAdvert(currentPatch)),
 						markdownPreviewSupported,
 						repoFilesSupported,
 						...sourceKindAdvert,
 						prDiffScope: currentPRDiffScope,
 						...(layerPatchIncomplete ? { prPatchIncomplete: true, prPatchUpgradeAvailable: layerUpgradeAvailable } : {}),
 						...(currentError ? { error: currentError } : {}),
-						semanticDiff,
 						callFlow,
 					});
 				};
@@ -3297,13 +3240,13 @@ export async function startReviewServer(options: {
 						approvalNotesSupported,
 						serverSession,
 						imagePreviewSupported,
+						...(await imageSizesAdvert(currentPatch)),
 						markdownPreviewSupported,
 						repoFilesSupported,
 						...sourceKindAdvert,
 						prDiffScope: currentPRDiffScope,
 						...(layerPatchIncomplete ? { prPatchIncomplete: true, prPatchUpgradeAvailable: layerUpgradeAvailable } : {}),
 						...((currentError ?? upgradeError) ? { error: currentError ?? upgradeError } : {}),
-						semanticDiff: await getSemanticDiffAdvert(),
 						callFlow: await getCallFlowAdvert(),
 					});
 					return;
@@ -3344,11 +3287,11 @@ export async function startReviewServer(options: {
 					approvalNotesSupported,
 					serverSession,
 					imagePreviewSupported,
+					...(await imageSizesAdvert(currentPatch)),
 					markdownPreviewSupported,
 					repoFilesSupported,
 					...sourceKindAdvert,
 					prDiffScope: currentPRDiffScope,
-					semanticDiff: await getSemanticDiffAdvert(),
 					callFlow: await getCallFlowAdvert(),
 				});
 			} catch (err) {
@@ -3436,6 +3379,7 @@ export async function startReviewServer(options: {
 					approvalNotesSupported,
 					serverSession,
 					imagePreviewSupported,
+					...(await imageSizesAdvert(currentPatch)),
 					markdownPreviewSupported,
 					repoFilesSupported,
 					...sourceKindAdvert,
@@ -3451,7 +3395,6 @@ export async function startReviewServer(options: {
 					repoInfo,
 					...(switchedViewedFiles.length > 0 && { viewedFiles: switchedViewedFiles }),
 					...(currentError ? { error: currentError } : {}),
-					semanticDiff: await getSemanticDiffAdvert(),
 					callFlow: await getCallFlowAdvert(),
 				});
 			} catch (err) {
@@ -3662,6 +3605,23 @@ export async function startReviewServer(options: {
 			if (requestAbort.signal.aborted) return;
 			res.writeHead(result.status, result.headers);
 			res.end(result.body ?? undefined);
+		} else if (url.pathname === REVIEW_IMAGE_SIZES_ENDPOINT && req.method === "GET") {
+			const requestAbort = new AbortController();
+			res.on("close", () => {
+				if (!res.writableEnded) requestAbort.abort();
+			});
+			const result = await handleReviewImageSizesRequest({
+				params: url.searchParams,
+				available: imagePreviewSupported,
+				patch: currentPatch,
+				isCurrentSnapshot: (snapshot) => snapshot === currentSnapshotId(),
+				signal: requestAbort.signal,
+				readSide: (side, filePath, oldPath, maxBytes, signal) =>
+					runImageRead(() => readReviewSide(side, filePath, oldPath, maxBytes, signal), signal),
+			});
+			if (requestAbort.signal.aborted) return;
+			res.writeHead(result.status, result.headers);
+			res.end(result.body ?? undefined);
 		} else if (url.pathname === REVIEW_IMAGE_ENDPOINT && req.method === "GET") {
 			// One side of a changed image, as bytes (#1598). Mirrors
 			// packages/server/review.ts: every decision is in the shared handler;
@@ -3686,6 +3646,12 @@ export async function startReviewServer(options: {
 			res.writeHead(result.status, result.headers);
 			res.end(result.body ?? undefined);
 		} else if (url.pathname === REPO_FILES_ENDPOINT && req.method === "GET") {
+			const requestAbort = url.searchParams.has("include") || url.searchParams.has("exclude") ? new AbortController() : null;
+			if (requestAbort) {
+				res.once("close", () => {
+					if (!res.writableEnded) requestAbort.abort();
+				});
+			}
 			const result = await handleRepoFilesRequest({
 				params: url.searchParams,
 				unavailable: repoFilesUnavailable(),
@@ -3696,8 +3662,9 @@ export async function startReviewServer(options: {
 						? findRepoOnDiskChanges(reviewRuntime, listing.root, diffFileStates(currentPatch), snapshotCapturedAt)
 						: Promise.resolve(null),
 				lazyThreshold: options.repoFilesLazyThreshold,
+				signal: requestAbort?.signal,
 			});
-			json(res, result.body, result.status);
+			if (!requestAbort?.signal.aborted) json(res, result.body, result.status);
 		} else if (url.pathname === REPO_FILES_SEARCH_ENDPOINT && req.method === "GET") {
 			const result = await handleRepoFilesSearchRequest({
 				params: url.searchParams,
@@ -3915,7 +3882,7 @@ export async function startReviewServer(options: {
 				return;
 			}
 			try {
-				const body = (await parseBody(req)) as { agentSwitch?: unknown; displayName?: string; diffOptions?: Record<string, unknown>; reviewDefaults?: Record<string, { defaultDiffType?: string }>; theme?: Record<string, unknown>; favicon?: FaviconStyle; autoUpdate?: unknown; updateCheck?: unknown; agentTool?: unknown; reviewAnalysis?: Record<string, unknown>; packageChanges?: unknown; conventionalComments?: boolean };
+				const body = (await parseBody(req)) as { agentSwitch?: unknown; displayName?: string; diffOptions?: Record<string, unknown>; displayOptions?: unknown; reviewDefaults?: Record<string, { defaultDiffType?: string }>; theme?: Record<string, unknown>; favicon?: FaviconStyle; autoUpdate?: unknown; updateCheck?: unknown; agentTool?: unknown; reviewAnalysis?: Record<string, unknown>; packageChanges?: unknown; conventionalComments?: boolean };
 				const toSave: Record<string, unknown> = {};
 				// OpenCode's agent switch (#1390): a known shape or nothing is saved.
 				const agentSwitch = agentSwitchConfigToSave(body);
@@ -3923,6 +3890,12 @@ export async function startReviewServer(options: {
 				if (agentSwitch !== undefined) toSave.agentSwitch = agentSwitch;
 				if (body.displayName !== undefined) toSave.displayName = body.displayName;
 				if (body.diffOptions !== undefined) toSave.diffOptions = body.diffOptions;
+				// The plan / annotate Display settings and the markdown selection mode: a plain object or nothing is saved.
+				if (body.displayOptions !== undefined) {
+					const displayOptions = parseDisplayOptionsConfig(body.displayOptions);
+					if (!displayOptions) return json(res, { error: "Invalid displayOptions" }, 400);
+					toSave.displayOptions = displayOptions;
+				}
 				if (body.reviewDefaults !== undefined) toSave.reviewDefaults = body.reviewDefaults;
 				if (body.theme !== undefined) toSave.theme = body.theme;
 				if (isFaviconStyle(body.favicon)) toSave.favicon = body.favicon;
@@ -3956,6 +3929,9 @@ export async function startReviewServer(options: {
 		} else if (url.pathname.startsWith("/api/star-ask/")) {
 			// The "Star the repo" ask on the done screen (generated/star-ask.ts).
 			if (!(await handleStarAskRequest(req, res, url, "review", isRemoteSession()))) handleApiNotFound(res, url.pathname);
+		} else if (url.pathname.startsWith("/api/launch-switch/")) {
+			// The launch switch's one-time dialog (generated/launch-switch.ts).
+			if (!(await handleLaunchSwitchRequest(req, res, url))) handleApiNotFound(res, url.pathname);
 		} else if (url.pathname === "/api/image") {
 			handleImageRequest(res, url);
 		} else if (url.pathname === "/api/upload" && req.method === "POST") {
@@ -4154,11 +4130,28 @@ export async function startReviewServer(options: {
 			await handleReviewDraftRequest(req, res, keys, reviewDrafts);
 		} else if (url.pathname === "/favicon.png" || url.pathname === "/favicon.ico") {
 			handleFavicon(res, url.pathname);
+		} else if (url.pathname === "/plannotator-themes.js" && req.method === "GET") {
+			// The person's own themes, for the page's first frame (packages/shared/theme-files.ts).
+			handleCustomThemesScript(res, url.searchParams);
 		} else if (isDiagramEngineRequest(url.pathname)) {
 			// Code review's diagram engine, fetched by the page only for a
 			// preview or guide overview that holds a diagram fence.
 			const answer = await answerDiagramEngineRequest(
 				diagramEngineAssets,
+				url.pathname,
+				req.method,
+				req.headers["accept-encoding"],
+				isRemoteSession(),
+			);
+			res.writeHead(answer.status, answer.headers);
+			res.end(answer.body);
+		} else if (isSemDiffOpinionRequest(url.pathname)) {
+			const answer = await answerSemDiffOpinionRequest(url.pathname, req.method, () => parseBody(req), semDiffOpinionDataDir());
+			res.setHeader("Cache-Control", "no-store");
+			json(res, answer.body, answer.status);
+		} else if (isSemDiffRequest(url.pathname)) {
+			const answer = await answerSemDiffRequest(
+				semDiffAssets,
 				url.pathname,
 				req.method,
 				req.headers["accept-encoding"],
@@ -4265,6 +4258,12 @@ export async function startReviewServer(options: {
 					reviewAlreadyDecided(res);
 					return;
 				}
+				// Nobody left to receive it: keep the draft, archive nothing.
+				const refusal = agentRefusal(body, options.agentPresence);
+				if (refusal) {
+					json(res, refusal.body, refusal.status);
+					return;
+				}
 				// Archive BEFORE the draft delete: a failed write keeps the
 				// draft as the reviewer's recovery copy (#678 ordering).
 				// Defensive on the body's own types: a malformed value must
@@ -4311,7 +4310,7 @@ export async function startReviewServer(options: {
 	boundPort = port;
 	// Remote sessions serve the app page compressed (#1617); start gzip (what
 	// browsers ask for over plain http) now so the first load does not wait.
-	if (isRemoteSession()) prewarmAppHtml(app.html, likelyAppHtmlEncoding(false));
+	if (isRemoteSession()) prewarmAppHtml(app.page(), likelyAppHtmlEncoding(false));
 	serverUrl = buildAdvertisedUrl(port);
 	agentApiUrl = `http://127.0.0.1:${port}`;
 	const exitHandler = () => agentJobs.killAll();

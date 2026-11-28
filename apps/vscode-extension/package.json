@@ -554,7 +554,7 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
-    "@pierre/diffs": "1.6.4",
+    "@pierre/diffs": "1.7.0-beta.3",
     "@plannotator/core": "workspace:*",
     "@plannotator/guide-viewer": "workspace:*",
     "@plannotator/review-editor": "workspace:*",

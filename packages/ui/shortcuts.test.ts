@@ -122,7 +122,6 @@ describe('shortcuts', () => {
       'Suggestion Editor',
       'AI Assistant',
       'PR Comments',
-      'Tour',
     ]);
   });
 

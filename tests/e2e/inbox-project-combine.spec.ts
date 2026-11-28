@@ -23,7 +23,7 @@
  * PNGs land in .local/proof/project-combine/ (1440×900 @2x, a phone 390×844 @3x).
  */
 
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -310,7 +310,7 @@ test('one project everywhere: its list, the thread, search, the menu and a reloa
   // The ⋯ menu of a combined project is any project's: undoing later is the agent's, not the window's.
   await page.goto(world.url);
   await row(page, 'docs').locator('.ib-pmore').click({ force: true });
-  await expect(menu(page).getByRole('menuitem')).toHaveText(['Mark all as read', 'Archive all', 'Rename…']);
+  await expect(menu(page).getByRole('menuitem')).toHaveText(['Mark all as read', 'Archive all', 'Add tag', 'Rename…']);
   await page.keyboard.press('Escape');
   await expect.poll(() => rowProject(page, threads.docs)).toBe('docs');
 });

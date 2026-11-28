@@ -146,7 +146,9 @@ describe.if(hasDom)('HtmlViewer bridgeScriptUrl', () => {
   test('the srcdoc loads the bridge by URL instead of inlining it', async () => {
     const { iframe } = await mount({ bridgeScriptUrl: ASSET_URL });
     const srcdoc = iframe.getAttribute('srcdoc') ?? '';
-    expect(srcdoc).toContain(`<script src="${ASSET_URL}"></script>`);
+    // The tag carries this load's link key; the bridge asset runs the link guard with it.
+    expect(srcdoc).toContain(`<script src="${ASSET_URL}" data-plannotator-link-key="`);
+    expect(srcdoc).toMatch(/ data-plannotator-link-key="[0-9a-f]{32}"><\/script>/);
     expect(srcdoc).not.toContain(BRIDGE_SCRIPT);
     // The sandbox is unchanged by the delivery path.
     expect(iframe.getAttribute('sandbox')).toBe('allow-scripts allow-modals');
@@ -183,7 +185,7 @@ describe.if(hasDom)('HtmlViewer bridgeScriptUrl', () => {
         rawHtml: '<html><head><base href="https://attacker.example/"><title>t</title></head><body><p>x</p></body></html>',
       });
       const srcdoc = iframe.getAttribute('srcdoc') ?? '';
-      expect(srcdoc).toContain('<script src="http://host.test:4000/assets/bridge-script.deadbeef.js"></script>');
+      expect(srcdoc).toContain('<script src="http://host.test:4000/assets/bridge-script.deadbeef.js" data-plannotator-link-key="');
       // The page's base tag still precedes the injected tag (end of <head>),
       // which is exactly why the src must already be absolute.
       expect(srcdoc.indexOf('<base href')).toBeLessThan(srcdoc.indexOf('<script src='));

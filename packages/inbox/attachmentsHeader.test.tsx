@@ -221,12 +221,17 @@ test.skipIf(!hasDom)('the count opens the same tiles in a band under the sender;
   expect(words(band.querySelector('[data-attachment-name="plan.html"]'))).toContain('Changed since it was sent');
   expect(band.querySelector('.ib-attach-h')).toBeNull();
   expect(words(band)).toContain('Also at the end of the message.');
-  // Detail ids stay unique with both sets on the page.
-  const described = [...el.querySelectorAll('[aria-describedby]')].map((t) => t.getAttribute('aria-describedby'));
+  // Detail ids stay unique with both sets on the page: each tile of the band and the foot names its own detail, and
+  // that id is one element. (Only tiles: the list's rows all point at one shared drag help, `ib-thread-drag-help`,
+  // which ARIA allows, an IDREF any number of elements may name, and which is the same words for every row.)
+  const described = [...el.querySelectorAll('[data-attachment-id][aria-describedby]')].map((t) => t.getAttribute('aria-describedby')!);
+  expect(described.length).toBeGreaterThanOrEqual(6); // this message's three, in the band and in the foot
   expect(new Set(described).size).toBe(described.length);
+  for (const id of described) expect(document.querySelectorAll(`[id="${id}"]`).length).toBe(1);
   // The band sits above the message body, under the sender row.
+  // Node identity as a boolean: a failing toBe on happy-dom nodes prints the whole page and ran the CI job out of time.
   const msg = article(el, ids.files.first).querySelector('.ib-msg')!;
-  expect(msg.firstElementChild).toBe(band);
+  expect(msg.firstElementChild === band).toBe(true);
 
   // Escape from a tile in the band closes it and puts focus on the count.
   const tile = band.querySelector<HTMLButtonElement>('[data-attachment-name="spec.md"]')!;

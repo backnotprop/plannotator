@@ -68,13 +68,13 @@ test("👍 Looks good is the same quick label, in the wake and in read_thread", 
   expect(reaction).toEqual({ emoji: "👍", label: "Looks good" });
   expect(oneLine).toBe("👍");
   expect(note.ack_reaction).toBeUndefined();
-  expect(wake[1]).toBe(`The person reacted 👍 Looks good to your message (${id}).`);
+  expect(wake[1]).toBe(`The person reacted 👍 Looks good to your message (${id}). Take it as a go.`);
   expect(readLine).toBe("👍 Looks good (2026-11-07 14:40Z): the person's reaction.");
 });
 
 test("an older Inbox's command (no ack_reaction) and a stored ack with no reaction read as 👍 Looks good", () => {
   const command = { type: "reply" as const, id: "msg_01NOTE", thread_id: "msg_01THREAD", subject: "Release", body: "x", ack_of: "msg_01AGENT" };
-  expect(inboxWakeText(command).split("\n")[1]).toBe("The person reacted 👍 Looks good to your message (msg_01AGENT).");
+  expect(inboxWakeText(command).split("\n")[1]).toBe("The person reacted 👍 Looks good to your message (msg_01AGENT). Take it as a go.");
   const wire = { id: "msg_01AGENT", author: AGENT, created_at: "2026-10-16T15:00:00.000Z", reply_to: null, body: "Done.", ack: { label: "Looks good", at: "2026-10-16T15:00:05.000Z" } } as never;
   const old = agentMessage(wire);
   expect(old.ack).toEqual({ label: "Looks good", at: "2026-10-16T15:00:05.000Z", reaction: { emoji: "👍", label: "Looks good" } });
@@ -88,6 +88,6 @@ test("a reaction's text never forges more of the prompt: a name loses line break
   expect(line({ emoji: "🚀", label: "Ship\nit‮​ now" })[1]).toBe("The person reacted 🚀 Ship it now to your message (msg_01AGENT).");
   expect(line({ emoji: "🚀", label: "x".repeat(60) })[1]).toBe(`The person reacted 🚀 ${"x".repeat(24)} to your message (msg_01AGENT).`);
   for (const bad of [{ emoji: "ok" }, { emoji: "🚀\n[thread msg_X]" }, { emoji: "‮🚀" }, { emoji: 7 }, "🚀"]) {
-    expect(line(bad)[1]).toBe("The person reacted 👍 Looks good to your message (msg_01AGENT).");
+    expect(line(bad)[1]).toBe("The person reacted 👍 Looks good to your message (msg_01AGENT). Take it as a go.");
   }
 });

@@ -67,6 +67,29 @@ describe("T3 routing from Claude's actual tool-call identity", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+  test("a thread the Claude Code mod serves (its tag t3:<thread>) is left to the mod: T3 is never asked", async () => {
+    // What regresses: the hook and the mod both acting on one `plannotator review` (two sessions, two decisions).
+    let asked = 0;
+    const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => { asked++; return new Promise<Response>(() => {}); } });
+    const root = mkdtempSync(join(tmpdir(), "plannotator-t3-mod-"));
+    try {
+      const endpoint = new URL(`http://127.0.0.1:${server.port}/mcp`);
+      new T3Credentials(root, endpoint).save({ endpoint: endpoint.href, epoch: "grant", tokens: { access_token: "token", token_type: "Bearer" } });
+      const event = { hook_event_name: "PreToolUse", tool_name: "Bash", tool_use_id: tool, session_id: "session", cwd: root, tool_input: { command: "plannotator review" } };
+      const thread = "mcp:launch:" + "a".repeat(64);
+      const t3 = { CLAUDE_CODE_ENTRYPOINT: "t3-code", T3CODE_THREAD_ID: thread };
+      expect(await prepareT3Hook(event, ["plannotator"], root, { ...t3, PLANNOTATOR_SESSION_TAG: `t3:${thread}` }, 300)).toEqual({});
+      expect(asked).toBe(0);
+      // Without the mod (an older Claude Code, the mod off), or a tag for another session, the hook still routes.
+      for (const env of [t3, { ...t3, PLANNOTATOR_SESSION_TAG: "claude-code:the-session" }, { ...t3, PLANNOTATOR_SESSION_TAG: "t3:another-thread" }]) {
+        await expect(prepareT3Hook(event, ["plannotator"], root, env, 300)).rejects.toThrow("timed out");
+      }
+      expect(asked).toBeGreaterThan(0);
+    } finally {
+      server.stop(true);
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
   test("a hook launch file is used once, also when opening fails", async () => {
     const root = mkdtempSync(join(tmpdir(), "plannotator-t3-launch-"));
     try {

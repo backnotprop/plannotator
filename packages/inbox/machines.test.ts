@@ -355,6 +355,33 @@ describe("thread ids: a linked machine never takes over this machine's", () => {
     });
   }
 
+  test("pinned artifacts: the reads ask every machine; a far pin's and a far Wall tile's thread, message and file go to its machine; a pin goes to the thread's machine", async () => {
+    const FAR_THREAD = 'msg_01KREMOTE00000000000000T';
+    const FAR_FILE = 'att_01KREMOTE00000000000000F';
+    const FAR_PIN_FILE = 'att_01KREMOTE00000000000000P';
+    const LOCAL_FILE = 'att_01KLOCAL000000000000000F';
+    const row = (thread: string, file: string, machine?: string) => ({ key: file, thread_id: thread, message_id: thread, project: { id: REMOTE_PROJECT }, attachment: { id: file }, ...(machine ? { machine } : {}) });
+    const asked = await withFetch(
+      (url) => json(url.includes('/artifact-pins') ? { pins: [{ key: FAR_PIN_FILE, thread_id: FAR_THREAD, pinned_at: '2026-11-20T10:00:00.000Z', machine: MAC }] } : { artifacts: [row(FAR_THREAD, FAR_FILE, MAC), row(LOCAL, LOCAL_FILE)], next_cursor: null, total: 2 }),
+      async () => {
+        await inboxApi.artifactPins();
+        await inboxApi.artifacts({ pinned: true });
+      },
+    );
+    expect(asked.map((url) => new URL(url, 'http://x').searchParams.get('machines'))).toEqual(['1', '1']);
+    for (const id of [FAR_THREAD, FAR_FILE, FAR_PIN_FILE]) expect(machineOf(id)).toBe(MAC);
+    expect(machineOf(LOCAL_FILE)).toBeNull();
+    expect(machineOf(LOCAL)).toBeNull();
+    const posts = await withFetch(
+      () => json({ pins: [] }),
+      async () => {
+        await inboxApi.setArtifactPinned(FAR_THREAD, FAR_FILE, true);
+        await inboxApi.setArtifactPinned(LOCAL, LOCAL_FILE, true);
+      },
+    );
+    expect(posts).toEqual([`/api/inbox/m/${MAC}/artifact-pins`, '/api/inbox/artifact-pins']);
+  });
+
   test('a forwarded answer teaches only its routed id fields, never any string under a key ending in _id', () => {
     const ids = idsIn({
       thread: { id: REMOTE, messages: [{ message_id: 'msg_01KREMOTE00000000000000001' }] },

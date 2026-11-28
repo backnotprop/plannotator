@@ -29,25 +29,20 @@
  * instructions, and a human-only skill past that is named with its folder
  * instead ("read SKILL.md in …"), the export's fallback wording.
  */
-import { INBOX_MESSAGE_SKILL_AUDIENCE, INBOX_REPLY_SKILL_AUDIENCE, inboxSkillNoteSection, type SkillBlockAudience } from '@plannotator/core/skill-reference-block';
-import { GRILL_ME_NOTE_TEXT, isGrillMeSkill } from '@plannotator/core/grill-me';
+import { INBOX_MESSAGE_SKILL_AUDIENCE, INBOX_REPLY_SKILL_AUDIENCE, type SkillBlockAudience } from '@plannotator/core/skill-reference-block';
+import { composeInboxSkillsBlock, inboxBuiltinSkillContent, INBOX_SKILL_INSTRUCTIONS_BUDGET } from '@plannotator/core/inbox-skills-compose';
 import type { InboxAnnotationRecord } from '@plannotator/core/inbox-types';
 import { fetchSkillCatalog, normalizeSkillContent } from '@plannotator/ui/utils/skillCatalog';
 import {
   extractSkillReferences,
-  renderSkillReferencesBlock,
   type SkillCatalogEntry,
   type SkillExportContent,
 } from '@plannotator/ui/utils/skillReferences';
-import { inboxReviewSkill } from '@plannotator/core/inbox-review';
-import { shapeSkill } from '@plannotator/core/shape-skill';
+import { INBOX_BUILTIN_SKILL_ROOT, inboxReviewSkill } from '@plannotator/core/inbox-review';
 import { inboxApi } from './api';
 import { annotationOf } from './attachments';
 
-export { INBOX_MESSAGE_SKILL_AUDIENCE, INBOX_REPLY_SKILL_AUDIENCE };
-
-/** The most SKILL.md text one message pastes, over all its human-only skills. */
-export const INBOX_SKILL_INSTRUCTIONS_BUDGET = 40_000;
+export { composeInboxSkillsBlock, INBOX_MESSAGE_SKILL_AUDIENCE, INBOX_REPLY_SKILL_AUDIENCE, INBOX_SKILL_INSTRUCTIONS_BUDGET };
 
 /** Every skill the texts reference, in first-appearance order across them, once each. */
 export function inboxSkillReferences(texts: readonly string[], catalog: readonly SkillCatalogEntry[]): SkillCatalogEntry[] {
@@ -63,47 +58,10 @@ export function inboxSkillReferences(texts: readonly string[], catalog: readonly
   return refs;
 }
 
-/**
- * The block for these references (pure): `contents` holds the SKILL.md of
- * the human-only ones that could be read. '' with no references.
- */
-export function composeInboxSkillsBlock(
-  refs: readonly SkillCatalogEntry[],
-  contents: ReadonlyMap<string, SkillExportContent>,
-  audience: SkillBlockAudience,
-  budget = INBOX_SKILL_INSTRUCTIONS_BUDGET,
-): string {
-  if (refs.length === 0) return '';
-  // In reference order, while the budget lasts; a skill past it is named with its folder.
-  const pasted = new Map<string, SkillExportContent>();
-  let spent = 0;
-  for (const ref of refs) {
-    const content = ref.humanOnly ? contents.get(ref.name) : undefined;
-    if (!content || spent + content.content.length > budget) continue;
-    pasted.set(ref.name, content);
-    spent += content.content.length;
-  }
-  const block = renderSkillReferencesBlock(refs, { contentOf: (name) => pasted.get(name), audience }).trimEnd();
-  // A grill-me skill (any author's, grill-me.ts): the note that sends the interview's questions back here as cards.
-  const grillMe = refs.find((ref) => isGrillMeSkill(ref.name));
-  return grillMe ? `${block}\n\n${inboxSkillNoteSection(grillMe.name, GRILL_ME_NOTE_TEXT)}` : block;
-}
-
 /** What `inboxSkillsBlock` reads; the window's own routes by default, a test's stand-ins otherwise. */
 export interface InboxSkillSources {
   catalog: () => Promise<SkillCatalogEntry[]>;
   content: (name: string) => Promise<SkillExportContent | undefined>;
-}
-
-/**
- * Shape's switch as this window last read it (App.tsx sets it from the settings). The review skills' drawing lines
- * go only while it is on (approval "code-review-029-shape-off"); off until the settings say otherwise.
- */
-let reviewSkillsShape = false;
-
-/** The window read Shape's switch: the review skills pasted from now on carry their drawing lines only while on. */
-export function setReviewSkillsShape(on: boolean): void {
-  reviewSkillsShape = on;
 }
 
 /**
@@ -119,14 +77,25 @@ export function setReviewSkillsDiagrams(on: boolean): void {
 
 /**
  * A Plannotator skill's instructions (root `plannotator`: the review skills the
- * Inbox lists while Code review is on, and `/shape` while Shape is on), from the window's own text, never read
- * from disk. Undefined for any other skill. A review skill's drawing lines ride `shape` (Shape's switch), and its
- * chapter diagram lines `diagrams` (Chapter diagrams).
+ * Inbox lists while Code review is on, `/create-routine` while Routines are on, and `/picture-it` always), from the
+ * window's own text, never read from disk. Undefined for any other skill. A review skill's chapter diagram lines ride
+ * `diagrams` (Chapter diagrams).
  */
-export function builtinSkillContent(ref: SkillCatalogEntry, shape: boolean = reviewSkillsShape, diagrams: boolean = reviewSkillsDiagrams): SkillExportContent | undefined {
-  if (ref.root !== 'plannotator') return undefined;
-  const skill = inboxReviewSkill(ref.name, { shape, diagrams }) ?? shapeSkill(ref.name);
-  return skill ? { content: skill.body, truncated: false, dir: '', path: '' } : undefined;
+export function builtinSkillContent(ref: SkillCatalogEntry, diagrams: boolean = reviewSkillsDiagrams): SkillExportContent | undefined {
+  return inboxBuiltinSkillContent(ref, diagrams);
+}
+
+/**
+ * The block a verdict asking for changes carries (`pull-handoff-pushes`: the next round sends only what changed):
+ * `/review-recheck`'s, the same block as when the person names it in a reply. Only for the session that wrote the
+ * review (`toReviewer`): another one never saw it, so it gets no block and its next round covers the whole change.
+ * '' for an approval.
+ */
+export function verdictRecheckBlock(verdict: 'approved' | 'changes_requested', toReviewer: boolean): string {
+  if (verdict !== 'changes_requested' || !toReviewer) return '';
+  const ref: SkillCatalogEntry = { name: 'review-recheck', root: INBOX_BUILTIN_SKILL_ROOT, humanOnly: true };
+  const content = builtinSkillContent(ref);
+  return content ? composeInboxSkillsBlock([ref], new Map([[ref.name, content]]), INBOX_REPLY_SKILL_AUDIENCE) : '';
 }
 
 /**

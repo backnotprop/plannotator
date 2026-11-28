@@ -20,7 +20,7 @@
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-html-fit.spec.ts`.
  */
 
-import { chromium, devices, expect, test, webkit, type Browser, type Page } from '@playwright/test';
+import { chromium, devices, expect, test, webkit, type Browser, type Page, type Request } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -71,12 +71,42 @@ async function world(): Promise<World> {
   return { root, url, agent, thread: sent.thread_id as string, ids };
 }
 
+/** Per page: the window's API requests still on their way (the event stream aside), and the agents reads answered. */
+const traffic = new WeakMap<Page, { open: Set<Request>; agents: number }>();
+function track(page: Page) {
+  const seen = { open: new Set<Request>(), agents: 0 };
+  traffic.set(page, seen);
+  const api = (request: Request) => {
+    const { pathname } = new URL(request.url());
+    return pathname.startsWith('/api/') && !pathname.startsWith('/api/inbox/events');
+  };
+  page.on('request', (request) => void (api(request) && seen.open.add(request)));
+  page.on('requestfailed', (request) => void seen.open.delete(request));
+  page.on('requestfinished', (request) => {
+    seen.open.delete(request);
+    if (new URL(request.url()).pathname === '/api/inbox/agents') seen.agents += 1;
+  });
+}
+
+/**
+ * The window's load is done and nothing is on its way, so a reload cancels no read. WebKit logs each read a reload
+ * cancels as "Fetch API cannot load … due to access control checks." (Playwright reports it as a page error); the
+ * window itself catches the failed read. The load reads the agents twice, the second about 2.5 s in (App.tsx
+ * `refreshAgents`), and the list after the thread's look.
+ */
+async function settled(page: Page) {
+  const seen = traffic.get(page)!;
+  await expect.poll(() => seen.agents, { message: "the load's second agents read" }).toBeGreaterThanOrEqual(2);
+  await expect.poll(() => seen.open.size, { message: 'the reads on their way' }).toBe(0);
+}
+
 async function withBrowser(engine: 'webkit' | 'chromium', device: Record<string, unknown>, run: (w: World, page: Page) => Promise<void>) {
   const w = await world();
   const browser: Browser = engine === 'webkit' ? await webkit.launch({ args: [] }) : await chromium.launch();
   try {
     const context = await browser.newContext({ ...device });
     const page = await context.newPage();
+    track(page);
     const errors: string[] = [];
     page.on('pageerror', (e) => errors.push(String(e)));
     await run(w, page);
@@ -138,6 +168,7 @@ for (const phone of [
       await expect(frameBox(page)).toHaveAttribute('data-page-size', 'phone');
       await expect(toggle(page)).toHaveAttribute('aria-label', 'Desktop size');
       await expect(toggle(page).locator('svg')).toHaveAttribute('data-icon', 'phone');
+      await settled(page);
       await page.reload();
       await expect(frame(page).locator('#k0')).toBeVisible();
       await expect(frameBox(page)).toHaveAttribute('data-page-size', 'phone');

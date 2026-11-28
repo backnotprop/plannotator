@@ -155,7 +155,7 @@ Approved and denied plans are saved to `~/.plannotator/plans/` by default. You c
 
 ## Config file
 
-Plannotator reads `~/.plannotator/config.json` for persistent settings. This includes display name, diff options, conventional comment labels, and feedback message customization.
+Plannotator reads `~/.plannotator/config.json` for persistent settings. This includes display name, diff options, display options (`displayOptions`: plan review's text size, font, Grid background, diagram shadow, sidebar, sticky actions, plan width, Tater mode, and the Select / Pinpoint selection mode), conventional comment labels, and feedback message customization.
 
 The review open-state flags (`plannotator review --base <ref>` / `--diff-type <type>`) seed a single session and never change the saved defaults — Settings → Review remains the only writer. Git reviews open on `diffOptions.defaultDiffType`; Jujutsu reviews open on `reviewDefaults.jj.defaultDiffType` (`jj-current`, `jj-last`, `jj-line`, `jj-evolog` or `jj-all`; unset or invalid means `jj-current`).
 
@@ -163,6 +163,12 @@ To turn off the Claude Code mod (non-blocking plan review, code review and annot
 
 ```json
 { "claudeCodeMod": false }
+```
+
+To open every annotate session in the same view, set `annotateView` to `"focus"`, `"wide"` or `"edit"` (the document toolbar's Focus, Wide and Edit). Clicking the toolbar still changes the view for that session, and that click is not saved back to the file. When a document cannot use the view (an HTML page has no view switch, and a diagram cannot be edited), the session opens as it does without the key.
+
+```json
+{ "annotateView": "focus" }
 ```
 
 You can customize the messages Plannotator sends to the agent when you approve, deny, or annotate plans and documents. See the [custom feedback guide](/docs/guides/custom-feedback/) for the full config shape, template variables, and runtime-specific overrides.

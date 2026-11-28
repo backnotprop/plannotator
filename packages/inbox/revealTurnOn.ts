@@ -7,7 +7,7 @@
  */
 import type { InboxToastModel } from './components/Toast';
 
-export type RevealFeature = 'board' | 'steps' | 'code_review' | 'bro';
+export type RevealFeature = 'board' | 'steps' | 'code_review' | 'bro' | 'scheduled_threads';
 
 /** The part of the settings a reveal reads and writes. */
 type FeatureSettings = { [K in RevealFeature]?: { on: boolean } };
@@ -30,6 +30,7 @@ const REVEAL_FEATURE_NAMES: Record<RevealFeature, string> = {
   steps: 'The Checklist isn’t on',
   code_review: 'Code review isn’t on',
   bro: 'Bro mode isn’t on',
+  scheduled_threads: 'Routines aren’t on',
 };
 
 /** How long the "isn't on" toast stays. */

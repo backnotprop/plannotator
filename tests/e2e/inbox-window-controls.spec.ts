@@ -18,7 +18,7 @@
  * Pictures land in PLANNOTATOR_WINDOW_CONTROLS_SHOTS (default
  * .local/proof/window-controls). Build the binary first (see inbox.spec.ts).
  */
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { removeInboxScratch } from './inbox-scratch';
@@ -328,7 +328,6 @@ test('the other pages: the header at the left edge clears the width, its control
     { hash: '#board', head: '.ib-bhead' },
     { hash: '#drafts', head: '.ib-dh' },
     { hash: '#reviews', head: '.ib-lhead' },
-    { hash: '#shapes', head: '.ib-bhead' },
     { hash: '#whats-new=', head: '.ib-wn-bar' },
   ];
   for (const { hash, head } of pages) {
@@ -350,7 +349,6 @@ test('full-window layers clear the height, their controls click and their band d
     { name: 'pr-page', open: () => openRoute(page, world, '#reviews&stack=none&layer=none', 'collapsed'), first: '.ib-prreview .ib-vhead' },
     { name: 'guided-review', open: () => openRoute(page, world, `#thread=${world.thread}&guide=${world.guide}`), first: '.ib-viewer .ib-vhead' },
     { name: 'code-review', open: () => openRoute(page, world, `#thread=${world.review.thread}&guide=${world.review.message}`, 'collapsed'), first: '.ib-review .ib-vhead' },
-    { name: 'shape-board', open: () => openRoute(page, world, `#thread=${world.picture}&shape=${world.board}`, 'collapsed'), first: '.ib-shape-layer .shp-head' },
   ];
   for (const layer of layers) {
     await test.step(layer.name, async () => {

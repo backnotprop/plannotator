@@ -1,0 +1,14 @@
+:root {
+  --semantic-moved: #69b1ff;
+  --semantic-edited: #bf91f3;
+  --semantic-reformatted: #a0a0a0;
+  --diffs-moved-color: var(--semantic-moved);
+  --diffs-edited-color: var(--semantic-edited);
+  --diffs-reformatted-color: var(--semantic-reformatted);
+}
+
+.light {
+  --semantic-moved: #009fff;
+  --semantic-edited: #9954d8;
+  --semantic-reformatted: gray;
+}

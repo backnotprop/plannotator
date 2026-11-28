@@ -11,7 +11,8 @@ import {
   fenceGrammar,
   __resetCodeHighlightCacheForTests,
 } from './codeHighlight';
-import { resolveFenceTheme, resolveSyntaxTheme, DEFAULT_SYNTAX_THEME, SHIKI_THEME_MAP } from './syntaxTheme';
+import { resolveFenceTheme, resolveSyntaxTheme, SHIKI_THEME_MAP } from './syntaxTheme';
+import { FENCE_SYNTAX_THEME } from './fenceSyntaxThemes';
 
 const hasDom = typeof document !== 'undefined';
 
@@ -56,16 +57,18 @@ describe('fence theme resolution', () => {
   test('falls back to the Pierre defaults for unmapped palettes', () => {
     // The default Plannotator palette has no Shiki counterpart, so it renders
     // in exactly what @pierre/diffs uses when handed no theme at all.
+    // A fence draws Pierre's default with its low-contrast colours fixed
+    // (fenceSyntaxThemes.ts); the diff pane keeps Pierre's own.
     expect(resolveSyntaxTheme('plannotator', 'dark')).toBeUndefined();
-    expect(resolveFenceTheme('plannotator', 'dark')).toBe(DEFAULT_SYNTAX_THEME.dark);
-    expect(resolveFenceTheme('plannotator', 'light')).toBe(DEFAULT_SYNTAX_THEME.light);
+    expect(resolveFenceTheme('plannotator', 'dark')).toBe(FENCE_SYNTAX_THEME.dark);
+    expect(resolveFenceTheme('plannotator', 'light')).toBe(FENCE_SYNTAX_THEME.light);
   });
 
   test('falls back per mode when a palette only defines one side', () => {
     // dracula is dark-only; its light mode must still resolve to something.
     expect(SHIKI_THEME_MAP['dracula']?.light).toBeNull();
     expect(resolveFenceTheme('dracula', 'dark')).toBe('dracula');
-    expect(resolveFenceTheme('dracula', 'light')).toBe(DEFAULT_SYNTAX_THEME.light);
+    expect(resolveFenceTheme('dracula', 'light')).toBe(FENCE_SYNTAX_THEME.light);
   });
 
   test('every mapped theme name is non-empty', () => {

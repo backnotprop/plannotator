@@ -364,3 +364,33 @@ describe("the same calls, at once or without blocking", () => {
     }
   });
 });
+
+describe("a take-down never believes an empty serve status while Tailscale is not running", () => {
+  const run = (backend: string | null, statusFails = false) => {
+    const calls: string[][] = [];
+    const runner = (args: string[]): TailscaleRunResult => {
+      calls.push(args);
+      if (args[0] === "serve") return { status: 0, stdout: "{}", stderr: "" };
+      if (statusFails) return { status: 1, stdout: "", stderr: "failed to connect to local tailscaled" };
+      return { status: 0, stdout: JSON.stringify(backend === null ? { Self: {} } : { BackendState: backend }), stderr: "" };
+    };
+    return { calls, answer: runTailscaleSteps(takeDownOwnServeSteps(8443, ["http://127.0.0.1:4321"]), runner) };
+  };
+
+  test("stopped (or starting, signed out): the mapping may come back with Tailscale, so it is \"later\", never \"none\"", () => {
+    for (const backend of ["Stopped", "Starting", "NeedsLogin"]) {
+      const { calls, answer } = run(backend);
+      expect(answer).toBe("later");
+      expect(calls).toEqual([
+        ["serve", "status", "--json"],
+        ["status", "--json"],
+      ]);
+    }
+  });
+
+  test("running, or a status that names no state or cannot be read: the empty read is believed, as before", () => {
+    expect(run("Running").answer).toBe("none");
+    expect(run(null).answer).toBe("none");
+    expect(run(null, true).answer).toBe("none");
+  });
+});

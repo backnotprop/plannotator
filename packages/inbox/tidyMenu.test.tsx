@@ -54,7 +54,7 @@ function plan(count: number): InboxTidyPlan {
   } as InboxTidyPlan;
 }
 
-const controller = (p: InboxTidyPlan): TidyController => ({ surface: 'list', scope: null, plan: p, run: p.run, start: async () => null, refresh: () => {} });
+const controller = (p: InboxTidyPlan): TidyController => ({ surface: 'list', scope: null, plan: p as TidyController['plan'], run: p.run, start: async () => null, refresh: () => {} });
 
 async function settle() {
   await act(async () => {
@@ -113,4 +113,34 @@ test.skipIf(!hasDom)('with nothing new offered the run shows alone: "Tidy · 3/3
   expect(document.querySelector('[data-tidy-run-agent="ses-b"]')!.textContent).toContain('Nothing to change');
   expect(document.querySelector('[data-tidy-run-agent="ses-a"]')!.textContent).toContain('1 thread updated');
   expect(document.querySelector('[data-tidy-run-agent="ses-d"]')!.textContent).toContain('Session ended');
+});
+
+test.skipIf(!hasDom)('a load reads only this machine’s Tidy; a linked machine is read once the person reaches for Tidy', async () => {
+  const { useTidy } = await import('./components/Tidy');
+  const realFetch = globalThis.fetch;
+  const urls: string[] = [];
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    urls.push(String(input));
+    return new Response(JSON.stringify(plan(0)), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }) as typeof fetch;
+  try {
+    const machines = { self: 'm_self', all: [], linked: [{ id: 'm_mini', name: 'Mac mini', marks: ['tidy'], state: 'online' }], names: new Map([['m_mini', 'Mac mini']]), away: new Set() } as never;
+    let tidy: ReturnType<typeof useTidy> | null = null;
+    function Probe() {
+      tidy = useTidy(null, 'list', 1, true, machines);
+      return null;
+    }
+    host = document.body.appendChild(document.createElement('div'));
+    root = createRoot(host);
+    act(() => root!.render(<Probe />));
+    await act(async () => void (await new Promise((resolve) => setTimeout(resolve, 300))));
+    expect(urls.filter((u) => u.includes('/tidy'))).toEqual([expect.stringMatching(/^\/api\/inbox\/tidy/)]);
+    await act(async () => {
+      tidy!.warm!();
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+    expect(urls.some((u) => u.startsWith('/api/inbox/m/m_mini/tidy'))).toBe(true);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });

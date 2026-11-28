@@ -72,7 +72,8 @@ describe.if(hasDom)('HtmlViewer frameUrl', () => {
     expect(documents[0]).toContain('<p id="target">Target</p>');
     // The inline bridge rides the served document, so annotation works as in a srcdoc.
     expect(documents[0]).toContain(bridgeModule!.BRIDGE_SCRIPT.slice(0, 200));
-    expect(frame.getAttribute('src')).toBe('about:blank#served');
+    // The address the host gave, with this load's link key (linkGuard.ts).
+    expect(frame.getAttribute('src')).toMatch(/^about:blank\?__pnk=[0-9a-f]{32}#served$/);
     expect(frame.getAttribute('sandbox')).toBe('allow-scripts allow-modals');
     expect(frame.hasAttribute('srcdoc')).toBe(false);
   });
@@ -106,7 +107,7 @@ describe.if(hasDom)('HtmlViewer frameUrl', () => {
     };
     await gone();
     expect(asked).toBe(2);
-    expect(frame.getAttribute('src')).toBe('about:blank#served-2');
+    expect(frame.getAttribute('src')).toMatch(/^about:blank\?__pnk=[0-9a-f]{32}#served-2$/);
     await gone();
     await gone();
     expect(asked).toBe(3);

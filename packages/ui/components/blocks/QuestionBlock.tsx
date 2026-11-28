@@ -1,6 +1,8 @@
-import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { QuestionOtherToolsContext } from '../QuestionOtherTools';
+import React, { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   canonicalQuestionAnswer,
+  contextWithoutScenarioTable,
   emptyQuestionAnswer,
   isQuestionAnswerEmpty,
   isRecommendedQuestionAnswer,
@@ -13,9 +15,13 @@ import {
 } from '@plannotator/core/question-block';
 import { InlineMarkdown } from '../InlineMarkdown';
 import { QuestionContext } from './QuestionContext';
+import { QuestionScenarios } from './QuestionScenarios';
+import { QuestionChangeGroups, QuestionChoiceChange, QuestionWhere, questionChoiceHasChange, type QuestionChangeHost } from './QuestionChange';
 import { HostTitle } from '../HostTitle';
 import { UNAVAILABLE_IMAGE_CLASS, useImageResolver } from '../ImageResolverContext';
 import { getImageSrc } from '../ImageThumbnail';
+import type { Block } from '../../types';
+import { sourceLineAttrs } from '../../utils/sourceLineAttrs';
 import {
   questionChoiceWords,
   questionPictureShape,
@@ -218,6 +224,7 @@ export type QuestionSaveResult = void | Promise<unknown>;
 
 export interface QuestionBlockProps {
   blockId: string;
+  sourceBlock?: Block;
   indexed: IndexedQuestion;
   /** How many question blocks the document has (for "Question N of M"). */
   total: number;
@@ -392,6 +399,7 @@ function fitOtherField(field: HTMLTextAreaElement): number | null {
 
 export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   blockId,
+  sourceBlock,
   indexed,
   total,
   answer: storedAnswer,
@@ -474,6 +482,9 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
         setDraft(sameAnswer(next, savedAnswer) ? null : { answer: next })
     : onLiveAnswer;
   const readOnly = !onAnswer;
+  const OtherTools = useContext(QuestionOtherToolsContext);
+  const [otherRevision, setOtherRevision] = useState(0);
+  const supersedeOther = () => { if (OtherTools) setOtherRevision((n) => n + 1); };
 
   const save = () => {
     if (!onSaveAnswer || !draft || saving) return;
@@ -509,6 +520,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   const promptId = `q-prompt-${uid}`;
   const contextId = `q-context-${uid}`;
   const stakesId = `q-stakes-${uid}`;
+  const whereId = `q-where-${uid}`;
   const suggestId = `q-suggest-${uid}`;
   const noteLabelId = `q-note-${uid}`;
   // null = follow the answer (open while a note exists); a click pins it.
@@ -598,6 +610,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
       nextSelected.sort((a, b) => order.indexOf(a) - order.indexOf(b));
       commit({ ...rest, selected: nextSelected });
     } else if (checked) {
+      supersedeOther();
       const { other: _o, ...single } = rest;
       commit({ ...single, selected: [label] });
     }
@@ -611,6 +624,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   const pickSuggestion = (checked: boolean) => {
     const text = question.suggestedText;
     if (!text) return;
+    supersedeOther();
     lastPickRef.current = { label: SUGGESTION_ROW, before: answer, at: now() };
     const { skipped: _s, other: _o, ...rest } = base;
     if (question.kind === 'multi') {
@@ -650,6 +664,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   };
 
   const toggleSkip = () => {
+    supersedeOther();
     replacedOtherRef.current = null;
     if (base.skipped) {
       const { skipped: _s, ...rest } = base;
@@ -664,6 +679,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
     const recommended = recommendedQuestionAnswer(indexed, base);
     if (!recommended) return;
     const keptOther = acceptBehavior?.keepOther && question.kind === 'multi' && recommended.selected.length > 0 && base.other?.trim() ? base.other : undefined;
+    if (!keptOther) supersedeOther();
     const next = keptOther ? { ...recommended, other: keptOther } : recommended;
     const before = answer;
     replacedOtherRef.current = null;
@@ -759,7 +775,10 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   const otherWidthRef = useRef(-1);
   const fitOther = () => {
     const field = otherRef.current;
-    setOtherGlyphTop(field ? fitOtherField(field) : null);
+    const grown = field ? fitOtherField(field) : null;
+    // With host tools, a line can come under the field (the mic's status): the mark stays beside its first line, where
+    // one line centres it, rather than centring on the taller box.
+    setOtherGlyphTop(grown ?? (field && OtherTools && field.offsetHeight > 15 ? (field.offsetHeight - 15) / 2 : null));
     otherWidthRef.current = field ? field.clientWidth : -1;
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -813,7 +832,50 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
     ? (recordingOn ? 'on' : 'off')
     : undefined;
 
-  const describedBy = [question.stakes ? stakesId : null, question.context ? contextId : null, question.kind === 'text' && question.suggestedText && !answered ? suggestId : null]
+  // A question that proposes a change (change lines): its Where, its places, and the pictures they open.
+  const change = question.change;
+  const changeHost: QuestionChangeHost | null = change || question.choices.some((c) => c.before || c.after || c.places)
+    ? { inline, pictureSrc, heldPlaceholder, failed: failedPictures, onPictureError: markPictureFailed, onOpenPicture: onImageClick }
+    : null;
+  // The `Shows:` picture is the place: with a Where it opens from "See it" there (with its `Source:`), not from the chip.
+  const firstWhere = change ? change.where ?? change.groups.find((g) => g.where !== undefined)?.where : undefined;
+  const place = firstWhere !== undefined && question.shows?.kind === 'image' && showsSrc && onImageClick
+    ? { url: showsSrc, alt: [question.shows.label || 'The place', change!.source].filter(Boolean).join(' · ') }
+    : null;
+
+  // A `Source:` the parser took with the place picture, shown as written when that picture cannot open here.
+  const changeSource = change?.source && !place ? change.source : undefined;
+  // A choice's own change: its words, outside its label, describe its input.
+  const choiceChanges = changeHost ? question.choices.map((c, i) => questionChoiceHasChange(question, c, i)) : null;
+  const choiceChangeId = (index: number) => `${groupName}-change-${index}`;
+  /** A click on a choice's own change picks it, as a click on its row does (never while selecting words or on a double-click). */
+  const onChoiceChangeClick = (event: React.MouseEvent<HTMLDivElement>, label: string) => {
+    onRowClick(event, label);
+    if (event.defaultPrevented || readOnly) return;
+    const holder = event.currentTarget.closest('[data-question-option-with-change], [data-question-tile]');
+    holder?.querySelector<HTMLInputElement>('input[data-question-control]')?.click();
+  };
+  const choiceChange = (index: number, layout: 'row' | 'tile') => {
+    const choice = question.choices[index];
+    if (!changeHost || !choice || !choiceChanges?.[index]) return null;
+    return (
+      <QuestionChoiceChange
+        question={question}
+        choice={choice}
+        index={index}
+        host={changeHost}
+        spokenId={choiceChangeId(index)}
+        layout={layout}
+        readOnly={readOnly}
+        onClick={(event) => onChoiceChangeClick(event, choice.label)}
+      />
+    );
+  };
+
+  // The scenario table stays in the question's context (every other reader shows it there); the card draws it as its
+  // own section instead, so it leaves the context drawn here.
+  const context = question.kind !== 'text' && question.scenarios ? contextWithoutScenarioTable(question.context, question.scenarios) : question.context;
+  const describedBy = [question.stakes ? stakesId : null, change?.where ? whereId : null, context ? contextId : null, question.kind === 'text' && question.suggestedText && !answered ? suggestId : null]
     .filter(Boolean)
     .join(' ') || undefined;
 
@@ -830,7 +892,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
     <fieldset
       ref={cardRef}
       className={cx(
-        'question-block my-5 min-w-0 rounded-[10px] border px-3.5 pb-2.5 pt-3',
+        'question-block relative my-5 min-w-0 rounded-[10px] border px-3.5 pb-2.5 pt-3',
         // A size container: the card's own width lays out its footer (FOOT_BUTTON).
         '@container/qcard',
         // Native radios/checkboxes follow the theme's mode. ThemeProvider marks
@@ -852,6 +914,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
       aria-disabled={readOnly || undefined}
       data-question-decision={question.decision ? 'recorded' : question.decisionOnAnswer ? 'on-answer' : undefined}
       data-question-decision-recording={recordingAttr}
+      {...sourceLineAttrs(sourceBlock)}
     >
       <div className="annotation-exclude select-none mb-1.5 flex items-center gap-2" data-pinpoint-ignore="">
         <span className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">{eyebrow}</span>
@@ -935,7 +998,8 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
           {inline(question.stakes)}
         </p>
       )}
-      {question.shows && (
+      {changeHost && change?.where !== undefined && <QuestionWhere id={whereId} where={change.where} host={changeHost} place={place} source={changeSource} />}
+      {question.shows && !place && (
         <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[12.5px]" data-question-shows="">
           <span className="annotation-exclude select-none text-muted-foreground" data-pinpoint-ignore="">Shows</span>
           {question.shows.kind === 'image' ? (
@@ -993,10 +1057,10 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
           )}
         </div>
       )}
-      {question.context && (
+      {context && (
         <QuestionContext
           id={contextId}
-          markdown={question.context}
+          markdown={context}
           imageBaseDir={imageBaseDir}
           onImageClick={onImageClick}
           onOpenLinkedDoc={onOpenLinkedDoc}
@@ -1006,6 +1070,8 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
           repoHost={repoHost}
         />
       )}
+      {/* The Where is the first thing under the prompt; the places' Now and After follow the context that explains them. */}
+      {changeHost && change && <QuestionChangeGroups question={question} host={changeHost} place={place} source={change.where === undefined ? changeSource : undefined} />}
 
       {question.kind === 'text' ? (
         <>
@@ -1056,18 +1122,32 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
                 pictureBadge={pictureBadge}
                 // Asked by the picture's own URL, loaded or not: a picture that fails keeps the set's layout.
                 pictureSize={pictureSize ? (index) => (pictures[index] ? pictureSize(pictures[index]!) : null) : undefined}
+                {...(choiceChanges?.some(Boolean)
+                  ? {
+                    inputProps: (label: string) => {
+                      const index = question.choices.findIndex((c) => c.label === label);
+                      return choiceChanges[index] ? { 'aria-describedby': choiceChangeId(index) } : {};
+                    },
+                    renderBelow: (_choice: unknown, index: number) => choiceChange(index, 'tile'),
+                  }
+                  : {})}
               />
             ) : (
-              question.choices.map((choice) => {
+              question.choices.map((choice, choiceIndex) => {
                 const checked = selected.includes(choice.label);
-                return (
+                const hasChange = !!choiceChanges?.[choiceIndex];
+                // A choice with a change of its own: the row and its change take the tint (hover, picked) as one.
+                const tint = cx('rounded-[7px] transition-colors', !readOnly && 'hover:bg-muted/45', checked && 'bg-primary/12 hover:bg-primary/12');
+                const row = (
                   <label
                     key={choice.label}
-                    className={cx(
-                      'flex items-start gap-2.5 rounded-[7px] px-[9px] py-1.5 transition-colors',
-                      readOnly ? 'cursor-default' : 'cursor-pointer hover:bg-muted/45',
-                      checked && 'bg-primary/12 hover:bg-primary/12',
-                    )}
+                    className={hasChange
+                      ? cx('flex items-start gap-2.5 rounded-[7px] px-[9px] py-1.5', readOnly ? 'cursor-default' : 'cursor-pointer')
+                      : cx(
+                        'flex items-start gap-2.5 rounded-[7px] px-[9px] py-1.5 transition-colors',
+                        readOnly ? 'cursor-default' : 'cursor-pointer hover:bg-muted/45',
+                        checked && 'bg-primary/12 hover:bg-primary/12',
+                      )}
                     data-question-option=""
                     onPointerDown={onRowPointerDown}
                     onClickCapture={(event) => onRowClick(event, choice.label)}
@@ -1080,6 +1160,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
                       className="mt-[3px] h-[15px] w-[15px] shrink-0 cursor-pointer accent-primary disabled:cursor-default"
                       data-question-control=""
                       disabled={readOnly}
+                      aria-describedby={hasChange ? choiceChangeId(choiceIndex) : undefined}
                     />
                     <span className="min-w-0 flex-1 select-text text-[13.5px] leading-[1.45] text-foreground" data-question-part="choice">
                       <span className="font-[550]">{inline(choice.label)}</span>
@@ -1091,6 +1172,13 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
                     </span>
                   </label>
                 );
+                // A choice's own change (its version, its pictures, or today's words): under its row, outside its label.
+                return hasChange ? (
+                  <div key={choice.label} className={tint} data-question-option-with-change="" data-question-option-checked={checked ? '' : undefined} onPointerDown={onRowPointerDown}>
+                    {row}
+                    {choiceChange(choiceIndex, 'row')}
+                  </div>
+                ) : row;
               })
             )}
             {suggestionRow && (
@@ -1141,6 +1229,8 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
                 </span>
                 {/* One line tall, as the one-line field it replaced; it grows with its lines (wrapped or typed:
                     Enter makes a new line, as in the note) up to a cap, then scrolls. A read-only card shows it whole. */}
+                {/* The host's tools (the Inbox's mic) draw inside this box: over the field's right edge, and below it. */}
+                <div className="relative flex min-w-0 flex-1 flex-col">
                 <textarea
                   ref={otherRef}
                   rows={1}
@@ -1158,10 +1248,12 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
                   aria-label={number > 0 ? `Other answer to question ${number}` : 'Other answer'}
                   data-question-other=""
                   className={cx(
-                    'annotation-exclude min-w-0 flex-1 resize-none overflow-hidden break-words border-0 border-b border-transparent bg-transparent py-[3px] text-[13.5px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-ring',
+                    'annotation-exclude w-full min-w-0 resize-none overflow-hidden break-words border-0 border-b border-transparent bg-transparent py-[3px] text-[13.5px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-ring',
                     !readOnly && 'max-h-48',
                   )}
                 />
+                {OtherTools && !readOnly && <OtherTools key={`${question.key}:${otherRevision}`} textareaRef={otherRef} />}
+                </div>
               </div>
             )}
           </div>
@@ -1177,6 +1269,8 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
           {inline(question.why)}
         </p>
       )}
+
+      {question.kind !== 'text' && question.scenarios && <QuestionScenarios table={question.scenarios} picked={selected} inline={inline} />}
 
       {/* Trade-offs (option lines, approval "inbox-question-tradeoffs"): one quiet line under Why that opens into a
           table, one row per option with its Pros and Cons side by side (stacked in a narrow card). No Recommended
@@ -1370,6 +1464,8 @@ export interface QuestionPictureTilesProps {
   inputProps?: (label: string) => React.InputHTMLAttributes<HTMLInputElement>;
   /** What sits under a choice's words (default: its Recommended tag). */
   renderBadges?: (choice: QuestionPictureTileChoice, index: number) => React.ReactNode;
+  /** What a tile draws under its label, outside it (the card: a choice's own version); null or absent draws nothing. */
+  renderBelow?: (choice: QuestionPictureTileChoice, index: number) => React.ReactNode;
   /** A small label over a tile's picture, top left (the card's `pictureBadge`); null or absent draws none. */
   pictureBadge?: (choice: { label: string; image: { alt: string; src: string } }) => string | null;
   /** Each choice's picture size in pixels by its place in `choices`, when the host knows it before the picture loads
@@ -1400,6 +1496,7 @@ export const QuestionPictureTiles: React.FC<QuestionPictureTilesProps> = ({
   labelProps,
   inputProps,
   renderBadges,
+  renderBelow,
   pictureBadge,
   pictureSize,
 }) => {
@@ -1515,6 +1612,7 @@ export const QuestionPictureTiles: React.FC<QuestionPictureTilesProps> = ({
                 </span>
               </span>
             </label>
+            {renderBelow?.(choice, index)}
             {shown && onZoom && (
               <button
                 type="button"

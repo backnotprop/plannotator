@@ -15,7 +15,7 @@
  * The PNGs, the video and the sampled curves land in .local/proof/sidebar/.
  */
 
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';

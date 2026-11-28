@@ -19,6 +19,7 @@ import { startInboxServer, type InboxServer } from "./inbox";
 import { fetchReleaseImagesFor } from "./inbox-whats-new-images";
 import { takeDownInboxTailscale, type InboxTailscaleTimers } from "./inbox-tailscale";
 import { inboxLiveSiteId } from "./inbox-live";
+import { savedConfig } from "../../tests/helpers/saved-config";
 
 type Json = Record<string, any>;
 
@@ -127,7 +128,14 @@ describe("Inbox over your tailnet", () => {
     expect(ts.serve.get(inbox.port)).toBe(`http://127.0.0.1:${listener}`);
     expect(listener).not.toBe(inbox.port);
     expect(ts.calls.some((args) => args.includes("funnel"))).toBe(false);
-    expect(registryOf(dataDir).tailscale).toEqual({ url: `https://${MAGIC}:${inbox.port}/`, error: null, https_port: inbox.port, proxy_port: listener });
+    // `made`: the proxy ports this Inbox pointed its mapping on this port at (its own leftovers, inbox-tailscale.ts).
+    expect(registryOf(dataDir).tailscale).toEqual({
+      url: `https://${MAGIC}:${inbox.port}/`,
+      error: null,
+      https_port: inbox.port,
+      proxy_port: listener,
+      made: { https_port: inbox.port, proxy_ports: [listener] },
+    });
 
     // The owner, through serve: the window and its data.
     expect((await throughServe(inbox, "/")).status).toBe(200);
@@ -142,7 +150,8 @@ describe("Inbox over your tailnet", () => {
     expect(await codeOf(await throughServe(inbox, "/api/inbox/threads", { headers: { "Tailscale-Funnel-Request": "?1" } }))).toEqual([403, "tailnet_funnel_refused"]);
     const page = await throughServe(inbox, "/", { login: "someone@example.com" });
     expect(page.status).toBe(403);
-    expect(await page.text()).toContain("only its owner's Tailscale login");
+    expect(page.headers.get("content-type")).toContain("text/html");
+    expect(await page.text()).toContain("only for the Tailscale account that owns this computer");
 
     // Host is the client's own through serve: only the served name and port pass, never a loopback claim.
     for (const host of [`127.0.0.1:${inbox.port}`, `localhost:${inbox.port}`, MAGIC, `${MAGIC}:443`, `evil.example:${inbox.port}`]) {
@@ -419,7 +428,8 @@ describe("Inbox over your tailnet", () => {
     inbox.stop();
     servers.splice(servers.indexOf(inbox), 1);
     expect(ts.serve.size).toBe(0);
-    expect(registryOf(dataDir).tailscale).toBeUndefined();
+    // No mapping is named any more, but the ports it made stay known until the switch goes off (#3591).
+    expect(registryOf(dataDir).tailscale).toEqual({ url: null, error: null, made: { https_port: port, proxy_ports: expect.any(Array) } });
     const next = await start(dataDir, ts.run);
     expect(next.port).toBe(port);
     expect(ts.serve.get(port)).toBe(`http://127.0.0.1:${next.tailscale.listenerPort()}`);
@@ -804,9 +814,8 @@ describe("Inbox over your tailnet", () => {
 });
 
 describe("running-app prototypes on the owner's phone, through the prototype relay", () => {
-  test("the owner opens a question's running app through the tailnet: one more mapping, the app at its own root, framed only by the window; a guest, an unnamed site, another site and a stale key are refused", async () => {
-    const GUEST = "guest@example.com";
-    const dataDir = world({ inboxTailscale: true, inboxTailscaleAllow: [GUEST] });
+  test("the owner opens a question's running app through the tailnet: one more mapping, the app at its own root, framed only by the window; another account, an unnamed site, another site and a stale key are refused", async () => {
+    const dataDir = world({ inboxTailscale: true });
     const ts = fakeTailscale();
     // The agent's running app: a page that loads an absolute-path asset, and a redirect to a loopback address.
     const app = Bun.serve({
@@ -835,8 +844,7 @@ describe("running-app prototypes on the owner's phone, through the prototype rel
       const windowOrigin = `https://${MAGIC}:${inbox.port}`;
       const own = { Origin: windowOrigin };
 
-      // A guest the allowlist lets in, and a site no Prototype line named: refused, and no relay is made.
-      expect(await codeOf(await throughServe(inbox, `${live}/${site.id}`, { login: GUEST, headers: own }))).toEqual([403, "owner_only"]);
+      // A site no Prototype line named: refused, and no relay is made.
       expect(await codeOf(await throughServe(inbox, `${live}/liv_0123456789abcdef`, { headers: own }))).toEqual([404, "live_site_not_found"]);
       expect(inbox.tailscale.relayPort()).toBeNull();
       expect(ts.serve.size).toBe(1);
@@ -888,8 +896,8 @@ describe("running-app prototypes on the owner's phone, through the prototype rel
       // A loopback redirect stays on the relay.
       expect((await relay("/old", { headers: signedIn })).headers.get("location")).toBe("/checkout?v=b");
 
-      // Refused: a guest, a wrong Host, no login, another site, a key no running proxy has, no cookie.
-      expect((await relay("/checkout?v=b", { login: GUEST, headers: signedIn })).status).toBe(403);
+      // Refused: another account, a wrong Host, no login, another site, a key no running proxy has, no cookie.
+      expect((await relay("/checkout?v=b", { login: "someone@example.com", headers: signedIn })).status).toBe(403);
       expect((await relay("/checkout?v=b", { host: `127.0.0.1:${relayPort}`, headers: signedIn })).status).toBe(403);
       expect((await relay("/checkout?v=b", { login: null, headers: signedIn })).status).not.toBe(200);
       expect((await relay("/checkout?v=b", { headers: { ...signedIn, "Sec-Fetch-Site": "cross-site" } })).status).toBe(403);
@@ -938,9 +946,8 @@ describe("running-app prototypes on the owner's phone, through the prototype rel
 
 // Who may use the update control, the agents and the other owner settings is inbox-tailnet-owner.test.ts.
 describe("what the owner reads through the tailnet, and what a page there never claims", () => {
-  test("What's new and its images answer the owner over the tailnet and another allowed login, read only; the update control stays the owner's", async () => {
-    const GUEST = "guest@example.com";
-    const dataDir = world({ inboxTailscale: true, inboxTailscaleAllow: [GUEST] });
+  test("What's new and its images answer the owner over the tailnet, read only", async () => {
+    const dataDir = world({ inboxTailscale: true });
     let githubRequests = 0;
     const github = Bun.serve({
       hostname: "127.0.0.1",
@@ -994,20 +1001,11 @@ describe("what the owner reads through the tailnet, and what a page there never 
       expect((await throughServe(inbox, page, { method: "POST", headers: own, body: "{}" })).status).toBe(405);
       expect((await throughServe(inbox, image, { method: "POST", headers: own, body: "{}" })).status).toBe(405);
 
-      // Another allowed login reads them too: public release notes (owner ruling 2026-11-11).
-      expect((await throughServe(inbox, page, { login: GUEST, headers: own })).status).toBe(200);
-      expect((await throughServe(inbox, image, { login: GUEST, headers: own })).status).toBe(200);
-
-      // The window is told who is a guest.
+      // The window is told where it is.
       const settings = async (login: string | null) =>
         (await (login === null ? fetch(`http://127.0.0.1:${inbox.port}/api/inbox/settings`) : throughServe(inbox, "/api/inbox/settings", { login, headers: own }))).json() as Promise<Json>;
-      expect(await settings(OWNER)).toMatchObject({ via: "tailnet", guest: false, version: "0.28.10" });
-      expect(await settings(GUEST)).toMatchObject({ via: "tailnet", guest: true });
-      expect(await settings(null)).toMatchObject({ via: "local", guest: false });
-
-      // The update control stays closed to a guest (what it does for the owner is inbox-tailnet-owner.test.ts).
-      expect(await codeOf(await throughServe(inbox, "/api/inbox/update", { method: "POST", login: GUEST, headers: own, body: JSON.stringify({ serverSession: inbox.serverSession }) }))).toEqual([403, "local_only"]);
-      expect(await codeOf(await throughServe(inbox, "/api/inbox/update", { login: GUEST, headers: own }))).toEqual([403, "local_only"]);
+      expect(await settings(OWNER)).toMatchObject({ via: "tailnet", version: "0.28.10" });
+      expect(await settings(null)).toMatchObject({ via: "local" });
       expect(launches).toEqual([]);
       // Nothing was fetched or written by reading it.
       expect(githubRequests).toBe(before);
@@ -1029,7 +1027,7 @@ describe("what the owner reads through the tailnet, and what a page there never 
     const remote = await throughServe(inbox, "/api/inbox/sound/dialog", { method: "POST", headers: own, body: JSON.stringify({ serverSession: inbox.serverSession }) });
     expect(remote.status).toBe(200);
     expect(((await remote.json()) as Json).show).toBe(true);
-    expect(JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")).inboxSound).toMatchObject({ dialogShownFor: "0.28.10" });
+    expect(savedConfig(dataDir).inboxSound).toMatchObject({ dialogShownFor: "0.28.10" });
     const local = await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/sound/dialog`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

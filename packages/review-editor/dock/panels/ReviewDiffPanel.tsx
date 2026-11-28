@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import type { IDockviewPanelProps } from 'dockview-react';
 import { DiffViewer } from '../../components/DiffViewer';
+import { RegionBoundary } from '@plannotator/ui/components/RegionBoundary';
 import { useReviewState } from '../ReviewStateContext';
 import { getReviewDiffPanelFilePath, type ReviewDiffPanelParams } from '../reviewPanelTypes';
 import { annotationMatchesPrScope } from '../../utils/annotationScope';
@@ -8,7 +9,11 @@ import { fileKind } from '@plannotator/core/file-kind';
 import { isLineRangeInPatch } from '@plannotator/core/diff-files';
 import { FileViewSwitch } from '../../components/FileViewSwitch';
 import { WholeFileView } from '../../components/WholeFileView';
-import { JumpCrumb } from '../../components/JumpCrumb';
+import { OriginalFileView } from '../../components/OriginalFileView';
+import type { ChangedFileView } from '../../components/FileViewSwitch';
+import { usesPaneLayout } from '../../workspace/layoutEngine';
+import { paneFileView, type PaneFileViewParams } from '../../workspace/paneFileView';
+import { usePaneDiffStyle } from '../../workspace/paneContext';
 
 /**
  * Thin adapter between dockview's panel API and the existing DiffViewer.
@@ -20,7 +25,15 @@ export const ReviewDiffPanel: React.FC<IDockviewPanelProps> = (props) => {
   const filePath =
     getReviewDiffPanelFilePath(props.params) ??
     getReviewDiffPanelFilePath(props.api.getParameters<ReviewDiffPanelParams>());
-  return <ReviewDiffBody filePath={filePath} onKeep={undefined} />;
+  const view = usesPaneLayout() ? paneFileView(props.api.getParameters<PaneFileViewParams>(), filePath) : undefined;
+  return (
+    <ReviewDiffBody
+      filePath={filePath}
+      onKeep={undefined}
+      view={view}
+      onViewChange={view !== undefined || usesPaneLayout() ? (next) => props.api.updateParameters({ view: next, viewPath: filePath }) : undefined}
+    />
+  );
 };
 
 /**
@@ -28,8 +41,14 @@ export const ReviewDiffPanel: React.FC<IDockviewPanelProps> = (props) => {
  * with change bars. Drawn by the diff tab and by a file kept in its own tab.
  * `onKeep` keeps a preview tab when a comment is made in it.
  */
-export const ReviewDiffBody: React.FC<{ filePath: string | null; onKeep?: () => void }> = ({ filePath, onKeep }) => {
+export const ReviewDiffBody: React.FC<{
+  filePath: string | null;
+  onKeep?: () => void;
+  view?: ChangedFileView;
+  onViewChange?: (view: ChangedFileView) => void;
+}> = ({ filePath, onKeep, view, onViewChange }) => {
   const state = useReviewState();
+  const paneDiffStyle = usePaneDiffStyle(state.diffStyle);
   const file = filePath
     ? state.files.find(candidate => candidate.path === filePath)
     : undefined;
@@ -87,19 +106,21 @@ export const ReviewDiffBody: React.FC<{ filePath: string | null; onKeep?: () => 
   // Changes | Whole file: offered where the server reads whole files at the
   // new side, for a file that has one (not a deletion), and not for Markdown,
   // whose Read view already shows the whole document.
-  const fileView = state.fileViewOf ? state.fileViewOf(file.path) : 'changes';
-  const crumb = state.jumpCrumb?.targetPath === file.path ? state.jumpCrumb : null;
+  const fileView = view ?? (state.fileViewOf ? state.fileViewOf(file.path) : 'changes');
   const markdownFile = !!state.markdownPreview?.isPreviewable(file);
   const wholeUnavailableReason = file.status === 'deleted'
     ? 'The diff deletes this file'
     : null;
+  const originalUnavailableReason = file.status === 'added' ? 'The diff adds this file: it has no original' : null;
   const showSwitch = !!state.onFileViewChange && !markdownFile;
   const wholeView = showSwitch && fileView === 'whole' && !wholeUnavailableReason;
+  const originalView = showSwitch && fileView === 'original' && !originalUnavailableReason;
   const switchControl = showSwitch ? (
     <FileViewSwitch
-      view={wholeView ? 'whole' : 'changes'}
-      onSelect={(view) => state.onFileViewChange!(file.path, view)}
+      view={wholeView ? 'whole' : originalView ? 'original' : 'changes'}
+      onSelect={(next) => (onViewChange ? onViewChange(next) : state.onFileViewChange!(file.path, next))}
       wholeUnavailableReason={wholeUnavailableReason}
+      originalUnavailableReason={originalUnavailableReason}
     />
   ) : undefined;
 
@@ -109,11 +130,23 @@ export const ReviewDiffBody: React.FC<{ filePath: string | null; onKeep?: () => 
   // context mismatch" warnings in the console.
   return (
     <div key={`${file.path}:${state.reviewBase ?? ''}:${state.activeDiffBase ?? ''}:${state.feedbackDiffContext?.snapshotId ?? ''}`} className="h-full flex flex-col">
-      {crumb && <JumpCrumb crumb={crumb} onBack={state.navigation?.back} />}
       <div className="flex-1 min-h-0 relative">
+      {/* A file whose diff throws while it draws says so here; the panels around it stay (ui's RegionBoundary). Try
+          again first clears the selection a "+" set (the app's, above the diff), which would fail it again. */}
+      <RegionBoundary name="Diff" onRetry={() => state.onLineSelection(null)}>
       <DiffViewer
         headerAccessory={switchControl}
-        bodyOverride={wholeView ? (
+        bodyOverride={originalView ? (
+          <OriginalFileView
+            filePath={file.path}
+            oldPath={file.oldPath}
+            patch={file.patch}
+            base={state.reviewBase}
+            snapshotId={state.feedbackDiffContext?.snapshotId}
+            tokens={state.fileTokens?.(file.path)}
+            minimap={!state.isCompactTouchLayout}
+          />
+        ) : wholeView ? (
           <WholeFileView
             filePath={file.path}
             patch={file.patch}
@@ -131,6 +164,7 @@ export const ReviewDiffBody: React.FC<{ filePath: string | null; onKeep?: () => 
             onSelectAnnotation={state.onSelectAnnotation}
             revealTarget={state.revealTarget}
             tokens={state.fileTokens?.(file.path)}
+            minimap={!state.isCompactTouchLayout}
           />
         ) : undefined}
         patch={file.patch}
@@ -148,7 +182,7 @@ export const ReviewDiffBody: React.FC<{ filePath: string | null; onKeep?: () => 
         prDiffScope={state.prDiffScope}
         isFocused={isFocusedFile}
         changeNavigation={isFocusedFile && state.isDiffPanelActive === true}
-        diffStyle={state.diffStyle}
+        diffStyle={paneDiffStyle}
         diffOverflow={state.diffOverflow}
         diffIndicators={state.diffIndicators}
         lineDiffType={state.lineDiffType}
@@ -213,6 +247,7 @@ export const ReviewDiffBody: React.FC<{ filePath: string | null; onKeep?: () => 
           ? (view, how) => (how === 'chosen' ? state.markdownPreview!.choose : state.markdownPreview!.show)(file.path, view)
           : undefined}
       />
+      </RegionBoundary>
       </div>
     </div>
   );

@@ -281,32 +281,31 @@ export function defineRefCardRouteScenarios(
       test(`${kind}: a --tailscale session refuses every other tailnet device, and nothing runs`, async () => {
         tailnet!.publish(TAILNET_OWNER, `https://${TAILNET_SERVED}`);
         await setUp(kind, { tailnetPublished: true });
-        for (const refused of [
-          // Another login on the tailnet.
-          await throughServe("someone-else@example.com"),
-          // The owner's login, but not on the served name and port.
-          await throughServe(TAILNET_OWNER, `${TAILNET_NAME}:7070`),
-        ]) {
-          expect(refused.status).toBe(404);
-          expect(refused.body?.code).toBe("ref_cards_disabled");
-        }
-        // A tagged device (no login) and a funnel request are peers too.
+        // Another login on the tailnet: the session's refusal, before any route.
+        const other = await throughServe("someone-else@example.com");
+        expect(other.status).toBe(403);
+        expect(other.body?.code).toBe("tailnet_identity_refused");
+        // The owner's login, but not on the served name and port.
+        const wrongHost = await throughServe(TAILNET_OWNER, `${TAILNET_NAME}:7070`);
+        expect(wrongHost.status).toBe(404);
+        expect(wrongHost.body?.code).toBe("ref_cards_disabled");
+        // A tagged device (no login) and a funnel request are refused too.
         const tagged = await get(refPath(PR_URL), { host: TAILNET_SERVED, "x-forwarded-for": "100.64.0.9" });
-        expect(tagged.status).toBe(404);
+        expect(tagged.status).toBe(403);
         const funnel = await get(refPath(PR_URL), {
           host: TAILNET_SERVED,
           "tailscale-user-login": TAILNET_OWNER,
           "tailscale-funnel-request": "?1",
           "x-forwarded-for": "203.0.113.7",
         });
-        expect(funnel.status).toBe(404);
+        expect(funnel.status).toBe(403);
         expect(calls).toHaveLength(0);
       });
 
       test(`${kind}: with no owner on record, only this machine's tabs get cards`, async () => {
         tailnet!.publish("", `https://${TAILNET_SERVED}`);
         await setUp(kind, { tailnetPublished: true });
-        expect((await throughServe(TAILNET_OWNER)).status).toBe(404);
+        expect((await throughServe(TAILNET_OWNER)).status).toBe(403);
         expect(calls).toHaveLength(0);
         expect((await get(refPath(PR_URL))).status).toBe(200);
       });

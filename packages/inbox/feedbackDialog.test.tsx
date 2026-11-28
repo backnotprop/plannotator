@@ -541,3 +541,30 @@ describe.skipIf(!hasDom)('the sidebar row', () => {
     expect(host.querySelector('[data-feedback-nav]')).toBeNull();
   });
 });
+
+describe.skipIf(!hasDom)('the Feedback dialog backdrop (the shared Modal)', () => {
+  const pointer = (el: Element, kind: 'pointerdown' | 'pointerup') => act(() => void el.dispatchEvent(new PointerEvent(kind, { bubbles: true })));
+  const click = (el: Element) => act(() => void el.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+
+  test('a press inside the box released on the backdrop keeps the dialog open and the words in it', () => {
+    let closed = 0;
+    const dialog = render({ onClose: () => closed++ });
+    type(dialog.box(), 'Selecting these words to the edge');
+    const backdrop = dialog.host.querySelector('dialog')!;
+    pointer(dialog.box(), 'pointerdown');
+    pointer(backdrop, 'pointerup');
+    click(backdrop);
+    expect(closed).toBe(0);
+    expect(dialog.box().value).toBe('Selecting these words to the edge');
+  });
+
+  test('a press and release on the backdrop closes it, as before', () => {
+    let closed = 0;
+    const dialog = render({ onClose: () => closed++ });
+    const backdrop = dialog.host.querySelector('dialog')!;
+    pointer(backdrop, 'pointerdown');
+    pointer(backdrop, 'pointerup');
+    click(backdrop);
+    expect(closed).toBe(1);
+  });
+});

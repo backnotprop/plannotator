@@ -24,7 +24,7 @@ import { useCodeAnnotationDraft } from './hooks/useCodeAnnotationDraft';
 import { localReviewDraftTransport } from '../review-editor/utils/localReviewDraft';
 import { resetDraftTransport, setDraftTransport } from './hooks/useAnnotationDraft';
 import type { CodeAnnotation } from './types';
-import { saveDraft, loadDraft, deleteDraft, getDraftGeneration } from '../shared/draft';
+import { saveDraft, loadDraft, deleteDraft, getDraftGeneration, missingDraftHeaders } from '../shared/draft';
 
 const hasDom = typeof document !== 'undefined';
 
@@ -64,13 +64,7 @@ function installFetchShim() {
         const data = loadDraft(DRAFT_KEY);
         return data
           ? new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } })
-          : new Response(
-              JSON.stringify({
-                found: false,
-                ...(getDraftGeneration(DRAFT_KEY) !== null ? { draftGeneration: getDraftGeneration(DRAFT_KEY) } : {}),
-              }),
-              { status: 404, headers: { 'Content-Type': 'application/json' } },
-            );
+          : new Response(null, { status: 204, headers: missingDraftHeaders(getDraftGeneration(DRAFT_KEY)) });
       }
       if (method === 'POST') {
         saveDraft(DRAFT_KEY, JSON.parse(String(init?.body)));
@@ -777,5 +771,66 @@ describe('in-place switch onto another draft target (#1590)', () => {
       expect(t.saves.at(-1)?.codeAnnotations?.map((a) => a.id)).toEqual(['mine']);
       await h.unmount();
     });
+  });
+});
+
+// A render error's notice takes the review's place (ui's RegionBoundary), and its Reload reloads the page: neither may
+// drop the comment saved half a second after it was made. What regresses: a comment added just before the failure is
+// gone after Reload.
+describe('a render error, and its Reload, keep the comment waiting to be saved', () => {
+  function recordingTransport(order: string[] = []) {
+    const saves: { codeAnnotations?: CodeAnnotation[] }[] = [];
+    return {
+      saves,
+      order,
+      transport: {
+        load: async () => ({ data: null, generation: null }),
+        save: async (body: object) => {
+          saves.push(body as { codeAnnotations?: CodeAnnotation[] });
+          order.push('save');
+        },
+        remove: async () => {},
+      },
+    };
+  }
+
+  test.skipIf(!hasDom)('the host unmounting with a save still waiting sends it', async () => {
+    const t = recordingTransport();
+    const s = await mountSession(options({ transport: t.transport }));
+    await s.rerender(options({ transport: t.transport, annotations: [ANNOTATION] }));
+    expect(t.saves).toEqual([]);
+    await s.unmount();
+    await tick(20);
+    expect(t.saves.map((d) => d.codeAnnotations?.map((a) => a.id))).toEqual([['a1']]);
+  });
+
+  test.skipIf(!hasDom)('a change of the comments sends no extra save: only the last state, after the pause', async () => {
+    const t = recordingTransport();
+    const s = await mountSession(options({ transport: t.transport }));
+    try {
+      await s.rerender(options({ transport: t.transport, annotations: [ANNOTATION] }));
+      await s.rerender(options({ transport: t.transport, annotations: [ANNOTATION, { ...ANNOTATION, id: 'a2' }] }));
+      await tick(20);
+      expect(t.saves).toEqual([]);
+      await tick(DEBOUNCE_WAIT_MS);
+      expect(t.saves.map((d) => d.codeAnnotations?.map((a) => a.id))).toEqual([['a1', 'a2']]);
+    } finally { await s.unmount(); }
+  });
+
+  test.skipIf(!hasDom)("a failure box's Reload sends the waiting save before the page reloads", async () => {
+    const { reloadAfterFlush } = await import('./utils/beforeReload');
+    const t = recordingTransport();
+    const s = await mountSession(options({ transport: t.transport }));
+    try {
+      await s.rerender(options({ transport: t.transport, annotations: [ANNOTATION] }));
+      await act(async () => {
+        await reloadAfterFlush(() => t.order.push('reload'));
+      });
+      expect(t.order).toEqual(['save', 'reload']);
+      expect(t.saves[0]?.codeAnnotations?.map((a) => a.id)).toEqual(['a1']);
+      // Sent once: the pause's own save does not follow.
+      await tick(DEBOUNCE_WAIT_MS);
+      expect(t.saves).toHaveLength(1);
+    } finally { await s.unmount(); }
   });
 });

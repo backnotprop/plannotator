@@ -14,14 +14,14 @@
  * Build the binary first (see inbox.spec.ts). PLANNOTATOR_E2E_BINARY names
  * another binary (an older release, to see the bug).
  */
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { markTourDecided } from '../helpers/tour-decided';
-import { E2E_LAUNCH_OFF, inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
+import { E2E_GROUP_TIP_SEEN, E2E_LAUNCH_OFF, inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -52,7 +52,7 @@ test.beforeAll(async () => {
       inboxListIntro: { shownAt: past, version: 2 },
       inboxVoiceIntro: { shownAt: past },
       favicon: 'glass',
-      inboxReveals: { lastShownAt: past, sidebar_tip: { shownAt: past } },
+      inboxReveals: { ...E2E_GROUP_TIP_SEEN, lastShownAt: past, sidebar_tip: { shownAt: past } },
     }),
   );
   for (const dir of ['claude', 'codex', 'xdg']) mkdirSync(join(root, dir), { recursive: true });

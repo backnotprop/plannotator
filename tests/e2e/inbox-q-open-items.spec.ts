@@ -18,7 +18,7 @@
  *
  * INBOX_Q_SHOTS names a folder for the video and the legend picture.
  */
-import { expect, test, type BrowserContext, type Locator, type Page } from '@playwright/test';
+import { expect, test, type BrowserContext, type Locator, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { FIXTURE_V1_LOCAL } from '../../packages/core/guide-format-fixtures';
 import { copyFileSync, mkdirSync, renameSync, writeFileSync } from 'node:fs';
@@ -232,7 +232,12 @@ async function press(...keys: string[]) {
     await page.keyboard.press(key);
     await page.waitForTimeout(110);
     if (!landed) landed = await page.evaluate(() => !!document.activeElement && document.activeElement !== document.body);
-    else expect(await page.evaluate(() => !!document.activeElement && document.activeElement !== document.body && document.activeElement.isConnected), `focus held after ${key} (on ${await focusedText()})`).toBe(true);
+    else {
+      const held = () => page.evaluate(() => !!document.activeElement && document.activeElement !== document.body && document.activeElement.isConnected);
+      // J unmounts the focused head; the next thread's head takes focus two frames after its messages draw (Thread.tsx), which a busy runner can put past the pause.
+      await expect.poll(held, { timeout: 1000 }).toBe(true).catch(() => {});
+      expect(await held(), `focus held after ${key} (on ${await focusedText()})`).toBe(true);
+    }
   }
 }
 

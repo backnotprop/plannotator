@@ -62,7 +62,7 @@ describe("derivePersonThreadSubject: a thread the person starts gets a short nam
       "Can you check github.com/…/1934 and tell me what you think",
     );
     expect(derivePersonThreadSubject("https://example.com is down")).toBe("example.com is down");
-    const path = derivePersonThreadSubject("/Users/ramos/src/plannotator/packages/inbox/compose/ComposeDialog.tsx throws when I paste an image")!;
+    const path = derivePersonThreadSubject("/Users/sam/src/plannotator/packages/inbox/compose/ComposeDialog.tsx throws when I paste an image")!;
     expect(path.startsWith("…/compose/ComposeDialog.tsx throws")).toBe(true);
     expect(columns(path)).toBeLessThanOrEqual(PERSON_THREAD_SUBJECT_COLUMNS);
   });

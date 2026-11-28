@@ -10,12 +10,14 @@
 import { AutoReload } from './auto-reload'
 import { BRIDGE_HOST, BRIDGE_MODES, bridgeBaseUrl, createBridge, type BridgeEnd, type BridgeHandle } from './bridge'
 import { deliveryFor, legacyResult, parseHostResult, type HostResultRecord, type SessionKind } from './delivery'
+import { isEarlyRunRefusal } from './early-run'
 import { PromptDropped, type Host, type HttpResult } from './host'
-import { InboxLink, inboxSessionProjectEnvValue, sessionProjectFolder } from './inbox'
+import { inboxAgentProjectEnvValue, InboxLink, inboxSessionProjectEnvValue, sessionProjectFolder, type InboxAgentIdentity, type InboxLaunchReminder, type InboxOwnerAnswer } from './inbox'
 import { isAbsolutePath } from './paths'
-import { inboxCommandBriefing, type InboxToolInfo } from './inbox-contract'
+import { inboxCommandBriefing, type InboxPlace, type InboxToolInfo } from './inbox-contract'
 import {
   aliveArgv,
+  hostPidArgv,
   CLAIM_EXIT,
   claimArgv,
   cleanupArgv,
@@ -83,6 +85,7 @@ import {
   plannotatorUnknownSessionText,
   PLANNOTATOR_TOOL_BUNDLE_UNAVAILABLE_TEXT,
   PLANNOTATOR_TOOL_TAILSCALE_UNAVAILABLE_TEXT,
+  PLANNOTATOR_TOOL_CLOUDFLARE_ACCESS_UNAVAILABLE_TEXT,
   scriptOnlyAnnotateFlag,
   scriptOnlyAnnotateFlagText,
   type PlannotatorCloseOutcome,
@@ -90,6 +93,7 @@ import {
   type PlannotatorTarget,
 } from './tool'
 import { TurnTracker, type EnteredPrompt } from './turns'
+import { TerminalPrompts } from './terminal-prompts'
 
 /** Persisted in `$.store` so open reviews reattach after a restart or `--resume`. */
 export interface LaunchRecord {
@@ -221,6 +225,8 @@ export const BRIDGE_RETRY_MS = { first: 5_000, max: 60_000 } as const
  */
 const LEASE_EVERY_TICKS = 5
 export const LEASE_STALE_MS = 20_000
+/** A launch timer silent this long while it has work is re-armed (`ensureLaunchTicking`). */
+export const LAUNCH_TICK_STALL_MS = 10_000
 /**
  * The minimum age of a stored record `pruneStoredLaunches` looks at: a
  * younger one's wrapper may not have written its pid yet.
@@ -228,6 +234,8 @@ export const LEASE_STALE_MS = 20_000
 export const LAUNCH_SETTLED_AGE_MS = 60_000
 /** Another session's launch this old whose server is gone is pruned even with a decision waiting. */
 export const LAUNCH_EXPIRED_MS = 14 * 24 * 60 * 60_000
+/** The review CLI's exit code when it ended a review whose session was gone (apps/hook/server/review-agent-watch.ts `AGENT_GONE_EXIT_CODE`). */
+export const REVIEW_AGENT_GONE_EXIT_CODE = 3
 /**
  * A claimed decision whose claimant has not renewed its watcher lease for
  * this long (or released it at `session.end`) and never marked it delivered
@@ -315,6 +323,12 @@ export interface SessionInfo {
    * at its first session start (inbox.ts); absent: no Inbox connection.
    */
   inboxTools?: readonly InboxToolInfo[]
+  /** Who the session is in the Inbox (a T3 Code thread); absent: this Claude Code session. */
+  inboxAs?: InboxAgentIdentity
+  /** False: the Inbox tool without the reply wake (`InboxLinkOptions.wake`). */
+  inboxWake?: boolean
+  /** Whether this process is the session's own (a T3 Code thread's Claude; `InboxLinkOptions.owner`). */
+  inboxOwner?: () => Promise<InboxOwnerAnswer>
   /** The session's working folder, read when asked (the Inbox link's polls say where the session works). */
   cwd?: () => Promise<string>
   /** The session's root folder (`$.session.root()`), read once at the link's start: where `claude --resume` runs. */
@@ -322,8 +336,17 @@ export interface SessionInfo {
   /** The name the person gave the session, read for each Inbox poll (`InboxLinkOptions.label`). */
   label?: () => string | Promise<string>
   title?: () => string | Promise<string>
+  model?: () => Promise<string | null>
+  effort?: () => string | null
+  contextPercent?: () => Promise<number | null>
+  /** The session's first start, given the link's (`InboxLinkOptions.firstStart`). */
+  firstStart?: (startedAt: number) => Promise<number>
   /** The session ids this conversation continues, read for each Inbox poll (`InboxLinkOptions.continues`). */
   continues?: () => Promise<readonly string[]>
+  /** Where the session lives (a Rex pane), read for each Inbox poll (`InboxLinkOptions.place`). */
+  place?: () => Promise<InboxPlace | null>
+  /** The Inbox reminder a launched session's first wake carries (`InboxLinkOptions.launchReminder`). */
+  launchReminder?: () => Promise<InboxLaunchReminder | null>
   /**
    * Made by the self-heal (self-heal.ts), not by anything the person did: the
    * Inbox link starts without a touch, so a live lease another process holds stands.
@@ -333,6 +356,8 @@ export interface SessionInfo {
 
 export class PlannotatorMod {
   readonly turns = new TurnTracker()
+  /** What the session waits on in its terminal now (terminal-prompts.ts), for the Inbox's Agents list. */
+  readonly prompts = new TerminalPrompts()
   private launches = new Map<string, LiveLaunch>()
   private approval: PendingApproval | null = null
   /** ExitPlanMode calls passed through as the approved plan, by tool_use_id. */
@@ -368,6 +393,15 @@ export class PlannotatorMod {
   /** Launches another process claimed: watched until delivered, or reported once its claimant is gone. */
   private claimedElsewhere = new Map<string, LaunchRecord>()
   private tickCount = 0
+  /** When the launch timer last ticked, or was armed (the host's clock): a timer the engine ended is re-armed (`ensureLaunchTicking`). */
+  private lastTickAt = 0
+  /**
+   * The Claude Code process this instance runs in, as the review CLI checks it
+   * (`hostPidArgv`); written into every launch lease so a CLI can tell a quit
+   * session from a live one whose timer stalled. Undefined until asked, null
+   * when it could not be known for sure.
+   */
+  private hostPid: number | null | undefined = undefined
   /** This session's connection to the Plannotator Inbox (the tool and the reply wake); null without one. */
   readonly inbox: InboxLink | null
   /**
@@ -410,6 +444,7 @@ export class PlannotatorMod {
           sessionId: session.sessionId,
           tools: session.inboxTools,
           isBusy: () => this.turns.busy,
+          blocked: (now) => this.prompts.kind(now),
           // Send now goes into a running main turn, never into this session's own Ask question, and
           // never into a turn another plugin's prompt started (that plugin may read its answer as its own).
           steerableTurn: () => {
@@ -420,10 +455,19 @@ export class PlannotatorMod {
           ...(session.root ? { root: session.root } : {}),
           ...(session.label ? { label: session.label } : {}),
           ...(session.title ? { title: session.title } : {}),
+          ...(session.model ? { model: session.model } : {}),
+          ...(session.effort ? { effort: session.effort } : {}),
+          ...(session.contextPercent ? { contextPercent: session.contextPercent } : {}),
+          ...(session.firstStart ? { firstStart: session.firstStart } : {}),
           ...(session.continues ? { continues: session.continues } : {}),
+          ...(session.place ? { place: session.place } : {}),
           instanceId: this.instanceId,
+          ...(session.inboxAs ? { agent: session.inboxAs } : {}),
+          ...(session.inboxWake === false ? { wake: false } : {}),
+          ...(session.inboxOwner ? { owner: session.inboxOwner } : {}),
           turns: this.turns,
           ...(this.autoReload ? { reload: this.autoReload } : {}),
+          ...(session.launchReminder ? { launchReminder: session.launchReminder } : {}),
         })
       : null
     this.inbox?.start({ touch: !session.healed })
@@ -475,8 +519,9 @@ export class PlannotatorMod {
             this.session.cwd ? await this.session.cwd().catch(() => null) : null,
           )
       if (!folder) return
-      const value = inboxSessionProjectEnvValue(this.session.sessionId, folder)
-      if (value === this.exportedProject) return
+      const agent = this.inbox?.agent ?? this.session.inboxAs
+      const value = agent ? inboxAgentProjectEnvValue(agent, folder) : inboxSessionProjectEnvValue(this.session.sessionId, folder)
+      if (value === null || value === this.exportedProject) return
       this.exportedProject = value
       await this.host.setSessionProject(value)
     } catch {
@@ -646,11 +691,11 @@ export class PlannotatorMod {
     for (const launch of this.launches.values()) {
       if (!launch.leader) continue
       launch.leader = false
-      void this.host.writeFile(fileIn(launch.dir, 'watcher'), JSON.stringify({ owner: null, at: 0, touchedAt: 0 })).catch(() => undefined)
+      void this.host.writeFile(fileIn(launch.dir, 'watcher'), this.leaseText(null, 0, 0)).catch(() => undefined)
     }
     // A decision still waiting for Claude to go idle: say at once that nobody waits for it any more.
     for (const record of this.awaitingIdle.values()) {
-      void this.host.writeFile(fileIn(record.dir, 'watcher'), JSON.stringify({ owner: null, at: 0, touchedAt: 0 })).catch(() => undefined)
+      void this.host.writeFile(fileIn(record.dir, 'watcher'), this.leaseText(null, 0, 0)).catch(() => undefined)
     }
   }
 
@@ -669,6 +714,62 @@ export class PlannotatorMod {
    */
   carryQueued(previous: PlannotatorMod | null): void {
     if (previous && previous !== this) this.turns.dropQueued(previous.turns.queuedPrompts())
+  }
+
+  /**
+   * Re-arms the launch timer when the engine ended it (it ends an interval
+   * at a refused period, as it did the Inbox tick): without its ticks no
+   * lease is renewed and no decision delivered. Called from every hook that
+   * reaches the mod and from the 30 s self-heal look.
+   */
+  async ensureLaunchTicking(): Promise<void> {
+    if (this.disposed || !this.hasWork()) return
+    if (!this.timer) {
+      this.ensureTimer()
+      return
+    }
+    const now = await this.host.now()
+    if (this.lastTickAt > 0 && now - this.lastTickAt > LAUNCH_TICK_STALL_MS) {
+      this.host.debug(`launch timer silent for ${now - this.lastTickAt} ms: armed again`)
+      this.timer.cancel()
+      this.timer = null
+      this.lastTickAt = now
+      this.ensureTimer()
+    }
+  }
+
+  /** Records that the launch timer is alive now (not awaited: a tick's work does not wait on the clock). */
+  private noteTick(): void {
+    void Promise.resolve()
+      .then(() => this.host.now())
+      .then(
+        (now) => {
+          this.lastTickAt = Math.max(this.lastTickAt, Number(now))
+        },
+        () => undefined,
+      )
+  }
+
+  /** `watcher.json`'s text: the holder, when it was renewed, the person's last touch, and this process's pid when known. */
+  private leaseText(owner: string | null, at: number, touchedAt: number): string {
+    return JSON.stringify({ owner, at, touchedAt, ...(typeof this.hostPid === 'number' ? { pid: this.hostPid } : {}) })
+  }
+
+  /**
+   * Asks the shell for this process's pid, twice: a script's parent that
+   * differs between two runs is a per-call helper, not Claude Code, and is
+   * not recorded (no pid: the CLI then never ends the review on its own).
+   */
+  private async knowHostPid(): Promise<void> {
+    if (this.hostPid !== undefined) return
+    const ask = async () => {
+      const result = await this.host.run(hostPidArgv(), { timeoutMs: 5_000 }).catch(() => null)
+      const text = result && result.exitCode === 0 ? result.stdout.trim() : ''
+      return /^\d+$/.test(text) ? Number(text) : null
+    }
+    const first = await ask()
+    const second = first === null ? null : await ask()
+    this.hostPid = first !== null && first > 1 && first === second ? first : null
   }
 
   private adopt(record: LaunchRecord, touchedAt = 0): LiveLaunch {
@@ -767,6 +868,7 @@ export class PlannotatorMod {
     this.timer = this.host.every(TICK_MS, () => {
       void this.tick()
     })
+    this.noteTick()
   }
 
   private stopTimerIfIdle(): void {
@@ -829,7 +931,11 @@ export class PlannotatorMod {
       })
       if (result.exitCode !== 0) return { error: result.stderr.trim() || `launcher exited ${result.exitCode}` }
     } catch (error) {
-      return { error: error instanceof Error ? error.message : String(error) }
+      const message = error instanceof Error ? error.message : String(error)
+      // Claude Code's guard held the start until the call is allowed (early-run.ts): nothing
+      // started, and the call opens again at tool.run in a launch of its own.
+      if (isEarlyRunRefusal(message)) await this.host.run(cleanupArgv(dir), { timeoutMs: 5_000 }).catch(() => undefined)
+      return { error: message }
     }
     const target = extra.target ?? modTargetFor(kind, cliArgv.slice(2), cwd)
     const record: LaunchRecord = {
@@ -1009,7 +1115,8 @@ export class PlannotatorMod {
     // A list of files is one review of all of them (a bundle), named as such.
     const bundle = Array.isArray(call.target)
     const subject = bundle ? plannotatorBundleSubject(targets) : subjectFor(action, targets)
-    const tailscale = call.tailscale === true
+    const tailscale = call.tailscale === true || call.cloudflareAccess === true
+    const unavailable = call.cloudflareAccess === true ? PLANNOTATOR_TOOL_CLOUDFLARE_ACCESS_UNAVAILABLE_TEXT : PLANNOTATOR_TOOL_TAILSCALE_UNAVAILABLE_TEXT
     const opened = await this.open(action, plannotatorToolArgs(call), subject, {
       ...(gate ? { deliverApproval: true } : {}),
       ...(tailscale ? { tailscaleAsked: true } : {}),
@@ -1021,7 +1128,7 @@ export class PlannotatorMod {
         // A CLI from before `--tailscale` refuses the word (an unknown flag or
         // file). A current CLI's publish failure (`--tailscale: Tailscale is
         // not running`, signed out, port routed) is shown as it is.
-        if (tailscale && isOlderCliTailscaleRefusal(opened.text)) return { deny: PLANNOTATOR_TOOL_TAILSCALE_UNAVAILABLE_TEXT }
+        if (tailscale && isOlderCliTailscaleRefusal(opened.text)) return { deny: unavailable }
         return { deny: opened.text }
       case 'starting':
         return { text: plannotatorToolOpenedText(opened.subject, undefined, gate, opened.sessionId, opened.target) }
@@ -1031,7 +1138,7 @@ export class PlannotatorMod {
           // predates #2166) or not on the tailnet at all (it ignored the
           // flag): say so and do not leave it open, never a silent downgrade.
           await this.abandonLaunch(opened.sessionId)
-          return { deny: PLANNOTATOR_TOOL_TAILSCALE_UNAVAILABLE_TEXT }
+          return { deny: unavailable }
         }
         return {
           text: plannotatorToolOpenedText(
@@ -1471,12 +1578,13 @@ export class PlannotatorMod {
 
   private async tick(): Promise<void> {
     if (this.disposed) return
+    this.noteTick()
     this.tickCount += 1
     if (this.tickCount % LEASE_EVERY_TICKS === 0) {
       const now = await this.host.now()
       // Still waiting for Claude to go idle: keep saying so.
       for (const record of this.awaitingIdle.values()) {
-        await this.host.writeFile(fileIn(record.dir, 'watcher'), JSON.stringify({ owner: this.instanceId, at: now, touchedAt: 0 })).catch(() => undefined)
+        await this.host.writeFile(fileIn(record.dir, 'watcher'), this.leaseText(this.instanceId, now, 0)).catch(() => undefined)
       }
       for (const record of [...this.claimedElsewhere.values()]) await this.watchClaimedElsewhere(record).catch(() => undefined)
     }
@@ -1571,6 +1679,13 @@ export class PlannotatorMod {
           .then(() => this.submitDecision(launch.subject, `Plannotator: ${launch.subject} — not opened.\n\n${CLASSIC_PLAN_RETRY_TEXT}`, { quiet: true }))
           .then(() => undefined, () => undefined)
         await this.delivering
+        return
+      }
+      // The CLI ended a review whose session was gone (no Claude Code process held its lease, and no tab had it open): no decision was taken.
+      // The words are a copy of `REVIEW_AGENT_GONE_MOD_LOG` in packages/shared/review-agent-gone-words.ts (this folder imports nothing outside it).
+      if (code === String(REVIEW_AGENT_GONE_EXIT_CODE) && launch.kind === 'review') {
+        this.host.log(`The review of ${launch.subject} ended while no Claude Code session was open for it. Your comments are saved as a draft; open a review of the same changes to get them back.`)
+        await this.forget(launch)
         return
       }
       // Exited without a decision: a crash, a kill, or a startup failure we did not wait for.
@@ -1679,7 +1794,8 @@ export class PlannotatorMod {
       launch.leader = false
       return false
     }
-    await this.host.writeFile(path, JSON.stringify({ owner: this.instanceId, at: now, touchedAt: launch.touchedAt })).catch(() => undefined)
+    await this.knowHostPid()
+    await this.host.writeFile(path, this.leaseText(this.instanceId, now, launch.touchedAt)).catch(() => undefined)
     if (!launch.leader) this.host.debug(`launch ${launch.id}: watching it (lease ${this.instanceId})`)
     launch.leader = true
     return true
@@ -1708,7 +1824,7 @@ export class PlannotatorMod {
     this.awaitingIdle.set(launch.id, stored)
     await this.forget(launch)
     await this.host
-      .writeFile(fileIn(launch.dir, 'watcher'), JSON.stringify({ owner: this.instanceId, at: await this.host.now(), touchedAt: 0 }))
+      .writeFile(fileIn(launch.dir, 'watcher'), this.leaseText(this.instanceId, await this.host.now(), 0))
       .catch(() => undefined)
     const delivery = deliveryFor(record, {
       // A review switched in place to another PR is named after that PR.
@@ -1862,6 +1978,31 @@ export class PlannotatorMod {
     this.inbox?.onMainStep(turnId)
   }
 
+  /** `tool.check` answered `ask` for a call: a permission prompt is up in the terminal (terminal-prompts.ts). */
+  async onToolAsked(callId: string, agentId?: string): Promise<void> {
+    this.prompts.asked(callId, agentId, await this.host.now())
+  }
+
+  /** An `AskUserQuestion` call started: a question is up in the terminal. */
+  async onQuestionAsked(callId: string, agentId?: string): Promise<void> {
+    this.prompts.question(callId, agentId, await this.host.now())
+  }
+
+  /** The call was allowed and runs (`tool.run`): its permission prompt is over. */
+  onToolRan(callId: string): void {
+    this.prompts.ran(callId)
+  }
+
+  /** The call settled (its `tool.call` returned): nothing of it waits. */
+  onToolSettled(callId: string): void {
+    this.prompts.settled(callId)
+  }
+
+  /** A model request of a loop is about to go out (every turn.step): what that loop waited on was answered. */
+  onLoopStep(agentId?: string): void {
+    this.prompts.stepped(agentId)
+  }
+
   /** A model request of a turn is about to go out (turn.step), from register.ts. */
   onTurnStep(turnId: string): void {
     this.turns.onStep(turnId)
@@ -1892,6 +2033,7 @@ export class PlannotatorMod {
   onTurnComplete(turnId: string, answer: string, aborted: boolean): void {
     this.host.debug(`turn.complete ${turnId}${aborted ? ' (aborted)' : ''}: ${answer.length} chars`)
     this.turns.onTurnComplete(turnId, answer, aborted)
+    this.prompts.ended()
     this.inbox?.onMainTurnComplete(turnId)
     this.pushBridgeStatus()
   }

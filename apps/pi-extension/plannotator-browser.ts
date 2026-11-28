@@ -25,6 +25,7 @@ import {
 	unstageFile,
 } from "./server.ts";
 import { BROWSER_SESSION_STOPPED } from "./browser-session-error.ts";
+import { hasCurrentPiSession, isCtxAlive } from "./current-pi-session.ts";
 import type { SessionBridge } from "./generated/ai/session-bridge.ts";
 import type { HostControl } from "./generated/host-control.ts";
 import type { AnnotateBundleFile } from "./generated/annotate-bundle.ts";
@@ -57,13 +58,17 @@ import {
 	hasPlanBrowserHtml,
 	hasReviewBrowserHtml,
 	reviewDiagramEngineDirectory,
+	reviewSemDiffDirectory,
 } from "./plannotator-browser-runtime.ts";
 import { diagramEngineSourcesFromDir, type DiagramEngineSources } from "./generated/diagram-engine-assets.ts";
+import { semDiffSourcesFromDir, type SemDiffSources } from "./generated/sem-diff-assets.ts";
 
 /** The diagram engine files, read once per extension process (the first review that needs them). */
 let reviewDiagramEngineSources: Promise<DiagramEngineSources | null> | undefined;
 const readReviewDiagramEngine = () =>
 	(reviewDiagramEngineSources ??= diagramEngineSourcesFromDir(reviewDiagramEngineDirectory)());
+let reviewSemDiffSources: Promise<SemDiffSources | null> | undefined;
+const readReviewSemDiff = () => (reviewSemDiffSources ??= semDiffSourcesFromDir(reviewSemDiffDirectory)());
 export { getLastAssistantMessageText } from "./assistant-message.ts";
 export {
 	getStartupErrorMessage,
@@ -462,6 +467,11 @@ export async function openCodeReview(
 	return session.waitForDecision();
 }
 
+export function piLiveReviewAgent(ctx: unknown): { host: "pi"; session: string } | null {
+	const session = (ctx as { sessionManager?: { getSessionId?: () => string | undefined } } | null)?.sessionManager?.getSessionId?.();
+	return typeof session === "string" && session ? { host: "pi", session } : null;
+}
+
 export async function startCodeReviewBrowserSession(
 	ctx: ExtensionContext,
 	options: CodeReviewOptions = {},
@@ -529,7 +539,8 @@ async function createCodeReviewBrowserSession(
 				"Supported formats:\n" +
 				"  GitHub: https://github.com/owner/repo/pull/123\n" +
 				"  GitLab: https://gitlab.com/group/project/-/merge_requests/42\n" +
-				"  Bitbucket Cloud: https://bitbucket.org/workspace/repo/pull-requests/7",
+				"  Bitbucket Cloud: https://bitbucket.org/workspace/repo/pull-requests/7\n" +
+				"  Forgejo / Gitea: https://codeberg.org/owner/repo/pulls/5",
 			);
 		}
 
@@ -547,7 +558,7 @@ async function createCodeReviewBrowserSession(
 			ghAccountEnv = access.childEnv;
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
-			// REST-only platforms (Bitbucket) have no CLI to be missing; their auth
+			// REST-only platforms (Bitbucket, Forgejo) have no CLI to be missing; their auth
 			// error already names the env vars and token scopes to set.
 			if (cliName && (msg.includes("not found") || msg.includes("ENOENT"))) {
 				throw new Error(`${getPlatformLabel(prRef)} CLI (${cliName}) is not installed. Install it from ${cliUrl}`);
@@ -822,6 +833,13 @@ async function createCodeReviewBrowserSession(
 
 	const server = await startServerWithSelfPreemption(() => startReviewServer({
 		sessionBridge: options.sessionBridge,
+		// The decision goes to the session that opened the review, or to the
+		// one Pi switched to since (index.ts). With neither (the moment between
+		// two sessions) Send is refused as "away" and the draft kept; sending
+		// again a moment later works. The server lives in Pi's process, so it
+		// never outlives Pi itself.
+		agentPresence: () => (isCtxAlive(ctx) || hasCurrentPiSession() ? "here" : "away"),
+		liveReviewAgent: piLiveReviewAgent(ctx),
 		rawPatch,
 		gitRef,
 		error: diffError,
@@ -843,6 +861,7 @@ async function createCodeReviewBrowserSession(
 		worktreePool,
 		htmlContent: reviewHtmlContent,
 		diagramEngine: readReviewDiagramEngine,
+		semDiff: readReviewSemDiff,
 		sharingEnabled: resolveSharingEnabled(loadConfig()),
 		// Pi's review consumer (index.ts) sends approve-time feedback after the
 		// approved prompt, so the advert is unconditional — same shape as the

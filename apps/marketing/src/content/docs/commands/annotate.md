@@ -25,6 +25,21 @@ The `/plannotator-annotate` command opens files, URLs, or folders in the Plannot
 
 Beyond `.md`, `.mdx`, `.txt`, `.html`, and `.htm`, annotate accepts common plain-text config and data formats: `.yaml`, `.yml`, `.json`, `.jsonc`, `.json5`, `.toml`, `.ini`, `.cfg`, `.conf`, `.properties`, `.csv`, `.tsv`, `.log`, `.xml`, and `.env.example`. These show as their own text, monospace and line by line, syntax-highlighted in their language (`.cfg` and `.conf` stay plain, since the name doesn't say which syntax is inside). You select and annotate them like any other document, and a `#` comment stays a comment. A file over 128 KB shows without highlighting, so a large log or JSON dump opens quickly.
 
+### Coloured text in Markdown
+
+To colour a few words, wrap them in `<span style="color: …">` or `<font color="…">`. This works in a sentence, in a table cell and in raw HTML, the same in plan review, annotate and the Inbox:
+
+```markdown
+| Model | Pass rate |
+| --- | --- |
+| alpha | <span style="color: #d00000">73.0%</span> |
+| beta | <font color="orange">93.5%</font> |
+```
+
+The colour can be a hex colour (`#d00`, `#d00000`, with or without alpha), `rgb()`, `rgba()`, `hsl()` or `hsla()` with plain numbers, or a CSS colour name such as `green` or `rebeccapurple`. A colour less than half opaque (alpha below 0.5) is not kept, so text cannot be made see-through. Only the text colour is kept. If a style holds anything else (a background, a size, `url()`, `var()`), the whole style is dropped and the words show uncoloured. Nothing is coloured unless you wrap it.
+
+If a colour is too dark or too light to read on the current theme (below a 3:1 contrast), Plannotator moves its lightness just enough to be readable and keeps the hue. Colours that are readable stay exactly as written. Copying a table as Markdown or CSV gives the words without the tags.
+
 ### AsciiDoc files
 
 `.adoc` and `.asciidoc` files render as AsciiDoc: sections, lists, listings with syntax highlighting, admonitions, tables and quotes. Exported feedback names the real lines in the `.adoc` file. `include::` and `ifdef::` lines are shown as written rather than resolved, and nested content inside admonition blocks and table cells shows as plain text.

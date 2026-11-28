@@ -38,6 +38,8 @@ import {
   INBOX_THREAD_PULLS_REMOVE_DESCRIPTION,
 } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
+import { shipStopLine } from "@plannotator/core/inbox-pull-handoff";
+import type { InboxShipStep, InboxShipStepResult } from "./inbox-ship-watch";
 import type { InboxStore, InboxThreadPullsChange } from "@plannotator/shared/inbox/store";
 import { sessionWho, shortTime, type SessionNameOf } from "./inbox-mcp-read";
 import { guarded, okComplete } from "./inbox-mcp-result";
@@ -64,6 +66,12 @@ export interface InboxPullsMcpContext {
   sessionName?: SessionNameOf;
   /** For a short `group/project!45` (`parseProjectPullRefs`). Absent: gitlab.com. */
   projectHost?: ProjectHostOf;
+  /**
+   * Ship (inbox-ship-watch.ts): a step the shipping agent logs; `{ other }` when the calling session (`agent_session`)
+   * is not the one shipping it; `{ stopped }` when that session's ship of the thread was stopped (it reads the stop
+   * line); null when the thread ships nothing. Absent: no Ship.
+   */
+  shipStep?: (threadId: string, step: InboxShipStep, session: string | null) => InboxShipStepResult;
 }
 
 /** The agent a call's filled fields name. */
@@ -79,8 +87,8 @@ export function checkPullRefs(values: unknown, field: string): InboxThreadPullRe
 }
 
 /** `checkPullRefs` in a thread's project, where a short `group/project!45` is on the project's own GitLab host. */
-export async function checkProjectPullRefs(context: Pick<InboxPullsMcpContext, "projectHost">, values: unknown, field: string, projectId: string): Promise<InboxThreadPullRef[]> {
-  return checkedRefs(await parseProjectPullRefs(values, field, projectId, context.projectHost), field);
+export async function checkProjectPullRefs(context: Pick<InboxPullsMcpContext, "projectHost">, values: unknown, field: string, projectId: string, onThread?: (key: string) => boolean): Promise<InboxThreadPullRef[]> {
+  return checkedRefs(await parseProjectPullRefs(values, field, projectId, context.projectHost, onThread), field);
 }
 
 function checkedRefs(parsed: ReturnType<typeof parseInboxThreadPullRefs>, field: string): InboxThreadPullRef[] {
@@ -182,6 +190,16 @@ export function registerInboxThreadPullsTool(server: McpServer, context: InboxPu
           thread_id: z.string().describe("Thread or message id."),
           add: z.array(z.string()).optional().describe(INBOX_THREAD_PULLS_ADD_DESCRIPTION),
           remove: z.array(z.string()).optional().describe(INBOX_THREAD_PULLS_REMOVE_DESCRIPTION),
+          // No words on it: every agent carries this schema, and only Ship (started from the window) uses it; the
+          // ship instruction and `--help` (SHIP_HELP_LINE) teach it.
+          ship: z
+            .object({
+              kind: z.enum(["step", "stuck", "merged"]),
+              text: z.string(),
+              sha: z.string().optional(),
+            })
+            .strict()
+            .optional(),
           project_path: z.string().optional(),
           agent_session: z.string().optional(),
           agent_name: z.string().optional(),
@@ -198,7 +216,7 @@ export function registerInboxThreadPullsTool(server: McpServer, context: InboxPu
         // Every ref is read before anything is written: one bad ref changes nothing.
         const add = input.add ? await checkProjectPullRefs(context, input.add, "add", named.project_id) : [];
         const all = input.remove?.length === 1 && input.remove[0]!.trim().toLowerCase() === "all";
-        const remove = all ? "all" : input.remove ? await checkProjectPullRefs(context, input.remove, "remove", named.project_id) : [];
+        const remove = all ? "all" : input.remove ? await checkProjectPullRefs(context, input.remove, "remove", named.project_id, (key) => store.threadPulls(root).some((pull) => pull.pull === key)) : [];
         const reader = input.agent_session?.trim() || null;
         let changed = "";
         let change: InboxThreadPullsChange | null = null;
@@ -206,10 +224,21 @@ export function registerInboxThreadPullsTool(server: McpServer, context: InboxPu
           change = await changePullsAsAgent(context, { thread_id: root, add, remove, actor: pullsActor(input) });
           changed = pullsChangeText(change);
         }
+        // Ship: the shipping agent's step, in the ship log (nothing when this thread ships nothing, or another session ships it).
+        const shipped = input.ship && context.shipStep ? context.shipStep(root, { kind: input.ship.kind, text: input.ship.text, sha: input.ship.sha ?? null }, reader) : null;
+        const logged = !input.ship
+          ? ""
+          : shipped && "ship" in shipped
+            ? ` Logged in the ship log of ${shipped.ship.url}.`
+            : shipped && "stopped" in shipped
+              ? ` ${shipStopLine(shipped.stopped)}`
+              : shipped
+                ? " Another session is shipping this pull request; nothing was logged."
+                : " Nothing is shipping in this thread; nothing was logged.";
         // The session has now seen the thread's PRs: the next wake says only what the person changed after this.
         noteSessionRead(store, reader, root, context.now?.() ?? Date.now());
         const lines = threadPullsText(context, root, reader);
-        const head = `Thread ${root}${changed ? `: ${changed}` : ""}${change ? " Nothing was sent to the person." : ""}`;
+        const head = `Thread ${root}${changed ? `: ${changed}` : ""}${change ? " Nothing was sent to the person." : ""}${logged}`;
         return okComplete([head, ...(lines.length > 0 ? lines : ["No PRs on this thread."])].join("\n"), {
           thread_id: root,
           ...(change ? { changed: change.added.length + change.removed.length > 0 } : {}),

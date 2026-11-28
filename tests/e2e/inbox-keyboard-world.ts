@@ -173,12 +173,11 @@ export async function createKeyboardWorld(prefix = 'plannotator-inbox-keyboard-'
 
   const holdingDraft = 'Detect them, but ask before writing any config';
   await post(url, `/api/inbox/threads/${encodeURIComponent(holding.thread_id as string)}/draft`, { body: holdingDraft, base: null });
-  // Refund is read (Quiet); the Board is on with three cards, its intro seen; Decide mode is on.
+  // Refund is read (Quiet); the Board is on with three cards, its intro seen. Decide mode is on by default.
   await post(url, `/api/inbox/threads/${encodeURIComponent(refund.thread_id as string)}/read`, {});
   await post(url, '/api/inbox/settings', { board: { on: true } });
   // The Board's first-visit dialog is claimed here, so G B lands on the Board itself (the dialog is inbox-board.spec.ts's).
   await post(url, '/api/inbox/board/intro', {});
-  await post(url, '/api/inbox/settings', { experimental: { decision_mode: true } });
   for (const title of ['Retry worker on Stripe 409', 'Checkout drawer', 'Installer detects agents']) await claude.card({ op: 'create', project_path: project, title });
 
   return {

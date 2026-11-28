@@ -38,7 +38,6 @@ Object.assign(process.env, {
   PLANNOTATOR_GLIMPSE: "0",
   PLANNOTATOR_SKIP_BROWSER_OPEN: "1",
   PLANNOTATOR_SKIP_AGENT_TERMINAL_INSTALL: "1",
-  PLANNOTATOR_SKIP_SEM_INSTALL: "1",
   PLANNOTATOR_FILE_BROWSER_MAX_FILES: "64",
   BROWSER: "true",
   // The read-only guards below forward the scanner's Host

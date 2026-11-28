@@ -175,9 +175,8 @@ test.skipIf(!hasDom)('Shift+F10 on a message’s head opens its ⋯ menu with fo
   const message = { id: 'msg_1', author: { kind: 'agent', host: 'claude-code', name: 'Claude Code' }, created_at: '2026-11-07T11:00:00.000Z', body: 'Hi' } as never;
   const el = mount(
     <MessageMenu
-      thread={{ thread_id: 'thr_1', subject: 'S', messages: [message] } as never}
+      newest={{ current: { thread: { thread_id: 'thr_1', subject: 'S', messages: [message] } as never, linkOf: () => 'http://x', phone: false } }}
       message={message}
-      linkOf={() => 'http://x'}
       phone={false}
       head={(more) => (
         <div data-test-head="">
@@ -338,9 +337,8 @@ test.skipIf(!hasDom)('Shift+F10 in a text field inside a message’s head is the
   const message = { id: 'msg_1', author: { kind: 'agent', host: 'claude-code', name: 'Claude Code' }, created_at: '2026-11-07T11:00:00.000Z', body: 'Hi' } as never;
   const el = mount(
     <MessageMenu
-      thread={{ thread_id: 'thr_1', subject: 'S', messages: [message] } as never}
+      newest={{ current: { thread: { thread_id: 'thr_1', subject: 'S', messages: [message] } as never, linkOf: () => 'http://x', phone: false } }}
       message={message}
-      linkOf={() => 'http://x'}
       phone={false}
       head={(more) => (
         <div data-test-head="">
@@ -375,11 +373,10 @@ test('Shift+R runs the refresh of the page on screen, route by route; none where
     ['the Board turned off or loading', { page: 'board', boardOn: false }, null],
     ['the Reviews list', { page: 'reviews' }, 'reviews'],
     ['a pull request’s review', { page: 'reviews', pullReview: true }, null],
-    ['Reviews hidden (Code review off, a tailnet guest)', { page: 'reviews', pullsShown: false }, null],
+    ['Reviews hidden (Code review off)', { page: 'reviews', pullsShown: false }, null],
     ['Drafts', { page: 'drafts' }, null],
     ['Settings', { page: 'settings' }, null],
     ['What’s new', { page: 'whats-new' }, null],
-    ['Shapes', { page: 'shapes' }, null],
     ['the tour', { page: 'tour', tourOn: true }, null],
   ];
   for (const [where, over, kind] of rows) expect([where, refreshKind({ ...base, ...over })]).toEqual([where, kind]);

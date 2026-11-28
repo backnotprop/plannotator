@@ -13,7 +13,8 @@ import { expect, test } from 'bun:test';
 import type { InboxAgent, InboxAgentsGroup, InboxListRow } from '@plannotator/core/inbox-types';
 import type { MachineView } from '../api';
 import { machinesModel } from '../machines';
-import { agentFacts, agentListFilter, agentRowName, agentsGroups, agentThread, filterAgentRows } from './model';
+import { agentFacts, agentListFilter, agentRowName, agentsGroups, agentThread, filterAgentRows, sortAgentEntries } from './model';
+import { holdAgentOrder } from './heldOrder';
 
 const SELF = 'ibx_01K0000000000000000000000S';
 const MAC = 'ibx_01K0000000000000000000000M';
@@ -60,6 +61,28 @@ test('linked: one group per machine in the machines\' order, each with its own a
   expect(groups[1]!.agents[1]!.agent.state).toBe('waiting');
 });
 
+test('when agent status is on, waiting marks sort first, then working marks, while other agents keep their order', () => {
+  const entries = [
+    { agent: agent('idle-1'), machine: null, name: 'Idle 1', thread: null },
+    { agent: agent('working-1', { status_mark: { state: 'working' } }), machine: null, name: 'Working 1', thread: null },
+    { agent: agent('waiting-1', { status_mark: { state: 'blocked', where: 'inbox' } }), machine: null, name: 'Waiting 1', thread: null },
+    { agent: agent('idle-2'), machine: null, name: 'Idle 2', thread: null },
+    { agent: agent('waiting-2', { status_mark: { state: 'blocked', kind: 'question', where: 'terminal' } }), machine: null, name: 'Waiting 2', thread: null },
+  ];
+  expect(sortAgentEntries(entries, true).map((entry) => entry.agent.id)).toEqual(['waiting-1', 'waiting-2', 'working-1', 'idle-1', 'idle-2']);
+  expect(sortAgentEntries(entries, false).map((entry) => entry.agent.id)).toEqual(['idle-1', 'working-1', 'waiting-1', 'idle-2', 'waiting-2']);
+});
+
+test('a held list keeps its drawn order: a new agent joins at the end, a gone one leaves, each row carries its new state', () => {
+  const entry = (id: string, over: Partial<InboxAgent> = {}) => ({ agent: agent(id, over), machine: null, name: id, thread: null });
+  const drawn = [{ machine: null, agents: [entry('a'), entry('b'), entry('c')] }];
+  const next = [{ machine: null, agents: [entry('c', { status_mark: { state: 'blocked', where: 'inbox' } }), entry('d'), entry('a')] }];
+  const held = holdAgentOrder(drawn, next);
+  expect(held[0]!.agents.map((e) => e.agent.id)).toEqual(['a', 'c', 'd']);
+  expect(held[0]!.agents[1]!.agent.status_mark?.state).toBe('blocked');
+  expect(holdAgentOrder(null, next)[0]!.agents.map((e) => e.agent.id)).toEqual(['c', 'd', 'a']);
+});
+
 test("an agent opens its launch's thread, else its own thread on its machine, one waiting on the person first", () => {
   const rows = [
     row('t_old', 'ses_a', { last_at: '2026-11-09T08:00:00.000Z', waiting_on_person: true }),
@@ -76,12 +99,36 @@ test("an agent opens its launch's thread, else its own thread on its machine, on
   expect(agentThread(agent('ses_to'), null, null, [row('t_to', 'x', { author: { kind: 'person' }, addressee: { host: 'pi', session: 'ses_to' } } as Partial<InboxListRow>)])!.id).toBe('t_to');
 });
 
-test("an agent's name: its title, else its thread's name, else its project, else its host, never its session", () => {
-  expect(agentRowName(agent('ses_a', { label: 'Fix login redirect' }), { id: 't', subject: 'Other' })).toBe('Fix login redirect');
-  expect(agentRowName(agent('ses_a'), { id: 't', subject: 'Invoice retries' })).toBe('Invoice retries');
-  expect(agentRowName(agent('ses_a'), null)).toBe('billing-svc');
-  expect(agentRowName(agent('ses_a', { project: null, host: 'pi' }), null)).toBe('Pi');
-  expect(agentRowName(agent('ses_a', { project: null, host: null }), null)).toBe('An agent');
+test("an agent's name, one rung at a time: its own name, its host's title, the thread it got first, its project, its host; never its session", () => {
+  const first = { id: 't_first', name: 'Invoice retries' };
+  expect(agentRowName(agent('ses_a', { label: 'Fix login redirect', title: 'Login redirect loop', first_thread: first }))).toBe('Fix login redirect');
+  expect(agentRowName(agent('ses_a', { title: 'Login redirect loop', first_thread: first }))).toBe('Login redirect loop');
+  expect(agentRowName(agent('ses_a', { first_thread: first }))).toBe('Invoice retries');
+  expect(agentRowName(agent('ses_a'))).toBe('billing-svc');
+  expect(agentRowName(agent('ses_a', { project: null, host: 'pi' }))).toBe('Pi');
+  expect(agentRowName(agent('ses_a', { project: null, host: null }))).toBe('An agent');
+});
+
+test("inside a thread an agent is named by its own name, else its agent's name: never the thread it got first, nor its project", () => {
+  const first = { id: 't_first', name: 'Retry policy for the nightly ledger sync' };
+  expect(agentRowName(agent('ses_a', { label: 'Fix login redirect', title: 'Login redirect loop', first_thread: first }), 'thread')).toBe('Fix login redirect');
+  expect(agentRowName(agent('ses_a', { title: 'Login redirect loop', first_thread: first }), 'thread')).toBe('Login redirect loop');
+  expect(agentRowName(agent('ses_a', { host: 'pi', first_thread: first }), 'thread')).toBe('Pi');
+  expect(agentRowName(agent('ses_a', { host: 'pi', first_thread: first }), 'list')).toBe('Retry policy for the nightly ledger sync');
+  expect(agentRowName(agent('ses_a', { host: null }), 'thread')).toBe('An agent');
+});
+
+test("an unnamed agent's row keeps its first thread's name while another thread waits on the person or gets newer activity", () => {
+  const rows = [
+    row('t_first', 'ses_a', { subject: 'Invoice retries', last_at: '2026-11-09T08:00:00.000Z' }),
+    row('t_waits', 'ses_a', { subject: 'Semantic diffs', last_at: '2026-11-09T09:00:00.000Z', waiting_on_person: true }),
+    row('t_newest', 'ses_a', { subject: 'Release notes', last_at: '2026-11-09T10:00:00.000Z' }),
+  ];
+  const listed = [group([agent('ses_a', { state: 'waiting', waiting: 1, first_thread: { id: 't_first', name: 'Invoice retries' } })])];
+  const entry = agentsGroups(listed, machinesModel(null), rows)[0]!.agents[0]!;
+  expect(entry.name).toBe('Invoice retries');
+  // The row still opens the thread that waits.
+  expect(entry.thread?.id).toBe('t_waits');
 });
 
 test('the hover card says where and when from what the window has, and leaves out what it does not', () => {
@@ -98,6 +145,15 @@ test('the hover card says where and when from what the window has, and leaves ou
   expect(bare.sub).toBe('Claude Code');
   expect(bare.state).toBe('Working');
   expect(bare.rows).toEqual([['Thread', 'Docs pass']]);
+  const sized = agentFacts({ agent: agent('ses_e', { model: 'claude-opus-5-5', effort: 'high', context: 63 }), machine: null, name: 'Claude Code', thread: null }, null, now);
+  expect(sized.rows.slice(-2)).toEqual([['Model', 'Opus 5.5 · high'], ['Context', '63% used']]);
+  expect(agentFacts({ agent: agent('ses_e', { model: 'claude-sonnet-4-5-20250929' }), machine: null, name: 'x', thread: null }, null, now).rows.at(-1)).toEqual(['Model', 'Sonnet 4.5']);
+  expect(agentFacts({ agent: agent('ses_e', { model: 'us.anthropic.claude-opus-4-1-v1:0', effort: 'max' }), machine: null, name: 'x', thread: null }, null, now).rows.at(-1)).toEqual(['Model', 'us.anthropic.claude-opus-4-1-v1:0 · max']);
+  expect(agentFacts({ agent: agent('ses_e', { model: 'claude-opus-5-5', effort: 'high', live: false, state: 'ended' }), machine: null, name: 'x', thread: null }, null, now).rows.some(([k]) => k === 'Model')).toBe(false);
+  const full = agentFacts({ agent: agent('ses_c', { context: 63 }), machine: null, name: 'Claude Code', thread: null }, null, now);
+  expect(full.rows.at(-1)).toEqual(['Context', '63% used']);
+  const gone = agentFacts({ agent: agent('ses_d', { context: 63, live: false, state: 'ended' }), machine: null, name: 'Claude Code', thread: null }, null, now);
+  expect(gone.rows.some(([k]) => k === 'Context')).toBe(false);
   // An asleep machine says so, in place of the agent's state.
   expect(agentFacts({ agent: agent('ses_c'), machine: MAC, name: 'x', thread: null }, view(MAC, 'MacBook', { state: 'offline' }), now).state).toStartWith('MacBook asleep since ');
 });
@@ -112,7 +168,7 @@ test('a sidebar cookie from before Agents keeps its choice: Machines closed is A
 test('an agent finds its thread under the session id its conversation had before', () => {
   const rows = [row('msg_old', 'ses_old', { subject: 'better-pierre' })];
   const [flat] = agentsGroups([group([agent('ses_new', { continues: ['ses_old'] })])], machinesModel(null), rows);
-  expect(flat!.agents.map((e) => [e.agent.id, e.name, e.thread?.id])).toEqual([['ses_new', 'better-pierre', 'msg_old']]);
+  expect(flat!.agents.map((e) => [e.agent.id, e.thread?.id])).toEqual([['ses_new', 'msg_old']]);
 });
 
 test('an old session id that still polls is not a second row when both open the same thread', () => {
@@ -150,10 +206,10 @@ test("an agent's filter lists every thread of its, not only the one its row woul
     // The same session id on another machine is another agent.
     row('t_mac', 'ses_a', { machine: MAC }),
   ];
-  const filter = agentListFilter('ses_a', [group([agent('ses_a'), agent('ses_b')], SELF), group([], MAC)], machines, rows);
+  const filter = agentListFilter('ses_a', [group([agent('ses_a', { first_thread: { id: 't_wrote', name: 'Subject t_wrote' } }), agent('ses_b')], SELF), group([], MAC)], machines, rows);
   expect(filter.machine).toBe(SELF);
   expect(ids(filterAgentRows(listOf(rows), filter, SELF))).toEqual(['t_wrote', 't_newest', 't_to', 't_with']);
-  // Its name is its row's name (the thread its row opens).
+  // Its name is its row's name.
   expect(filter.name).toBe('Subject t_wrote');
   // The sections stay, an emptied one included, as a machine's filter leaves them.
   const none = filterAgentRows(listOf([row('t_b', 'ses_b')]), filter, SELF);
@@ -182,9 +238,19 @@ test("an agent's filter follows its row: a continued conversation is one agent, 
 test("a launched agent's filter has its launch's thread before it writes; an agent the list no longer names is matched by its session", () => {
   const flat = machinesModel(null);
   const rows = [row('t_launch', 'nobody', { subject: 'Invoice retries' }), row('t_other', 'ses_x')];
-  const launched = agentListFilter('lch_1', [group([agent('lch_1', { session: 'launch:lch_1', launch: { id: 'lch_1', thread_id: 't_launch' } })])], flat, rows);
+  const launched = agentListFilter('lch_1', [group([agent('lch_1', { session: 'launch:lch_1', launch: { id: 'lch_1', thread_id: 't_launch' }, first_thread: { id: 't_launch', name: 'Invoice retries' } })])], flat, rows);
   expect([launched.name, ids(filterAgentRows(listOf(rows), launched, null))]).toEqual(['Invoice retries', ['t_launch']]);
   // A link from before: the agent ended and is not listed.
   const ended = agentListFilter('ses_x', [group([])], flat, rows);
   expect(ids(filterAgentRows(listOf(rows), ended, null))).toEqual(['t_other']);
+});
+
+// The owner's truth rules (2026-11-18), with "Agent status" off as with it on (the card reads no setting): a resting
+// agent of a host that reports turns still says "Idle" in words (no idle mark is ever drawn), and one whose host
+// reports nothing says so, never "Idle".
+test('the hover card: "Idle" in words for a host that reports turns; "Doesn\'t say when it\'s working" for one that does not', () => {
+  const now = new Date('2026-11-18T12:00:00.000Z');
+  const resting = agentFacts({ agent: agent('ses_cc', { state: 'idle' }), machine: null, name: 'Claude Code', thread: null }, null, now);
+  const quiet = agentFacts({ agent: agent('ses_codex', { state: 'idle', host: 'codex', turns_unknown: true }), machine: null, name: 'Codex', thread: null }, null, now);
+  expect([resting.state, quiet.state]).toEqual(['Idle', "Doesn't say when it's working"]);
 });

@@ -29,14 +29,14 @@
  * `RL_FOLDER_SHOTS` the folder browser's, `folder-<state>-<1440|390>-<light|dark>.png` (default
  * /tmp/remote-launch-picker/other-folder).
  */
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { markTourDecided } from '../helpers/tour-decided';
 import { installFakeClaude, type FakeClaude } from '../helpers/fake-claude';
-import { inboxScratch, rememberInboxOf, removeInboxScratch, stopScratchInbox } from './inbox-scratch';
+import { E2E_GROUP_TIP_SEEN, inboxScratch, rememberInboxOf, removeInboxScratch, stopScratchInbox } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -68,7 +68,7 @@ function machine(name: string): Machine {
   mkdirSync(dataDir, { recursive: true });
   const fake = installFakeClaude({ bin: join(root, 'fakes'), state: join(root, 'fake-claude'), config: { workMs: 60_000, hold: true } });
   // Launch on, and Plannotator's Claude Code plugin on in the sandbox's own agent home (launch needs its mod).
-  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ inboxLaunch: { enabled: true } }));
+  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ inboxLaunch: { enabled: true }, inboxReveals: { ...E2E_GROUP_TIP_SEEN } }));
   markTourDecided(dataDir);
   mkdirSync(join(dataDir, 'agents-home', '.claude'), { recursive: true });
   writeFileSync(join(dataDir, 'agents-home', '.claude', 'settings.json'), JSON.stringify({ enabledPlugins: { 'plannotator@plannotator': true } }));

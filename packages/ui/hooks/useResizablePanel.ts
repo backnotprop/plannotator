@@ -189,8 +189,22 @@ export function useResizablePanel({
     storage.setItem(storageKey, String(defaultWidth));
   }, [defaultWidth, storageKey]);
 
+  /** Set the width directly (keyboard resizing): clamped, applied and saved like a finished drag. */
+  const resizeTo = useCallback(
+    (px: number) => {
+      if (!Number.isFinite(px)) return;
+      const w = Math.min(maxWidth, Math.max(minWidth, px));
+      widthRef.current = w;
+      applyRef.current?.(w);
+      setWidth(w);
+      storage.setItem(storageKey, String(w));
+    },
+    [minWidth, maxWidth, storageKey],
+  );
+
   return {
     width,
+    resizeTo,
     /** Alias for `width` — reads clearer when axis is 'y' (it's a height). */
     size: width,
     isDragging,

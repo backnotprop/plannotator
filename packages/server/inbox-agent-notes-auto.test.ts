@@ -13,6 +13,7 @@ import { appendFileSync, chmodSync, existsSync, linkSync, mkdirSync, readFileSyn
 import { join } from "node:path";
 import { loadConfig } from "@plannotator/shared/config";
 import { createFakeAgents, type FakeAgents } from "../../tests/helpers/fake-agents";
+import { writeOldConfig } from "../../tests/helpers/saved-config";
 import { addInboxNote, autoAddInboxNotes, INBOX_NOTE_BLOCK, INBOX_NOTE_START, markAutoNotesSaid, markNotesAsked, removeInboxNote, unsaidAutoNotes } from "./inbox-agent-notes";
 import { connectInboxAgents, createAgentEnvironmentFor, type AgentEnvironment } from "./inbox-agents";
 
@@ -97,7 +98,7 @@ test("an agent not connected to the Inbox gets nothing, even when found", async 
 test("someone who answered the old dialog with Not now or Don't add a note keeps their answer; another agent is still written", async () => {
   fake.install("codex", "gemini");
   await connect();
-  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxAgentNotes: { offered: true, asked: ["codex"] } }));
+  writeOldConfig(dataDir, { inboxAgentNotes: { offered: true, asked: ["codex"] } });
   expect(await autoAddInboxNotes(options())).toEqual([{ agent: "gemini", path: "~/.gemini/GEMINI.md" }]);
   expect(existsSync(file(".codex", "AGENTS.md"))).toBe(false);
 });
@@ -105,7 +106,7 @@ test("someone who answered the old dialog with Not now or Don't add a note keeps
 test("a config from 0.28.18 (asked once, about every agent then, no list): those agents count as answered", async () => {
   fake.install("codex");
   await connect();
-  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxAgentNotes: { offered: true } }));
+  writeOldConfig(dataDir, { inboxAgentNotes: { offered: true } });
   expect(await autoAddInboxNotes(options())).toEqual([]);
   expect(existsSync(file(".codex", "AGENTS.md"))).toBe(false);
 });

@@ -172,7 +172,7 @@ export function PRArtifactGallery({
             <ArtifactPreview artifact={artifact} provider={provider} />
             <span className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center gap-2 bg-gradient-to-t from-black/80 via-black/50 to-transparent px-3 pb-2.5 pt-10 text-white">
               <PRArtifactIcon kind={artifact.kind} className="h-5 w-5 shrink-0 drop-shadow-sm" />
-              <span className="min-w-0 flex-1 truncate text-[11px] font-medium leading-tight drop-shadow-sm">
+              <span className="min-w-0 flex-1 truncate text-xs font-medium leading-tight drop-shadow-sm">
                 {artifact.name}
               </span>
             </span>

@@ -3,9 +3,9 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { ImageResolver } from '@plannotator/ui/components/ImageResolverContext';
 import type { InboxPull } from '@plannotator/core/inbox-types';
 import { isGitHubAttachmentUrl } from '@plannotator/core/pr-attachment-url';
-import { inboxApi } from '../api';
 import { mayBeVideoLink, probeVideo, pullMediaSizes, reservedBox, servesPullMedia, writtenMediaUrl, type PullMediaItem, type PullMediaSizes } from './pullMedia';
 import { PullMediaViewer } from './PullMediaViewer';
+import { pullMediaUrl } from './pullUrls';
 
 const CHIP_TITLE = 'Images in a description open on the forge';
 
@@ -13,7 +13,7 @@ export function forgeImageResolver(layer: InboxPull): ImageResolver {
   const serves = servesPullMedia(layer);
   return (src) => {
     if (src.startsWith('data:image/')) return { kind: 'src', src };
-    if (serves && isGitHubAttachmentUrl(src)) return { kind: 'src', src: inboxApi.pullMediaUrl(layer.key, new URL(src).href) };
+    if (serves && isGitHubAttachmentUrl(src)) return { kind: 'src', src: pullMediaUrl(layer.key, new URL(src).href) };
     return { kind: 'unavailable', title: CHIP_TITLE };
   };
 }

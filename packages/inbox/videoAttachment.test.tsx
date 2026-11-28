@@ -14,6 +14,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxAnnotationRecord, InboxAttachmentState } from '@plannotator/core/inbox-types';
 import { attachmentFeedback, videoCommentAnnotation, videoLocationLine } from './attachments';
+import { PLAYBACK_RATE_KEY } from './components/PlaybackSpeed';
 
 const hasDom = typeof document !== 'undefined';
 const { AttachmentPane } = (hasDom ? await import('./components/AttachmentPane') : {}) as typeof import('./components/AttachmentPane');
@@ -258,6 +259,93 @@ test.skipIf(!hasDom)('typing pauses the film and pins the moment; Comment keeps 
   // The row is clear again and follows the film.
   expect(host!.querySelector<HTMLTextAreaElement>('[data-video-composer] textarea')!.value).toBe('');
   expect(host!.querySelector('[data-video-time]')!.hasAttribute('data-pinned')).toBe(false);
+});
+
+test.skipIf(!hasDom)('the speed button opens 1x to 2x; a pick plays the film at it and holds for the next file in this tab', async () => {
+  globalThis.fetch = (async () => new Response('{}', { status: 404 })) as unknown as typeof fetch;
+  restores.push(() => window.sessionStorage.removeItem(PLAYBACK_RATE_KEY));
+  window.sessionStorage.removeItem(PLAYBACK_RATE_KEY);
+  await render(pane([]));
+  const video = () => host!.querySelector<HTMLVideoElement>('video[data-video-player]')!;
+  const button = () => host!.querySelector<HTMLButtonElement>('[data-playback-speed]')!;
+  expect(button().textContent).toBe('1x');
+  expect(button().getAttribute('aria-haspopup')).toBe('menu');
+  expect(video().playbackRate).toBe(1);
+
+  act(() => button().click());
+  await settle();
+  const menu = document.querySelector<HTMLElement>('[data-playback-speed-menu]')!;
+  const radios = [...menu.querySelectorAll<HTMLElement>('[role="menuitemradio"]')];
+  expect(radios.map((r) => [r.textContent, r.getAttribute('aria-checked')])).toEqual([
+    ['1x', 'true'],
+    ['1.2x', 'false'],
+    ['1.5x', 'false'],
+    ['1.7x', 'false'],
+    ['2x', 'false'],
+  ]);
+  await act(async () => radios[2]!.click());
+  await settle();
+  expect(video().playbackRate).toBe(1.5);
+  // A new source (the next file, a reload of this one) starts at the default rate: that holds the speed too.
+  expect(video().defaultPlaybackRate).toBe(1.5);
+  expect(button().textContent).toBe('1.5x');
+  // The pick closes the list.
+  expect(button().getAttribute('aria-expanded')).toBe('false');
+
+  // The browser's own player menu sets 2x: the button says so.
+  video().playbackRate = 2;
+  await act(async () => video().dispatchEvent(new Event('ratechange')));
+  expect(button().textContent).toBe('2x');
+
+  // Another file opened later in this tab starts at the speed last picked.
+  act(() => root!.unmount());
+  host!.remove();
+  await render(pane([]));
+  expect(button().textContent).toBe('2x');
+  expect(video().playbackRate).toBe(2);
+});
+
+test.skipIf(!hasDom)("the film's speed sits in the line under the film, never over the browser's own controls; its list is drawn in the window's root with the labels lined up", async () => {
+  globalThis.fetch = (async () => new Response('{}', { status: 404 })) as unknown as typeof fetch;
+  restores.push(() => window.sessionStorage.removeItem(PLAYBACK_RATE_KEY));
+  window.sessionStorage.removeItem(PLAYBACK_RATE_KEY);
+  // The window's root, as the Inbox draws it: its styles reach only what is inside it.
+  await render(<div className="pn-inbox">{pane([])}</div>);
+  const button = host!.querySelector<HTMLButtonElement>('[data-playback-speed]')!;
+  const video = host!.querySelector<HTMLVideoElement>('video[data-video-player]')!;
+  // Beside the comments' rail, under the film: nothing of ours is laid over the video.
+  expect(button.closest('[data-video-foot]')?.querySelector('[data-video-rail]')).not.toBeNull();
+  expect(video.parentElement!.querySelector(':scope > [data-playback-speed]')).toBeNull();
+  expect(video.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  act(() => button.click());
+  await settle();
+  const menu = document.querySelector<HTMLElement>('[data-playback-speed-menu]')!;
+  expect(menu.closest('.pn-inbox')).not.toBeNull();
+  // Every speed holds the check's room: the checked one its check, the others an empty slot of the same kind.
+  const rows = [...menu.querySelectorAll<HTMLElement>('[role="menuitemradio"]')];
+  expect(rows.map((row) => (row.firstElementChild?.matches('svg') ? 'check' : row.firstElementChild?.className))).toEqual(['check', 'ib-pmi-slot', 'ib-pmi-slot', 'ib-pmi-slot', 'ib-pmi-slot']);
+  // A desktop's list is a popover: no sheet, no scrim.
+  expect(menu.closest('[data-phone]')).toBeNull();
+  expect(document.querySelector('.ib-pm-scrim')).toBeNull();
+});
+
+test.skipIf(!hasDom)("on a phone the film's speed sits in the line that names its length, and its list is the Inbox's bottom sheet", async () => {
+  globalThis.fetch = (async () => new Response('{}', { status: 404 })) as unknown as typeof fetch;
+  restores.push(() => window.sessionStorage.removeItem(PLAYBACK_RATE_KEY));
+  window.sessionStorage.removeItem(PLAYBACK_RATE_KEY);
+  await render(<div className="pn-inbox">{pane([], { phone: true })}</div>);
+  const button = host!.querySelector<HTMLButtonElement>('[data-playback-speed]')!;
+  expect(button.closest('[data-video-meta]')).not.toBeNull();
+  act(() => button.click());
+  await settle();
+  const menu = document.querySelector<HTMLElement>('[data-playback-speed-menu]')!;
+  expect(menu.closest('.ib-pm-pos')!.hasAttribute('data-phone')).toBe(true);
+  expect(document.querySelector('.pn-inbox .ib-pm-scrim')).not.toBeNull();
+  const radios = [...menu.querySelectorAll<HTMLElement>('[role="menuitemradio"]')];
+  await act(async () => radios[4]!.click());
+  await settle();
+  expect(host!.querySelector<HTMLVideoElement>('video[data-video-player]')!.playbackRate).toBe(2);
+  expect(button.textContent).toBe('2x');
 });
 
 test.skipIf(!hasDom)('a film the browser cannot play shows the Download card', async () => {

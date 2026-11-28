@@ -23,13 +23,15 @@
 
 import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { INBOX_SEARCH_GROUPS, middleCutInboxName, type InboxSearchGroupId, type InboxSearchRow, type InboxSearchSort } from '@plannotator/core/inbox-search';
-import { inboxApi, saveRecentSearch, searchInbox, type SearchModel } from '../api';
+import { saveRecentSearch, searchInbox, type MachineView, type SearchModel } from '../api';
 
 import { HostMark, Icon } from '../icons';
-import { ShapeThumb } from '@plannotator/ui/components/shape/ShapeGrid';
+import { rowTintTitle, tintAttrs, type RowTint } from '../tagColours';
 import { KeyCaps } from '../shortcuts/hint';
 import { isTextCut, ProjectTipText, Tip } from '../components/Tip';
 import { actionLabel, busyWord, namesActionWord, startedLine, type ComposeAction } from '../compose/model';
+import { useThreadTags } from '../threadTags';
+import { searchTagIds, tagChipText, tagPicked, toggledTag } from './searchTags';
 import {
   FROM_OPTIONS,
   GROUP_LABELS,
@@ -50,7 +52,6 @@ import {
   searchTime,
   searchGroups,
   searchRowMark,
-  type SearchShape,
   sectionLabel,
   termMarks,
   typeCountWords,
@@ -60,6 +61,9 @@ import {
   type RowThreadChip,
 } from './model';
 import { readSearchSort, SEARCH_SORT_OPTIONS, setSearchSort, useSearchSort } from './searchSort';
+import { keepingRow, optionKey, searchPasses, unansweredWords } from './searchMachines';
+import { useSearchTip } from './searchTip';
+import { SearchTipCard } from './SearchTipCard';
 
 /** How long typing settles before a query goes out. */
 export const SEARCH_DEBOUNCE_MS = 120;
@@ -80,6 +84,8 @@ export interface SearchPaletteProps {
   currentProject: string | null;
   /** The projects for the Project chip, with their names as the person reads them. */
   projects: readonly { id: string; name: string; root: string; display_name?: unknown }[];
+  projectLabels?: ReadonlyMap<string, string>;
+  linkedMachines?: readonly MachineView[];
   /** `opened`: a result opened here (focus goes to it); `dismissed`: focus goes back to what opened the palette. */
   onClose: (reason: 'dismissed' | 'opened') => void;
   /** Open a result in this tab: the window writes the hash (a new history entry) and lands on the message. */
@@ -91,13 +97,16 @@ export interface SearchPaletteProps {
   actions?: (q: string) => ComposeAction[];
   /** An action chosen: the palette closes and the window opens compose. */
   onAction?: (action: ComposeAction) => void;
-  /** Shape's boards the words find (the "Shape" group, under the results). Absent: none (Shape off). */
-  shapes?: (q: string) => SearchShape[];
+  /** A thread result's tag colour (tagColours.ts), as its row in the list has: tinted, the tag named. Absent or null: as usual. */
+  tintOf?: (threadId: string) => RowTint | null;
+  /** The Search tip (searchTip.ts): the Inbox has it for this page and no other one-time thing holds it back. Required, so the window cannot leave it out. */
+  searchTip: boolean;
 }
 
-type FilterKind = keyof SearchFilters;
-/** A chip and its menu: the three filters, and the Type chip that leads them. */
-type ChipKind = FilterKind | 'type';
+type FilterKind = 'project' | 'status' | 'from';
+/** A chip and its menu: the three filters, the Type chip that leads them, and the Tag chip (several picks) after them. */
+type ChipKind = FilterKind | 'type' | 'tag';
+const NO_TAGS: readonly never[] = [];
 
 interface Answered {
   /** The query and filters this answer is for. */
@@ -294,16 +303,27 @@ function KeyFooter() {
 
 /** A result's mark and lines. Memoized: moving the highlight re-renders the option elements, not what they hold
  *  (the row is the answer's own object, so it stays the same until a new answer lands). */
-const ResultContent = memo(function ResultContent({ row, phone, projectName, terms }: { row: InboxSearchRow; phone: boolean; projectName: string; terms: readonly string[] }) {
+const ResultContent = memo(function ResultContent({ row, phone, projectName, terms, tag }: { row: InboxSearchRow; phone: boolean; projectName: string; terms: readonly string[]; tag?: string }) {
   return (
     <>
       <RowMark row={row} />
-      <RowBody row={row} phone={phone} projectName={projectName} terms={terms} />
+      <RowBody row={row} phone={phone} projectName={projectName} terms={terms} tag={tag} />
     </>
   );
 });
 
-function RowBody({ row, phone, projectName, terms }: { row: InboxSearchRow; phone: boolean; projectName: string; terms: readonly string[] }) {
+/** A tinted thread result's tag, as a list row names it (threadTags.css `.ib-rtag`). */
+function ResultTag({ json }: { json: string }) {
+  const tag = JSON.parse(json) as RowTint;
+  return (
+    <span className="ib-rtag" dir="auto" title={rowTintTitle(tag)} data-row-tag="">
+      <span className="ib-rtag-n">{tag.name}</span>
+      {tag.also.length > 0 && <span className="ib-rtag-more"> +{tag.also.length}</span>}
+    </span>
+  );
+}
+
+function RowBody({ row, phone, projectName, terms, tag }: { row: InboxSearchRow; phone: boolean; projectName: string; terms: readonly string[]; tag?: string }) {
   const chip = rowThreadChip(row);
   // The time: in its own column on a desktop, at the end of the meta line on a phone (a column would take the title's width).
   const time = row.type === 'project' ? null : searchTime(row.at);
@@ -321,6 +341,7 @@ function RowBody({ row, phone, projectName, terms }: { row: InboxSearchRow; phon
             <MetaLine chip={chip} chipTerms={terms} project={projectName} projectMarks={projectMarks(projectName, row.project.name, terms)} section={label} at={metaAt} />
           </span>
           {row.archived ? <span className="ib-sp-chip">Archived</span> : row.section === 'stopped' ? <span className="ib-sp-chip ib-sp-warn">Stopped</span> : null}
+          {tag && <ResultTag json={tag} />}
           {!phone && <TimeColumn at={time} />}
         </>
       );
@@ -438,7 +459,7 @@ function keepInputFocus(event: ReactMouseEvent): void {
 }
 
 export default function SearchPalette(props: SearchPaletteProps) {
-  const { open, phone, currentProject, projects, onClose, onOpenResult, actions, onAction, shapes } = props;
+  const { open, phone, currentProject, projects, projectLabels, linkedMachines, onClose, onOpenResult, actions, onAction } = props;
   const dialogRef = useRef<HTMLDialogElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   /** An IME composition is under way in the input (its Escape is not the palette's). */
@@ -465,13 +486,23 @@ export default function SearchPalette(props: SearchPaletteProps) {
     setTypeState(next);
   };
   const [live, setLive] = useState('');
+  const rowRef = useRef<HTMLDivElement>(null);
+  const tip = useSearchTip({ open, offered: props.searchTip, q, say: setLive });
+  const tipUp = tip.stage === 'trying' || tip.stage === 'shown' || tip.stage === 'leaving';
   /** Best match or Newest: this browser's pick, kept across opens (searchSort.ts). */
   const sort = useSearchSort();
   const [fades, setFades] = useState({ top: false, bottom: false });
 
-  const names = useMemo(() => projectNames(projects), [projects]);
+  // The tags this Inbox's own threads carry (approval "inbox-thread-tags", step 2): the Tag chip shows once there is one.
+  const tagList = useThreadTags()?.here ?? NO_TAGS;
+  const tagListRef = useRef(tagList);
+  tagListRef.current = tagList;
+  const tagWords = (picks: readonly string[], tags: typeof tagList) => (picks.length > 0 ? tagChipText(tags, picks) : null);
+  const names = useMemo(() => projectLabels ?? projectNames(projects), [projectLabels, projects]);
   const projectName = useCallback((id: string) => names.get(id) ?? id, [names]);
   const projectNameRef = useRef(projectName);
+  const linkedRef = useRef(linkedMachines);
+  linkedRef.current = linkedMachines;
   projectNameRef.current = projectName;
 
   // ── the dialog ──
@@ -515,6 +546,14 @@ export default function SearchPalette(props: SearchPaletteProps) {
   const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Enter pressed while a newer query was on its way: open its first row once it lands. */
   const openWhenSettled = useRef(false);
+  const merged = useRef<{ key: string; model: SearchModel } | null>(null);
+  const carry = useRef<{ key: string; top: number | null; height: number } | null>(null);
+  const pointed = useRef(false);
+  const moved = useRef(false);
+  const pressing = useRef(false);
+  const heldMerge = useRef<(() => void) | null>(null);
+  const optionsRef = useRef<SearchOption[]>([]);
+  const hlRef = useRef<number | null>(null);
 
   const clearTimers = () => {
     if (debounceTimer.current) clearTimeout(debounceTimer.current);
@@ -534,11 +573,33 @@ export default function SearchPalette(props: SearchPaletteProps) {
       const key = JSON.stringify([query.trim(), nextFilters, nextType, nextSort]);
       // A picked type asks for its group alone, the first page ("Show all"'s request); with no words, the request is today's.
       const one = nextType && query.trim() ? { group: nextType, limit: SEARCH_PAGE } : {};
+      const passes = searchPasses(nextFilters);
+      const request = { q: query, ...nextFilters, tags: searchTagIds(tagListRef.current, nextFilters.tags), current: currentProject, sort: nextSort, ...one };
+      merged.current = null;
       setPending(true);
       setError(false);
-      searchInbox({ q: query, ...nextFilters, current: currentProject, sort: nextSort, ...one }, controller.signal)
-        .then((model) => {
+      if (passes === 'both') {
+        searchInbox({ ...request, machines: true }, controller.signal)
+          .then((model) => {
+            if (seq !== requestSeq.current || model.indexing) return;
+            merged.current = { key, model };
+            const apply = () => {
+              if (seq !== requestSeq.current) return;
+              const at = hlRef.current;
+              const option = at === null || !moved.current ? undefined : optionsRef.current[at];
+              const shown = at === null ? null : document.getElementById(optionId(at));
+              carry.current = option ? { key: optionKey(option), top: shown ? shown.getBoundingClientRect().top : null, height: listRef.current?.clientHeight ?? 0 } : null;
+              setAnswered((current) => (current && current.key === key ? { ...current, model: keepingRow(model, option, current.model) } : current));
+            };
+            if (pressing.current) heldMerge.current = apply;
+            else apply();
+          })
+          .catch(() => {});
+      }
+      searchInbox({ ...request, machines: passes === 'merged' }, controller.signal)
+        .then((local) => {
           if (seq !== requestSeq.current) return;
+          const model = !local.indexing && merged.current?.key === key ? merged.current.model : local;
           if (model.indexing) {
             // Skeletons and the indexing line until the index is built; ask again.
             setAnswered({ key, q: query.trim(), model, filters: nextFilters, type: nextType, sort: nextSort });
@@ -550,8 +611,8 @@ export default function SearchPalette(props: SearchPaletteProps) {
           setAnswered({ key, q: query.trim(), model, filters: nextFilters, type: nextType, sort: nextSort });
           const said = nextType ? typeCountWords(model, query, nextType) : countWords(model, query, filtersSet(nextFilters));
           // Found inside a filter: the count says so, as the line under the list does ("2 results in 2 groups. Searched only plannotator").
-          const only = said && query.trim() && filtersSet(nextFilters) && !said.startsWith('No ') ? scopeWords(nextFilters, projectNameRef.current, nextType).join(', ') : '';
-          setLive(only ? `${said}. Searched only ${only}` : said);
+          const only = said && query.trim() && filtersSet(nextFilters) && !said.startsWith('No ') ? scopeWords(nextFilters, projectNameRef.current, nextType, tagWords(nextFilters.tags, tagListRef.current)).join(', ') : '';
+          setLive(model.unanswered?.length && passes === 'merged' ? unansweredWords(model.unanswered, linkedRef.current) : only ? `${said}. Searched only ${only}` : said);
         })
         .catch((cause) => {
           if (seq !== requestSeq.current || (cause instanceof DOMException && cause.name === 'AbortError')) return;
@@ -610,25 +671,61 @@ export default function SearchPalette(props: SearchPaletteProps) {
     const found = answered.model.indexing ? [] : searchGroups(answered.model, expanded);
     // A picked type lists its group alone, without Actions.
     if (answered.type) return found;
-    // Shape's boards the words find: their own group, under the results.
-    const shapeList = shapes && answered.q.trim() ? shapes(answered.q) : [];
-    const withShapes = shapeList.length ? [...found, { id: 'shapes' as const, heading: 'Shape', total: null, options: shapeList.map((shape) => ({ kind: 'shape' as const, shape })) }] : found;
     const actionList = actions ? actions(answered.q) : [];
-    if (actionList.length === 0) return withShapes;
+    if (actionList.length === 0) return found;
     const group: SearchGroupView = { id: 'actions', heading: 'Actions', total: null, options: actionList.map((action) => ({ kind: 'action' as const, action })) };
     // Above everything (Recent searches included) with no words, when nothing
     // matched, or when the words name an action; below real results otherwise.
-    const first = !answered.q.trim() || withShapes.length === 0 || namesActionWord(answered.q);
-    return first ? [group, ...withShapes] : [...withShapes, group];
-  }, [answered, expanded, actions, shapes]);
+    const first = !answered.q.trim() || found.length === 0 || namesActionWord(answered.q);
+    return first ? [group, ...found] : [...found, group];
+  }, [answered, expanded, actions]);
   const options = useMemo(() => groups.flatMap((g) => g.options), [groups]);
   const optionsKey = answered?.key ?? '';
+  optionsRef.current = options;
+  hlRef.current = hl;
   // The highlight snaps to the first row when the rows change (a new answer), never while arrowing.
   useLayoutEffect(() => {
+    pointed.current = false;
+    moved.current = false;
+    carry.current = null;
+    if (listRef.current) listRef.current.style.maxHeight = '';
     setHl(options.length > 0 ? 0 : null);
     // Only a new answer resets it; expanding a group keeps the row.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [optionsKey]);
+  useLayoutEffect(() => {
+    const held = carry.current;
+    carry.current = null;
+    if (!held) return;
+    const at = options.findIndex((option) => optionKey(option) === held.key);
+    if (at < 0) return;
+    const row = document.getElementById(optionId(at));
+    const list = listRef.current;
+    if (pointed.current && held.top !== null && row && list) {
+      list.style.maxHeight = `${held.height}px`;
+      list.scrollTop += row.getBoundingClientRect().top - held.top;
+    }
+    setHl(at);
+    // optionId is stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [options]);
+  useEffect(() => {
+    const release = () => {
+      if (!pressing.current) return;
+      pressing.current = false;
+      setTimeout(() => {
+        const apply = heldMerge.current;
+        heldMerge.current = null;
+        apply?.();
+      }, 0);
+    };
+    document.addEventListener('pointerup', release, true);
+    document.addEventListener('pointercancel', release, true);
+    return () => {
+      document.removeEventListener('pointerup', release, true);
+      document.removeEventListener('pointercancel', release, true);
+    };
+  }, []);
   useEffect(() => {
     if (!openWhenSettled.current || pending || !answered || answered.model.indexing) return;
     openWhenSettled.current = false;
@@ -666,7 +763,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
     const already = expanded[option.group] ?? (answered.type === option.group ? (answered.model.groups?.[option.group] ?? null) : null);
     const offset = already ? already.length : 0;
     try {
-      const model = await searchInbox({ q: answered.q, ...filters, current: currentProject, sort: answered.sort, group: option.group, offset, limit: SEARCH_PAGE });
+      const model = await searchInbox({ q: answered.q, ...filters, tags: searchTagIds(tagList, filters.tags), current: currentProject, sort: answered.sort, group: option.group, offset, limit: SEARCH_PAGE, machines: searchPasses(filters) !== 'local' });
       // A message that came in since the last page moves the next one down: a row already shown is not shown twice.
       const shown = new Set((already ?? []).map((row) => `${row.type}-${row.id}`));
       const more = (model.groups?.[option.group] ?? []).filter((row) => !shown.has(`${row.type}-${row.id}`));
@@ -694,15 +791,6 @@ export default function SearchPalette(props: SearchPaletteProps) {
     if (option.kind === 'action') {
       close('opened');
       onAction?.(option.action);
-      return;
-    }
-    if (option.kind === 'shape') {
-      if (newTab) {
-        window.open(`${window.location.pathname}${window.location.search}${option.shape.hash}`, '_blank', 'noopener');
-        return;
-      }
-      close('opened');
-      onOpenResult(option.shape.hash, null);
       return;
     }
     if (option.kind === 'recent-q') {
@@ -741,6 +829,8 @@ export default function SearchPalette(props: SearchPaletteProps) {
       event.preventDefault();
       if (options.length === 0) return;
       const down = event.key === 'ArrowDown';
+      pointed.current = false;
+      moved.current = true;
       setHl((current) => (current === null ? (down ? 0 : options.length - 1) : (current + (down ? 1 : -1) + options.length) % options.length));
       return;
     }
@@ -768,6 +858,10 @@ export default function SearchPalette(props: SearchPaletteProps) {
         const kind = menu.kind;
         setMenu(null);
         filtersRef.current?.querySelector<HTMLElement>(`[data-chip="${kind}"]`)?.focus();
+      } else if (tip.stage === 'shown') {
+        // The first Escape closes only the Search tip, as the Launch tip's does; focus goes back to the box.
+        tip.close();
+        inputRef.current?.focus();
       } else close('dismissed');
       return;
     }
@@ -794,15 +888,26 @@ export default function SearchPalette(props: SearchPaletteProps) {
         ? [{ value: null, label: 'All projects' }, ...projects.map((p) => ({ value: p.id, label: projectName(p.id) }))]
         : kind === 'status'
           ? STATUS_OPTIONS.map((o) => ({ value: o.value, label: o.label }))
-          : FROM_OPTIONS.map((o) => ({ value: o.value, label: o.label }));
+          : kind === 'tag'
+            ? [{ value: null, label: 'Any tag' }, ...tagList.map((tag) => ({ value: tag.id, label: tag.name }))]
+            : FROM_OPTIONS.map((o) => ({ value: o.value, label: o.label }));
 
-  const chipValue = (kind: ChipKind): string | null => (kind === 'type' ? type : filters[kind]);
+  const chipValue = (kind: ChipKind): string | null => (kind === 'type' ? type : kind === 'tag' ? (tagList.find((tag) => tagPicked(tag, filters.tags))?.id ?? null) : filters[kind]);
+  /** Whether a menu row is ticked: the Tag menu ticks every picked tag, and "Any tag" when none is. */
+  const itemChecked = (kind: ChipKind, value: string | null): boolean => {
+    if (kind !== 'tag') return chipValue(kind) === value;
+    const tag = value === null ? null : tagList.find((t) => t.id === value);
+    return tag ? tagPicked(tag, filters.tags) : chipValue('tag') === null;
+  };
   /** Set one chip (null: back to its start) and ask again. */
   const setChip = (kind: ChipKind, value: string | null) => {
     if (kind === 'type') {
       const next = value as InboxSearchGroupId | null;
       setType(next);
       run(q, filters, next);
+    } else if (kind === 'tag') {
+      const tag = value === null ? null : tagList.find((t) => t.id === value);
+      changeFilters({ ...filters, tags: tag ? toggledTag(filters.tags, tag) : [] });
     } else changeFilters({ ...filters, [kind]: value } as SearchFilters);
   };
   const openMenu = (kind: ChipKind) => {
@@ -814,6 +919,11 @@ export default function SearchPalette(props: SearchPaletteProps) {
     setMenu({ kind, hl: Math.max(0, at) });
   };
   const pick = (kind: ChipKind, value: string | null) => {
+    // A tag ticks or unticks and the menu stays open, so several can be picked; "Any tag" clears them and closes.
+    if (kind === 'tag' && value !== null) {
+      setChip(kind, value);
+      return;
+    }
     setMenu(null);
     setChip(kind, value);
     requestAnimationFrame(() => filtersRef.current?.querySelector<HTMLElement>(`[data-chip="${kind}"]`)?.focus());
@@ -821,7 +931,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
   const menuRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     if (!menu) return;
-    menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitemradio"]')[menu.hl]?.focus();
+    menuRef.current?.querySelectorAll<HTMLElement>('[role^="menuitem"]')[menu.hl]?.focus();
   }, [menu]);
   const onMenuKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (!menu) return;
@@ -851,7 +961,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
 
   const chip = (kind: ChipKind) => {
     const set = chipValue(kind) !== null;
-    const label = kind === 'type' ? (type ? GROUP_LABELS[type].heading : 'All types') : chipText(kind, filters, projectName);
+    const label = kind === 'type' ? (type ? GROUP_LABELS[type].heading : 'All types') : kind === 'tag' ? tagChipText(tagList, filters.tags) : chipText(kind, filters, projectName);
     const button = (
       <Tip content={label} when={(trigger) => isTextCut(trigger.querySelector('.ib-sp-fl'))}>
         <button
@@ -893,16 +1003,16 @@ export default function SearchPalette(props: SearchPaletteProps) {
     const cell = chipEl?.closest<HTMLElement>('.ib-sp-fcell');
     const left = cell?.offsetLeft ?? 10;
     const top = cell ? cell.offsetTop + cell.offsetHeight + 6 : undefined;
-    const label = menu.kind === 'type' ? 'Type' : menu.kind === 'project' ? 'Project' : menu.kind === 'status' ? 'Status' : 'From';
+    const label = menu.kind === 'type' ? 'Type' : menu.kind === 'project' ? 'Project' : menu.kind === 'status' ? 'Status' : menu.kind === 'tag' ? 'Tag' : 'From';
     return (
       <div ref={menuRef} className="ib-sp-menu" role="menu" aria-label={label} style={phone ? undefined : { left, top }} onKeyDown={onMenuKey}>
         {items.map((item, i) => {
-          const checked = chipValue(menu.kind) === item.value;
+          const checked = itemChecked(menu.kind, item.value);
           return (
             <div
               key={item.value ?? 'any'}
               className="ib-sp-mi"
-              role="menuitemradio"
+              role={menu.kind === 'tag' && item.value !== null ? 'menuitemcheckbox' : 'menuitemradio'}
               tabIndex={-1}
               aria-checked={checked}
               data-hl={menu.hl === i ? '' : undefined}
@@ -926,6 +1036,8 @@ export default function SearchPalette(props: SearchPaletteProps) {
   // ── body ──
   const filtered = filtersSet(filters);
   const indexing = answered?.model.indexing === true;
+  const unanswered = answered && !indexing && !error ? (answered.model.unanswered ?? []) : [];
+  const unansweredEmpty = unanswered.length > 0 && !options.some((option) => option.kind === 'row') && Boolean(answered?.filters.project);
   let index = -1;
   const body = (() => {
     if (error) {
@@ -964,11 +1076,13 @@ export default function SearchPalette(props: SearchPaletteProps) {
     if (options.length === 0) {
       if (answered.type && !answered.q) return <div className="ib-sp-empty ib-sp-quiet" data-search-type-empty="">Type to search {GROUP_LABELS[answered.type].noun}.</div>;
       if (!answered.q && !filtered) return <div className="ib-sp-empty ib-sp-quiet">Type to search threads, messages and files.</div>;
-      const scope = scopeWords(answered.filters, projectName, answered.type);
+      const scope = scopeWords(answered.filters, projectName, answered.type, tagWords(answered.filters.tags, tagList));
       return (
-        <div className="ib-sp-empty" data-search-none="">
+        <div className="ib-sp-empty" data-search-none="" data-search-unanswered={unansweredEmpty ? '' : undefined}>
           <span>
-            {answered.q ? (
+            {unansweredEmpty ? (
+              unansweredWords(unanswered, linkedMachines)
+            ) : answered.q ? (
               <>
                 No matches for &ldquo;<bdi>{answered.q}</bdi>&rdquo;
               </>
@@ -982,6 +1096,16 @@ export default function SearchPalette(props: SearchPaletteProps) {
             </span>
           )}
         </div>
+      );
+    }
+    if (unansweredEmpty) {
+      return (
+        <>
+          {renderGroups()}
+          <div className="ib-sp-empty" data-search-none="" data-search-unanswered="">
+            <span>{unansweredWords(unanswered, linkedMachines)}</span>
+          </div>
+        </>
       );
     }
     return renderGroups();
@@ -1008,7 +1132,11 @@ export default function SearchPalette(props: SearchPaletteProps) {
               role: 'option' as const,
               'aria-selected': selected,
               'data-option': i,
-              onPointerMove: () => hl !== i && setHl(i),
+              onPointerMove: () => {
+                pointed.current = true;
+                moved.current = true;
+                if (hl !== i) setHl(i);
+              },
               onMouseDown: keepInputFocus,
               onClick: (event: ReactMouseEvent) => activate(i, event.metaKey || event.ctrlKey),
             };
@@ -1038,24 +1166,8 @@ export default function SearchPalette(props: SearchPaletteProps) {
                   <span className="ib-sp-rs">
                     <span className="ib-sp-p">{actionLabel(action)}</span>
                     <span className="ib-sp-s">
-                      {action.kind === 'new' ? 'Start a thread with a live agent' : action.kind === 'review' ? 'Local changes or a pull request' : `${startedLine(action.target)} · ${busyWord(action.target).toLowerCase()}`}
+                      {action.kind === 'new' ? 'Start a thread with a live agent' : action.kind === 'review' ? 'Local changes or a pull request' : `${startedLine(action.target)}${busyWord(action.target) ? ` · ${busyWord(action.target)!.toLowerCase()}` : ''}`}
                     </span>
-                  </span>
-                </div>
-              );
-            }
-            if (option.kind === 'shape') {
-              const shape = option.shape;
-              return (
-                <div key={`shape-${shape.id}`} className="ib-sp-row" {...common} data-result="shape" data-result-id={shape.id}>
-                  <span className="ib-sp-shape-prev" aria-hidden="true">
-                    <ShapeThumb picture={shape.picture} refs={shape.refs} resolveSrc={(src) => inboxApi.shapeFileUrl(shape.id, src)} />
-                  </span>
-                  <span className="ib-sp-rs">
-                    <span className="ib-sp-p">{shape.title}</span>
-                  </span>
-                  <span className="ib-sp-time ib-sp-shape-meta">
-                    {shape.project} · {shape.meta}
                   </span>
                 </div>
               );
@@ -1073,9 +1185,12 @@ export default function SearchPalette(props: SearchPaletteProps) {
               );
             }
             const row = option.row;
+            const tint = row.type === 'thread' ? (props.tintOf?.(row.thread_id) ?? null) : null;
+            const tinted = tint ? tintAttrs(tint.colour) : null;
             return (
-              <div key={`${row.type}-${row.id}`} className="ib-sp-row" {...common} data-result={row.type} data-result-id={row.id}>
-                <ResultContent row={row} phone={phone} projectName={projectName(row.project.id)} terms={answered?.model.terms ?? NO_TERMS} />
+              <div key={`${row.type}-${row.id}`} className="ib-sp-row" {...common} data-result={row.type} data-result-id={row.id} data-tint={tinted?.['data-tint']}>
+                {/* The tag as a string, so the memo holds while the answer and the colour stay. */}
+                <ResultContent row={row} phone={phone} projectName={names.get(row.project.id) ?? row.project.name} terms={answered?.model.terms ?? NO_TERMS} tag={tint ? JSON.stringify(tint) : undefined} />
               </div>
             );
           })}
@@ -1089,7 +1204,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
   // Results found inside a filter (a project the person picked, say): say what was left out, under the list.
   // The filters the shown answer was asked with: a chip changed since keeps the line true until its own answer lands.
   const scopeShown = Boolean(answered && answered.q && !indexing && !error && filtersSet(answered.filters) && options.length > 0);
-  const resultScope = scopeShown ? scopeWords(answered!.filters, projectName, answered!.type) : [];
+  const resultScope = scopeShown ? scopeWords(answered!.filters, projectName, answered!.type, tagWords(answered!.filters.tags, tagList)) : [];
   // The order only means something for words: the recent view and filters alone keep their own order.
   const sortSwitch = q.trim() ? <SortSwitch sort={sort} onChange={changeSort} name={`ib-sp-sort-${uid}`} /> : null;
   return (
@@ -1108,6 +1223,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
         // An Escape that cancelled an IME composition closes nothing.
         if (composing.current) return;
         if (menu) setMenu(null);
+        else if (tip.stage === 'shown') tip.close();
         else close('dismissed');
       }}
       onClick={(event) => {
@@ -1118,7 +1234,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
         if (event.clientX < r.left || event.clientX > r.right || event.clientY < r.top || event.clientY > r.bottom) close('dismissed');
       }}
     >
-      <div className="ib-sp-inrow">
+      <div className="ib-sp-inrow" ref={rowRef}>
         <Icon name="search" />
         <input
           ref={inputRef}
@@ -1135,6 +1251,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
           aria-activedescendant={hl !== null && options[hl] ? optionId(hl) : undefined}
           placeholder="Search threads, messages and files"
           aria-label="Search threads, messages and files"
+          aria-describedby={tip.stage === 'shown' ? `ib-sp-tipl-${uid}` : undefined}
           dir="auto"
           maxLength={400}
           value={q}
@@ -1157,6 +1274,22 @@ export default function SearchPalette(props: SearchPaletteProps) {
           Cancel
         </button>
       </div>
+      {tipUp && (
+        <SearchTipCard
+          phone={phone}
+          leaving={tip.stage === 'leaving'}
+          dialogRef={dialogRef}
+          rowRef={rowRef}
+          listRef={listRef}
+          onPlaced={tip.placed}
+          titleId={`ib-sp-tipt-${uid}`}
+          lineId={`ib-sp-tipl-${uid}`}
+          onOk={(keyboard) => {
+            tip.close();
+            if (keyboard) inputRef.current?.focus();
+          }}
+        />
+      )}
       {/* The filters and Clear filters on one line. A phone's filters scroll sideways, the order pinned at the line's end. */}
       <div className="ib-sp-fbar" data-search-filter-bar="">
         <div className="ib-sp-filters" ref={filtersRef}>
@@ -1164,6 +1297,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
           {chip('project')}
           {chip('status')}
           {chip('from')}
+          {(tagList.length > 0 || filters.tags.length > 0) && chip('tag')}
           {anyFilter && (
             <span className="ib-sp-end">
               <button type="button" className="ib-sp-clear" data-clear-filters="" onClick={clearFilters}>
@@ -1185,6 +1319,12 @@ export default function SearchPalette(props: SearchPaletteProps) {
           aria-label="Search results"
           data-dim={pending && answered && !indexing ? '' : undefined}
           onScroll={measure}
+          onPointerDown={() => {
+            pressing.current = true;
+          }}
+          onPointerLeave={(event) => {
+            event.currentTarget.style.maxHeight = '';
+          }}
         >
           {body}
         </div>
@@ -1193,6 +1333,11 @@ export default function SearchPalette(props: SearchPaletteProps) {
       {resultScope.length > 0 && (
         <div className="ib-sp-scope" data-search-scope="" onMouseDown={keepInputFocus}>
           <SearchedOnly scope={resultScope} onEverywhere={clearFilters} />
+        </div>
+      )}
+      {unanswered.length > 0 && !unansweredEmpty && (
+        <div className="ib-sp-scope" data-search-unanswered="" onMouseDown={keepInputFocus}>
+          {unansweredWords(unanswered, linkedMachines)}
         </div>
       )}
       {!phone && <KeyFooter />}

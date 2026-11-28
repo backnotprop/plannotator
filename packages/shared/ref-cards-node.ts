@@ -41,19 +41,19 @@ export function createNodeRefCliRunner(timeoutMs: number = REF_TIMEOUT_MS): RefR
           if (group && child.pid !== undefined) process.kill(-child.pid, signal);
           else if (!child.kill(signal)) throw new Error("gone");
         });
-      const finish = (exitCode: number, stderr?: string) => {
+      const finish = (exitCode: number, stderr?: string, timedOut = false) => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
         if (drainTimer) clearTimeout(drainTimer);
         child.stdout?.destroy();
         child.stderr?.destroy();
-        resolve({ stdout: Buffer.concat(out).toString("utf8"), stderr: stderr ?? Buffer.concat(err).toString("utf8"), exitCode });
+        resolve({ stdout: Buffer.concat(out).toString("utf8"), stderr: stderr ?? Buffer.concat(err).toString("utf8"), exitCode, ...(timedOut ? { timedOut } : {}) });
       };
       // At the limit: end it and everything it started, and answer at once.
       const timer = setTimeout(() => {
         end();
-        finish(1, `${cli}: timed out`);
+        finish(1, `${cli}: timed out`, true);
       }, timeoutMs);
       child.stdout?.on("data", (chunk: Buffer) => out.push(chunk));
       child.stderr?.on("data", (chunk: Buffer) => err.push(chunk));

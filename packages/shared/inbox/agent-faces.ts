@@ -1,14 +1,15 @@
 /**
  * Plannotator Inbox: the face each agent's icon shows (core `inbox-types.ts` ("Agent faces")), saved for every window.
  *
- *   inbox/agent-faces.json   { v: 1, rev, faces: { [agent id]: { face, sessions, name? } } }, the latest choice last,
+ *   inbox/agent-faces.json   { v: 1, rev, faces: { [agent id]: { face, tile?, sessions, name? } } }, the latest choice last,
  *                            0600, written whole (temp, then rename)
  *
  * A file outside the store's JSONL, as pins are: a face is window furniture and never enters the event log, which
  * agents' cursors, the phone relay and search read. At most INBOX_AGENT_FACES_KEPT agents (the oldest unnamed choice
  * goes first), so the file stays a few kilobytes however many sessions come and go; an ended agent keeps its face, so
  * its old threads still show it. The agent's own mark is stored only beside a name the person gave it (Rename… on its
- * sidebar row), which lives in the same entry so a continued session keeps it as it keeps its face.
+ * sidebar row) or a tile choice (`tile`, beside `face: "agent"`; a Plannotator from before tiles passes over the field
+ * and keeps the entry's name), which live in the same entry so a continued session keeps them as it keeps its face.
  */
 
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
@@ -20,6 +21,7 @@ import {
   INBOX_AGENT_FACE_SESSIONS_MAX,
   isInboxAgentFace,
   isInboxAgentFaceId,
+  isInboxAgentTile,
   readInboxAgentFaces,
   type InboxAgentFaceChange,
   type InboxAgentFaceEntry,
@@ -103,7 +105,10 @@ export function checkInboxAgentFaceChange(body: Record<string, unknown>): InboxA
     return { agent: body.agent, name: checked.name, sessions };
   }
   if (!isInboxAgentFace(body.face)) throw new InboxError("validation_error", "face: one of the agent icon's faces.", { field: "face" });
-  return { agent: body.agent, face: body.face, sessions };
+  // A tile choice rides beside the own mark only (core inbox-types.ts `InboxAgentTile`).
+  if (body.tile !== undefined && body.tile !== null && !isInboxAgentTile(body.tile)) throw new InboxError("validation_error", "tile: project or mark.", { field: "tile" });
+  const tile = body.face === "agent" && isInboxAgentTile(body.tile) ? body.tile : undefined;
+  return { agent: body.agent, face: body.face, ...(tile ? { tile } : {}), sessions };
 }
 
 /**
@@ -165,9 +170,11 @@ export function createInboxAgentFacesFile(inboxDirPath: string, onChange: (wire:
       delete faces[change.agent];
       for (const session of change.sessions ?? []) if (session !== change.agent && faces[session]) delete faces[session];
       const face = "face" in change ? change.face : (before?.face ?? merged.find((entry) => entry.face !== "agent")?.face ?? "agent");
+      // A tile rides beside the own mark only: a face change sets it (or clears it), a name change keeps it.
+      const tile = face !== "agent" ? null : "face" in change ? (change.tile ?? null) : (before?.tile ?? merged.find((entry) => entry.tile)?.tile ?? null);
       const name = "name" in change ? change.name : (before?.name ?? merged.find((entry) => entry.name)?.name ?? null);
-      if (face !== "agent" || name) {
-        faces[change.agent] = { face, sessions: cleanInboxFaceSessions([...(before?.sessions ?? []), ...(change.sessions ?? [])], change.agent), ...(name ? { name } : {}) };
+      if (face !== "agent" || name || tile) {
+        faces[change.agent] = { face, ...(tile ? { tile } : {}), sessions: cleanInboxFaceSessions([...(before?.sessions ?? []), ...(change.sessions ?? [])], change.agent), ...(name ? { name } : {}) };
       }
       if (!before && merged.length === 0 && !faces[change.agent]) return this.wire();
       return save(faces);

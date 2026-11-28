@@ -17,7 +17,7 @@
  * PNGs, light and dark at 1440 and 390, land in .local/proof/ended-session/.
  */
 
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -251,8 +251,8 @@ test('the asking session stopped and another is live: the thread says so, Send a
   const box = pane.getByRole('textbox', { name: 'Reply to Pi' });
   const words = 'Go with backoff, but cap the total wait at 10 minutes so it finishes before the 2 AM export.';
   await box.fill(words);
-  // The box open: the recipient pill under it names the asker, ended, in the note's place (approval
-  // "inbox-reply-recipient"); the note's always-mounted status region stays.
+  // The box open: the recipient chip at the start of the words names the asker, ended, in the note's place (approval
+  // "inbox-reply-recipient", placed by "inbox-reply-target-chip"); the note's always-mounted status region stays.
   const pill = pane.locator('[data-recipient]');
   await expect(pill).toHaveAttribute('aria-label', 'To Pi, ended. Change who gets this reply');
   await expect(pane.locator('[data-asker-note]')).toHaveAttribute('role', 'status');
@@ -262,7 +262,8 @@ test('the asking session stopped and another is live: the thread says so, Send a
   // Send does not send: the pill's list opens once, the live session first and the asker, ended, last.
   // "Where should this reply go?" is gone.
   await pane.locator('.ib-pfoot').getByRole('button', { name: 'Send', exact: true }).click();
-  const list = pane.locator('[data-recipient-list]');
+  // The list is drawn at the Inbox's root, outside the pane (#3427).
+  const list = page.locator('[data-recipient-list]');
   await expect(list).toBeVisible();
   await expect(list.locator('[data-recipient-row]')).toHaveText([/^Pi 2/, /^Pi\s*ended$/]);
   await expect(pane.locator('[data-route-choice]')).toHaveCount(0);
@@ -363,7 +364,7 @@ test('a saved reply moves to a session that started later, which then keeps the 
   await expect(pane.locator('[data-recipient]')).not.toHaveAttribute('aria-label', /ended/);
   await pane.locator('textarea:not([data-question-other])').first().fill('And log each retry.');
   await pane.locator('.ib-pfoot').getByRole('button', { name: 'Send', exact: true }).click();
-  await expect(pane.locator('[data-recipient-list]')).toHaveCount(0);
+  await expect(page.locator('[data-recipient-list]')).toHaveCount(0);
   const next = await waitFor('the next reply handed to the later session', () => late.commands[1]);
   expect((await threadMessages()).at(-1)).toMatchObject({ id: next.id, to: { host: 'pi', session: 'pi-session-late' } });
   await shot('6-after-move');

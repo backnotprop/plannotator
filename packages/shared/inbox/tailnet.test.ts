@@ -8,6 +8,7 @@ import { describe, expect, test } from "bun:test";
 import { resolveInboxTailscale, resolveInboxTailscaleAllow } from "../config";
 import { decodeTailscaleHeaderValue, parseTailscaleSelfIdentity, serveStatusRoutes, serveTargetIsLoopbackPort } from "../tailscale";
 import { checkTailnetIdentity, isServedTailnetHost, tailnetFetchSiteAllowed } from "./tailnet";
+import { cfAccessFetchSiteAllowed } from "./cf-access";
 
 const status = (self: Record<string, unknown>, users: Record<string, unknown> = { "42": { LoginName: "me@example.com" } }) =>
   JSON.stringify({ Self: self, User: users });
@@ -20,10 +21,40 @@ describe("parseTailscaleSelfIdentity", () => {
   test("a tagged machine has no owner, whatever pseudo-user Tailscale lists for it", () => {
     expect(parseTailscaleSelfIdentity(status({ UserID: 42, Tags: ["tag:server"] }, { "42": { LoginName: "tagged-devices" } }))).toEqual({ login: null, tagged: true });
   });
+  test("large 64-bit Self.UserIDs beyond Number.MAX_SAFE_INTEGER keep their exact User key", () => {
+    const exact = '{"Self":{"UserID":12345678901234567},"User":{"12345678901234567":{"LoginName":"me@example.com"}}}';
+    expect(parseTailscaleSelfIdentity(exact)).toEqual({ login: "me@example.com", tagged: false });
+
+    const maxInt64 = '{"Self":{"UserID":9223372036854775807},"User":{"9223372036854775807":{"LoginName":"max@example.com"}}}';
+    expect(parseTailscaleSelfIdentity(maxInt64)).toEqual({ login: "max@example.com", tagged: false });
+
+    // Adjacent 64-bit ids that round to the same IEEE-754 float64 must never collide.
+    const bothNeighbors =
+      '{"Peer":{"n1":{"UserID":12345678901234568}},"Self":{"UserID":12345678901234567},"User":{"12345678901234567":{"LoginName":"owner@example.com"},"12345678901234568":{"LoginName":"other@example.com"}}}';
+    expect(parseTailscaleSelfIdentity(bothNeighbors)).toEqual({ login: "owner@example.com", tagged: false });
+
+    const roundedNeighborOnly =
+      '{"Self":{"UserID":12345678901234567},"User":{"12345678901234568":{"LoginName":"other@example.com"}}}';
+    expect(parseTailscaleSelfIdentity(roundedNeighborOnly)).toEqual({ login: null, tagged: false });
+
+    // Non-canonical unsafe numeric forms must fail closed instead of matching a rounded neighbor.
+    const unsafeFloat =
+      '{"Self":{"UserID":12345678901234567.0},"User":{"12345678901234568":{"LoginName":"other@example.com"}}}';
+    expect(parseTailscaleSelfIdentity(unsafeFloat)).toEqual({ login: null, tagged: false });
+
+    const unsafeExponent =
+      '{"Self":{"UserID":1.2345678901234567e16},"User":{"12345678901234568":{"LoginName":"other@example.com"}}}';
+    expect(parseTailscaleSelfIdentity(unsafeExponent)).toEqual({ login: null, tagged: false });
+
+    const taggedLarge = '{"Self":{"UserID":12345678901234567,"Tags":["tag:server"]},"User":{"12345678901234567":{"LoginName":"tagged-devices"}}}';
+    expect(parseTailscaleSelfIdentity(taggedLarge)).toEqual({ login: null, tagged: true });
+  });
   test("an unknown user id, a missing User map or an empty login is no login; not a status document is undefined", () => {
     expect(parseTailscaleSelfIdentity(status({ UserID: 9 }))).toEqual({ login: null, tagged: false });
     expect(parseTailscaleSelfIdentity(JSON.stringify({ Self: { UserID: 42 } }))).toEqual({ login: null, tagged: false });
     expect(parseTailscaleSelfIdentity(status({ UserID: 42 }, { "42": { LoginName: "" } }))).toEqual({ login: null, tagged: false });
+    expect(parseTailscaleSelfIdentity(JSON.stringify({ Self: { UserID: "toString" }, User: {} }))).toEqual({ login: null, tagged: false });
+    expect(parseTailscaleSelfIdentity(JSON.stringify({ Self: { UserID: 0 }, User: [{ LoginName: "me@example.com" }] }))).toEqual({ login: null, tagged: false });
     expect(parseTailscaleSelfIdentity("not json")).toBeUndefined();
     expect(parseTailscaleSelfIdentity("null")).toBeUndefined();
     expect(parseTailscaleSelfIdentity(JSON.stringify({ User: {} }))).toBeUndefined();
@@ -98,6 +129,39 @@ describe("tailnetFetchSiteAllowed", () => {
       expect(tailnetFetchSiteAllowed("POST", "/", h({ "Sec-Fetch-Site": site, "Sec-Fetch-Mode": "navigate" }))).toBe(false);
       expect(tailnetFetchSiteAllowed("POST", "/api/html-assets/tok/x", h({ "Sec-Fetch-Site": site }))).toBe(false);
     }
+  });
+  test("a linked machine's attached page loads its folder through the forward; nothing else under the forward opens cross-site", () => {
+    const machine = "ibx_01K7MMMMMMMMMMMMMMMMMMMMMM";
+    for (const site of ["cross-site", "same-site"]) {
+      for (const mode of ["no-cors", "cors", "navigate"]) {
+        expect(tailnetFetchSiteAllowed("GET", `/api/inbox/m/${machine}/html-assets/tok/style.css`, h({ "Sec-Fetch-Site": site, "Sec-Fetch-Mode": mode }))).toBe(true);
+      }
+      expect(tailnetFetchSiteAllowed("HEAD", `/api/inbox/m/${machine}/html-assets/tok/img.png`, h({ "Sec-Fetch-Site": site }))).toBe(true);
+      // Still refused: a write, the page route itself, any other forwarded route, a malformed machine id, a look-alike.
+      for (const [method, path] of [
+        ["POST", `/api/inbox/m/${machine}/html-assets/tok/x`],
+        ["GET", `/api/inbox/m/${machine}/attachments/att_x/page`],
+        ["GET", `/api/inbox/m/${machine}/attachments/att_x/view`],
+        ["GET", `/api/inbox/m/${machine}/threads`],
+        ["GET", `/api/inbox/m/${machine}/html-assets`],
+        ["GET", "/api/inbox/m/ibx_short/html-assets/tok/x.css"],
+        ["GET", `/api/inbox/m/${machine.toLowerCase()}/html-assets/tok/x.css`],
+        ["GET", `/api/inbox/m/${machine}/x/html-assets/tok/x.css`],
+        ["GET", `/x/api/inbox/m/${machine}/html-assets/tok/x.css`],
+        ["GET", "/api/inbox/machines"],
+      ] as const) {
+        expect([method, path, tailnetFetchSiteAllowed(method, path, h({ "Sec-Fetch-Site": site, "Sec-Fetch-Mode": "no-cors" }))]).toEqual([method, path, false]);
+      }
+    }
+  });
+  test("the Cloudflare Access door answers the forwarded folder as the tailnet does, and with session links only its entry, as for a local folder", () => {
+    const machine = "ibx_01K7MMMMMMMMMMMMMMMMMMMMMM";
+    const fromPage = h({ "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "no-cors" });
+    for (const path of [`/api/inbox/m/${machine}/html-assets/tok/style.css`, "/api/html-assets/tok/style.css"]) {
+      expect([path, cfAccessFetchSiteAllowed("GET", path, fromPage)]).toEqual([path, true]);
+      expect([path, cfAccessFetchSiteAllowed("GET", path, fromPage, true)]).toEqual([path, false]);
+    }
+    expect(cfAccessFetchSiteAllowed("GET", `/api/inbox/m/${machine}/threads`, fromPage)).toBe(false);
   });
 });
 

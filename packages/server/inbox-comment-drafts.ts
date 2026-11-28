@@ -10,6 +10,8 @@ export function createInboxCommentDrafts(options: {
   serverSession: string;
   readBody: (req: Request) => Promise<Record<string, unknown>>;
   json: (body: unknown, status?: number) => Response;
+  /** A draft was saved: the person's doing in the thread ("Recent activity", shared's acted.ts). */
+  onSaved?: (threadId: string) => void;
 }) {
   const { store, serverSession, json } = options;
 
@@ -28,6 +30,7 @@ export function createInboxCommentDrafts(options: {
     if (match[2]) return json({ ok: true, deleted: deleteInboxCommentDraft(store.dir, threadId, body.key, body.base) });
     const saved = saveInboxCommentDraft(store.dir, threadId, body);
     if ("conflict" in saved) return json({ error: "This comment changed in another window.", code: "draft_conflict", draft: saved.conflict }, 409);
+    options.onSaved?.(threadId);
     return json(saved);
   };
 

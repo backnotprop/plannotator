@@ -54,9 +54,11 @@ const listing = (paths: string[], extra: Record<string, unknown> = {}) => ({
   ...extra,
 });
 
-async function render(props: { enabled: boolean; snapshotId?: string }, fetchImpl: typeof fetch) {
+type ListingProps = Pick<Parameters<typeof useRepoFiles>[0], 'enabled' | 'snapshotId' | 'filter' | 'listingVersion'>;
+
+async function render(props: ListingProps, fetchImpl: typeof fetch) {
   const latest: { current: RepoFiles | null } = { current: null };
-  const Probe = (p: { enabled: boolean; snapshotId?: string }) => {
+  const Probe = (p: ListingProps) => {
     latest.current = useRepoFiles({ ...p, fetchImpl, eventSourceImpl: FakeEventSource as unknown as typeof EventSource });
     return null;
   };
@@ -66,7 +68,7 @@ async function render(props: { enabled: boolean; snapshotId?: string }, fetchImp
   await act(async () => root?.render(<Probe {...props} />));
   return {
     latest,
-    rerender: async (next: { enabled: boolean; snapshotId?: string }) => {
+    rerender: async (next: ListingProps) => {
       await act(async () => root?.render(<Probe {...next} />));
     },
   };
@@ -147,47 +149,41 @@ describe.skipIf(!hasDom)('useRepoFiles', () => {
     expect(state.dirs.get('src')?.map((entry) => entry.path)).toEqual(['src/a.ts']);
   });
 
-  test('a quiet lazy refresh keeps visible folders until the refreshed tree is ready', async () => {
-    let refreshing = false;
-    let release!: () => void;
-    const pending = new Promise<void>(resolve => { release = resolve; });
-    const net = (async (url: string) => {
-      const dir = new URL(url, 'http://localhost').searchParams.get('dir') ?? '';
-      if (refreshing && dir === 'src') await pending;
-      const entries = dir === '' ? [{ name: 'src', path: 'src', type: 'dir' }, { name: 'extra', path: 'extra', type: 'dir' }]
-        : dir === 'src' ? (refreshing
-            ? [{ name: 'new.ts', path: 'src/new.ts', type: 'file' }]
-            : [{ name: 'old.ts', path: 'src/old.ts', type: 'file' }, { name: 'gone', path: 'src/gone', type: 'dir' }])
-        : dir === 'extra' ? [{ name: 'fresh.ts', path: 'extra/fresh.ts', type: 'file' }]
-        : [{ name: 'nested.ts', path: 'src/gone/nested.ts', type: 'file' }];
-      return Response.json(listing([], { paths: undefined, lazy: true, dir, entries }));
-    }) as unknown as typeof fetch;
-    const view = await render({ enabled: true, snapshotId: 's1' }, net);
+  test('a new lazy filter cancels the old request and scopes folder loads without opening a live stream', async () => {
+    const streams = FakeEventSource.opened;
+    const calls: URLSearchParams[] = [];
+    let oldSignal: AbortSignal | null | undefined;
+    let finishOld!: (response: Response) => void;
+    const oldResponse = new Promise<Response>((resolve) => { finishOld = resolve; });
+    const fetchImpl = (async (input: string, init?: RequestInit) => {
+      const params = new URL(input, 'http://localhost').searchParams;
+      calls.push(params);
+      if (params.get('include') === 'docs/**') {
+        oldSignal = init?.signal;
+        return oldResponse;
+      }
+      const dir = params.get('dir') ?? '';
+      const entry = dir
+        ? { name: 'app.ts', path: 'src/app.ts', type: 'file' }
+        : { name: 'src', path: 'src', type: 'dir', files: 1 };
+      return Response.json(listing([], { paths: undefined, total: 300_000, lazy: true, dir, entries: [entry] }));
+    }) as typeof fetch;
+
+    const target = { enabled: true, snapshotId: 's1' };
+    const view = await render({ ...target, filter: { include: 'docs/**', exclude: '' } }, fetchImpl);
+    await view.rerender({ ...target, filter: { include: 'src/**', exclude: '**/*.test.ts' } });
+    expect(oldSignal?.aborted).toBe(true);
+    finishOld(Response.json(listing([], { paths: undefined, lazy: true, entries: [] })));
     await flush();
-    await act(async () => {
-      view.latest.current!.loadDir('src');
-      view.latest.current!.loadDir('src/gone');
-    });
-    await flush();
-    refreshing = true;
-    await view.rerender({ enabled: false, snapshotId: 's1' });
-    await view.rerender({ enabled: true, snapshotId: 's1' });
-    await flush();
-    const before = view.latest.current!.state;
-    if (before.status !== 'ready') throw new Error('not ready');
-    expect(before.dirs.get('src')?.map(entry => entry.path)).toEqual(['src/old.ts', 'src/gone']);
-    await act(async () => view.latest.current!.loadDir('extra'));
-    await flush();
-    const during = view.latest.current!.state;
-    if (during.status !== 'ready') throw new Error('not ready');
-    expect(during.dirs.get('extra')?.map(entry => entry.path)).toEqual(['extra/fresh.ts']);
-    await act(async () => release());
-    await flush();
-    const after = view.latest.current!.state;
-    if (after.status !== 'ready') throw new Error('not ready');
-    expect(after.dirs.get('src')?.map(entry => entry.path)).toEqual(['src/new.ts']);
-    expect(after.dirs.has('src/gone')).toBe(false);
-    expect(after.dirs.get('extra')?.map(entry => entry.path)).toEqual(['extra/fresh.ts']);
+    await act(async () => view.latest.current!.loadDir('src'));
+
+    const state = view.latest.current!.state;
+    if (state.status !== 'ready') throw new Error('not ready');
+    expect(state.dirs.get('')?.map((entry) => entry.path)).toEqual(['src']);
+    expect(state.dirs.get('src')?.map((entry) => entry.path)).toEqual(['src/app.ts']);
+    expect(calls.at(-1)?.get('include')).toBe('src/**');
+    expect(calls.at(-1)?.get('exclude')).toBe('**/*.test.ts');
+    expect(FakeEventSource.opened).toBe(streams);
   });
 
   test('says when the session cannot list', async () => {

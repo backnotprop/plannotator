@@ -11,7 +11,7 @@ import { expect, test } from 'bun:test';
 import type { InboxAgent, InboxAgentsGroup, InboxListRow, InboxParticipant } from '@plannotator/core/inbox-types';
 import type { MachineView } from '../api';
 import { machinesModel } from '../machines';
-import { agentRowName, agentThread, threadSessions } from './model';
+import { agentRowName, threadSessions } from './model';
 
 const SELF = 'ibx_01K0000000000000000000000S';
 const MAC = 'ibx_01K0000000000000000000000M';
@@ -87,16 +87,17 @@ test("another machine's thread is named from that machine's agents, never this o
   ]);
 });
 
-test("an unnamed session is its agent inside a thread, never the sidebar's thread or project name; two read the same", () => {
+test("an unnamed session is its agent inside a thread, never the sidebar's thread or project name; two read the same; a host's title names it", () => {
   const rows = [
     { thread_id: 't_inv', subject: 'Invoice retries', thread_name: null, author: { kind: 'agent', host: 'claude-code', session: 'ses_a', name: null }, last_at: '2026-11-09T09:00:00.000Z', waiting_on_person: false },
   ] as unknown as InboxListRow[];
-  const a = agent('ses_a');
+  const a = agent('ses_a', { first_thread: { id: 't_inv', name: 'Invoice retries' } });
   const b = agent('ses_b', { project: { id: 'prj_bill', name: 'billing-svc' } });
   const pi = agent('ses_pi', { host: 'pi', label: 'Queue timeouts' });
-  // The sidebar names them by their thread and their project.
-  expect(agentRowName(a, agentThread(a, null, null, rows))).toBe('Invoice retries');
-  expect(agentRowName(b, agentThread(b, null, null, rows))).toBe('billing-svc');
-  const sessions = threadSessions([who('ses_a'), who('ses_b'), who('ses_pi', 'pi')], [group([a, b, pi])], machinesModel(null), rows, null);
-  expect(sessions.map((s) => s.name)).toEqual(['Claude Code', 'Claude Code', 'Queue timeouts']);
+  const titled = agent('ses_t', { title: 'Retry backoff' });
+  // The sidebar names them by the thread each got first and their project.
+  expect(agentRowName(a)).toBe('Invoice retries');
+  expect(agentRowName(b)).toBe('billing-svc');
+  const sessions = threadSessions([who('ses_a'), who('ses_b'), who('ses_pi', 'pi'), who('ses_t')], [group([a, b, pi, titled])], machinesModel(null), rows, null);
+  expect(sessions.map((s) => s.name)).toEqual(['Claude Code', 'Claude Code', 'Queue timeouts', 'Retry backoff']);
 });

@@ -21,8 +21,60 @@ function notifyProjects(): void {
   for (const listener of projectListeners) listener();
 }
 
-/** The Inbox's projects as a list read brought them: their names and when each one's picture was set. */
-export function learnProjects(list: readonly { id: string; name: string; picture?: number }[]): void {
+/** A row as `learnProjects` reads it: its project and the agent sessions in it. */
+interface SessionsRow {
+  project: { id: string; name: string };
+  author: { kind: string; session?: string | null };
+  addressee?: { session?: string | null } | null;
+  participants?: readonly { session?: string | null }[];
+}
+
+/**
+ * The project of each agent session, by the rows reads brought: an agent's project tile (agents/projectFace.tsx) for an
+ * agent the Agents list no longer names. One rule, whatever order rows come in: a project the session wrote a thread
+ * in over one it was only addressed or took part in, and among those the lowest project id. So a session in threads
+ * of two projects keeps one tile, and a read that brings nothing new changes nothing (and redraws nothing).
+ */
+const sessionProjects = new Map<string, { id: string; name: string; rank: 0 | 1 }>();
+// Its own listeners: a new session redraws the agents' tiles, never every letter mark.
+const sessionListeners = new Set<() => void>();
+
+export function sessionProjectOf(session: string): { id: string; name: string } | null {
+  const held = sessionProjects.get(session);
+  return held ? { id: held.id, name: held.name } : null;
+}
+
+/** Hear each read that taught a session's project (agents/projectFace.tsx). Returns the way to stop. */
+export function onSessionProjects(listener: () => void): () => void {
+  sessionListeners.add(listener);
+  return () => void sessionListeners.delete(listener);
+}
+
+function notifySessions(): void {
+  for (const listener of [...sessionListeners]) listener();
+}
+
+/** The Inbox's projects as a list read brought them: their names and when each one's picture was set; `rows`: its sessions' projects. */
+export function learnProjects(list: readonly { id: string; name: string; picture?: number }[], rows: readonly SessionsRow[] = []): void {
+  let sessionsChanged = false;
+  for (const row of rows) {
+    const sessions: [string | null | undefined, 0 | 1][] = [
+      [row.author.kind === 'agent' ? row.author.session : null, 0],
+      [row.addressee?.session, 1],
+      ...(row.participants ?? []).map((p): [string | null | undefined, 1] => [p.session, 1]),
+    ];
+    for (const [session, rank] of sessions) {
+      if (!session) continue;
+      const before = sessionProjects.get(session);
+      if (before?.id === row.project.id) {
+        // The same project: a better rank or a new name is kept; the rest is what it was.
+        if (before.name === row.project.name && before.rank <= rank) continue;
+      } else if (before && (before.rank < rank || (before.rank === rank && before.id < row.project.id))) continue;
+      sessionProjects.set(session, { id: row.project.id, name: row.project.name, rank: before?.id === row.project.id ? (Math.min(before.rank, rank) as 0 | 1) : rank });
+      sessionsChanged = true;
+    }
+  }
+  if (sessionsChanged) notifySessions();
   let changed = false;
   for (const project of list) {
     const before = projects.get(project.id);
@@ -72,7 +124,9 @@ export function projectPictureUrl(projectId: string, marks: MarksChoice): string
 /** Tests only. */
 export function resetKnownProjectsForTests(): void {
   projects.clear();
+  sessionProjects.clear();
   notifyProjects();
+  notifySessions();
 }
 
 /** The most Set picture… sends: the Inbox refuses more (PROJECT_PICTURE_MAX_BYTES on the server). */

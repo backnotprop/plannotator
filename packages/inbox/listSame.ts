@@ -46,7 +46,8 @@ export function sameListModel(held: object | null | undefined, next: object | nu
   const b = next as Record<string, unknown>;
   for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
     // `agents` live in their own store (agentsList.ts), which draws what reads them: their last poll moves on every read.
-    if (key === 'list_version' || key === 'agents' || (key === 'cursor' && !options.cursor)) continue;
+    // `now`: the server's clock as it answered (a linked machine reads it), new on every read.
+    if (key === 'list_version' || key === 'agents' || key === 'now' || (key === 'cursor' && !options.cursor)) continue;
     const left = a[key];
     const right = b[key];
     if (left === right) continue;

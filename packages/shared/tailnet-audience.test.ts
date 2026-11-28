@@ -23,12 +23,12 @@ describe('tailnetAudience', () => {
     const owners = ['me@example.com', 'Me@Work.example']
     expect(tailnetAudience(served({ 'tailscale-user-login': 'me@example.com' }), owners)).toBe('owner')
     expect(tailnetAudience(served({ 'tailscale-user-login': 'me@work.example' }), owners)).toBe('owner')
-    expect(tailnetAudience(served({ 'tailscale-user-login': 'guest@example.com' }), owners)).toBe('peer')
+    expect(tailnetAudience(served({ 'tailscale-user-login': 'other@example.com' }), owners)).toBe('peer')
     expect(tailnetAudience(served(), owners)).toBe('peer')
   })
 
   test('another login, a tagged device, funnel, an unreadable owner, a malformed login: peer', () => {
-    expect(tailnetAudience(served({ 'tailscale-user-login': 'guest@example.com' }), [OWNER])).toBe('peer')
+    expect(tailnetAudience(served({ 'tailscale-user-login': 'other@example.com' }), [OWNER])).toBe('peer')
     expect(tailnetAudience(served(), [OWNER])).toBe('peer')
     expect(tailnetAudience(served({ 'tailscale-user-login': OWNER, 'tailscale-funnel-request': '?1' }), [OWNER])).toBe('peer')
     expect(tailnetAudience(served({ 'tailscale-user-login': OWNER }), [])).toBe('peer')

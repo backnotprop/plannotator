@@ -50,6 +50,7 @@ import { existsSync } from "node:fs";
 import { loadConfig, resolveInboxTool } from "../../packages/shared/config";
 import { getPlannotatorDataDir } from "../../packages/shared/data-dir";
 import { discoverInboxTools, InboxAgentConnection, InboxDeliverLater, inboxRegistryFileOf, InboxWake, type InboxWakeTarget } from "../../packages/shared/inbox/agent-link";
+import { isInboxTurnedOn } from "../../packages/shared/inbox/turned-on";
 import { inboxAgentTool, type InboxReplyCommand, type InboxToolInfo } from "../../packages/shared/inbox/connection";
 
 export const CLINE_INBOX_HOST = "cline";
@@ -254,7 +255,8 @@ export async function setupClineInbox(api: ClinePluginApi, ctx: ClineSetupContex
   const env = deps.env ?? process.env;
   if (!resolveInboxTool(loadConfig(), env, CLINE_INBOX_HOST)) return null;
   const dataDir = deps.dataDir ?? getPlannotatorDataDir();
-  if (!existsSync(inboxRegistryFileOf(dataDir))) return null;
+  // Only once the person turned the Inbox on here (turned-on.ts).
+  if (!existsSync(inboxRegistryFileOf(dataDir)) || !isInboxTurnedOn(dataDir, env)) return null;
   const tools = await (deps.discover ?? ((dir) => discoverInboxTools(dir, { timeoutMs: CLINE_DISCOVER_TIMEOUT_MS })))(dataDir).catch(() => null);
   if (!tools) return null;
   const connection = new InboxAgentConnection({ dataDir, host: CLINE_INBOX_HOST, agentName: CLINE_INBOX_AGENT_NAME, tools });

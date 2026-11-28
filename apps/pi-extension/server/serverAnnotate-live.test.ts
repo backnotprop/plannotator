@@ -214,7 +214,7 @@ describe("pi annotate server: live app mode (annotate-app)", () => {
 
 		async function loadDraft(server: { url: string }): Promise<{ feedback?: string } | null> {
 			const res = await fetch(`${server.url}/api/draft`);
-			if (res.status === 404) return null;
+			if (res.status === 204) return null;
 			expect(res.status).toBe(200);
 			return (await res.json()) as { feedback?: string };
 		}

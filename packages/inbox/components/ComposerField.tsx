@@ -20,17 +20,14 @@
  * keep their meaning and the host's own `onKeyDown` gets everything else.
  * With no skills installed (or the route missing) `/` and `$` are plain text.
  *
- * Where the picker opens: never inside the field's own boxes (FloatingSkillMenu
- * portals it out, so no scrolling foot or stacking context can cut or cover
- * it). By default it hangs off the field's own box (the reply box, two lines
- * tall, so that is at the caret), inside the room the person really sees (the
- * visual viewport, under the thread's header). A tall field in a modal dialog
- * (compose) passes `caretMenu`: the picker then opens at the caret's line,
- * kept inside the box `caretMenu.bounds` names (compose: the viewport on a
- * desktop, so it floats over the footer; the sheet above its footer on a
- * phone).
+ * Where a picker (`/`, `#` or `@`) opens: never inside the field's own boxes (FloatingSkillMenu portals it out, so no
+ * scrolling foot or stacking context can cut or cover it; #3427). By default it hangs off the field's own box (the
+ * reply box, two lines tall, so that is at the caret), inside the room the person really sees (the visual viewport,
+ * under the thread's header). A tall field in a modal dialog (compose) passes `caretMenu`: the picker then opens at
+ * the caret's line, kept inside the box `caretMenu.bounds` names (compose: the viewport on a desktop, so it floats
+ * over the footer; the sheet above its footer on a phone).
  */
-import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ComposerTokenTextarea } from '@plannotator/ui/components/ComposerTokenTextarea';
 import { HumanOnlySkillNotice, SkillReferenceMenu } from '@plannotator/ui/components/SkillReferenceMenu';
@@ -48,6 +45,8 @@ import { isPhone, isTouchScreen } from '../phone';
 import { inboxSkillFilter } from '../skills';
 import { builtinSkillIcon } from './BuiltinSkillIcon';
 import { hashtagMenuLeft, useHashtagPicker, useInitiativeTags } from '../hashtags';
+import { useReplyMentions } from '../replyMentions';
+import { FieldLead } from './FieldLead';
 
 /** The chip class a tag gets in the composer's highlight layer (inbox.css: colour, background and box-shadow only). */
 export const TAG_TOKEN_CLASS = 'ib-tg-tok';
@@ -109,15 +108,35 @@ export interface InboxComposerFieldProps {
   voice?: VoiceHandle;
   /** The voice note opens and closes in one motion (the reply box, approval "inbox-reply-box"). */
   voiceNoteGlide?: boolean;
-  /** Which skills this field offers and paints (skills.ts `inboxSkillFilter`); all by default. Keep its identity stable. */
+  /** Which skills this field offers and paints (skills.ts `inboxSkillFilter`); absent, the thread's (`ThreadSkillFilter`). Keep its identity stable. */
   skillFilter?: (entry: SkillCatalogEntry) => boolean;
   /** The Inbox's own commands this field lists with the skills after a `/` (`ComposerCommand`). Absent: none. Keep its identity stable. */
   commands?: readonly ComposerCommand[];
+  /**
+   * The reply box (and full screen's reply): the thread it answers, which takes thread mentions (replyMentions.tsx,
+   * approval "inbox-drag-threads"): a dragged row, the row menu's Mention in reply, a pasted thread link. Absent: none.
+   */
+  mentionThread?: string;
+  /**
+   * Drawn at the start of the field's first line, the words flowing after it (`FieldLead`): the reply box's recipient
+   * chip in a thread with several agents. Absent: the field as ever.
+   */
+  lead?: React.ReactNode;
+  /** The field took focus (a video's comment row pauses the film and pins the moment). */
+  onFocus?: (event: React.FocusEvent<HTMLTextAreaElement>) => void;
+  /** The field's rows: 2 by default (the reply box); a file's one-line comment row passes 1. */
+  rows?: number;
 }
 
 const NO_PEOPLE: readonly MentionPerson[] = [];
 /** Where no thread says a review happened (New message, compose, a comment): `/review-recheck` is not offered. */
 const OUTSIDE_A_REVIEW = inboxSkillFilter(false);
+/**
+ * The thread's skill rule for the fields under it that name none (`skillFilter`): Thread provides it around the open
+ * file, so a comment on an image, a film or a page lists the skills the thread's Send honours (`/review-recheck` once
+ * a review happened). Elsewhere, no skill that needs a review.
+ */
+export const ThreadSkillFilter = createContext<(entry: SkillCatalogEntry) => boolean>(OUTSIDE_A_REVIEW);
 
 export function InboxComposerField({
   value,
@@ -133,9 +152,15 @@ export function InboxComposerField({
   escapeClosesMenu = false,
   voice,
   voiceNoteGlide = false,
-  skillFilter = OUTSIDE_A_REVIEW,
+  skillFilter: ownSkillFilter,
   commands,
+  mentionThread,
+  lead,
+  onFocus,
+  rows = 2,
 }: InboxComposerFieldProps) {
+  const threadSkillFilter = useContext(ThreadSkillFilter);
+  const skillFilter = ownSkillFilter ?? threadSkillFilter;
   const innerRef = useRef<HTMLTextAreaElement | null>(null);
   const attach = useCallback(
     (el: HTMLTextAreaElement | null) => {
@@ -152,6 +177,17 @@ export function InboxComposerField({
     return voiceSession.attach(textareaField(innerRef.current, isTouchScreen));
   }, [voiceSession]);
   const voiceLive = voice ? voiceHidesCaret(voice.view) : false;
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  // Thread mentions (a reply's field only): every change of the words goes through `setText`, so the mentions move with them.
+  const threadMentions = useReplyMentions({ threadId: mentionThread ?? '', text: value, fieldRef: innerRef, wrapRef, voiceLive, off: mentionThread === undefined });
+  const commitMentions = threadMentions.commit;
+  const setText = useCallback(
+    (next: string, caret?: number | null, undo = false) => {
+      commitMentions(next, caret, undo);
+      onChange(next);
+    },
+    [commitMentions, onChange],
+  );
   // The commands as the list's rows: the built-ins' own row ("Plannotator" at its right end), and never a reference.
   const commandRows = useMemo<SkillCatalogEntry[] | undefined>(
     () => (commands?.length ? commands.map((command) => ({ name: command.name, root: 'plannotator', description: command.description, humanOnly: false })) : undefined),
@@ -160,7 +196,7 @@ export function InboxComposerField({
   const runCommand = useCallback((row: SkillCatalogEntry, words: string) => commands?.find((command) => command.name === row.name)?.run(words), [commands]);
   const skills = useSkillReferenceAutocomplete({
     text: value,
-    setText: onChange,
+    setText,
     textareaRef: innerRef,
     enabled: true,
     bareEscapeDismisses: escapeClosesMenu,
@@ -169,6 +205,9 @@ export function InboxComposerField({
     onCommand: runCommand,
     // Plannotator's built-ins are one group at the top of the list (the owner, 2026-11-09), whatever was typed.
     hostRowsFirst: true,
+    // A list opens when the person types, not when they delete (the owner, 2026-11-17): Backspace held back over a
+    // `/name` or `@name` in the words never pops a list; one open for the name being typed stays through a typo's fix.
+    quietOnDelete: true,
   });
   const [announce, setAnnounce] = useState('');
   const options = tags?.options;
@@ -191,10 +230,10 @@ export function InboxComposerField({
         : undefined,
     [options, people, onTagsChange],
   );
-  const mention = useMentionAutocomplete({ text: value, setText: onChange, textareaRef: innerRef, source });
+  const mention = useMentionAutocomplete({ text: value, setText, textareaRef: innerRef, source, quietOnDelete: true });
   // `#` names an initiative (approval "board-hashtags"): the skill list's menu, the skill list's keys.
   const initiativeTags = useInitiativeTags();
-  const hash = useHashtagPicker({ text: value, setText: onChange, fieldRef: innerRef, tags: initiativeTags, bareEscapeDismisses: escapeClosesMenu });
+  const hash = useHashtagPicker({ text: value, setText, fieldRef: innerRef, tags: initiativeTags, bareEscapeDismisses: escapeClosesMenu });
   const hashListboxId = `ib-hash-${useId().replace(/:/g, '')}`;
   const hashMenu = hash.menu && !mention.menu && !skills.menu ? hash.menu : null;
   const [hashShown, setHashShown] = useState(false);
@@ -230,17 +269,19 @@ export function InboxComposerField({
     mention.select(index);
     if (option?.taggable) setAnnounce(tagPickedWords(option));
   };
-  const wrapRef = useRef<HTMLDivElement | null>(null);
   // Whether the skill list is drawn (FloatingSkillMenu draws it only while the field is in sight): its keys and
   // `aria-expanded` follow what the person sees, so arrows never move through a list nobody can see.
   const [skillShown, setSkillShown] = useState(false);
   const skillMenuShown = skills.menu !== null && skillShown;
+  const [tagShown, setTagShown] = useState(false);
+  const tagMenuShown = tagMenu !== null && tagShown;
   const textarea = innerRef.current;
   const wrap = wrapRef.current;
   const host = textarea ? skillMenuHost(textarea) : null;
-  const describedBy = [ariaDescribedBy, showNotes ? notesId : null].filter(Boolean).join(' ') || undefined;
+  const describedBy = [ariaDescribedBy, showNotes ? notesId : null, threadMentions.describedBy].filter(Boolean).join(' ') || undefined;
+  const fieldTokens = hash.tokens.length > 0 || threadMentions.tokens.length > 0 ? [...skills.referenceTokens, ...hash.tokens, ...threadMentions.tokens].sort((a, b) => a.start - b.start) : skills.referenceTokens;
   return (
-    <div className="ib-cfield" ref={wrapRef} data-composer-field="" data-voice-live={voiceLive ? '' : undefined}>
+    <div className="ib-cfield" ref={wrapRef} data-composer-field="" data-voice-live={voiceLive ? '' : undefined} onPaste={threadMentions.onPaste}>
       {skills.menu && !tagMenu && textarea && wrap && host ? (
         <FloatingSkillMenu textarea={textarea} wrap={wrap} host={host} caret={caretMenu ?? null} onShown={setSkillShown}>
           {(boundary, maxListHeight) => (
@@ -281,28 +322,37 @@ export function InboxComposerField({
           )}
         </FloatingSkillMenu>
       ) : null}
-      {tagMenu && options && <TagPicker id={tagListboxId} menu={tagMenu} options={options} onSelect={select} />}
+      {tagMenu && options && textarea && wrap && host ? (
+        <FloatingSkillMenu textarea={textarea} wrap={wrap} host={host} caret={caretMenu ?? null} onShown={setTagShown}>
+          {(boundary) => <TagPicker id={tagListboxId} menu={tagMenu} options={options} onSelect={select} field={textarea} boundary={boundary} />}
+        </FloatingSkillMenu>
+      ) : null}
+      {lead ? <FieldLead value={value}>{lead}</FieldLead> : null}
       <ComposerTokenTextarea
         textareaRef={attach}
         value={value}
         onChange={(event) => {
-          onChange(event.target.value);
-          skills.onSelect();
-          mention.onSelect();
+          // The browser's undo and redo bring back the thread mentions the words had (threadMentions.ts).
+          const kind = (event.nativeEvent as InputEvent).inputType;
+          setText(event.target.value, event.target.selectionEnd, kind === 'historyUndo' || kind === 'historyRedo');
+          skills.onEdit(kind);
+          mention.onEdit(kind);
           hash.onSelect();
         }}
         onKeyDown={(event) => {
-          if (tagMenu && (event.key === 'Enter' || event.key === 'Tab') && !event.metaKey && !event.ctrlKey && !event.altKey && tagMenu.activeIndex !== null) {
+          if (tagMenu && tagShown && (event.key === 'Enter' || event.key === 'Tab') && !event.metaKey && !event.ctrlKey && !event.altKey && tagMenu.activeIndex !== null) {
             event.preventDefault();
             select(tagMenu.activeIndex);
             return;
           }
-          if (mention.onKeyDown(event)) return;
+          if (tagMenuShown && mention.onKeyDown(event)) return;
           if (hashMenuShown && hash.onKeyDown(event)) return;
           if (skillMenuShown && skills.onKeyDown(event)) return;
+          if (threadMentions.onKeyDown(event)) return;
           onKeyDown?.(event);
         }}
         onSelectCaret={() => {
+          threadMentions.onSelect();
           skills.onSelect();
           mention.onSelect();
           hash.onSelect();
@@ -314,13 +364,14 @@ export function InboxComposerField({
         inputClassName="ib-rtext"
         mirrorClassName="ib-rmirror"
         skillReferences
-        tokens={hash.tokens.length > 0 ? [...skills.referenceTokens, ...hash.tokens].sort((a, b) => a.start - b.start) : skills.referenceTokens}
+        tokens={fieldTokens}
         mentionChips={source ? { people: mention.mentions, tokenClassName: TAG_TOKEN_CLASS } : null}
         listboxId={listboxId}
-        listboxOpen={skillMenuShown || hashMenuShown || tagMenu !== null}
+        listboxOpen={skillMenuShown || hashMenuShown || tagMenuShown}
         activeOptionId={activeOption}
-        inputProps={{ 'aria-label': ariaLabel, 'aria-describedby': describedBy, rows: 2 }}
+        inputProps={{ 'aria-label': ariaLabel, 'aria-describedby': describedBy, rows, onFocus }}
       />
+      {threadMentions.overlay}
       {voice && <VoiceNote voice={voice} glide={voiceNoteGlide} />}
       <HumanOnlySkillNotice skills={skills.humanOnlyReferences} destination={destination} />
       {options && showNotes && (tags?.note ? tags.note({ id: notesId, tagged, focusField: () => innerRef.current?.focus() }) : <TagNotes id={notesId} tagged={tagged} owner={owner} />)}
@@ -342,7 +393,7 @@ export function InboxComposerField({
  * under the thread's header, so a list drawn there was cut at the foot's top
  * edge (only the last row's bottom showed) and hidden behind the header.
  */
-function skillMenuHost(field: HTMLElement): HTMLElement {
+export function skillMenuHost(field: HTMLElement): HTMLElement {
   return field.closest<HTMLElement>('dialog[open]') ?? field.closest<HTMLElement>('.pn-inbox') ?? field.ownerDocument.body;
 }
 
@@ -355,6 +406,8 @@ const SIDE_CHROME = 16;
 const MIN_LIST_ROOM = 56;
 /** The list's own padding above and below its rows (SkillReferenceMenu's `p-1.5`). */
 const LIST_PADDING = 12;
+/** A list widened past its field (`minWidth`) keeps this far from the visible area's sides (the menu's own 8 px). */
+const WIDE_LIST_MARGIN = 8;
 
 interface MenuFrame {
   box: AnchorBox;
@@ -364,11 +417,17 @@ interface MenuFrame {
   least: number;
   /** fieldInSight: the field has focus and nothing covers it. */
   shown: boolean;
+  /**
+   * The box's top in the window. A host that moves with the field (the reaction tray's layer, which follows its
+   * anchor a frame after a scroll) leaves `box` unchanged, so without it the list kept the side it measured before.
+   */
+  at: number;
 }
 
 // Object.is: a reading that is NaN (a viewport mid-rotation) still equals itself, so the commit loop converges.
 const sameFrame = (a: MenuFrame, b: MenuFrame) =>
   a.shown === b.shown &&
+  Object.is(a.at, b.at) &&
   a.least === b.least &&
   Object.is(a.box.top, b.box.top) &&
   Object.is(a.box.bottom, b.box.bottom) &&
@@ -397,8 +456,11 @@ const sameFrame = (a: MenuFrame, b: MenuFrame) =>
  * on a phone) would otherwise leave it floating, and pressable, over that.
  * Focus moves, the shell's own changes and the end of a transition re-check.
  * `onShown` tells the field, which then leaves the list's keys alone.
+ *
+ * Also a one-line field's list (`textarea` an input: a saved emoji's name field in the reaction tray, SkillNameInput),
+ * with `minWidth` so its rows read as the reply box's do beside a narrow field.
  */
-function FloatingSkillMenu({
+export function FloatingSkillMenu({
   textarea,
   wrap,
   host,
@@ -407,8 +469,10 @@ function FloatingSkillMenu({
   children,
   kind = 'skill',
   left,
+  minWidth,
+  roomOf,
 }: {
-  textarea: HTMLTextAreaElement;
+  textarea: HTMLTextAreaElement | HTMLInputElement;
   wrap: HTMLElement;
   host: HTMLElement;
   caret: CaretMenuOptions | null;
@@ -416,6 +480,10 @@ function FloatingSkillMenu({
   kind?: 'skill' | 'hashtag';
   /** The list's left edge inside the anchor, from the anchor's box in viewport x (the `#` list: under the `#`). */
   left?: (box: { left: number; width: number }) => number;
+  /** The list is at least this wide (px), from the left edge of the box it hangs off, kept inside what is visible. */
+  minWidth?: number;
+  /** The field is drawn outside its pane (the reaction tray's, at the root): the room is this element's pane's, under its header. */
+  roomOf?: Element | null;
   onShown: (shown: boolean) => void;
   children: (boundary: () => VerticalBox | null, maxListHeight: number | undefined) => React.ReactNode;
 }) {
@@ -429,16 +497,16 @@ function FloatingSkillMenu({
   const room = useCallback((): VerticalBox | null => {
     const own = caretRef.current;
     if (own) return own.bounds();
-    return overHeaderRef.current ? seenBox(textarea.ownerDocument.defaultView ?? window) : skillListRoom(textarea);
-  }, [textarea]);
+    return overHeaderRef.current ? seenBox(textarea.ownerDocument.defaultView ?? window) : skillListRoom(roomOf ?? textarea);
+  }, [textarea, roomOf]);
 
   const update = useCallback(() => {
     const own = caretRef.current;
     const phone = isPhone();
     const atCaret = (): AnchorBox => {
       const field = textarea.getBoundingClientRect();
-      // Not laid out (a test DOM): the field's top edge, so the menu still renders.
-      const line = caretLineRect(textarea) ?? { top: field.top, bottom: field.top };
+      // Not laid out (a test DOM): the field's top edge, so the menu still renders. A one-line input is its own line.
+      const line = (textarea instanceof HTMLTextAreaElement ? caretLineRect(textarea) : { top: field.top, bottom: field.bottom }) ?? { top: field.top, bottom: field.top };
       return caretAnchor(line, visibleBox(textarea, host), { left: field.left, width: field.width });
     };
     let anchor = own ? atCaret() : fieldAnchor(wrap, host, phone ? PHONE_FIELD_GAP_EXTRA : FIELD_GAP_EXTRA, phone ? 1 : 0);
@@ -470,6 +538,22 @@ function FloatingSkillMenu({
         }
       }
     }
+    // A file's comment row (an image's, a film's): the list spans the whole card, not the one-line field squeezed
+    // between the row's time chip, frame and buttons, so names and descriptions read as in the reply box.
+    const card = own ? null : wrap.closest('.ib-crowfield')?.closest<HTMLElement>('.ib-ccard');
+    if (card) {
+      const c = card.getBoundingClientRect();
+      if (c.width > anchor.width) anchor = { ...anchor, left: c.left, width: c.width };
+    }
+    if (minWidth && anchor.width < minWidth) {
+      const view = textarea.ownerDocument.defaultView ?? window;
+      const seenWidth = view.visualViewport?.width || view.innerWidth;
+      // A pinch-zoomed page: the visible area starts at the visual viewport's left, not at 0.
+      const seenLeft = Number.isFinite(view.visualViewport?.offsetLeft) ? view.visualViewport!.offsetLeft : 0;
+      const width = Math.max(anchor.width, Math.min(minWidth, seenWidth - 2 * WIDE_LIST_MARGIN));
+      const leftEdge = Math.max(seenLeft + WIDE_LIST_MARGIN, Math.min(anchor.left, seenLeft + seenWidth - WIDE_LIST_MARGIN - width));
+      anchor = { ...anchor, left: leftEdge, width };
+    }
     // In the host's coordinates: an absolute box is placed against its padding box.
     const h = host.getBoundingClientRect();
     const box: AnchorBox = {
@@ -482,9 +566,9 @@ function FloatingSkillMenu({
     const phoneCap = phone ? phoneSkillListHeight(seen.bottom - seen.top) : undefined;
     const cap = own ? own.maxListHeight : tight ? least : Number.isFinite(phoneCap) ? phoneCap : undefined;
     const shown = fieldInSight(textarea, textarea.closest('.ib-pfoot, dialog') ?? wrap, host, anchorRef.current);
-    const next: MenuFrame = { box, room: r, cap, least, shown };
+    const next: MenuFrame = { box, room: r, cap, least, shown, at: Math.round(anchor.top) };
     setFrame((prev) => (prev && sameFrame(prev, next) ? prev : next));
-  }, [host, textarea, wrap, room]);
+  }, [host, textarea, wrap, room, minWidth]);
 
   // Every commit: the caret moved or the text changed (the equality guard above converges).
   useLayoutEffect(() => {

@@ -47,6 +47,8 @@ export const AGENT_CLIS = [
   'openclaude', 'autohand', 'agy', 'aider', 'goose', 'kilo', 'crush', 'auggie', 'codebuff', 'command-code', 'cn', 'kimi', 'vibe', 'qwen-code', 'rovo', 'hermes', 'openclaw', 'grok',
   // Not an agent: claude-swap, which every Inbox window reads usage through, and which goes to the Keychain.
   'cswap',
+  // Not an agent: T3 Code's command, through which the Inbox puts a reply into a T3 thread.
+  't3',
 ] as const;
 
 /** Marks the runner's PATH as already guarded (the folder), so a second config load adds nothing. */

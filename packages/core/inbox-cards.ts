@@ -596,6 +596,8 @@ export type InboxCardHistoryEntry =
   | { at: string; by: InboxAuthor; kind: "you"; text: string }
   | { at: string; by: InboxAuthor; kind: "linked_thread"; thread_id: string }
   | { at: string; by: InboxAuthor; kind: "linked_ref"; ref: string; ref_kind: string }
+  /** A link the person removed from the card. */
+  | { at: string; by: InboxAuthor; kind: "unlinked_ref"; ref: string; ref_kind: string }
   | { at: string; by: InboxAuthor; kind: "renamed"; title: string }
   | { at: string; by: InboxAuthor; kind: "notes" }
   /** Put in an initiative (its `ini_` id; the window names it), or taken out of one (null). */
@@ -628,7 +630,9 @@ export function inboxCardHistory(snapshots: readonly InboxCard[]): InboxCardHist
       for (const thread of card.threads) if (!before.threads.includes(thread)) out.push({ at, by, kind: "linked_thread", thread_id: thread });
     }
     const known = inboxCardRefsOf(before);
-    for (const ref of inboxCardRefsOf(card)) if (!known.some((k) => k.url === ref.url)) out.push({ at, by, kind: "linked_ref", ref: ref.ref, ref_kind: ref.kind });
+    const now = inboxCardRefsOf(card);
+    for (const ref of now) if (!known.some((k) => k.url === ref.url)) out.push({ at, by, kind: "linked_ref", ref: ref.ref, ref_kind: ref.kind });
+    for (const ref of known) if (!now.some((k) => k.url === ref.url)) out.push({ at, by, kind: "unlinked_ref", ref: ref.ref, ref_kind: ref.kind });
     if (card.title !== before.title) out.push({ at, by, kind: "renamed", title: card.title });
     if ((card.notes ?? null) !== (before.notes ?? null)) out.push({ at, by, kind: "notes" });
     if ((card.initiative ?? null) !== (before.initiative ?? null)) out.push({ at, by, kind: "initiative", initiative: card.initiative ?? null });
@@ -651,9 +655,10 @@ export function inboxCardHistory(snapshots: readonly InboxCard[]): InboxCardHist
  * A card as every reader gets it: the record, its `threads` only those that
  * still exist, and `heard_seq` (additive): the store seq of the line that
  * last wrote to it (a line that only marks a drop seen is not a write), so
- * the Board tells news by seq, never by clock.
+ * the Board tells news by seq, never by clock. `machine` (the merged Board
+ * only): a linked machine's card, the `ibx_` id of that machine; absent on this Inbox's own.
  */
-export type InboxCardWire = InboxCard & { heard_seq?: number };
+export type InboxCardWire = InboxCard & { heard_seq?: number; machine?: string };
 
 /**
  * Whether `next` differs from `prev` only in what the person saw (a drop's

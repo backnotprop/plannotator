@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { HOST_PLAN_CARD_ENV } from './enabled'
 import { SKIP_RM_PROMPTS_VARIABLE } from './skip-rm-prompts'
 
 // Claude Code refuses to load a hooks module whose `$.env.get` takes anything
@@ -20,6 +21,22 @@ describe('$.env.get in the hooks module', () => {
       }
     }
     expect(bad).toEqual([])
+  })
+
+  // Claude Code 2.1.322's loader says "$.env.set takes a literal name as its first argument" and loads nothing.
+  test('every $.env.set names its variable as a string literal', () => {
+    const bad: string[] = []
+    for (const { name, text } of sources) {
+      for (const match of text.matchAll(/\$\.env\.set\(\s*([^,)]*)[,)]/g)) {
+        if (!/^(['"])[A-Z0-9_]+\1$/.test(match[1].trim())) bad.push(`${name}: $.env.set(${match[1]}`)
+      }
+    }
+    expect(bad).toEqual([])
+  })
+
+  test('register.ts sets the plan review switch for a host plan card under its exact name', () => {
+    const register = sources.find((s) => s.name === 'register.ts')!.text
+    expect(register.includes(`$.env.set('${HOST_PLAN_CARD_ENV.name}', HOST_PLAN_CARD_ENV.value)`)).toBe(true)
   })
 
   test('register.ts reads the skip-rm-prompts variable under its exact name', () => {

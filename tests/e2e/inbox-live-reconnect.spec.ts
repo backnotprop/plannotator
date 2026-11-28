@@ -32,7 +32,7 @@
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-live-reconnect.spec.ts`.
  */
 
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import http from 'node:http';

@@ -5,11 +5,12 @@
  * `inboxTour`, written by the server only, every part checked first).
  */
 import { afterEach, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { INBOX_TOUR_ASSET_PATHS } from "./inbox-tour-content";
+import { savedConfig } from "../../tests/helpers/saved-config";
 
 const roots: string[] = [];
 const servers: InboxServer[] = [];
@@ -76,7 +77,7 @@ test("the tour setting: each true stamps now, notify_again is a flag, anything e
   expect(done.finished_at).toBeTruthy();
   expect(done.notify_again).toBe(true);
   expect(done.seen_at).toBe(after.seen_at);
-  expect(JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")).inboxTour.finished_at).toBe(done.finished_at);
+  expect(savedConfig(dataDir).inboxTour.finished_at).toBe(done.finished_at);
   for (const bad of [{ tour: {} }, { tour: { seen: "yes" } }, { tour: { started: true } }, { tour: [] }, { tour: { skipped: true }, text_size: 99 }]) {
     const res = await settings(bad);
     expect(res.status, JSON.stringify(bad)).toBe(422);

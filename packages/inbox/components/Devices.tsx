@@ -4,6 +4,8 @@ import { shortTime } from '../format';
 import { Icon, TailscaleMark } from '../icons';
 import { PairFlow } from './PairFlow';
 import { Tip } from './Tip';
+import { ThroughCloudflare } from './ThroughCloudflare';
+import { Switch } from './SettingSwitch';
 
 const PLATFORM: Record<string, string> = { ios: 'iPhone', android: 'Android' };
 
@@ -188,21 +190,6 @@ export function devicesNeedAttention(phones: PhonesState | null, tailscale: Tail
 }
 
 /** A switch whose name is its row's visible title (label in name). */
-function Switch({ on, labelledBy, disabled, onClick, label }: { on: boolean; labelledBy?: string; label?: string; disabled?: boolean; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      className="ib-sw"
-      aria-checked={on}
-      aria-labelledby={labelledBy}
-      aria-label={label}
-      disabled={disabled}
-      onClick={onClick}
-    />
-  );
-}
-
 /**
  * Over your tailnet, in Devices: the browser on your other devices, which
  * the phone app does not need (owner, decision 2: written out). One switch,
@@ -213,13 +200,11 @@ function Switch({ on, labelledBy, disabled, onClick, label }: { on: boolean; lab
 function OverYourTailnet({
   state,
   via,
-  guest,
   busy,
   onToggle,
 }: {
   state: TailscaleSettings;
   via: 'local' | 'tailnet';
-  guest: boolean;
   busy: boolean;
   onToggle: (next: boolean, replaceExposed?: boolean) => void;
 }) {
@@ -232,11 +217,17 @@ function OverYourTailnet({
   return (
     <section className="ib-sgroup" data-settings-tailscale={state.on ? 'on' : 'off'} aria-labelledby="ib-g-tailscale">
       <h2 id="ib-g-tailscale">Over your tailnet</h2>
-      <p>Open the Inbox window in a browser on your laptop or tablet, through Tailscale, over HTTPS. Your phone&apos;s app does not need this.</p>
+      <p>
+        Open the Inbox window in a browser on your laptop or tablet, through{' '}
+        <a href="https://tailscale.com/" target="_blank" rel="noreferrer">
+          Tailscale
+        </a>
+        , over HTTPS. Your phone&apos;s app does not need this.
+      </p>
       <div className="ib-card">
         <div className="ib-prow">
           <span className="ib-tile">
-            <Icon name="globe" />
+            <TailscaleMark />
           </span>
           <span className="ib-txt">
             <span className="ib-l">
@@ -269,7 +260,7 @@ function OverYourTailnet({
             </span>
           </span>
           <span className="ib-ctl">
-            <Switch on={state.on} labelledBy="ib-ts-label" disabled={busy || locked || (guest && !state.on)} onClick={() => onToggle(!state.on)} />
+            <Switch on={state.on} labelledBy="ib-ts-label" disabled={busy || locked} onClick={() => onToggle(!state.on)} />
           </span>
         </div>
         {exposed && (
@@ -278,7 +269,7 @@ function OverYourTailnet({
             <span>
               A tailscale serve mapping{exposedPorts.length ? ` on port ${exposedPorts.join(', ')}` : ''} points at the Inbox&apos;s own port. It exposes the whole
               Inbox, agent tools included, to everyone on your tailnet, so the Inbox refuses every request that comes through it.{' '}
-              {!guest && !locked && (
+              {!locked && (
                 <button type="button" className="ib-lnk" data-tailscale-replace="" disabled={busy} onClick={() => onToggle(true, true)}>
                   Replace it with the owner-only address
                 </button>
@@ -297,7 +288,7 @@ function OverYourTailnet({
         <Icon name="info" />
         {locked ? (
           `PLANNOTATOR_INBOX_TAILSCALE is set in this Inbox's environment, so it stays ${state.env ? 'on' : 'off'}.`
-        ) : remote && (guest || state.source !== 'flag') ? (
+        ) : remote && state.source !== 'flag' ? (
           'You opened this page over your tailnet. Turning this off ends that connection; turn it on again from this computer.'
         ) : state.source === 'flag' ? (
           <span>
@@ -375,8 +366,6 @@ export interface DevicesSectionProps {
   phones: PhonesState | null;
   tailscale: TailscaleSettings | undefined;
   via: 'local' | 'tailnet';
-  /** A tailnet login other than the owner's (`tailnetGuest`): it pairs nothing and turns no way on. */
-  guest: boolean;
   tailscaleBusy: boolean;
   onToggleTailscale: (next: boolean, replaceExposed?: boolean) => void;
   /** `#settings/devices/pair`: Pair a phone is open. */
@@ -390,9 +379,8 @@ export interface DevicesSectionProps {
  * Over your tailnet for browsers on other devices, the difference written
  * out (owner, decision 2).
  */
-export function DevicesSection({ phones, tailscale, via, guest, tailscaleBusy, onToggleTailscale, pairing, onPairing }: DevicesSectionProps) {
+export function DevicesSection({ phones, tailscale, via, tailscaleBusy, onToggleTailscale, pairing, onPairing }: DevicesSectionProps) {
   // The owner pairs and switches from this computer or any of their own devices over the tailnet (owner ruling 2026-11-11).
-  const remote = guest;
   const pairButton = useRef<HTMLButtonElement>(null);
   const [justPaired, setJustPaired] = useState(false);
   const wasPairing = useRef(pairing);
@@ -409,13 +397,7 @@ export function DevicesSection({ phones, tailscale, via, guest, tailscaleBusy, o
           <section className="ib-sgroup" data-settings-phones="" aria-labelledby="ib-g-phones">
             <h2 id="ib-g-phones">Phones</h2>
             <p>Read and answer the Inbox from Plannotator on your phone. Each phone gets its own key, and Remove takes it back.</p>
-            {remote && (
-              <div className="ib-callout" data-pair-remote="">
-                <Icon name="lock" />
-                <span>Pair a phone and its switches are for this computer&apos;s owner.</span>
-              </div>
-            )}
-            {pairing && !remote ? (
+            {pairing ? (
               <PairFlow
                 lan={phones.lan}
                 tailnet={phones.tailnet}
@@ -464,7 +446,6 @@ export function DevicesSection({ phones, tailscale, via, guest, tailscaleBusy, o
                       ref={pairButton}
                       type="button"
                       className={`ib-btn${devices.length === 0 ? ' ib-pri' : ''}`}
-                      disabled={remote}
                       onClick={() => {
                         setJustPaired(false);
                         onPairing(true);
@@ -485,19 +466,20 @@ export function DevicesSection({ phones, tailscale, via, guest, tailscaleBusy, o
             )}
           </section>
           {/* While pairing, step 1 holds the two ways and their switches: one thing in one place. */}
-          {!(pairing && !remote) && (
+          {!pairing && (
           <section className="ib-sgroup" data-settings-ways="" aria-labelledby="ib-g-ways">
             <h2 id="ib-g-ways">How your phone reaches this computer</h2>
             <p>Turn on one or both. The phone uses whichever works where it is.</p>
             <div className="ib-card">
-              <WayRow kind="wifi" state={phones.lan} busy={phones.busy || remote} onSwitch={(on) => void phones.switchLan(on)} />
-              <WayRow kind="tailscale" state={phones.tailnet} busy={phones.busy || remote} onSwitch={(on) => void phones.switchTailnet(on)} />
+              <WayRow kind="wifi" state={phones.lan} busy={phones.busy} onSwitch={(on) => void phones.switchLan(on)} />
+              <WayRow kind="tailscale" state={phones.tailnet} busy={phones.busy} onSwitch={(on) => void phones.switchTailnet(on)} />
             </div>
           </section>
           )}
         </>
       )}
-      {tailscale && <OverYourTailnet state={tailscale} via={via} guest={guest} busy={tailscaleBusy} onToggle={onToggleTailscale} />}
+      {tailscale && <OverYourTailnet state={tailscale} via={via} busy={tailscaleBusy} onToggle={onToggleTailscale} />}
+      <ThroughCloudflare />
     </>
   );
 }

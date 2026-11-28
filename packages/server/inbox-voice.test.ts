@@ -4,7 +4,7 @@
  * `~/.codex`, no call to OpenAI.
  *
  * What regresses: Codex started while voice is off, a token or key reaching a page or a log, a browser disguise, any
- * retry past the one token refresh, a 403 retried, a key accepted on a plain-http path or from a guest, audio forwarded
+ * retry past the one token refresh, a 403 retried, a key accepted on a plain-http path, audio forwarded
  * to a linked machine, the announcement shown to the wrong computer or twice, Codex left running.
  */
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
@@ -19,6 +19,7 @@ import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { INBOX_VOICE_MAX_CLIP_BYTES } from "@plannotator/core/inbox-types";
 import { installFakeCodex, type FakeCodex, type FakeCodexState } from "../../tests/helpers/fake-codex-app-server";
+import { savedConfig } from "../../tests/helpers/saved-config";
 
 const FIRST_TOKEN = "tok-first-secret-value";
 const FRESH_TOKEN = "tok-fresh-secret-value";
@@ -152,7 +153,7 @@ async function world(options: WorldOptions = {}) {
   const transcribe = (clip: Uint8Array<ArrayBuffer> = wav(), init: RequestInit = {}) =>
     fetch(`${base}/api/inbox/voice/transcribe?serverSession=${session}`, { method: "POST", headers: { "Content-Type": "audio/wav" }, body: clip, ...init });
   const status = async (query = "") => (await (await fetch(`${base}/api/inbox/voice/status${query}`)).json()) as { state: string; plan: string | null };
-  const saved = () => JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")) as { inboxVoice?: unknown; inboxVoiceIntro?: { dueAt?: string; shownAt?: string; skippedAt?: string } };
+  const saved = () => savedConfig(dataDir) as { inboxVoice?: unknown; inboxVoiceIntro?: { dueAt?: string; shownAt?: string; skippedAt?: string } };
   return { root, dataDir, codex: codex as FakeCodex, server, base, session, json, settings, turnOn, transcribe, status, saved };
 }
 
@@ -576,61 +577,6 @@ describe("over the tailnet", () => {
       return { show: ((await response.json()) as { show: boolean }).show, shown: w.saved().inboxVoiceIntro?.shownAt !== undefined };
     };
     expect(await claimFrom(false)).toEqual(await claimFrom(true));
-  });
-
-  describe("a login the owner allowed, who isn't the owner", () => {
-    const GUEST = "guest@example.com";
-    async function guestWorld(options: WorldOptions = {}) {
-      const w = await tailnetWorld({ ...options, config: { ...options.config, inboxTailscaleAllow: [GUEST] } });
-      const asGuest = (path: string, init: RequestInit = {}) => w.through(path, { ...init, headers: { "Tailscale-User-Login": GUEST, ...init.headers } });
-      const post = (path: string, payload: Record<string, unknown>) =>
-        asGuest(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serverSession: w.session, ...payload }) });
-      return { ...w, asGuest, post };
-    }
-
-    test("gets no use of the owner's login or key: no route, no Codex, nothing upstream", async () => {
-      const chatgpt = fakeEndpoint([ok("Never.")]);
-      const w = await guestWorld({ chatgpt });
-      await w.turnOn();
-      const started = w.codex.starts();
-      const answers = [
-        await w.asGuest(`/api/inbox/voice/transcribe?serverSession=${w.session}`, { method: "POST", headers: { "Content-Type": "audio/wav" }, body: wav() }),
-        await w.asGuest("/api/inbox/voice/status?fresh=1"),
-        await w.post("/api/inbox/voice/intro", {}),
-        await w.post("/api/inbox/voice/key", { key: KEY }),
-      ];
-      for (const answer of answers) {
-        expect(answer.status).toBe(403);
-        expect((await body(answer)).code).toBe("owner_only");
-      }
-      expect(w.codex.starts()).toBe(started);
-      expect(chatgpt.seen).toHaveLength(0);
-    });
-
-    test("can't change voice, and a mixed save writes nothing", async () => {
-      const w = await guestWorld();
-      await w.turnOn();
-      for (const voice of [{ on: false }, { engine: "api" }, { phones_only: true }]) {
-        const answer = await w.post("/api/inbox/settings", { voice });
-        expect(answer.status).toBe(403);
-        expect((await body(answer)).code).toBe("owner_only");
-      }
-      expect((await w.post("/api/inbox/settings", { text_size: 15, voice: { on: false } })).status).toBe(403);
-      expect((await w.settings()).voice).toMatchObject({ on: true, engine: "codex", phones_only: false });
-      expect(((await (await fetch(`${w.base}/api/inbox/settings`)).json()) as { text_size: number }).text_size).not.toBe(15);
-    });
-
-    test("is told voice is off here, with no sign of the key, and the owner isn't", async () => {
-      const w = await guestWorld();
-      await w.turnOn();
-      expect((await w.json("/api/inbox/voice/key", { key: KEY })).status).toBe(200);
-      const seen = (await (await w.asGuest("/api/inbox/settings")).json()) as { voice: Record<string, unknown> };
-      expect(seen.voice).toMatchObject({ on: false, guest: true, intro_due: false, key: { source: null, last4: null } });
-      expect(JSON.stringify(seen)).not.toContain(KEY.slice(-4));
-      const owner = (await (await w.through("/api/inbox/settings")).json()) as { voice: Record<string, unknown> };
-      expect(owner.voice).toMatchObject({ on: true, guest: false });
-      expect((await w.through(`/api/inbox/voice/status`)).status).toBe(200);
-    });
   });
 
   test("the window's worklet is served from this origin, as a script", async () => {

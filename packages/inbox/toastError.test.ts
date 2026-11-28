@@ -6,7 +6,8 @@
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { InboxApiError, InboxHeldError } from './api';
-import { errorText, errorToast, INBOX_UNREACHABLE } from './toastError';
+import { ackErrorToast, errorText, errorToast, INBOX_UNREACHABLE } from './toastError';
+import { rememberLocal, rememberMachine, setLinkedMachines } from './inboxUrl';
 
 const FALLBACK = 'The thread did not change.';
 const realWarn = console.warn;
@@ -66,5 +67,28 @@ describe('errorToast', () => {
     captureWarn();
     expect(errorToast(new InboxApiError(404, 'thread_not_found', 'This thread is gone.'), FALLBACK).lead).toBe('This thread is gone.');
     expect(warned).toHaveLength(0);
+  });
+});
+
+describe('a reaction a linked machine refused', () => {
+  const far = 'ibx_01M8A00000000000000000FAR1';
+  const msg = 'msg_01M8A00000000000000000003';
+  afterEach(() => {
+    rememberLocal([msg]);
+    setLinkedMachines([]);
+  });
+
+  test('an older Inbox’s refusal of a reaction on an earlier message says that machine needs an update, not its words', () => {
+    rememberMachine([msg], far);
+    setLinkedMachines([{ id: far, name: 'Mini', state: 'online' }]);
+    const stale = new InboxApiError(409, 'ack_stale', 'A newer message arrived in this thread; read it first.');
+    expect(ackErrorToast(stale, msg).lead).toBe('Mini needs an update to react to this message');
+    expect(ackErrorToast(new InboxApiError(409, 'ack_after_reply', 'You already replied in this thread after this message.'), msg).lead).toBe('Mini needs an update to react to this message');
+  });
+
+  test('any other refusal keeps the Inbox’s own words', () => {
+    rememberMachine([msg], far);
+    const open = new InboxApiError(409, 'question_open', 'A question here waits on you: answer it, or Mark read.');
+    expect(ackErrorToast(open, msg).lead).toBe('A question here waits on you: answer it, or Mark read.');
   });
 });

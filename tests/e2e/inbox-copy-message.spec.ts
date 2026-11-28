@@ -22,7 +22,7 @@
  * PLANNOTATOR_COPY_MENU_SHOTS).
  */
 
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -146,8 +146,9 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   await page.locator('.ib-rbox textarea').first().fill(WORDS);
   await page.getByRole('button', { name: /^Send/ }).last().click();
   await expect(page.locator('[data-author="person"]')).toHaveCount(1);
-  const read = await agent.readThread(thread);
-  const reply = ((read.messages ?? []) as { id: string; author: { kind: string } }[]).find((m) => m.author.kind === 'person')!.id;
+  const stored = async () => (((await agent.readThread(thread)).messages ?? []) as { id: string; author: { kind: string } }[]).find((m) => m.author.kind === 'person')?.id;
+  await expect.poll(stored).toBeTruthy();
+  const reply = (await stored())!;
   const done = await agent.send({ project_path: billing, thread: 'retry', reply_to: reply, body: DONE });
   const last = await agent.send({ project_path: billing, thread: 'retry', reply_to: done.message_id as string, body: LAST });
   world = {
@@ -184,7 +185,8 @@ test("a message's ⋯ shows on hover; Copy message copies its Markdown with the 
   await expect(button).toHaveCSS('opacity', '1');
   await button.click();
   await expect(messageMenu(page)).toBeVisible();
-  await expect(messageMenu(page).getByRole('menuitem')).toHaveText(['Copy message', 'Copy link to message', 'Copy thread']);
+  // The emoji row (approval "inbox-reactions-every-message") leads; then the items, Reply first.
+  await expect(messageMenu(page).locator('[role="menuitem"].ib-pmi')).toHaveText(['Reply', 'New thread from this message', 'Copy message', 'Copy link to message', 'Copy thread']);
   await shot(page, 'desktop-light-message-menu-open.png');
   await messageMenu(page).locator('[data-copy-item="message"]').click();
   await expect(toast(page)).toContainText('Message copied');
@@ -247,7 +249,13 @@ test('the keyboard: Tab reaches ⋯ and shows it, Enter opens, the arrows walk, 
   await expect(button).toHaveCSS('opacity', '1');
   await page.keyboard.press('Enter');
   await expect(messageMenu(page)).toBeVisible();
-  // Opened from the keyboard: the first item has focus, then the arrows walk.
+  // Opened from the keyboard: the first item has focus (the emoji row's 👍 where the message takes a reaction), then the
+  // arrows walk along the emoji, Reply, and on (past the separators).
+  await expect(messageMenu(page).getByRole('menuitem').first()).toBeFocused();
+  const lead = await messageMenu(page).locator('[data-menu-reaction]').count();
+  for (let i = 0; i < lead + 1; i++) await page.keyboard.press('ArrowDown');
+  await expect(messageMenu(page).locator('[data-new-thread-item]')).toBeFocused();
+  await page.keyboard.press('ArrowDown');
   await expect(messageMenu(page).locator('[data-copy-item="message"]')).toBeFocused();
   await page.keyboard.press('ArrowDown');
   await expect(messageMenu(page).locator('[data-copy-item="message-link"]')).toBeFocused();
@@ -260,7 +268,7 @@ test('the keyboard: Tab reaches ⋯ and shows it, Enter opens, the arrows walk, 
   const box = (await head.boundingBox())!;
   await page.mouse.click(box.x + box.width * 0.45, box.y + box.height / 2, { button: 'right' });
   await expect(page.locator('[data-message-menu][data-context]')).toBeVisible();
-  await expect(page.locator('[data-message-menu][data-context]').getByRole('menuitem')).toHaveText(['Copy message', 'Copy link to message', 'Copy thread']);
+  await expect(page.locator('[data-message-menu][data-context]').locator('[role="menuitem"].ib-pmi')).toHaveText(['Reply', 'New thread from this message', 'Copy message', 'Copy link to message', 'Copy thread']);
   await page.keyboard.press('Escape');
   await expect(messageMenu(page)).toHaveCount(0);
   await expect(button).toBeFocused();

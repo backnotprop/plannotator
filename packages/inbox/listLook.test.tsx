@@ -478,7 +478,7 @@ describe('the saved look', () => {
 });
 
 describe.if(hasDom)('the ⋮ menu', () => {
-  test('four checkboxes after Refresh and the view (listView.ts), only Smaller thread names checked by default, each a menuitemcheckbox', async () => {
+  test('the agent status switch after the view, then four row checkboxes (listView.ts), only Smaller thread names checked by default, each a menuitemcheckbox', async () => {
     const el = render('narrow');
     await openMenu(el);
     const popup = document.querySelector<HTMLElement>('[data-tidy-menu-popup]')!;
@@ -489,6 +489,9 @@ describe.if(hasDom)('the ⋮ menu', () => {
       ['menuitem', 'Refresh', null],
       ['menuitemradio', 'Smart groups', 'true'],
       ['menuitemradio', 'Simple list', 'false'],
+      ['menuitemradio', 'Agents', 'false'],
+      // The agent status switch (owner, 2026-11-18): its own item after the View group, off by default, the same as Settings' row.
+      ['menuitemcheckbox', 'Show agent status', 'false'],
       ['menuitemcheckbox', 'Highlight thread subject', 'false'],
       ['menuitemcheckbox', 'Compact rows', 'false'],
       ['menuitemcheckbox', 'Hide agent icons', 'false'],
@@ -673,6 +676,7 @@ describe.if(hasDom)('the rows in each mode', () => {
     expect([...stop.querySelector('.ib-l2 > .ib-lend')!.children].map((c) => c.className.split(' ')[0])).toEqual(['ib-att', 'ib-pinmark', 'ib-zwhen', 'ib-badge']);
     // The pin's and the badge's words still reach a screen reader.
     expect(stop.querySelector(':scope > .ib-sr')!.textContent).toBe(', starred');
+    // Its description is the badge's words (no row actions here, so no drag help: listDrops.tsx).
     expect(document.getElementById(stop.getAttribute('aria-describedby')!)!.textContent).toBeTruthy();
 
     const phone = remount('phone', opts);

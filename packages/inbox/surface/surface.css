@@ -106,7 +106,7 @@
   border-radius: 999px;
 }
 
-/* An open document's Contents (4 or more headings, packages/inbox/contents.ts):
+/* An open document's Contents (2 or more headings, packages/inbox/contents.ts):
    a button at the top right opens ui's DocumentContents, the list plan review
    shows, as a sheet from the left; a pick scrolls there and closes it. */
 .sf-contents-open {

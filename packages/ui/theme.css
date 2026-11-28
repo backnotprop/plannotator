@@ -31,6 +31,7 @@
 @import "./themes/cursor-hc.css";
 @import "./themes/cursor-midnight.css";
 @import "./themes/colorblind.css";
+@import "./themes/tritanopia.css";
 @import "./themes/everforest.css";
 @import "./themes/everforest-hard.css";
 @import "./themes/everforest-soft.css";
@@ -39,6 +40,7 @@
 @import "./themes/github.css";
 @import "./themes/one-dark-pro.css";
 @import "./themes/night-owl.css";
+@import "./themes/nightfox.css";
 @import "./themes/ayu-dark.css";
 @import "./themes/poimandres.css";
 @import "./themes/material.css";
@@ -648,6 +650,7 @@
   --color-muted-foreground: var(--muted-foreground);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
+  --color-accent-text: var(--accent-text);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-success: var(--success);
@@ -668,9 +671,9 @@
   --color-surface-0: var(--surface-0);
   --color-surface-1: var(--surface-1);
   --color-surface-2: var(--surface-2);
-  /* Comment-annotation indicator color. Defaults to each theme's --accent
-   * (see :root below); a theme whose accent is a low-contrast neutral (e.g.
-   * "simple") overrides --annotation-comment directly. */
+  /* Comment-annotation indicator color. Defaults to each theme's
+   * --accent-text (see :root below), which is --accent unless the theme sets
+   * its own; "simple" also overrides --annotation-comment directly. */
   --color-annotation-comment: var(--annotation-comment);
   --font-sans: var(--font-sans);
   --font-mono: var(--font-mono);
@@ -718,9 +721,14 @@
     --sidebar-accent-foreground: var(--foreground);
     --sidebar-border: var(--border);
     --sidebar-ring: var(--ring);
-    /* Comment-annotation color follows the theme's accent unless the theme
-     * overrides it (neutral themes whose accent is an illegible gray). */
-    --annotation-comment: var(--accent);
+    /* Accent used as text on the page (`text-accent-text`): the accent itself
+     * unless a theme sets a separate one, where its accent is a pale fill that
+     * text drawn in it would vanish against (Simple, Neutral, Quantum Rose
+     * light). */
+    --accent-text: var(--accent);
+    /* Comment-annotation color follows the theme's accent text unless the
+     * theme overrides it (neutral themes whose accent is an illegible gray). */
+    --annotation-comment: var(--accent-text);
     /* Sensible amber default so a "warning" color utility exists even for
      * themes that don't define --warning. Matches the plannotator theme;
      * per-theme files override these. */
@@ -984,6 +992,20 @@ html[data-pn-panel-scroll-lock="true"] body {
 /* The navigator reuses information-dense desktop browser content, but its
  * interactive rows become physical controls on touch. Scope both the 44px
  * target and the TOC's legible type lift to the compact stage only. */
+.pn-hit-target {
+  position: relative;
+}
+
+.pn-hit-target::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: max(100%, 24px);
+  height: max(100%, 24px);
+  transform: translate(-50%, -50%);
+}
+
 [data-pn-plan-navigator="true"] button {
   min-block-size: var(--pn-touch-target);
   touch-action: manipulation;
@@ -2041,6 +2063,47 @@ body:has([data-popout="true"]) [data-sidebar-tabs="true"] {
   /* The HTML embed's and SVG fence's captions and Show more are controls. */
   [data-doc-font] [data-doc-text-root] :is(figcaption, [data-html-embed-more]) {
     font-family: var(--font-sans);
+  }
+}
+
+/* Source line numbers (Settings → Display → Source line numbers, #1650; see
+   utils/sourceLineAttrs). Each block carries data-doc-source-line and draws
+   it as its own ::before: no element, so nothing that walks a block's
+   children or text meets it and the switch never adds a node. It shows only
+   when the host opted in (hooks/useDocumentSourceLineNumbers sets
+   data-doc-source-lines on the document element) and only inside the
+   Viewer's article (data-doc-source-root), never in the plan diff, the Inbox
+   or code review. Not on phones or in print. The article's left side grows
+   to hold a span label such as 128–135 (about 3.6rem with its gap): the
+   Clean look has only the plan area's 2.5rem beside it and the scroll area
+   clips sideways; the Grid card's own padding is 2–3rem. */
+@media screen and (min-width: 48rem) {
+  [data-doc-source-lines] [data-doc-source-root] [data-doc-source-line]::before {
+    content: attr(data-doc-source-line);
+    position: absolute;
+    right: 100%;
+    top: 0;
+    z-index: 1;
+    margin-right: 0.75rem;
+    font-family: var(--font-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+    font-style: normal;
+    font-weight: 400;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: normal;
+    line-height: 1rem;
+    text-decoration: none;
+    text-transform: none;
+    white-space: nowrap;
+    color: color-mix(in oklab, var(--muted-foreground) 70%, transparent);
+    pointer-events: none;
+    user-select: none;
+  }
+  [data-doc-source-lines] [data-doc-source-root="clean"] {
+    padding-left: 1.5rem;
+  }
+  [data-doc-source-lines] [data-doc-source-root="grid"] {
+    padding-left: 4rem;
   }
 }
 

@@ -57,10 +57,10 @@ import { scheduleOpenCodeDailyPing } from "./daily-ping";
 import { decideListed } from "./session-registry";
 import {
   readLastUserAgent,
-  readMessageAgent,
   resolveAddressableAgent,
   resolveAnnotatedMessageAgent,
 } from "./message-agent";
+import { pickRecentAssistantMessages } from "./recent-messages";
 
 /** Shared dependencies injected by the plugin */
 export interface CommandDeps {
@@ -306,6 +306,10 @@ export async function handleReviewCommand(
     // Approve-time notes are delivered below only when there is a session to
     // prompt into — same per-session gating as the annotate command's advert.
     approvalNotesSupported: Boolean(sessionId),
+    // The decision is delivered below into the command's session, and this
+    // server runs inside OpenCode, so it never outlives it. With no session
+    // nothing could receive it: Send says so and keeps the draft.
+    agentPresence: sessionId ? undefined : () => "no-session" as const,
     htmlContent: reviewHtmlContent,
     diagramEngine: deps.reviewDiagramEngineDir ? diagramEngineSourcesFromDir(deps.reviewDiagramEngineDir) : undefined,
     opencodeClient: client,
@@ -659,28 +663,11 @@ export async function handleAnnotateLastCommand(
   });
   const messages = messagesResponse.data;
 
-  const RECENT_LIMIT = 25;
-  const recentMessages: { messageId: string; text: string; timestamp?: string }[] = [];
+  const picked = pickRecentAssistantMessages(messages);
+  const recentMessages = picked.map(({ agent: _agent, ...message }) => message);
   // Who wrote each candidate message (#1612), kept beside the payload rather
   // than in it: the annotate server has no use for it.
-  const messageAgents: { messageId: string; agent?: string }[] = [];
-  if (messages) {
-    for (let i = messages.length - 1; i >= 0 && recentMessages.length < RECENT_LIMIT; i--) {
-      const msg = messages[i];
-      if (msg.info.role !== "assistant") continue;
-      const textParts = msg.parts
-        .filter((p: any) => p.type === "text" && p.text?.trim())
-        .map((p: any) => p.text);
-      if (textParts.length === 0) continue;
-      const messageId = msg.info.id ?? `opencode-${i}`;
-      recentMessages.push({
-        messageId,
-        text: textParts.join("\n"),
-        timestamp: msg.info.time?.created ? new Date(msg.info.time.created).toISOString() : undefined,
-      });
-      messageAgents.push({ messageId, agent: readMessageAgent(msg.info) });
-    }
-  }
+  const messageAgents = picked.map(({ messageId, agent }) => ({ messageId, agent }));
 
   const lastText = recentMessages[0]?.text ?? null;
   if (!lastText) {

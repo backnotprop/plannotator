@@ -12,7 +12,7 @@
  * Screenshots: set PLANNOTATOR_BB_SHOTS to a folder.
  */
 
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page } from './inbox-test';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';

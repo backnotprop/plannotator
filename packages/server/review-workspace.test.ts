@@ -11,8 +11,6 @@ import {
   existsSync,
   mkdtempSync,
   mkdirSync,
-  readFileSync,
-  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -35,7 +33,7 @@ import { startReviewServer } from "./review";
 import { getVcsContext, type DiffType, type GitContext } from "./vcs";
 
 const tempDirs: string[] = [];
-const originalSemPath = process.env.PLANNOTATOR_SEM_PATH;
+const originalPath = process.env.PATH;
 const originalDataDir = process.env.PLANNOTATOR_DATA_DIR;
 
 /**
@@ -74,68 +72,21 @@ function linkDirectory(target: string, path: string): void {
   symlinkSync(resolve(target), path, process.platform === "win32" ? "junction" : "dir");
 }
 
-function makeMockSem(dir: string, options: {
-  versionCounterPath?: string;
-  runCwdLogPath?: string;
-  inputLogPath?: string;
-} = {}): string {
-  const semPath = join(dir, "sem");
-  writeFileSync(
-    semPath,
-    [
-      "#!/usr/bin/env bash",
-      "set -euo pipefail",
-      'if [ "${1:-}" = "--version" ]; then',
-      ...(options.versionCounterPath ? [`  printf x >> ${JSON.stringify(options.versionCounterPath)}`] : []),
-      '  echo "sem 0.8.0"',
-      "  exit 0",
-      "fi",
-      ...(options.runCwdLogPath ? [`pwd >> ${JSON.stringify(options.runCwdLogPath)}`] : []),
-      ...(options.inputLogPath ? [`cat > ${JSON.stringify(options.inputLogPath)}`] : ["cat >/dev/null"]),
-      "cat <<'JSON'",
-      JSON.stringify({
-        summary: { fileCount: 1, added: 1, modified: 0, deleted: 0, moved: 0, renamed: 0, reordered: 0, binary: 0, orphan: 0, total: 1 },
-        changes: [
-          {
-            entityId: "src/app.ts::function::created",
-            changeType: "added",
-            entityType: "function",
-            entityName: "created",
-            filePath: "src/app.ts",
-            startLine: 1,
-            endLine: 3,
-          },
-        ],
-        binaryChanges: [],
-      }),
-      "JSON",
-      "",
-    ].join("\n"),
-    "utf-8",
-  );
-  chmodSync(semPath, 0o755);
-  return semPath;
-}
-
-function makeBlockingSem(dir: string): { semPath: string; startedPath: string; releasePath: string } {
-  const semPath = join(dir, "sem-blocking");
+function makeBlockingNode(dir: string): { binDir: string; startedPath: string; releasePath: string } {
+  const binDir = join(dir, "bin");
+  mkdirSync(binDir, { recursive: true });
   const startedPath = join(dir, "started");
   const releasePath = join(dir, "release");
-  writeFileSync(semPath, [
-    "#!/usr/bin/env bash",
-    "set -euo pipefail",
-    'if [ "${1:-}" = "--version" ]; then',
-    `  : > ${JSON.stringify(startedPath)}`,
-    `  while [ ! -f ${JSON.stringify(releasePath)} ]; do sleep 0.02; done`,
-    '  echo "sem 0.8.0"',
-    "  exit 0",
-    "fi",
-    "cat >/dev/null",
-    "echo '{}'",
+  const nodePath = join(binDir, "node");
+  writeFileSync(nodePath, [
+    "#!/bin/bash",
+    `: > ${JSON.stringify(startedPath)}`,
+    `while [ ! -f ${JSON.stringify(releasePath)} ]; do sleep 0.02; done`,
+    "echo v22.0.0",
     "",
   ].join("\n"), "utf-8");
-  chmodSync(semPath, 0o755);
-  return { semPath, startedPath, releasePath };
+  chmodSync(nodePath, 0o755);
+  return { binDir, startedPath, releasePath };
 }
 
 async function waitForFile(path: string): Promise<void> {
@@ -147,7 +98,7 @@ async function waitForFile(path: string): Promise<void> {
 }
 
 // Sandbox every test's data dir so a contributor's ~/.plannotator/config.json
-// (e.g. reviewAnalysis.semanticDiff: false) can never change server behavior.
+// (e.g. reviewAnalysis.callFlow: true) can never change server behavior.
 // The root bunfig preload does this too, but not when bun runs from this
 // package directory. Tests that need a specific dir still override it.
 beforeEach(() => {
@@ -155,11 +106,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  if (originalSemPath === undefined) {
-    delete process.env.PLANNOTATOR_SEM_PATH;
-  } else {
-    process.env.PLANNOTATOR_SEM_PATH = originalSemPath;
-  }
+  process.env.PATH = originalPath;
   if (originalDataDir === undefined) {
     delete process.env.PLANNOTATOR_DATA_DIR;
   } else {
@@ -171,72 +118,16 @@ afterEach(() => {
 });
 
 describe("review-workspace", () => {
-  describe("semantic diff API", () => {
-    const rawPatch = [
-      "diff --git a/src/app.ts b/src/app.ts",
-      "new file mode 100644",
-      "index 0000000..1111111",
-      "--- /dev/null",
-      "+++ b/src/app.ts",
-      "@@ -0,0 +1,3 @@",
-      "+export function created() {",
-      "+  return true;",
-      "+}",
-      "",
-    ].join("\n");
-
-    it("advertises semantic diff availability and serves parsed sem output", async () => {
-      const dir = makeTempDir("plannotator-sem-server-");
-      const dataDir = makeTempDir("plannotator-sem-data-");
-      const cwdLogPath = join(dir, "cwd-log");
-      process.env.PLANNOTATOR_DATA_DIR = dataDir;
-      process.env.PLANNOTATOR_SEM_PATH = makeMockSem(dir, { runCwdLogPath: cwdLogPath });
-
-      const server = await startReviewServer({
-        rawPatch,
-        gitRef: "test",
-        origin: "claude-code",
-        htmlContent: "<!doctype html><html><body>review</body></html>",
-      });
-
-      try {
-        const diffPayload = await fetch(`${server.url}/api/diff`).then((response) => response.json()) as {
-          semanticDiff?: { available: boolean; semVersion?: string; semSource?: string };
-        };
-        expect(diffPayload.semanticDiff).toMatchObject({
-          available: true,
-          semVersion: "0.8.0",
-          semSource: "env",
-        });
-
-        const semanticPayload = await fetch(`${server.url}/api/semantic-diff?fileExt=.ts`).then((response) => response.json()) as {
-          status: string;
-          summary?: { added: number; fileCount: number };
-          changes?: Array<{ entityType: string; entityName: string; filePath: string }>;
-        };
-        expect(semanticPayload).toMatchObject({
-          status: "ok",
-          summary: { added: 1, fileCount: 1 },
-          changes: [
-            { entityType: "function", entityName: "created", filePath: "src/app.ts" },
-          ],
-        });
-        expect(realpathSync(readFileSync(cwdLogPath, "utf-8").trim())).toBe(
-          realpathSync(join(dataDir, "semantic-diff", "patch-only")),
-        );
-      } finally {
-        server.stop();
-      }
-    });
-
+  describe("diff switch", () => {
     it.skipIf(process.platform === "win32")("does not partially commit a valid switch superseded by an invalid request", async () => {
       const repoDir = makeTempDir("plannotator-switch-atomic-");
-      const semDir = makeTempDir("plannotator-switch-atomic-sem-");
+      const nodeDir = makeTempDir("plannotator-switch-atomic-node-");
       initRepo(repoDir);
       writeFileSync(join(repoDir, "README.md"), "# Dirty\n", "utf-8");
       const gitContext = await getVcsContext(repoDir, "git");
-      const blocker = makeBlockingSem(semDir);
-      process.env.PLANNOTATOR_SEM_PATH = blocker.semPath;
+      const blocker = makeBlockingNode(nodeDir);
+      writeFileSync(join(process.env.PLANNOTATOR_DATA_DIR!, "config.json"), JSON.stringify({ reviewAnalysis: { callFlow: true } }), "utf-8");
+      process.env.PATH = `${blocker.binDir}:${originalPath ?? ""}`;
       const initialPatch = "diff --git a/initial.txt b/initial.txt\n";
       const server = await startReviewServer({
         rawPatch: initialPatch,
@@ -278,110 +169,6 @@ describe("review-workspace", () => {
         server.stop();
       }
     }, 10_000);
-
-    it("runs semantic diff from the local agent cwd when one is available", async () => {
-      const dir = makeTempDir("plannotator-sem-agent-");
-      const agentCwd = makeTempDir("plannotator-sem-agent-cwd-");
-      const cwdLogPath = join(dir, "cwd-log");
-      process.env.PLANNOTATOR_SEM_PATH = makeMockSem(dir, { runCwdLogPath: cwdLogPath });
-
-      const server = await startReviewServer({
-        rawPatch,
-        gitRef: "test",
-        origin: "claude-code",
-        agentCwd,
-        htmlContent: "<!doctype html><html><body>review</body></html>",
-      });
-
-      try {
-        const semanticPayload = await fetch(`${server.url}/api/semantic-diff`).then((response) => response.json()) as {
-          status: string;
-        };
-        expect(semanticPayload.status).toBe("ok");
-        expect(realpathSync(readFileSync(cwdLogPath, "utf-8").trim())).toBe(realpathSync(agentCwd));
-      } finally {
-        server.stop();
-      }
-    });
-
-    it("runs semantic diff from the local git context cwd in local review mode", async () => {
-      const dir = makeTempDir("plannotator-sem-local-");
-      const repoDir = makeTempDir("plannotator-sem-local-repo-");
-      const cwdLogPath = join(dir, "cwd-log");
-      initRepo(repoDir);
-      const gitContext = await getVcsContext(repoDir);
-      process.env.PLANNOTATOR_SEM_PATH = makeMockSem(dir, { runCwdLogPath: cwdLogPath });
-
-      const server = await startReviewServer({
-        rawPatch,
-        gitRef: "test",
-        origin: "claude-code",
-        diffType: "unstaged",
-        gitContext,
-        htmlContent: "<!doctype html><html><body>review</body></html>",
-      });
-
-      try {
-        const semanticPayload = await fetch(`${server.url}/api/semantic-diff`).then((response) => response.json()) as {
-          status: string;
-        };
-        expect(semanticPayload.status).toBe("ok");
-        expect(realpathSync(readFileSync(cwdLogPath, "utf-8").trim())).toBe(realpathSync(repoDir));
-      } finally {
-        server.stop();
-      }
-    });
-
-    it("caches semantic diff availability probes for the session cwd", async () => {
-      const dir = makeTempDir("plannotator-sem-cache-");
-      const versionCounterPath = join(dir, "version-count");
-      process.env.PLANNOTATOR_SEM_PATH = makeMockSem(dir, { versionCounterPath });
-
-      const server = await startReviewServer({
-        rawPatch,
-        gitRef: "test",
-        origin: "claude-code",
-        htmlContent: "<!doctype html><html><body>review</body></html>",
-      });
-
-      try {
-        await fetch(`${server.url}/api/diff`).then((response) => response.json());
-        await fetch(`${server.url}/api/diff`).then((response) => response.json());
-        expect(readFileSync(versionCounterPath, "utf-8")).toBe("x");
-      } finally {
-        server.stop();
-      }
-    });
-
-    it("hides semantic diff from /api/diff when sem cannot be resolved", async () => {
-      const dir = makeTempDir("plannotator-sem-missing-server-");
-      process.env.PLANNOTATOR_SEM_PATH = join(dir, "missing-sem");
-
-      const server = await startReviewServer({
-        rawPatch,
-        gitRef: "test",
-        origin: "claude-code",
-        htmlContent: "<!doctype html><html><body>review</body></html>",
-      });
-
-      try {
-        const diffPayload = await fetch(`${server.url}/api/diff`).then((response) => response.json()) as {
-          semanticDiff?: { available: boolean };
-        };
-        expect(diffPayload.semanticDiff).toEqual({ available: false });
-
-        const semanticPayload = await fetch(`${server.url}/api/semantic-diff`).then((response) => response.json()) as {
-          status: string;
-          reason?: string;
-        };
-        expect(semanticPayload).toMatchObject({
-          status: "unavailable",
-          reason: "sem-path-missing",
-        });
-      } finally {
-        server.stop();
-      }
-    });
   });
 
   describe("prefixPatchPaths", () => {
@@ -1358,10 +1145,6 @@ describe("review-workspace", () => {
 
     it("serves combined diffs and maps prefixed paths back to child repos", async () => {
       const root = makeTempDir("plannotator-workspace-server-");
-      const semDir = makeTempDir("plannotator-workspace-switch-sem-");
-      const cwdLogPath = join(semDir, "cwd-log");
-      const inputLogPath = join(semDir, "input.patch");
-      process.env.PLANNOTATOR_SEM_PATH = makeMockSem(semDir, { runCwdLogPath: cwdLogPath, inputLogPath });
       const api = join(root, "api");
       const web = join(root, "web");
       mkdirSync(api, { recursive: true });
@@ -1403,7 +1186,6 @@ describe("review-workspace", () => {
           diffType?: string;
           diffOptions?: Array<{ id: string }>;
           agentCwd?: string;
-          semanticDiff?: { available: boolean };
         };
         expect(diffPayload.mode).toBe("workspace");
         expect(diffPayload.diffType).toBe("workspace-current");
@@ -1414,19 +1196,9 @@ describe("review-workspace", () => {
           "workspace-last",
         ]);
         expect(diffPayload.agentCwd).toBe(root);
-        expect(diffPayload.semanticDiff).toEqual(expect.objectContaining({ available: true }));
         expect("workspace" in diffPayload).toBe(false);
         expect(diffPayload.rawPatch).toContain("diff --git a/api/tracked.txt b/api/tracked.txt");
         expect(diffPayload.rawPatch).toContain("diff --git a/web/new.txt b/web/new.txt");
-
-        const semanticPayload = await fetch(`${server.url}/api/semantic-diff`).then((response) => response.json()) as {
-          status: string;
-        };
-        expect(semanticPayload.status).toBe("ok");
-        expect(realpathSync(readFileSync(cwdLogPath, "utf-8").trim())).toBe(realpathSync(root));
-        const semInput = readFileSync(inputLogPath, "utf-8");
-        expect(semInput).toContain("diff --git a/api/tracked.txt b/api/tracked.txt");
-        expect(semInput).toContain("diff --git a/web/new.txt b/web/new.txt");
 
         const lastResponse = await fetch(`${server.url}/api/diff/switch`, {
           method: "POST",
@@ -1438,11 +1210,9 @@ describe("review-workspace", () => {
           diffType?: string;
           rawPatch: string;
           diffOptions?: Array<{ id: string }>;
-          semanticDiff?: { available: boolean };
         };
         expect(lastPayload.diffType).toBe("workspace-last");
         expect(lastPayload.diffOptions?.map((option) => option.id)).toContain("workspace-current");
-        expect(lastPayload.semanticDiff).toEqual(expect.objectContaining({ available: true }));
         expect(lastPayload.rawPatch).toContain("diff --git a/api/tracked.txt b/api/tracked.txt");
 
         const currentResponse = await fetch(`${server.url}/api/diff/switch`, {

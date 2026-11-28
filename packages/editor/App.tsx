@@ -58,6 +58,8 @@ import { Annotation, AnnotationType, Block, EditorMode, type CodeAnnotation, typ
 import { ThemeProvider } from '@plannotator/ui/components/ThemeProvider';
 import { RefHoverCards } from '@plannotator/ui/components/RefHoverCard';
 import { refCardRouteTransport, setRefCardTransport } from '@plannotator/ui/utils/refCard';
+import { registerRefCardProvider } from '@plannotator/ui/utils/refCardProviders';
+import { linearLinkCardProvider } from '@plannotator/ui/utils/linearLinkCards';
 import { Tooltip, TooltipProvider } from '@plannotator/ui/components/Tooltip';
 import { AnnotationToolstrip } from '@plannotator/ui/components/AnnotationToolstrip';
 import { StickyHeaderLane } from '@plannotator/ui/components/StickyHeaderLane';
@@ -65,16 +67,16 @@ import { TaterSpriteRunning } from '@plannotator/ui/components/TaterSpriteRunnin
 import { TaterSpritePullup } from '@plannotator/ui/components/TaterSpritePullup';
 import { useSharing } from '@plannotator/ui/hooks/useSharing';
 import { shareableDocumentMarkdown } from '@plannotator/ui/utils/sharing';
-import { getCallbackConfig, CallbackAction, executeCallback } from '@plannotator/ui/utils/callback';
+import { getCallbackConfig, CallbackAction, executeCallback, type ReturnLink } from '@plannotator/ui/utils/callback';
 import { useAgents } from '@plannotator/ui/hooks/useAgents';
 import { useActiveSection } from '@plannotator/ui/hooks/useActiveSection';
 import { tocHeadings } from '@plannotator/ui/utils/annotationHelpers';
-import { storage } from '@plannotator/ui/utils/storage';
 import { getIdentity } from '@plannotator/ui/utils/identity';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { configStore, useConfigValue } from '@plannotator/ui/config';
 import { CompletionOverlay } from '@plannotator/ui/components/CompletionOverlay';
 import { useStarAskDoneScreen } from '@plannotator/ui/components/StarAskDoneScreen';
+import { useLaunchAnnouncement } from '@plannotator/ui/components/LaunchAnnouncement';
 import { useUpdateCheck } from '@plannotator/ui/hooks/useUpdateCheck';
 import { useUpdateToast } from '@plannotator/ui/hooks/useUpdateToast';
 import { useUpdateCheckSetting } from '@plannotator/ui/hooks/useUpdateCheckSetting';
@@ -88,7 +90,8 @@ import { getOctarineSettings, isOctarineConfigured } from '@plannotator/ui/utils
 import { getNotionSettings, getNotionParentPageId, isNotionConfigured, setNotionAvailable } from '@plannotator/ui/utils/notion';
 import { getDefaultNotesApp } from '@plannotator/ui/utils/defaultNotesApp';
 import { agentSwitchTargetLabel, getAgentSwitchDefaults, getAgentSwitchSettings, getEffectiveAgentName } from '@plannotator/ui/utils/agentSwitch';
-import { adoptServerSession, noteServerSessionMismatch, withServerSession, withServerSessionQuery } from '@plannotator/ui/utils/serverSession';
+import { adoptServerSession, currentServerSession, noteServerSessionMismatch, withServerSession, withServerSessionQuery } from '@plannotator/ui/utils/serverSession';
+import { aiChatStorageKey } from '@plannotator/ui/utils/aiChatPersistence';
 import { assertSendOk, PLAN_REVISED_CODE, refusalCode, throwUnreachable } from '@plannotator/ui/utils/sendFailure';
 import { dismissSendFailureToast, sendSettled, sendStarted, showSendFailureToast } from '@plannotator/ui/components/SendFailureToast';
 import { ServerSessionReplacedBanner } from '@plannotator/ui/components/ServerSessionReplacedBanner';
@@ -101,6 +104,7 @@ import type { SessionAskAction } from '@plannotator/ui/components/ai/SessionAskN
 import { useAIProviderConfig } from '@plannotator/ui/hooks/useAIProviderConfig';
 import { useDocumentTextSize } from '@plannotator/ui/hooks/useDocumentTextSize';
 import { useDocumentFont } from '@plannotator/ui/hooks/useDocumentFont';
+import { useDocumentSourceLineNumbers } from '@plannotator/ui/hooks/useDocumentSourceLineNumbers';
 import { useAIProviderActivation } from '@plannotator/ui/hooks/useAIProviderActivation';
 import { usePlanLookDialog } from '@plannotator/ui/hooks/usePlanLookDialog';
 import { TerminalToolsAnnouncementDialog } from '@plannotator/ui/components/TerminalToolsAnnouncementDialog';
@@ -136,9 +140,10 @@ import { useAgentToolSetting } from '@plannotator/ui/hooks/useAgentToolSetting';
 import { useLatchedTrue } from '@plannotator/ui/hooks/useLatchedTrue';
 import { buildDefaultPrompt, draftAnnotationsToSend, useAIChat } from '@plannotator/ui/hooks/useAIChat';
 import { askScopeFromContext as askScopeFromContextFor } from './askScope';
-import { getUIPreferences, type UIPreferences, type PlanWidth } from '@plannotator/ui/utils/uiPreferences';
+import { getPlanMaxWidth, type UIPreferences } from '@plannotator/ui/utils/uiPreferences';
+import { goalSetupMaxWidth } from './goalSetupWidth';
 import { getEditorMode, saveEditorMode } from '@plannotator/ui/utils/editorMode';
-import { getInputMethod, refreshInputMethodStamp, saveInputMethod } from '@plannotator/ui/utils/inputMethod';
+import { getInputMethod, refreshInputMethodStamp } from '@plannotator/ui/utils/inputMethod';
 import { getHtmlChromeState, mergeHtmlChromeState, saveHtmlChromeState, shouldRestoreHtmlChrome } from '@plannotator/ui/utils/htmlChrome';
 import {
   buildAnnotationDocumentGroups,
@@ -225,7 +230,7 @@ import { observeActionsLabelMode } from './actionsLabelMode';
 // same env var on the server side so V2/V3 stay paired.
 import { DEMO_PLAN_CONTENT as DEFAULT_DEMO_PLAN_CONTENT } from './demoPlan';
 import { DIFF_DEMO_PLAN_CONTENT } from './demoPlanDiffDemo';
-import { canUseAnnotateWideMode, resolveFocusShortcutAction, resolveWideModeExitLayout, type WideModeLayoutSnapshot, type WideModeType } from '@plannotator/ui/utils/wideMode';
+import { canUseAnnotateWideMode, parseAnnotateOpenView, resolveAnnotateOpenView, resolveFocusShortcutAction, resolveWideModeExitLayout, type AnnotateOpenView, type WideModeLayoutSnapshot, type WideModeType } from '@plannotator/ui/utils/wideMode';
 import { modKey } from '@plannotator/ui/utils/platform';
 import {
   annotateSidebarShortcuts,
@@ -338,7 +343,7 @@ import {
   computeEditStats,
   isEmptyFeedbackSentinel,
   normalizeEditedMarkdown,
-} from './directEdits';
+} from '@plannotator/shared/direct-edits';
 import {
   buildAnnotateApprovalBody,
   buildCompleteAnnotateFeedback,
@@ -385,7 +390,8 @@ import { configurePlannotatorUI } from '@plannotator/ui/configure';
 // copies rich text, and on a touch screen the toolbar sits below the selection
 // (clear of iOS's edit menu), inside the screen, with thumb-sized buttons;
 // @plannotator/ui hosts keep both unchanged unless they opt in.
-configurePlannotatorUI({ richCopy: true, touchSelectionToolbar: true });
+// A click on a #12 or a pasted PR / issue URL in the text opens its card pinned (utils/refCardClick).
+configurePlannotatorUI({ richCopy: true, touchSelectionToolbar: true, refCardClick: true });
 
 type NoteAutoSaveResults = {
   obsidian?: boolean;
@@ -631,14 +637,12 @@ const App: React.FC = () => {
   const [editorMode, setEditorMode] = useState<EditorMode>(getEditorMode);
   const [inputMethod, setInputMethod] = useState<InputMethod>(getInputMethod);
   const [compactInputMethod, setCompactInputMethod] = useState<InputMethod>(getInputMethod);
-  const [taterMode, setTaterMode] = useState(() => {
-    const stored = storage.getItem('plannotator-tater-mode');
-    return stored === 'true';
-  });
+  const taterMode = useConfigValue('taterMode');
   const gridEnabled = useConfigValue('gridEnabled');
   // Settings → Display → Text size and Document font: the document's blocks only.
   useDocumentTextSize();
   useDocumentFont();
+  useDocumentSourceLineNumbers();
   const vimModeEnabled = useConfigValue('vimModeEnabled');
   const vimHudEnabled = useConfigValue('vimHudEnabled');
   const vimHudKeyPanelEnabled = useConfigValue('vimHudKeyPanelEnabled');
@@ -646,7 +650,25 @@ const App: React.FC = () => {
     configStore.set('vimHudKeyPanelEnabled', enabled);
     requestVimDocumentFocus();
   }, []);
-  const [uiPrefs, setUiPrefs] = useState(() => getUIPreferences());
+  // Settings → Display's Auto-open Sidebar, Sticky Actions and Plan Width, read
+  // from the config registry so a config.json value applies once init() runs.
+  // Settings also reports file-browser changes through onUIPreferencesChange;
+  // the nonce gives uiPrefs a new identity then, so the memos keyed on it
+  // (vault path, Files tab) recompute as they did before.
+  const tocEnabledSetting = useConfigValue('tocEnabled');
+  const stickyActionsEnabledSetting = useConfigValue('stickyActionsEnabled');
+  const planWidthSetting = useConfigValue('planWidth');
+  const [uiPrefsNonce, setUiPrefsNonce] = useState(0);
+  const uiPrefs = useMemo<UIPreferences>(
+    () => ({
+      tocEnabled: tocEnabledSetting,
+      stickyActionsEnabled: stickyActionsEnabledSetting,
+      planWidth: planWidthSetting,
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- uiPrefsNonce only forces a new identity
+    [tocEnabledSetting, stickyActionsEnabledSetting, planWidthSetting, uiPrefsNonce],
+  );
+  const handleUIPreferencesChange = useCallback(() => setUiPrefsNonce((n) => n + 1), []);
 
   // Plan-area width (inside the OverlayScrollArea, after sidebar/panel
   // shrinkage) drives the action button label compactness. ResizeObserver
@@ -669,6 +691,7 @@ const App: React.FC = () => {
   // Hover cards for issue, PR and MR links (ui RefHoverCard): the server reads them with this
   // computer's gh / glab (GET /api/ref, ref-cards.ts). Only when a Plannotator server serves
   // the page, never on a share link. A card shows only when the forge answered (`onlyWithData`).
+  // Linear issue links get one too, read with the Linear API key (ui linearLinkCards); without a key they stay plain.
   // (The transport is installed further down, once `isSharedSession` exists.)
   const refCardRootRef = useRef<HTMLDivElement>(null);
   const [origin, setOrigin] = useState<Origin | null>(null);
@@ -781,8 +804,7 @@ const App: React.FC = () => {
   // captures clicks for pinpoint annotation; disarmed (Interact) = clicks are
   // fully native while committed markers stay visible/clickable and text
   // drag-selection commenting stays live. Session-only, never persisted.
-  // BOTH surface kinds start armed; Esc (or the header pen) drops to
-  // Interact.
+  // Annotate sessions apply their startup preference when /api/plan loads.
   const [htmlAnnotateArmed, setHtmlAnnotateArmed] = useState(true);
   const handleHtmlAnnotateToggle = useCallback(() => setHtmlAnnotateArmed((v) => !v), []);
   const handleHtmlToolsToggle = useCallback(() => setHtmlToolsHidden((v) => !v), []);
@@ -853,6 +875,12 @@ const App: React.FC = () => {
   const agentTerminalRef = useRef<AnnotateAgentTerminalPanelHandle>(null);
   const [wideModeType, setWideModeType] = useState<WideModeType | null>(null);
   const wideModeSnapshotRef = useRef<WideModeLayoutSnapshot | null>(null);
+  // config.json `annotateView`: the view an annotate session opens in. Decided
+  // once, when the session's document first loads; a choice the person makes
+  // before that (or any time after) wins, and nothing is written back.
+  const [configuredAnnotateView, setConfiguredAnnotateView] = useState<AnnotateOpenView | null>(null);
+  const [pendingAnnotateOpenView, setPendingAnnotateOpenView] = useState<AnnotateOpenView | null>(null);
+  const annotateOpenViewSettledRef = useRef(false);
   const initialSidebarPreferenceAppliedRef = useRef(false);
   const lastAppliedTocEnabledRef = useRef(uiPrefs.tocEnabled);
   const goalSetupMode = goalSetupBundle !== null;
@@ -1773,6 +1801,7 @@ const App: React.FC = () => {
   }, [canUseWideMode, hideAgentTerminal, isAgentTerminalOpen, isPanelOpen, wideModeType, sidebar.activeTab, sidebar.close, sidebar.isOpen]);
 
   const toggleViewMode = useCallback((type: WideModeType) => {
+    annotateOpenViewSettledRef.current = true;
     if (wideModeType === type) {
       exitWideMode();
     } else {
@@ -1867,6 +1896,7 @@ const App: React.FC = () => {
   // available everywhere: a linked-doc navigation can flip the surface to HTML
   // while focus mode is active, and without the exit path that layout is stuck.
   const handleToggleFocusMode = useCallback(() => {
+    annotateOpenViewSettledRef.current = true;
     const action = resolveFocusShortcutAction({
       canUseWideMode: canUseWideMode && !isHtmlSurface,
       wideModeType,
@@ -2817,7 +2847,11 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!isApiMode || isSharedSession) return;
     setRefCardTransport(refCardRouteTransport('/api/ref'));
-    return () => setRefCardTransport(null);
+    const removeLinearCards = registerRefCardProvider(linearLinkCardProvider);
+    return () => {
+      removeLinearCards();
+      setRefCardTransport(null);
+    };
   }, [isApiMode, isSharedSession]);
 
   // The user's current direct-edit text: the open editor buffer, else the
@@ -2900,7 +2934,7 @@ const App: React.FC = () => {
   );
 
   // Auto-save annotation drafts
-  const { draftBanner, restoreDraft, scheduleDraftSave, scheduleDraftSaveAfterSubmitFailure, getDraftGeneration, dismissDraft, flushPendingSave: flushSessionDraft } = useAnnotationDraft({
+  const annotateDraft = useAnnotationDraft({
     annotations: draftAnnotations,
     codeAnnotations,
     globalAttachments: draftGlobalAttachments,
@@ -2914,6 +2948,7 @@ const App: React.FC = () => {
     // banner into the next session for this plan. Saving resumes if it fails.
     submitted: !!submitted || isSubmitting,
   });
+  const { draftBanner, draftChecked, restoreDraft, scheduleDraftSave, scheduleDraftSaveAfterSubmitFailure, getDraftGeneration, dismissDraft, flushPendingSave: flushSessionDraft } = annotateDraft;
   flushPendingDraftsRef.current = () => {
     flushSessionDraft();
     flushDocumentDrafts();
@@ -3343,6 +3378,7 @@ const App: React.FC = () => {
   }, [isEditingMarkdown, usesDocumentScroll]);
 
   const handleEditToggle = useCallback(() => {
+    annotateOpenViewSettledRef.current = true;
     captureEditScroll();
     if (isEditingMarkdown) {
       commitMarkdownEdits();
@@ -3374,6 +3410,33 @@ const App: React.FC = () => {
     setIsEditingMarkdown(true);
   }, [activeEditableDocument, displayedMarkdown, editableDocuments, isEditingMarkdown, commitMarkdownEdits, captureEditScroll]);
   handleEditToggleRef.current = handleEditToggle;
+
+  // Open the annotate session in its configured view (config.json
+  // `annotateView`), once. A view the toolbar does not offer here falls back
+  // to today's default; Edit also waits for the saved-draft lookup and stays
+  // off when a draft is offered, so restoring it is never refused.
+  useEffect(() => {
+    if (annotateOpenViewSettledRef.current || isLoading || !isApiMode) return;
+    if (configuredAnnotateView === 'edit' && !draftChecked) return;
+    annotateOpenViewSettledRef.current = true;
+    const view = resolveAnnotateOpenView(configuredAnnotateView, {
+      toolbarShown: annotateMode && !isCompactTouchLayout && !isPlanDiffActive && !archive.archiveMode && !isHtmlSurface
+        && !goalSetupMode && !(annotateSource === 'folder' && !markdown && !linkedDocHook.isActive),
+      canUseWideMode,
+      canEditMarkdown,
+    });
+    if (view === 'edit' && draftBanner) return;
+    // Applied on the next render, after the initial sidebar effect's own
+    // update, so leaving the view restores the layout the session opened with.
+    if (view) setPendingAnnotateOpenView(view);
+  }, [annotateMode, annotateSource, archive.archiveMode, canEditMarkdown, canUseWideMode, configuredAnnotateView, draftBanner, draftChecked, goalSetupMode, isApiMode, isCompactTouchLayout, isHtmlSurface, isLoading, isPlanDiffActive, linkedDocHook.isActive, markdown]);
+  useEffect(() => {
+    if (!pendingAnnotateOpenView) return;
+    setPendingAnnotateOpenView(null);
+    if (wideModeType !== null || isEditingMarkdown) return;
+    if (pendingAnnotateOpenView === 'edit') handleEditToggle();
+    else enterViewMode(pendingAnnotateOpenView);
+  }, [enterViewMode, handleEditToggle, isEditingMarkdown, pendingAnnotateOpenView, wideModeType]);
 
   // Restore after the swap has committed. Two timing facts decide the shape:
   // the editor publishes its handle, and establishes its height, in its own
@@ -3860,8 +3923,7 @@ const App: React.FC = () => {
   }, [sourceWatchSubscription.key]);
 
   const handleTaterModeChange = useCallback((enabled: boolean) => {
-    setTaterMode(enabled);
-    storage.setItem('plannotator-tater-mode', String(enabled));
+    configStore.set('taterMode', enabled);
   }, []);
 
   const handleEditorModeChange = (mode: EditorMode) => {
@@ -3880,9 +3942,10 @@ const App: React.FC = () => {
       return;
     }
     setInputMethod(method);
-    // Surface-scoped persistence: an explicit choice made on the HTML surface
-    // sticks for HTML sessions only; markdown keeps its own preference.
-    saveInputMethod(method, isHtmlSurface ? 'html' : 'markdown');
+    // Only the markdown surface reaches here (HTML returned above). Its choice
+    // goes through the config registry, so it syncs to config.json's
+    // displayOptions.inputMethod; the cookie is the same one utils/inputMethod reads.
+    configStore.set('inputMethod', method);
   };
 
   // Raw-HTML surfaces resolve their own input-method preference (default:
@@ -3893,10 +3956,25 @@ const App: React.FC = () => {
   useEffect(() => {
     if (prevSurfaceRef.current === isHtmlSurface) return;
     prevSurfaceRef.current = isHtmlSurface;
-    const method = getInputMethod(isHtmlSurface ? 'html' : 'markdown');
+    const method = isHtmlSurface ? getInputMethod('html') : configStore.get('inputMethod');
     setInputMethod(method);
     setCompactInputMethod(method);
   }, [isHtmlSurface]);
+
+  // The markdown selection mode can arrive from config.json after mount:
+  // configStore.init() runs once /api/plan answers, after the initial state was
+  // taken from the cookie. Apply the stored value when it changes (not on
+  // mount, where the cookie read above already decided).
+  const storedInputMethod = useConfigValue('inputMethod');
+  const prevStoredInputMethodRef = useRef(storedInputMethod);
+  useEffect(() => {
+    if (prevStoredInputMethodRef.current === storedInputMethod) return;
+    prevStoredInputMethodRef.current = storedInputMethod;
+    if (isHtmlSurface || liveApp) return;
+    setInputMethod(storedInputMethod);
+    setCompactInputMethod(storedInputMethod);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only a stored-value change applies; a surface flip is handled above
+  }, [storedInputMethod]);
 
   // Alt/Option key: hold to temporarily switch, double-tap to toggle
   useInputMethodSwitch(effectiveInputMethod, handleInputMethodChange);
@@ -3970,7 +4048,7 @@ const App: React.FC = () => {
         if (!res.ok) throw new Error('Not in API mode');
         return res.json();
       })
-      .then((data: { plan: string; origin?: Origin; mode?: 'annotate' | 'annotate-last' | 'annotate-folder' | 'annotate-app' | 'annotate-bundle' | 'archive' | 'goal-setup'; bundle?: unknown; goalSetup?: GoalSetupBundle; filePath?: string; appUrl?: string; targetUrl?: string; liveToken?: string; sourceInfo?: string; title?: string; sourceConverted?: boolean; sourceSave?: SourceSaveCapability; gate?: boolean; approvalNotesSupported?: boolean; clientLease?: AnnotateClientLeaseConfig; renderAs?: DocumentRenderAs; rawHtml?: string; shareHtml?: string; diffHtml?: string; convertHtml?: boolean; sharingEnabled?: boolean; shareBaseUrl?: string; pasteApiUrl?: string; repoInfo?: { display: string; branch?: string; host?: string }; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string }; liveVersions?: boolean; planRevision?: number; serverSession?: string; archivePlans?: ArchivedPlan[]; projectRoot?: string; planDir?: string; planPath?: string; planFilePath?: string; isWSL?: boolean; notion?: boolean; markdownExtensions?: string[]; documentDrafts?: boolean; serverConfig?: { displayName?: string; gitUser?: string; autoUpdate?: boolean; autoUpdateEnv?: boolean; updateCheck?: boolean; updateCheckEnv?: boolean }; autoUpdateNotice?: unknown; updateAvailable?: unknown; updateCheckFailing?: unknown; autoUpdateSupported?: boolean; autoUpdateActive?: boolean; recentMessages?: PickerMessage[]; agentTerminal?: AgentTerminalCapability; feedbackTemplates?: AnnotateFeedbackTemplates }) => {
+      .then((data: { plan: string; origin?: Origin; mode?: 'annotate' | 'annotate-last' | 'annotate-folder' | 'annotate-app' | 'annotate-bundle' | 'archive' | 'goal-setup'; bundle?: unknown; goalSetup?: GoalSetupBundle; filePath?: string; appUrl?: string; targetUrl?: string; liveToken?: string; sourceInfo?: string; title?: string; sourceConverted?: boolean; sourceSave?: SourceSaveCapability; gate?: boolean; approvalNotesSupported?: boolean; clientLease?: AnnotateClientLeaseConfig; renderAs?: DocumentRenderAs; rawHtml?: string; shareHtml?: string; diffHtml?: string; convertHtml?: boolean; sharingEnabled?: boolean; shareBaseUrl?: string; pasteApiUrl?: string; repoInfo?: { display: string; branch?: string; host?: string }; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string }; liveVersions?: boolean; planRevision?: number; serverSession?: string; archivePlans?: ArchivedPlan[]; projectRoot?: string; planDir?: string; planPath?: string; planFilePath?: string; isWSL?: boolean; notion?: boolean; markdownExtensions?: string[]; documentDrafts?: boolean; serverConfig?: { displayName?: string; gitUser?: string; annotateView?: unknown; autoUpdate?: boolean; autoUpdateEnv?: boolean; updateCheck?: boolean; updateCheckEnv?: boolean }; autoUpdateNotice?: unknown; updateAvailable?: unknown; updateCheckFailing?: unknown; autoUpdateSupported?: boolean; autoUpdateActive?: boolean; recentMessages?: PickerMessage[]; agentTerminal?: AgentTerminalCapability; feedbackTemplates?: AnnotateFeedbackTemplates }) => {
         // Initialize config store with server-provided values (config file > cookie > default)
         configStore.init(data.serverConfig);
         // Save to Notion: offered only when the server has NOTION_TOKEN and the session is local.
@@ -4013,8 +4091,6 @@ const App: React.FC = () => {
           // proxy origin. No rawHtml, no version fields, no sharing.
           setRenderAs('html');
           setMarkdown('');
-          // Live sessions open ARMED like every HTML surface (htmlAnnotateArmed
-          // defaults true): pinpoint is the default, Esc drops to Interact.
           setLiveApp({
             appUrl: data.appUrl,
             origin: new URL(data.appUrl).origin,
@@ -4067,14 +4143,14 @@ const App: React.FC = () => {
         setApprovalNotesSupported(data.approvalNotesSupported === true);
         if (data.mode === 'annotate' || data.mode === 'annotate-last' || folderLike || data.mode === 'annotate-app') {
           setAnnotateMode(true);
+          setAnnotateSource(data.mode === 'annotate-last' ? 'message' : folderLike ? 'folder' : 'file');
+          setHtmlAnnotateArmed(configStore.get('htmlAnnotateOnStartup'));
+          setConfiguredAnnotateView(parseAnnotateOpenView(data.serverConfig?.annotateView));
           setGate(data.gate ?? false);
           setClientLease(data.clientLease ?? null);
         }
         if (folderLike) {
           sidebar.open('files');
-        }
-        if (data.mode === 'annotate' || data.mode === 'annotate-last' || folderLike || data.mode === 'annotate-app') {
-          setAnnotateSource(data.mode === 'annotate-last' ? 'message' : folderLike ? 'folder' : 'file');
         }
         if (data.mode === 'annotate-last' && data.recentMessages && data.recentMessages.length > 0) {
           messageStateCacheRef.current = new Map();
@@ -5707,6 +5783,7 @@ const App: React.FC = () => {
   const askDocumentLatchRef = useRef<AskDocumentLatch>(EMPTY_ASK_DOCUMENT_LATCH);
 
   const aiChat = useAIChat({
+    storageKey: isLoading ? null : aiChatStorageKey(currentServerSession(), 'editor'),
     context: aiContext,
     providerId: aiConfig.providerId,
     model: aiConfig.model,
@@ -5907,6 +5984,9 @@ const App: React.FC = () => {
   // If a user adds code comments and hits the callback button, those comments are silently dropped.
   // Fix: either disable callbacks when codeAnnotations exist, or include annotationsOutput in the payload.
   const callbackConfig = React.useMemo(() => getCallbackConfig(), []);
+  // The bot's answer may name where the link came from: the done screen shows
+  // it as a link the person clicks (never an automatic move; see callback.ts).
+  const [callbackReturnLink, setCallbackReturnLink] = useState<ReturnLink | null>(null);
 
   const callCallback = React.useCallback(async (action: CallbackAction) => {
     if (!callbackConfig || isSubmitting) return;
@@ -5921,6 +6001,7 @@ const App: React.FC = () => {
       if (result) {
         if (result.type === 'success') {
           toast.success(result.message);
+          setCallbackReturnLink(result.returnLink ?? null);
           setSubmitted(action === CallbackAction.Approve ? 'approved' : 'denied');
         } else {
           toast.error(result.message);
@@ -7027,9 +7108,8 @@ const App: React.FC = () => {
           : []),
         // HTML/live surfaces on the compact touch shell: the desktop pen and
         // eye toggles are header-only and hidden here, and Mod+Shift+A is
-        // keyboard-only, so without these menu actions a touch user has NO
-        // way to disarm annotate mode (every tap annotates, the page beneath
-        // is unreachable) or to bring hidden tools back.
+        // keyboard-only. These menu actions let touch users switch modes
+        // and bring hidden tools back.
         ...(isHtmlSurface && !documentReadOnly
           ? [{
               id: 'annotate' as const,
@@ -7065,10 +7145,8 @@ const App: React.FC = () => {
           : []),
       ];
 
-  const planMaxWidth = useMemo(() => {
-    const widths: Record<PlanWidth, number> = { compact: 832, default: 1040, wide: 1280 };
-    return widths[uiPrefs.planWidth] ?? 832;
-  }, [uiPrefs.planWidth]);
+  // Wide has no cap: the document fills the space between the side panels.
+  const planMaxWidth = useMemo(() => getPlanMaxWidth(uiPrefs.planWidth), [uiPrefs.planWidth]);
   const annotateReaderMaxWidth = canUseWideMode && wideModeType === 'wide' ? null : planMaxWidth;
   const agentTerminalPanel = shouldRenderAgentTerminal && agentTerminalCapability ? (
     <div
@@ -7122,6 +7200,17 @@ const App: React.FC = () => {
     !isSharedSession &&
     !goalSetupMode &&
     !showPermissionModeSetup;
+  // The launch dialog (the launch switch; LaunchAnnouncement.tsx): FIRST on the load it is due, as the page opens and
+  // before the reader starts working, ahead of every announcement below and the star ask, which yield on that load
+  // (`launch.holds`). It waits behind the look-and-feel chooser and the two setup flows, as they do. Never on a
+  // shared, archive or read-only page, or the share portal; the VS Code panel shows it too.
+  const launch = useLaunchAnnouncement({
+    ready: !isLoading,
+    eligible:
+      isApiMode && !isSharedSession && !archive.archiveMode
+      && !goalSetupMode && !showPermissionModeSetup && !shouldShowLookAndFeelAnnouncement,
+    firstRunWindow: true,
+  });
   // LAST in this app's first-run sequence: it asks for no decision, so it waits
   // behind the look-and-feel chooser and the two setup flows. Archive browsing
   // and a read-only shared plan have no one to address, so it is deferred there
@@ -7136,7 +7225,7 @@ const App: React.FC = () => {
     readOnlySession: isSharedSession || archive.archiveMode || !isApiMode,
     compact: isCompactTouchLayout,
     otherFirstRunDialogVisible:
-      shouldShowLookAndFeelAnnouncement || goalSetupMode || showPermissionModeSetup,
+      shouldShowLookAndFeelAnnouncement || goalSetupMode || showPermissionModeSetup || launch.holds,
   });
   const terminalToolsShownThisLoad = useLatchedTrue(shouldShowTerminalToolsAnnouncement);
   // The Plannotator Inbox announcement: after the terminal-tools one (never on
@@ -7153,7 +7242,8 @@ const App: React.FC = () => {
       shouldShowLookAndFeelAnnouncement
       || goalSetupMode
       || showPermissionModeSetup
-      || shouldShowTerminalToolsAnnouncement,
+      || shouldShowTerminalToolsAnnouncement
+      || launch.holds,
     earlierAnnouncementTakesThisLoad:
       terminalToolsShownThisLoad || (terminalToolsIntroPending && !isCompactTouchLayout),
   });
@@ -7182,7 +7272,8 @@ const App: React.FC = () => {
       || goalSetupMode
       || showPermissionModeSetup
       || shouldShowTerminalToolsAnnouncement
-      || inboxTakesThisLoad,
+      || inboxTakesThisLoad
+      || launch.holds,
   });
   const showAskSessionAnnouncement = useFirstRunAnnouncementWindow({
     pending: askSessionIntroPending,
@@ -7211,7 +7302,8 @@ const App: React.FC = () => {
         || showPermissionModeSetup
         || shouldShowTerminalToolsAnnouncement
         || showInboxAnnouncement
-        || showAskSessionAnnouncement,
+        || showAskSessionAnnouncement
+        || launch.holds,
       earlierAnnouncementMayShow:
         inboxTakesThisLoad
         || askSessionShownThisLoad
@@ -7230,18 +7322,19 @@ const App: React.FC = () => {
       || shouldShowTerminalToolsAnnouncement
       || showInboxAnnouncement
       || showAskSessionAnnouncement
-      || showAgentToolAnnouncement,
+      || showAgentToolAnnouncement
+      || launch.open,
     autoUpdateActive,
     suppressed: openedWithHash || isSharedSession || archive.archiveMode || !isApiMode,
   });
   // The "Star the repo" ask (approval "star-ask"): claimed once the page loads (the server stops on the decision),
   // shown on the done screen only, once a decision was sent (approved, feedback, done; never a closed session or goal
   // setup's answers), with the announcements' gates (never a shared, archive or read-only page, the share portal, or
-  // the VS Code webview). The server decides the rest.
+  // the VS Code webview), and never on a load that showed the launch dialog. The server decides the rest.
   const starAskFooter = useStarAskDoneScreen({
     ready: !isLoading,
     decided: (submitted === 'approved' || submitted === 'denied' || submitted === 'done') && !goalSetupMode,
-    eligible: isApiMode && !goalSetupMode && !isSharedSession && !archive.archiveMode && !isVSCodeWebview(),
+    eligible: isApiMode && !goalSetupMode && !isSharedSession && !archive.archiveMode && !isVSCodeWebview() && !launch.shownThisLoad,
   });
   // Read from the host alone, not agentToolOfferApplies: once "Turn it on"
   // succeeds the setting is on, and the open offer must stay to say so.
@@ -7606,7 +7699,7 @@ const App: React.FC = () => {
           onArchiveDone={archive.done}
           onTaterModeChange={handleTaterModeChange}
           onIdentityChange={handleIdentityChange}
-          onUIPreferencesChange={setUiPrefs}
+          onUIPreferencesChange={handleUIPreferencesChange}
           onPermissionModeChange={setPermissionMode}
           onOpenSettings={handleOpenSettings}
           onCloseSettings={handleCloseSettings}
@@ -7865,7 +7958,7 @@ const App: React.FC = () => {
                   <GoalSetupSurface
                     ref={goalSetupSurfaceRef}
                     bundle={goalSetupBundle}
-                    maxWidth={planMaxWidth}
+                    maxWidth={goalSetupMaxWidth(uiPrefs.planWidth)}
                     onActionStateChange={setGoalSetupAction}
                     onSubmitted={() => setSubmitted('approved')}
                   />
@@ -8475,6 +8568,9 @@ const App: React.FC = () => {
           }
           agentLabel={agentName}
           footer={starAskFooter}
+          links={callbackReturnLink && (submitted === 'approved' || submitted === 'denied')
+            ? [{ ...callbackReturnLink, sameTab: true }]
+            : undefined}
         />
 
         <LookAndFeelAnnouncementDialog
@@ -8484,6 +8580,9 @@ const App: React.FC = () => {
           onToggleGrid={(v) => configStore.set('gridEnabled', v)}
           onDismiss={dismissLookAndFeelAnnouncement}
         />
+
+        {/* The launch dialog: first on the load it is due; the others yield. */}
+        {launch.dialog}
 
         {/* One-time Plannotator TUI + Herdr Annotate announcement, shared with
             the code review editor. Renders only once the look-and-feel chooser

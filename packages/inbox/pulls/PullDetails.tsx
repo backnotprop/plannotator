@@ -82,7 +82,7 @@ export function reviewWords(all: readonly InboxPullReviewer[]) {
 
 const CheckMark = ({ state, quiet }: { state: InboxPullCheckState; quiet?: boolean }) =>
   state === 'pending' ? (
-    <span className="ib-prd-ring" aria-hidden="true" />
+    <span className="ib-prd-ring ib-prck-turn" aria-hidden="true" />
   ) : (
     <span className="ib-prd-cmark" data-state={quiet ? 'quiet' : state} aria-hidden="true">
       <Icon name={state === 'pass' ? 'checkCircle' : 'xCircle'} size={15} />

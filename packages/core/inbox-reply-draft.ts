@@ -19,7 +19,8 @@
  * held for this person's draft only. Nobody else sees them (no agent, phone
  * event, search or teammate) until a Send turns them into an attachment.
  */
-import type { InboxDraftPasted, InboxReplyDraft, InboxUpload } from './inbox-types';
+import type { InboxDraftFile, InboxDraftPasted, InboxReplyDraft, InboxReplyMention, InboxReplyQuote, InboxUpload } from './inbox-types';
+import { inboxReplyMentionTitles, remapReplyMentions, withoutInboxThreadMentions } from './inbox-thread-mention';
 
 /** A file as a draft save names it: the ref of bytes not sent yet, and for a long paste where it goes back in the words. */
 export interface ReplyDraftFileRef {
@@ -39,6 +40,7 @@ export interface ReplyDraftFileOps<F extends ReplyDraftFileRef = ReplyDraftFileR
   add: F[];
   remove: string[];
   place: { upload_id: string; pasted: InboxDraftPasted }[];
+  order?: string[];
 }
 
 export const NO_FILE_OPS: ReplyDraftFileOps = { add: [], remove: [], place: [] };
@@ -110,7 +112,12 @@ export function applyReplyDraftFileOps<F extends ReplyDraftFileRef>(
       return file;
     });
   const here = new Set(kept.map((file) => file.upload_id));
-  return [...kept, ...ops.add.filter((file) => !removed.has(file.upload_id) && !here.has(file.upload_id))];
+  const out = [...kept, ...ops.add.filter((file) => !removed.has(file.upload_id) && !here.has(file.upload_id))];
+  const rank = new Map((ops.order ?? []).map((id, index) => [id, index]));
+  const slots = out.flatMap((file, at) => (rank.has(file.upload_id) ? [at] : []));
+  const named = slots.map((at) => out[at]!).sort((a, b) => rank.get(a.upload_id)! - rank.get(b.upload_id)!);
+  slots.forEach((at, index) => (out[at] = named[index]!));
+  return out;
 }
 
 /**
@@ -121,6 +128,7 @@ export function rewordReplyDraftFileOps<F extends ReplyDraftFileRef>(ops: ReplyD
   if (from === to) return ops;
   const move = <P extends InboxDraftPasted>(pasted: P): P => ({ ...pasted, at: Math.max(0, Math.min(mapAnchor(from, to, pasted.at), to.length)) });
   return {
+    ...ops,
     add: ops.add.map((file) => (file.pasted ? { ...file, pasted: move(file.pasted) } : file)),
     remove: ops.remove,
     place: ops.place.map((entry) => ({ ...entry, pasted: move(entry.pasted) })),
@@ -131,7 +139,7 @@ export function rewordReplyDraftFileOps<F extends ReplyDraftFileRef>(ops: ReplyD
 export function diffReplyDraftFiles<F extends ReplyDraftFileRef>(before: readonly string[], after: readonly F[]): ReplyDraftFileOps<F> {
   const was = new Set(before);
   const now = new Set(after.map((file) => file.upload_id));
-  return { add: after.filter((file) => !was.has(file.upload_id)), remove: before.filter((id) => !now.has(id)), place: [] };
+  return { add: after.filter((file) => !was.has(file.upload_id)), remove: before.filter((id) => !now.has(id)), place: [], order: [...now] };
 }
 
 /**
@@ -151,7 +159,10 @@ export function composeReplyDraftFileOps<F extends ReplyDraftFileRef>(first: Rep
       ...then.add,
     ],
     remove: [...first.remove.filter((id) => !touched.has(id)), ...then.remove],
-    place: [...first.place.filter((entry) => !placed.has(entry.upload_id)), ...then.place],
+    // A place `then` gives, or for a file `then` removed or adds again, is `then`'s to say: `first`'s place (in its own,
+    // older words) would name a spot past the end of shorter words.
+    place: [...first.place.filter((entry) => !placed.has(entry.upload_id) && !touched.has(entry.upload_id)), ...then.place],
+    ...((then.order ?? first.order) ? { order: then.order ?? first.order } : {}),
   };
 }
 
@@ -184,12 +195,14 @@ export type ReplyDraftAfterSend<F> = { kind: 'unchanged' } | { kind: 'delete' } 
  *    draft of files only: never lost, at worst left behind.
  *  - It names an older version: the draft goes only while it holds exactly the
  *    sent words and only files the Send carried. Anything else is another
- *    window's newer work, and stays whole.
+ *    window's newer work, and stays whole. The sent words carry each thread
+ *    mention as a reference and a list (inbox-thread-mention.ts): they are
+ *    compared with the draft's words read the same way (each mention its title).
  * The files a Send carried also leave every other draft (they are attachments
  * now); the store does that apart from this rule.
  */
 export function settleReplyDraftAfterSend<F extends { upload_id: string; pasted?: InboxDraftPasted }>(
-  existing: Pick<InboxReplyDraft, 'body' | 'updated_at'> & { files?: readonly F[] },
+  existing: Pick<InboxReplyDraft, 'body' | 'updated_at' | 'mentions'> & { files?: readonly F[] },
   sent: { clearDraft: string; words?: string; uploads: readonly string[] },
 ): ReplyDraftAfterSend<F> {
   const files = existing.files ?? [];
@@ -201,9 +214,87 @@ export function settleReplyDraftAfterSend<F extends { upload_id: string; pasted?
     return { kind: 'files', files: left.map((file) => (file.pasted ? { ...file, pasted: { at: 0, preview: file.pasted.preview } } : file)) };
   }
   const words = sent.words;
-  const sameWords = words !== undefined && existing.body.trim() === words.trim() && (words.trim() !== '' || files.length > 0);
+  const asSent = (text: string) => withoutInboxThreadMentions(text).trim();
+  const sameWords =
+    words !== undefined &&
+    (existing.body.trim() === words.trim() || inboxReplyMentionTitles(existing.body, existing.mentions ?? []).trim() === asSent(words)) &&
+    (words.trim() !== '' || files.length > 0);
   if (!sameWords || !files.every((file) => carried.has(file.upload_id))) return { kind: 'unchanged' };
   return { kind: 'delete' };
+}
+
+/**
+ * The rules a save meets wherever the draft is kept: this Inbox's store (store.ts `saveReplyDraft`), and a linked
+ * machine's draft this Inbox answers for while that machine is away (inbox-machine-drafts.ts). One set, so a draft
+ * held here becomes there exactly what that machine's own store would have made of the same saves.
+ */
+/** A save's compare-and-set, as `checkReplyDraftConflict` reads it. */
+export interface ReplyDraftSaveBase {
+  /** The `updated_at` the writer last read (null: none). */
+  base: string | null;
+  /** The words the writer saved last: a draft still holding them is its own, whatever its `updated_at`. */
+  baseBody: string | null;
+  /** The upload ids the writer saved last (a whole-list save): its own draft must hold those too. */
+  baseFiles: readonly string[] | null;
+  allFiles: boolean;
+  /** The save names its file changes (every page since 0.28.47): only the words are compared. */
+  ops: boolean;
+}
+
+/**
+ * Why a save is refused (`draft_conflict`): the draft changed elsewhere since the writer read it. Null: it may go on.
+ * `uploadHeld`: whether an upload id is still an upload (a file a Send carried since is not, and left every draft).
+ */
+export function checkReplyDraftConflict(existing: InboxReplyDraft | null, save: ReplyDraftSaveBase, uploadHeld: (id: string) => boolean): string | null {
+  if ((existing?.updated_at ?? null) === save.base) return null;
+  if (save.baseBody !== null && existing !== null && existing.body === save.baseBody) {
+    if (save.ops || save.baseFiles === null) return null;
+    const seen = replyDraftFileIdsSeenBy(existing.files ?? [], save.allFiles);
+    const named = save.baseFiles.filter((id) => seen.includes(id) || uploadHeld(id));
+    if (seen.length === named.length && seen.every((id, index) => id === named[index])) return null;
+  }
+  return existing ? 'This reply changed in another window since you opened it.' : "This reply's draft was discarded or sent in another window.";
+}
+
+/**
+ * The draft's files after a save: its file changes applied to the files as they are (a long paste it neither adds
+ * nor places moves with the new words), or an older page's whole list (`replyDraftFilesAfterSave`).
+ */
+export function replyDraftFilesAfter<F extends ReplyDraftFileRef>(existing: InboxReplyDraft | null, existingFiles: readonly F[], body: string, change: { ops: ReplyDraftFileOps<F> } | { files: readonly F[]; allFiles: boolean }): F[] {
+  if ('ops' in change) return applyReplyDraftFileOps(existingFiles, change.ops, existing ? { from: existing.body, to: body } : undefined);
+  return replyDraftFilesAfterSave(existingFiles, [...change.files], change.allFiles);
+}
+
+/**
+ * The draft a save makes, its `updated_at` strictly later than the last one's (`at`, or a millisecond past the last).
+ * `recipients`: null keeps the draft's own. `quote`: null takes it away, undefined keeps it. `mentions`: undefined
+ * keeps the draft's own that still stand once its words become these (remapped, never matched).
+ */
+export function projectReplyDraft(
+  threadId: string,
+  existing: InboxReplyDraft | null,
+  next: { body: string; files: readonly InboxDraftFile[]; recipients?: readonly string[] | null; quote?: InboxReplyQuote | null; mentions?: readonly InboxReplyMention[] },
+  at: string,
+): InboxReplyDraft {
+  const updatedAt = existing && at <= existing.updated_at ? new Date(Date.parse(existing.updated_at) + 1).toISOString() : at;
+  const draft: InboxReplyDraft = { v: 1, thread_id: threadId, body: next.body, created_at: existing?.created_at ?? at, updated_at: updatedAt, ...(next.files.length > 0 ? { files: [...next.files] } : {}) };
+  const aimed = next.recipients ?? existing?.recipients ?? [];
+  if (aimed.length > 0) draft.recipients = [...aimed];
+  const quoted = next.quote === undefined ? (existing?.quote ?? null) : next.quote;
+  if (quoted) draft.quote = { ...quoted };
+  const mentioned = next.mentions ?? remapReplyMentions(existing?.mentions ?? [], existing?.body ?? '', next.body);
+  if (mentioned.length > 0) draft.mentions = mentioned.map((m) => ({ ...m }));
+  return draft;
+}
+
+/** How many characters of a reply draft the Drafts page shows. */
+export const REPLY_DRAFT_PREVIEW_MAX = 160;
+
+/** The words a Drafts row shows for a draft: its words, else its first file's (a long paste's first words, a name). */
+export function replyDraftPreview(draft: Pick<InboxReplyDraft, 'body' | 'files'> | null | undefined): string | null {
+  const first = draft?.files?.[0];
+  const words = (draft?.body.trim() || first?.pasted?.preview || first?.name || '').replace(/\s+/g, ' ').trim();
+  return words ? words.slice(0, REPLY_DRAFT_PREVIEW_MAX) : null;
 }
 
 /** A save as the window sends it to its draft store. */
@@ -229,6 +320,11 @@ export interface ReplyDraftSaveInput {
    * quote it has (a host or page that does not send one).
    */
   quote?: { of: string; words?: string } | null;
+  /**
+   * The threads mentioned in the words (approval "inbox-drag-threads"): each an id and the range its label holds
+   * (inbox-thread-mention.ts). Absent: the draft keeps those of its own that still stand in the new words.
+   */
+  mentions?: readonly InboxReplyMention[];
 }
 
 /**
@@ -241,7 +337,29 @@ export interface ReplyDraftStore {
   read(threadId: string): Promise<InboxReplyDraft | null>;
   /** `keepalive`: sent as the page goes; its answer may never be read. */
   save(threadId: string, input: ReplyDraftSaveInput, options: { keepalive: boolean }): Promise<{ draft: InboxReplyDraft | null }>;
-  discard(threadId: string): Promise<void>;
+  /**
+   * `base`: the version the person threw away (a store that holds the draft for another computer discards only that
+   * one there). `baseBody`: the words this window saved last (a save still on its way may land them under a newer
+   * version: still the one thrown away). `notLanded`: Discard mine after a conflict the last read offered (`notLanded`):
+   * only those words go.
+   */
+  discard(threadId: string, options?: { base?: string | null; baseBody?: string; notLanded?: string }): Promise<void>;
+  /**
+   * Words of the person's the last read of the thread found the draft does not hold (a store that holds the draft for
+   * another computer: a conflict met there, or words refused there). Absent or null: none.
+   */
+  notLanded?(threadId: string): ReplyDraftNotLanded | null;
+}
+
+/**
+ * A draft read's `not_landed` (a linked machine's thread only, inbox-machine-drafts.ts): the person's words the draft
+ * there does not hold (`conflict`: it changed there first), and `files` a held save added that it did not take.
+ */
+export interface ReplyDraftNotLanded {
+  words: string;
+  version: string;
+  conflict?: boolean;
+  files?: InboxDraftFile[];
 }
 
 /**

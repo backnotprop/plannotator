@@ -129,7 +129,7 @@ function buildSnippet(text: string, start: number, end: number): string {
   return `${prefix}${text.slice(snippetStart, snippetEnd)}${suffix}`;
 }
 
-export function findMatchesInIndex(index: SearchableLine[], query: string): ReviewSearchMatch[] {
+export function findMatchesInIndex(index: SearchableLine[], query: string, visiblePaths?: ReadonlySet<string>): ReviewSearchMatch[] {
   const trimmedQuery = query.trim();
   if (!trimmedQuery) return [];
 
@@ -137,6 +137,7 @@ export function findMatchesInIndex(index: SearchableLine[], query: string): Revi
   const matches: ReviewSearchMatch[] = [];
 
   index.forEach((line) => {
+    if (visiblePaths && !visiblePaths.has(line.filePath)) return;
     let fromIndex = 0;
     let matchCountForLine = 0;
 

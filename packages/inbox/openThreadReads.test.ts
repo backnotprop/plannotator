@@ -38,9 +38,9 @@ const settledOpen = (over: Partial<OpenThreadState> = {}): OpenThreadState => ({
   ...over,
 });
 
-const readFor = (events: (InboxEvent | null)[], open = settledOpen()) => {
+const readFor = (events: (InboxEvent | null)[], open = settledOpen(), applied = false) => {
   const batch = newRecordBatch();
-  for (const event of events) noteRecord(batch, event);
+  for (const event of events) noteRecord(batch, event, applied);
   return openThreadRead(batch, open);
 };
 
@@ -52,9 +52,9 @@ describe('which records read the open thread again', () => {
   });
 
   test("another thread's message, question and annotation do not", () => {
-    expect(readFor([message(OTHER)])).toBe('files');
-    expect(readFor([question(OTHER)])).toBe('files');
-    expect(readFor([annotation(OTHER)])).toBe('files');
+    expect(readFor([message(OTHER)])).toBe('none');
+    expect(readFor([question(OTHER)])).toBe('none');
+    expect(readFor([annotation(OTHER)])).toBe('none');
   });
 
   test('any project record reads it: a rename, a combine or a new project can change its header', () => {
@@ -79,7 +79,7 @@ describe('which records read the open thread again', () => {
     const batch = newRecordBatch();
     noteRecord(batch, message(OPEN));
     expect(openThreadRead(batch, settledOpen())).toBe('thread');
-    expect(openThreadRead(newRecordBatch(), settledOpen())).toBe('files');
+    expect(openThreadRead(newRecordBatch(), settledOpen())).toBe('none');
   });
 });
 
@@ -105,12 +105,41 @@ describe('an open thread whose view does not come from records alone is read on 
 
   test("its last read is older than the repo's freshness: a changed git origin reaches its links, as when every record read it", () => {
     expect(readFor(another, settledOpen({ loadedAt: 0, now: INBOX_REPO_TTL_MS + 1 }))).toBe('thread');
-    expect(readFor(another, settledOpen({ loadedAt: 0, now: INBOX_REPO_TTL_MS }))).toBe('files');
+    expect(readFor(another, settledOpen({ loadedAt: 0, now: INBOX_REPO_TTL_MS }))).toBe('none');
   });
 
   test("its project's repo not known yet (the server resolves it off the record path)", () => {
     expect(readFor(another, settledOpen({ loaded: { thread_id: OPEN, project: { repo: null } } }))).toBe('thread');
     expect(readFor(another, settledOpen({ loaded: { thread_id: OPEN, project: {} } }))).toBe('thread');
+  });
+
+  test('a project the server resolved to no git origin needs no read: its repo will not come with one', () => {
+    expect(readFor(another, settledOpen({ loaded: { thread_id: OPEN, project: { repo: null, repo_known: true } } }))).toBe('none');
+  });
+});
+
+describe('records the cache applied to the open thread: no read of it, its files when they can have moved', () => {
+  const later = { seq: 9, kind: 'message', id: OPEN, first: false, message: { id: OPEN, thread_id: OPEN } } as unknown as InboxEvent;
+  const applied = (events: [InboxEvent, boolean][], open = settledOpen()) => {
+    const batch = newRecordBatch();
+    for (const [event, files] of events) noteRecord(batch, event, true, files);
+    return openThreadRead(batch, open);
+  };
+
+  test("one that can have moved them (data/apply/record.ts recordMovesFiles): the files and waiting comments are read (the foot's count, a file gone)", () => {
+    expect(applied([[annotation(OPEN), true]])).toBe('files');
+    expect(applied([[later, false], [message(OPEN), true]])).toBe('files');
+  });
+
+  test('none that can: nothing of the open thread is read; nor for records of another thread', () => {
+    expect(applied([[later, false], [question(OPEN), false]])).toBe('none');
+    expect(applied([[annotation(OTHER), true]])).toBe('none');
+  });
+
+  test('a launched thread is read on every record: its run line ("Starting Pi again…") moves with no record', () => {
+    const launched = settledOpen({ loaded: { thread_id: OPEN, project: { repo: null, repo_known: true }, messages: [{ launch: { id: 'lch_1' } }] } });
+    expect(applied([[later, false]], launched)).toBe('thread');
+    expect(readFor([message(OTHER)], launched)).toBe('thread');
   });
 });
 
@@ -151,8 +180,8 @@ describe("the echo of this window's own question save", () => {
     expect(ownFor(OPEN, [project])).toBe('thread');
   });
 
-  test("with another thread's record, the open thread's files are read as before", () => {
-    expect(ownFor(OPEN, [message(OTHER)])).toBe('files');
+  test("with another thread's record, nothing of the open thread is read", () => {
+    expect(ownFor(OPEN, [message(OTHER)])).toBe('none');
   });
 
   test("a thread whose row only its read brings (not in the list), or another machine's, is read as before", () => {

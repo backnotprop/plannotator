@@ -31,6 +31,9 @@ const ROWS: [href: string, platform: "github" | "gitlab" | null, calls: boolean]
   ["http://gitlab.com/acme/api/-/merge_requests/1", null, false],
   ["https://gitlab.com:8443/acme/api/-/merge_requests/1", null, false],
   ["https://gitlab.com-evil.example/acme/api/-/merge_requests/1", null, false],
+  ["https://gitlab.com.evil.example/acme/api/-/merge_requests/1", null, false],
+  // A GitLab by its name is a GitLab, and still asked only when this computer's glab is signed in there.
+  ["https://gitlab-master.example.com/acme/api/-/merge_requests/1", "gitlab", false],
   ["https://git.acme.com/acme/api/-/blob/main/README.md", null, false],
   ["https://git.acme.com/acme/api/pull/1", null, false],
 ];

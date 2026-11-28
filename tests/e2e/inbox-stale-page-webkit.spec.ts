@@ -17,7 +17,7 @@
  * it names a folder. Runs in the playwright config's `webkit` project; needs the built apps (`bun run build:hook`).
  */
 
-import { expect, test, devices, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, devices, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';

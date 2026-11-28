@@ -13,12 +13,14 @@
  * everywhere at once and a session that ended keeps its name while the Inbox runs. The map has no prototype and is
  * read with `Object.hasOwn`, so a session id like "constructor" finds nothing.
  *
- * A name the person gave the agent (agents/agentNames.ts) is read here over the label its poll sends; the poll's
- * label is kept, so Reset name shows it as it is then.
+ * One name per session, the same ladder as the sidebar's (agents/model.ts `agentOwnName`): a name the person gave
+ * the agent in the Inbox (agents/agentNames.ts), else the label its poll sends, else the title its host generated
+ * (sessionTitles.ts). The poll's label is kept, so Reset name shows it as it is then.
  */
 import { useSyncExternalStore } from 'react';
 import { graphemesOf } from '@plannotator/core/inbox-format';
 import { agentNamesNow, onAgentNames } from './agents/agentNames';
+import { onSessionTitles, sessionTitlesNow } from './sessionTitles';
 
 export type SessionLabels = Readonly<Record<string, string>>;
 
@@ -31,19 +33,24 @@ const listeners = new Set<() => void>();
 
 function merge(): void {
   const names = agentNamesNow();
-  if (names.size === 0) {
+  const titles = sessionTitlesNow();
+  const untitled = Object.keys(titles).filter((session) => !Object.hasOwn(polled, session));
+  if (names.size === 0 && untitled.length === 0) {
     current = polled;
     return;
   }
   const out = Object.assign(Object.create(null), polled) as Record<string, string>;
+  for (const session of untitled) out[session] = titles[session]!;
   for (const [id, name] of names) out[id] = name;
   current = Object.freeze(out);
 }
 
-onAgentNames(() => {
+const remerge = () => {
   merge();
   for (const listener of listeners) listener();
-});
+};
+onAgentNames(remerge);
+onSessionTitles(remerge);
 
 /** The labels as a list read brought them; anything that is not a short string is dropped. Unchanged: no redraw. */
 export function setSessionLabels(next: unknown): void {
@@ -70,6 +77,11 @@ const snapshot = () => current;
 /** The labels now, outside React. */
 export function sessionLabelsNow(): SessionLabels {
   return current;
+}
+
+/** How many draws watch the labels (a list watches once, not once per row: RowSlot.tsx, RowAgents.tsx). */
+export function sessionLabelsWatchersForTests(): number {
+  return listeners.size;
 }
 
 /** The labels now, redrawn when a list read or a given name changes them. */

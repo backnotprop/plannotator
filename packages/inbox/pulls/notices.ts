@@ -3,6 +3,7 @@
  * says by cause. Never "Nothing open" while a host failed, a read was cut short, or a CLI could not ask.
  */
 import type { InboxPullsAnswer } from '@plannotator/core/inbox-types';
+import { TOOL_WORDS } from '@plannotator/core/problem-words';
 import { hostName } from './labels';
 import type { PullFilter } from './model';
 
@@ -35,6 +36,13 @@ function clisFor(host: string): Cli[] {
 }
 
 /**
+ * A host (or hosts, `many`) that didn't answer: its last read shown, or its pull requests not. The list's line, and a
+ * PR's page with nothing of it to show (routePull.ts).
+ */
+export const unansweredLine = (names: string, shown: boolean, many = false): string =>
+  `${names} didn't answer; ${shown ? `showing ${many ? 'their' : 'its'} last read.` : `${many ? 'their' : 'its'} pull requests aren't shown.`}`;
+
+/**
  * Why the list may be missing pull requests, one notice per cause: a host that didn't answer or asked to slow down
  * (its last read shown when there is one, else its PRs are not), a host whose searches found more than one read takes
  * ("Showing 100 of 133" when the searches were limited to the projects' repositories, else that not every one was
@@ -54,7 +62,7 @@ export function pullsNotices(model: Pick<InboxPullsAnswer, 'hosts' | 'clis' | 'u
       const many = hosts.length > 1;
       const head = error === 'unavailable' ? `${names} didn't answer` : `${names} asked to slow down`;
       const tail = shown ? `showing ${many ? 'their' : 'its'} last read.` : `${many ? 'their' : 'its'} pull requests aren't shown.`;
-      out.push({ key: `${error}:${shown}`, head, line: `${head}; ${tail}${error === 'rate_limited' && !shown ? ' Try again in a minute.' : ''}` });
+      out.push({ key: `${error}:${shown}`, head, line: error === 'unavailable' ? unansweredLine(names, shown, many) : `${head}; ${tail}${!shown ? ' Try again in a minute.' : ''}` });
     }
   }
   // Others (every open PR of the projects' repositories) is a read of its own: it failed while the person's own lists
@@ -101,12 +109,14 @@ export function pullsNotices(model: Pick<InboxPullsAnswer, 'hosts' | 'clis' | 'u
   for (const [key, { missing, clis, hosts }] of groups) {
     const names = joinAnd(clis);
     const where = joinAnd(hosts);
-    const head = missing
-      ? `${names} ${clis.length > 1 ? "aren't" : "isn't"} installed`
-      : clis.length > 1
-        ? `Neither ${clis.join(' nor ')} is signed in to ${where}`
-        : `${names} isn't signed in to ${where}`;
-    const line = missing ? `${head} here, so pull requests on ${where} aren't shown.` : `${head}, so ${hosts.length > 1 ? 'their' : 'its'} pull requests aren't shown.`;
+    // One CLI: the bold line the PR card and the hover cards say for the same state (problem-words.ts).
+    const head =
+      clis.length === 1
+        ? TOOL_WORDS[missing ? 'missing' : 'signed_out']({ cli: clis[0]!, host: where }).title
+        : missing
+          ? `${names} aren't installed`
+          : `Neither ${clis.join(' nor ')} is signed in to ${where}`;
+    const line = missing ? `${head}${clis.length === 1 ? '' : ' here'}, so pull requests on ${where} aren't shown.` : `${head}, so ${hosts.length > 1 ? 'their' : 'its'} pull requests aren't shown.`;
     out.push({ key, head, line });
   }
   return out;
@@ -135,7 +145,8 @@ export function pullsEmptyWords(
   if (unsigned.length > 0 && model.hosts.length === 0) {
     if (unsigned.every((n) => n.key.startsWith('unsigned:missing:'))) {
       const clis = [...new Set(unsigned.flatMap((n) => n.key.slice('unsigned:missing:'.length).split('+')))];
-      return { kind: 'missing', head: `${joinAnd(clis)} ${clis.length > 1 ? "aren't" : "isn't"} installed`, lines: [...unsigned.map((n) => n.line), SIGN_IN_LINE] };
+      const head = clis.length === 1 ? TOOL_WORDS.missing({ cli: clis[0] as Cli, host: '' }).title : `${joinAnd(clis)} aren't installed`;
+      return { kind: 'missing', head, lines: [...unsigned.map((n) => n.line), SIGN_IN_LINE] };
     }
     return { kind: 'signed-out', head: 'No signed-in GitHub or GitLab here', lines: [...unsigned.map((n) => n.line), SIGN_IN_LINE] };
   }

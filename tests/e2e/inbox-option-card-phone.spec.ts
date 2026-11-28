@@ -6,7 +6,8 @@
  * whole picture can always be seen, with no gap or overlap at the pan's stop.
  * Everything the fingers could do before still works: a pinch in and out (one
  * finger under the card included), a pan to all four edges at Actual size and
- * zoomed, a tall picture or a panorama zoomed below its Fit, a double tap, a
+ * zoomed, a tall picture zoomed below its Fit, a panorama whole at Fit (the owner's pick, 2026-11-19) and zoomed
+ * in to its far edge, a double tap, a
  * swipe between pictures and a drag down to close. A zoomed picture still
  * slides under the bars. Hide takes the card too and gives the picture the
  * whole screen, and so does the comment box's ⌄, the same gather into the
@@ -27,7 +28,7 @@
  * PNGs land in PLANNOTATOR_OPTION_CARD_SHOTS (default .local/proof/option-card-phone).
  */
 
-import { chromium, devices, expect, test, webkit, type Browser, type Locator, type Page } from '@playwright/test';
+import { chromium, devices, expect, test, webkit, type Browser, type Locator, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -191,10 +192,12 @@ async function panTo(page: Page, touch: Finger, side: 'top' | 'bottom' | 'left' 
   let last = await layout(page);
   const at = middle(last);
   for (let i = 0; i < 40; i++) {
-    // Sideways, a drag from the edge steps to the next file, and one that reaches the edge hands the rest of itself to
-    // the swipe: slowly, so it is no flick, and long enough for the picture to spring back before it is measured.
+    // No drag past the stop: sideways, a drag from the edge steps to the next file, and down, one at the top of a
+    // picture at Fit closes it (a flick, as these quick drags are once each move carries its own time). Sideways, one
+    // that reaches the edge hands the rest of itself to the swipe: slowly, so it is no flick, and long enough for the
+    // picture to spring back before it is measured.
     const sideways = dx !== 0;
-    const room = side === 'left' ? last.stage.left - last.image.left : side === 'right' ? last.image.right - last.stage.right : Infinity;
+    const room = { left: last.stage.left - last.image.left, right: last.image.right - last.stage.right, top: ceiling(last) - last.image.top, bottom: last.image.bottom - floor(last) }[side];
     if (room <= 0.5) break;
     await touch.down(at.x - dx / 2, at.y - dy / 2, dx, dy, sideways ? 20 : 6);
     await touch.up();
@@ -490,20 +493,23 @@ for (const { name, width, height } of [
       expect(small.scale).toBeLessThan(tall.scale);
       inTheClear(small);
 
-      // A panorama: Fit by its height, a pan to its far end, then below its Fit, the whole of it.
+      // A panorama on a phone (the owner's pick, 2026-11-19): whole at Fit, in the clear of the card; a spread zooms
+      // into it, and zoomed in, a pan reaches its far edge.
       await openChoice(page, url, thread, 'E');
       const pano = await layout(page);
+      await expect(zoomStage(page)).toHaveAttribute('data-image-zoom-stage', 'fit');
       inTheClear(pano);
-      expect(pano.image.width).toBeGreaterThan(pano.stage.width);
+      expect(pano.image.left, 'the whole width at Fit').toBeGreaterThanOrEqual(pano.stage.left - 0.5);
+      expect(pano.image.right, 'the whole width at Fit').toBeLessThanOrEqual(pano.stage.right + 0.5);
+      await shot(page, `${tag}-E-whole`);
+      await spread(page, middle(pano), 90, 320);
+      await settled(page);
+      await expect(zoomStage(page)).toHaveAttribute('data-image-zoom-stage', 'zoom');
+      const panoIn = await layout(page);
+      expect(panoIn.scale).toBeGreaterThan(pano.scale * 2);
+      expect(panoIn.image.width).toBeGreaterThan(panoIn.stage.width);
       const far = await panTo(page, touch, 'right');
-      expect(Math.abs(far.image.right - far.stage.right)).toBeLessThan(1);
-      for (let i = 0; i < 3; i++) {
-        await spread(page, at, 300, 60);
-        await settled(page, 120);
-      }
-      const wholePano = await layout(page);
-      expect(wholePano.scale).toBeLessThan(pano.scale);
-      expect(wholePano.image.width).toBeLessThanOrEqual(wholePano.stage.width + 0.5);
+      expect(Math.abs(far.image.right - far.stage.right), 'zoomed in, the right edge reaches the stage').toBeLessThan(1);
 
       // The picture standing up gets the room Hide gives, and the card goes with the tools.
       await openChoice(page, url, thread, 'C');
@@ -628,8 +634,9 @@ for (const [width, height] of [
       expect(last.top).toBe(recommended.top);
       await shot(page, `${width}x${height}-E-lean`);
 
-      // A swipe past the end (the panorama panned to its far end first) says it again, as the pane always has.
-      const l = await panTo(page, touch, 'right');
+      // A swipe past the end says it again, as the pane always has (on a phone the panorama is whole at Fit, so the
+      // swipe is the pane's at once).
+      const l = await layout(page);
       await touch.down(l.stage.right - 60, middle(l).y, -l.stage.width * 0.5, 0);
       await touch.up();
       await expect(page.locator('[data-step-live]')).toHaveText('Last option');

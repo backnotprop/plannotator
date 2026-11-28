@@ -3,7 +3,7 @@ import type { InboxLaunchRecord } from '@plannotator/core/inbox-types';
 import { shortLaunchModel } from '../compose/launchChoice';
 
 /** What was asked at launch, not what the agent reports: the Inbox reads no model back from it. */
-export function LaunchChoiceMeta({ launch }: { launch: Pick<InboxLaunchRecord, 'model' | 'effort'> }) {
+export function LaunchChoiceMeta({ launch }: { launch: Pick<InboxLaunchRecord, 'model' | 'effort' | 'primary_agent'> }) {
   const line = launchChoiceLine(launch, shortLaunchModel);
   if (!line) return null;
   return (

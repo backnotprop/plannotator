@@ -135,6 +135,8 @@ export function InlineReuseLayer({ bodyRef }: { bodyRef: RefObject<HTMLElement |
     const run = () => measure.current();
     const observer = new ResizeObserver(run);
     observer.observe(body);
+    const marks = new MutationObserver(run);
+    marks.observe(body, { subtree: true, attributeFilter: ['data-inline-image'] });
     const over = (event: Event) => {
       const target = event.target;
       if (target instanceof HTMLImageElement && target.hasAttribute('data-inline-image')) setHover(target.getAttribute('data-inline-image'));
@@ -147,6 +149,7 @@ export function InlineReuseLayer({ bodyRef }: { bodyRef: RefObject<HTMLElement |
     body.addEventListener('load', run, true);
     return () => {
       observer.disconnect();
+      marks.disconnect();
       body.removeEventListener('mouseover', over);
       body.removeEventListener('mouseout', out);
       body.removeEventListener('load', run, true);

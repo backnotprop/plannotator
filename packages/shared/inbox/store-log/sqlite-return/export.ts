@@ -3,7 +3,7 @@ import { Database } from "bun:sqlite";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { InboxLine } from "@plannotator/core/inbox-types";
-import { ANNOTATIONS_FILE, CARDS_FILE, INBOX_PROJECTS_DIR, INITIATIVES_FILE, MESSAGES_FILE, PROJECT_FILE, PULLS_FILE, QUESTIONS_FILE, SEQ_FLOOR_FILE, STEPS_FILE } from "../../schema";
+import { ANNOTATIONS_FILE, CARDS_FILE, INBOX_PROJECTS_DIR, INITIATIVES_FILE, MESSAGES_FILE, PROJECT_FILE, PULLS_FILE, QUESTIONS_FILE, SCHEDULED_FILE, SEQ_FLOOR_FILE, STEPS_FILE } from "../../schema";
 
 const FILE_OF: Record<InboxLine["kind"], string> = {
   project: PROJECT_FILE,
@@ -14,6 +14,7 @@ const FILE_OF: Record<InboxLine["kind"], string> = {
   steps: STEPS_FILE,
   thread_pull: PULLS_FILE,
   initiative: INITIATIVES_FILE,
+  scheduled: SCHEDULED_FILE,
 };
 
 const UNPLACED = "unplaced";
@@ -31,8 +32,8 @@ export function exportInboxDb(dbFile: string, outDir: string): { lines: number; 
     );
     for (const row of rows.iterate()) {
       const path =
-        row.kind === "initiative"
-          ? INITIATIVES_FILE
+        row.kind === "initiative" || row.kind === "scheduled"
+          ? FILE_OF[row.kind]
           : join(INBOX_PROJECTS_DIR, (row.project_id !== null ? keyOf.get(row.project_id) : undefined) ?? fallback, FILE_OF[row.kind]);
       const text = `{"v":${JSON.stringify(row.v)},"seq":${row.seq},"at":${JSON.stringify(row.at)},"kind":${JSON.stringify(row.kind)},"id":${JSON.stringify(row.subject_id)},"record":${row.data}}`;
       const list = files.get(path);

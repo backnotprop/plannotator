@@ -1,7 +1,7 @@
 /**
  * The list's filter (the owner, 2026-11-08: "the classic filter icon and nothing else in the header under any state.
  * A number badge can show and the filter icon can change color"; `components/ListFilter.tsx` draws it): which threads
- * the list shows, by project (several), by when the thread last changed (Today, the last 7 or 30 days, a range of
+ * the list shows, by project (several), by when the thread last changed (Today, the last 3, 7 or 30 days, a range of
  * days) and by agent (several). Each group narrows the list; picks inside one group widen it (billing-svc or web-app).
  *
  * A filter on the list the person reads, never a place: the sidebar's project stays a page of its own (its title, its
@@ -17,12 +17,40 @@
  * Not seen (one row, on or off): only the rows drawn bold, the row's `unread`. Not a Smart group: a row still waiting
  * on the person is seen once its news is.
  *
+ * Tags (approval "inbox-thread-tags", step 2): several, kept by id (listFilterTags.ts reads them against the live
+ * tags, across linked machines); on a tag's own list they step aside, as Project picks do on a project's page.
+ *
+ * Recent activity is not here: the menu's row turns on a view of the list (listRecentView.ts), never a pick. An older
+ * cookie's `recent: true` (when it was a pick) is read as nothing, so no one opens the Inbox stuck in it.
+ *
+ * Routines (the owner: "I should be able to filter routines in the main inbox list"): Routine threads, Other threads,
+ * either or both, as Has a PR and No PR are. A row is a routine's when it is the thread of one of this computer's
+ * routines (listFilterRoutines.ts, the row look's own rule). They apply only while Routines are on and read: off, the
+ * picks step aside (kept in the cookie, not counted) and come back when Routines do.
+ *
  * This file holds no routes or server calls, so another host can share the rule.
  */
 import { useSyncExternalStore } from 'react';
 import type { InboxListRow, InboxListSection, InboxThreadPullState } from '@plannotator/core/inbox-types';
 import { storage } from '@plannotator/ui/utils/storage';
 import { agentName } from './tags';
+
+/** A row's tags as the window reads them (threadTags.ts `rowTagsHere`): the filter's Tag group tests these. */
+export type RowTagsOf = (row: InboxListRow) => readonly string[];
+const ownTags: RowTagsOf = (row) => row.tags ?? [];
+
+/** The row is the thread of one of this computer's routines (listFilterRoutines.ts): the filter's Routine group tests it. */
+export type RowIsRoutine = (row: InboxListRow) => boolean;
+const noRoutine: RowIsRoutine = () => false;
+
+/** The Routine group's picks: a routine's own thread, or every other thread. */
+export type RoutinePick = 'routine' | 'other';
+const ROUTINE_PICKS: readonly RoutinePick[] = ['routine', 'other'];
+/** The menu's words, in order. */
+export const ROUTINE_OPTIONS: ReadonlyArray<{ value: RoutinePick; label: string }> = [
+  { value: 'routine', label: 'Routine threads' },
+  { value: 'other', label: 'Other threads' },
+];
 
 /**
  * The row's PRs' states, or [] for none. A row carries `pulls?: { count, headline: { key, state } }`
@@ -70,7 +98,8 @@ export const LIST_FILTER_COOKIE = 'plannotator-inbox-list-filter';
 
 /** A day as `YYYY-MM-DD`, in the window's own time zone. */
 export type LocalDay = string;
-export type UpdatedPick = 'today' | '7d' | '30d' | { from: LocalDay; to: LocalDay };
+type UpdatedPreset = 'today' | '3d' | '7d' | '30d';
+export type UpdatedPick = UpdatedPreset | { from: LocalDay; to: LocalDay };
 
 export interface ListFilter {
   /** Project ids; empty: every project. */
@@ -82,27 +111,37 @@ export interface ListFilter {
   pulls: readonly PullPick[];
   /** Only the rows drawn bold. */
   notSeen: boolean;
+  /** Tag ids; empty: every thread. */
+  tags: readonly string[];
+  /** Routine picks; empty: every thread. Apply only while Routines are on (`appliedFilter`'s `routinesOn`). */
+  routines: readonly RoutinePick[];
 }
 
-export const NO_LIST_FILTER: ListFilter = { projects: [], updated: null, agents: [], pulls: [], notSeen: false };
+export const NO_LIST_FILTER: ListFilter = { projects: [], updated: null, agents: [], pulls: [], notSeen: false, tags: [], routines: [] };
 
-/** The menu's words for the three set spans, in order; "Custom range…" follows them. */
-export const UPDATED_OPTIONS: ReadonlyArray<{ value: 'today' | '7d' | '30d'; label: string }> = [
+/** The menu's words for the preset spans, in order; "Custom range…" follows them. */
+export const UPDATED_OPTIONS: ReadonlyArray<{ value: UpdatedPreset; label: string }> = [
   { value: 'today', label: 'Today' },
+  { value: '3d', label: 'Last 3 days' },
   { value: '7d', label: 'Last 7 days' },
   { value: '30d', label: 'Last 30 days' },
 ];
 
 /**
- * The picks that apply where the list is: on a project's page (`scoped`) its Project picks step aside. How many of
- * them there are is the header's badge: one per ticked row of the menu.
+ * The picks that apply where the list is: on a project's page (`scoped`) its Project picks step aside, on a tag's
+ * list (`tagScoped`) its Tag picks, and while Routines are off or not read yet (`routinesOn` false) its Routine
+ * picks. How many of them there are is the header's badge: one per ticked row of the menu.
  */
-export function appliedFilter(filter: ListFilter, scoped: boolean): ListFilter {
-  return scoped && filter.projects.length > 0 ? { ...filter, projects: [] } : filter;
+export function appliedFilter(filter: ListFilter, scoped: boolean, tagScoped = false, routinesOn = false): ListFilter {
+  const projects = scoped && filter.projects.length > 0;
+  const tags = tagScoped && filter.tags.length > 0;
+  const routines = !routinesOn && filter.routines.length > 0;
+  if (!projects && !tags && !routines) return filter;
+  return { ...filter, ...(projects ? { projects: [] } : {}), ...(tags ? { tags: [] } : {}), ...(routines ? { routines: [] } : {}) };
 }
 
 export function pickCount(filter: ListFilter): number {
-  return filter.projects.length + filter.agents.length + (filter.updated ? 1 : 0) + filter.pulls.length + (filter.notSeen ? 1 : 0);
+  return filter.projects.length + filter.agents.length + (filter.updated ? 1 : 0) + filter.pulls.length + (filter.notSeen ? 1 : 0) + filter.tags.length + filter.routines.length;
 }
 
 /** Midnight of `day` (local), as ms. */
@@ -119,7 +158,7 @@ export function localDay(ms: number): LocalDay {
 
 /**
  * The span a pick keeps, as [from, to) in ms: Today from this midnight; the last 7 days from the midnight six days
- * before (today and the six before it), 30 the same; a range from its first day's midnight to the end of its last.
+ * before (today and the six before it), 3 and 30 the same; a range from its first day's midnight to the end of its last.
  * Calendar days, so a clock change is still one day.
  */
 export function updatedSpan(pick: UpdatedPick, now: number): [number, number] {
@@ -131,7 +170,7 @@ export function updatedSpan(pick: UpdatedPick, now: number): [number, number] {
   }
   const start = new Date(now);
   start.setHours(0, 0, 0, 0);
-  if (pick !== 'today') start.setDate(start.getDate() - (pick === '7d' ? 6 : 29));
+  if (pick !== 'today') start.setDate(start.getDate() - ({ '3d': 2, '7d': 6, '30d': 29 }[pick]));
   return [start.getTime(), Infinity];
 }
 
@@ -151,10 +190,10 @@ export function agentHost(row: Pick<InboxListRow, 'participants' | 'author' | 'a
   return hosts.find((host) => !!host && agentName(host) === name) ?? null;
 }
 
-type Group = 'projects' | 'updated' | 'agents' | 'pulls' | 'notSeen';
+type Group = 'projects' | 'updated' | 'agents' | 'pulls' | 'notSeen' | 'tags' | 'routines';
 
 /** The row is shown under `filter`; `skip` leaves one group out (a menu row's count: the other groups' picks). */
-export function rowMatches(row: InboxListRow, filter: ListFilter, now: number, skip?: Group): boolean {
+export function rowMatches(row: InboxListRow, filter: ListFilter, now: number, skip?: Group, tagsOf: RowTagsOf = ownTags, isRoutine: RowIsRoutine = noRoutine): boolean {
   if (skip !== 'projects' && filter.projects.length > 0 && !filter.projects.includes(row.project.id)) return false;
   if (skip !== 'updated' && filter.updated) {
     const [from, to] = updatedSpan(filter.updated, now);
@@ -164,6 +203,8 @@ export function rowMatches(row: InboxListRow, filter: ListFilter, now: number, s
   if (skip !== 'agents' && filter.agents.length > 0 && !rowAgentNames(row).some((name) => filter.agents.includes(name))) return false;
   if (skip !== 'pulls' && filter.pulls.length > 0 && !filter.pulls.some((pick) => rowPullMatches(row, pick))) return false;
   if (skip !== 'notSeen' && filter.notSeen && !rowNotSeen(row)) return false;
+  if (skip !== 'tags' && filter.tags.length > 0 && !tagsOf(row).some((id) => filter.tags.includes(id))) return false;
+  if (skip !== 'routines' && filter.routines.length > 0 && !filter.routines.includes(isRoutine(row) ? 'routine' : 'other')) return false;
   return true;
 }
 
@@ -173,9 +214,9 @@ export function rowMatches(row: InboxListRow, filter: ListFilter, now: number, s
  * Nothing picked: the same sections, untouched. `heldRead`: threads whose rows Not seen leaves where they are
  * (App.tsx: opened while bold, until the list settles), so opening a row never takes it out of a Not seen list.
  */
-export function filterListSections(sections: readonly InboxListSection[], filter: ListFilter, now: number, heldRead?: ReadonlySet<string>): InboxListSection[] {
+export function filterListSections(sections: readonly InboxListSection[], filter: ListFilter, now: number, heldRead?: ReadonlySet<string>, tagsOf?: RowTagsOf, isRoutine?: RowIsRoutine): InboxListSection[] {
   if (pickCount(filter) === 0) return sections as InboxListSection[];
-  return sections.map((section) => ({ ...section, threads: section.threads.filter((row) => rowMatches(row, filter, now, heldRead?.has(row.thread_id) ? 'notSeen' : undefined)) }));
+  return sections.map((section) => ({ ...section, threads: section.threads.filter((row) => rowMatches(row, filter, now, heldRead?.has(row.thread_id) ? 'notSeen' : undefined, tagsOf, isRoutine)) }));
 }
 
 /** `heldRead` once the list settles: only the thread open then stays held, and only when it was. */
@@ -185,9 +226,9 @@ export function settledHeldRead(held: ReadonlySet<string>, open: string | null):
 }
 
 /** How many rows a menu row would leave: that row's rule with the other groups' picks. */
-export function countWhere(rows: readonly InboxListRow[], filter: ListFilter, now: number, group: Group, test: (row: InboxListRow) => boolean): number {
+export function countWhere(rows: readonly InboxListRow[], filter: ListFilter, now: number, group: Group, test: (row: InboxListRow) => boolean, tagsOf?: RowTagsOf, isRoutine?: RowIsRoutine): number {
   let n = 0;
-  for (const row of rows) if (rowMatches(row, filter, now, group) && test(row)) n += 1;
+  for (const row of rows) if (rowMatches(row, filter, now, group, tagsOf, isRoutine) && test(row)) n += 1;
   return n;
 }
 
@@ -205,9 +246,10 @@ export function parseListFilter(raw: string | null): ListFilter {
     const value = JSON.parse(raw) as Record<string, unknown>;
     const u = value.updated as unknown;
     const updated: UpdatedPick | null =
-      u === 'today' || u === '7d' || u === '30d' ? u : u && typeof u === 'object' && isDay((u as { from?: unknown }).from) && isDay((u as { to?: unknown }).to) ? { from: (u as { from: string }).from, to: (u as { to: string }).to } : null;
+      u === 'today' || u === '3d' || u === '7d' || u === '30d' ? u : u && typeof u === 'object' && isDay((u as { from?: unknown }).from) && isDay((u as { to?: unknown }).to) ? { from: (u as { from: string }).from, to: (u as { to: string }).to } : null;
     const pulls = strings(value.pulls).filter((p): p is PullPick => (PULL_PICKS as readonly string[]).includes(p));
-    return { projects: strings(value.projects), updated, agents: strings(value.agents), pulls, notSeen: value.notSeen === true };
+    const routines = strings(value.routines).filter((p): p is RoutinePick => (ROUTINE_PICKS as readonly string[]).includes(p));
+    return { projects: strings(value.projects), updated, agents: strings(value.agents), pulls, notSeen: value.notSeen === true, tags: strings(value.tags), routines };
   } catch {
     return NO_LIST_FILTER;
   }
@@ -230,7 +272,7 @@ function safeGet(): string | null {
 export function writeListFilter(next: ListFilter): void {
   try {
     if (pickCount(next) === 0) storage.removeItem(LIST_FILTER_COOKIE);
-    else storage.setItem(LIST_FILTER_COOKIE, JSON.stringify({ projects: next.projects, updated: next.updated, agents: next.agents, pulls: next.pulls, notSeen: next.notSeen }));
+    else storage.setItem(LIST_FILTER_COOKIE, JSON.stringify({ projects: next.projects, updated: next.updated, agents: next.agents, pulls: next.pulls, notSeen: next.notSeen, tags: next.tags, routines: next.routines }));
   } catch {
     // A page with no cookies: the filter holds until it reloads.
   }

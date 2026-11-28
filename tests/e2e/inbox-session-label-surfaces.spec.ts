@@ -19,12 +19,12 @@
  * video (none when unset). SESSION_LABEL_SURFACES_BASELINE=1 runs the same world on an older binary
  * (PLANNOTATOR_E2E_BINARY) for the "before" pictures only, with no label checks.
  */
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { INBOX_BRIDGE_POLL_PATH } from '../../packages/shared/inbox/connection';
-import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
+import { E2E_GROUP_TIP_SEEN, inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
 
 const repo = resolve(__dirname, '../..');
@@ -217,7 +217,7 @@ test.beforeAll(async () => {
       inboxThemeChooser: { notNeededAt: '2026-10-01T10:00:00.000Z' },
       inboxSnoozeIntro: { shownAt: past },
       inboxBoardIntro: { shownAt: past },
-      inboxReveals: { lastShownAt: past },
+      inboxReveals: { ...E2E_GROUP_TIP_SEEN, lastShownAt: past },
     }),
   );
   const env = {

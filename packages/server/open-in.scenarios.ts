@@ -14,7 +14,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { createTestEnvironment } from "../../tests/helpers/environment";
 
 export interface OpenInScenarioServer {
@@ -30,7 +30,7 @@ export type StartOpenInScenarioServer = (
 ) => Promise<OpenInScenarioServer>;
 
 const HTML = "<!doctype html><html><body>open-in-scenario-app</body></html>";
-const LAUNCHERS = ["open", "xdg-open", "code"] as const;
+const LAUNCHERS = ["open", "xdg-open", "code", "webstorm"] as const;
 
 /** The JSON read whose payload advertises `serverSession`. */
 const FIRST_READ: Record<OpenInScenarioKind, string> = {
@@ -221,6 +221,65 @@ export function defineOpenInScenarios(runtime: string, start: StartOpenInScenari
         const answer = await send({ origin: `http://${host}` }, { filePath: "/etc/hosts", appId: "reveal", serverSession });
         expect(answer.status).toBe(403);
         expect(launches()).toEqual([]);
+      });
+
+      test("WebStorm opens the file at the given line on its CLI", async () => {
+        await setUp();
+        const answer = await send(
+          { origin: `http://${host}`, "sec-fetch-site": "same-origin" },
+          { filePath: docPath, appId: "webstorm", line: 42, serverSession },
+        );
+        expect(answer.status).toBe(200);
+        expect(answer.body).toEqual({ ok: true });
+        const lines = launches();
+        expect(lines.length).toBe(1);
+        if (process.platform === "darwin") {
+          // The app's own launcher takes the line: `open -na <app> --args --line n path`.
+          expect(lines[0].startsWith("open -na WebStorm --args --line 42 ")).toBe(true);
+          expect(lines[0].endsWith("/notes.md")).toBe(true);
+        } else {
+          expect(lines[0].startsWith("webstorm --line 42 ")).toBe(true);
+          expect(lines[0].endsWith("/notes.md")).toBe(true);
+        }
+      });
+
+      test.skipIf(kind !== "review" || process.platform !== "darwin")(
+        "Android Studio gets the review file through its launcher, with or without a selected line",
+        async () => {
+          await setUp();
+          const cases = [{ filePath: "build.gradle.kts", expectedLine: 1 }, { filePath: "Main Activity.kt", line: 42, expectedLine: 42 }];
+          const expected: string[] = [];
+          for (const { filePath, line, expectedLine } of cases) {
+            const file = join(dirname(docPath), filePath);
+            writeFileSync(file, "// Review fixture\n");
+            const answer = await send(
+              { origin: `http://${host}`, "sec-fetch-site": "same-origin" },
+              { filePath, appId: "android-studio", line, serverSession },
+            );
+            expect(answer.status).toBe(200);
+            expect(answer.body).toEqual({ ok: true });
+            expected.push(`open -na Android Studio --args --line ${expectedLine} ${filePath}`);
+          }
+          expect(launches().map((launched) => launched.replace(/ \/.*\//, " "))).toEqual(expected);
+        },
+      );
+
+      test("a line that is not a whole number above zero is dropped: the file opens at its top", async () => {
+        await setUp();
+        for (const line of [0, -3, 1.5, "42", null, 2 ** 60]) {
+          const answer = await send(
+            { origin: `http://${host}`, "sec-fetch-site": "same-origin" },
+            { filePath: docPath, appId: "webstorm", line, serverSession },
+          );
+          expect(answer.status).toBe(200);
+          expect(answer.body).toEqual({ ok: true });
+        }
+        const lines = launches();
+        expect(lines.length).toBe(6);
+        for (const launched of lines) {
+          expect(launched).not.toContain("--line");
+          expect(launched.endsWith("/notes.md")).toBe(true);
+        }
       });
     });
   }

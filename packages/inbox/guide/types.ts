@@ -1,7 +1,7 @@
 import type { GuideOverviewDiagram } from '@plannotator/core/guide';
 import type { GuideSnapshot } from '@plannotator/core/guide-format';
 import type { InboxFileContents } from '@plannotator/core/inbox-types';
-import type { ReactNode } from 'react';
+import type { ComponentType, ReactNode, RefObject } from 'react';
 import type { CodeAnnotation } from '@plannotator/ui/types';
 
 /**
@@ -27,8 +27,30 @@ export interface GuideReaderComments {
   onShowGlobalComment?: (id: string) => void;
 }
 
+/**
+ * Code review's image preview on changed images (review-editor's `ImageDiffPreview`, as its All files draws it) and its
+ * package changes card (`PackageChangesCard`): the reads of `/api/review-image` and `/api/package-changes` sent to the
+ * host's own routes (packages/inbox/reviewImages.ts), under a snapshot id of the host's own. A host names it with
+ * `ReaderPart` `images` (lazyParts.tsx), which the reader reads from `ReviewImagesContext`. Absent: an image's diff is
+ * the binary notice, and a package file has no card, as before.
+ */
+export interface GuideReaderImages {
+  snapshotId: string;
+  fetchImpl: typeof fetch;
+  /**
+   * Where a rendered Markdown file's pictures are read (review parity B3): code review's
+   * `/api/review-markdown-image?…` turned into the host's own route (review-editor's `MarkdownFilePreview` `imageUrl`).
+   */
+  markdownImageUrl: (url: string) => string;
+}
+
 export interface GuideReaderProps {
   snapshot: GuideSnapshot;
+  /**
+   * Drawn with each line comment's field (the Inbox's mic, FieldVoice): review-editor's `LineFeedbackToolsProvider`,
+   * set inside the reader so the window never imports review-editor itself. Absent or null: none.
+   */
+  lineFeedbackTools?: ComponentType<{ textareaRef: RefObject<HTMLTextAreaElement | null>; onBusyChange: (busy: boolean) => void }> | null;
   /** The reviewed ticks as the person left them (kept with the thread by the pane). */
   reviewed: readonly boolean[];
   onReviewedChange: (reviewed: boolean[]) => void;
@@ -48,7 +70,7 @@ export interface GuideReaderProps {
   viewed?: { files: ReadonlySet<string>; onToggle: (path: string) => void };
   /**
    * Choices for selected lines before the comment box (code review in the
-   * Inbox: Comment · Ask · Show me; review-editor's `DiffSelectionActions`).
+   * Inbox: Comment · Ask; review-editor's `DiffSelectionActions`).
    * Absent: a selection opens the comment box at once, as before.
    */
   selectionActions?: GuideSelectionActions;
@@ -66,6 +88,8 @@ export interface GuideReaderProps {
   bare?: boolean;
   /** Bare: Global comment and Split | Unified in this element of the host's (the PR review's strip), not above the files. */
   controlsHost?: HTMLElement | null;
+  /** Power Up's mark in this element of the host's (the PR page's row on a phone) instead of beside Global comment. */
+  powerUpHost?: HTMLElement | null;
   /** Reads one changed file's whole text, for the "N unmodified lines" arrows. Absent: the diffs show as they came. */
   fileContents?: (path: string, signal: AbortSignal, patch: string) => Promise<InboxFileContents>;
   /**
@@ -94,6 +118,10 @@ export interface GuideReaderProps {
    * comments: nothing counts, sends or posts them. Absent: none, as before.
    */
   lineNotes?: readonly GuideLineNote[];
+  /** The host's marks at the right edge of lines (the PR page: the risk bars), never over code. Absent: none. */
+  lineMarks?: readonly GuideLineMark[];
+  /** Hears the marks (hover, keyboard focus, a press): the PR page opens its card on them. */
+  onLineMark?: OnGuideLineMark;
   /**
    * What the host draws itself about whole files, in each file's header under its path (the PR page: other people's
    * folded comments on a whole file), so it stays with the header. Never comments, as `lineNotes`; something that
@@ -119,6 +147,23 @@ export interface GuideLineNote {
   key: string;
   render: () => ReactNode;
 }
+
+/** A mark at the right edge of a line (review-editor's `HostLineMark`, as the window's strict typecheck sees it). */
+export interface GuideLineMark {
+  /** Unique on the page: what `onLineMark` hands back. */
+  id: string;
+  filePath: string;
+  side: 'old' | 'new';
+  line: number;
+  /** Its accessible name. */
+  label: string;
+  /** Its look: CSS background declarations for its box (review-editor's `LINE_MARK_WIDTH` × one line). */
+  paint: string;  /** It opens a popup of this kind (`aria-haspopup`; `aria-expanded` is the host's to set while it is open). */
+  popup?: 'dialog';
+}
+
+/** review-editor's `OnHostLineMark`: a mark's id, what happened on it, its button, and where the pointer or focus went. */
+export type OnGuideLineMark = (id: string, event: 'enter' | 'leave' | 'focus' | 'blur' | 'press', button: HTMLButtonElement, related: EventTarget | null) => void;
 
 /** One thing the host draws about a whole file (review-editor's `HostFileNote`, as the window's strict typecheck sees it). */
 export interface GuideFileNote {
@@ -152,7 +197,6 @@ export interface GuideSelection {
 /** review-editor's `DiffSelectionActions`, as the window's strict typecheck sees it. */
 export interface GuideSelectionActions {
   onAsk?: (selection: GuideSelection) => void;
-  onShowMe?: (selection: GuideSelection) => void;
 }
 
 /** The surface's guide reader (SurfaceGuideReader.tsx): the sections (6.1), then one section per screen (6.2). */

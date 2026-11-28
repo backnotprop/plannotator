@@ -35,6 +35,8 @@ import {
   type DocumentTextSize,
 } from '../utils/documentTextSize';
 import { normalizeFontFamilyName } from '../utils/cssFontFamily';
+import type { PlanWidth } from '../utils/uiPreferences';
+import type { InputMethod } from '../types';
 import { storage } from '../utils/storage';
 import { isLookChoiceResolved } from '../utils/lookAndFeelAnnouncement';
 import { generateIdentity } from '../utils/generateIdentity';
@@ -121,6 +123,38 @@ function writeAgentSwitchCookies(choice: AgentSwitchChoice | null): void {
   // Custom with its name cleared: drop the old name, or the next read would
   // pair it with "custom" and switch to that old agent again.
   else if (choice.switchTo === 'custom') storage.removeItem(AGENT_SWITCH_CUSTOM_COOKIE);
+}
+
+/**
+ * One leaf of `displayOptions` in config.json: the plan / annotate Display
+ * settings and the markdown selection mode share that one server key, the way
+ * the diff options share `diffOptions`.
+ */
+function displayOption(sc: Record<string, unknown>, key: string): unknown {
+  const options = sc.displayOptions;
+  if (!options || typeof options !== 'object' || Array.isArray(options)) return undefined;
+  return (options as Record<string, unknown>)[key];
+}
+
+function parseBooleanCookie(key: string): boolean | undefined {
+  const v = storage.getItem(key);
+  return v === 'true' ? true : v === 'false' ? false : undefined;
+}
+
+function parsePlanWidth(v: unknown): PlanWidth | undefined {
+  return v === 'compact' || v === 'default' || v === 'wide' ? v : undefined;
+}
+
+/** `word` was a third method for a short while; its click is part of Select now (see utils/inputMethod). */
+function parseMarkdownInputMethod(v: unknown): InputMethod | undefined {
+  if (v === 'word') return 'drag';
+  return v === 'drag' || v === 'pinpoint' ? v : undefined;
+}
+
+export type DiffMinimapMode = 'auto' | 'always' | 'off';
+const DIFF_MINIMAP_MODES = ['auto', 'always', 'off'] as const;
+function isDiffMinimapMode(v: unknown): v is DiffMinimapMode {
+  return typeof v === 'string' && (DIFF_MINIMAP_MODES as readonly string[]).includes(v);
 }
 
 const DIFF_LINE_BG_INTENSITY_VALUES = ['subtle', 'normal', 'strong'] as const;
@@ -223,14 +257,22 @@ export const SETTINGS = {
       return v === 'true' ? true : v === 'false' ? false : undefined;
     },
     toCookie: (v: boolean) => storage.setItem('plannotator-grid-enabled', String(v)),
-    serverKey: undefined, fromServer: undefined, toServer: undefined,
+    // config.json's value wins over the cookie once init() runs. The first-run
+    // Grid/Clean chooser still decides from the cookie marker at mount.
+    serverKey: 'displayOptions',
+    fromServer: (sc: Record<string, unknown>) => {
+      const v = displayOption(sc, 'showGrid');
+      return typeof v === 'boolean' ? v : undefined;
+    },
+    toServer: (v: boolean) => ({ displayOptions: { showGrid: v } }),
   },
 
   /**
    * How strong the drop shadow under Mermaid diagram nodes is, 0..100, where
    * 100 is Mermaid 12's own default geometry. Default 70: the shipped neo look
    * with its halo toned down (the colour is always derived from the palette,
-   * see `utils/mermaidTheme`). Cookie-only, like the other display knobs.
+   * see `utils/mermaidTheme`). Synced to config.json like the other Display
+   * settings (`displayOptions.diagramShadow`).
    */
   diagramShadow: {
     defaultValue: DEFAULT_DIAGRAM_SHADOW as number,
@@ -244,13 +286,18 @@ export const SETTINGS = {
       return isDiagramShadow(parsed) ? parsed : undefined;
     },
     toCookie: (value: number) => storage.setItem('plannotator-diagram-shadow', String(value)),
-    serverKey: undefined, fromServer: undefined, toServer: undefined,
+    serverKey: 'displayOptions',
+    fromServer: (sc: Record<string, unknown>) => {
+      const v = displayOption(sc, 'diagramShadow');
+      return isDiagramShadow(v) ? v : undefined;
+    },
+    toServer: (value: number) => ({ displayOptions: { diagramShadow: value } }),
   },
 
   /**
    * The document's body text size in plan review and annotate, in px (#2066;
-   * see `utils/documentTextSize`). Default 15, today's size. Cookie-only, like
-   * the other display knobs; an unknown value reads as the default.
+   * see `utils/documentTextSize`). Default 15, today's size. Synced to
+   * config.json (`displayOptions.textSize`); an unknown value reads as the default.
    */
   documentTextSize: {
     defaultValue: DEFAULT_DOCUMENT_TEXT_SIZE as DocumentTextSize,
@@ -262,19 +309,115 @@ export const SETTINGS = {
     },
     toCookie: (value: DocumentTextSize) =>
       storage.setItem('plannotator-document-text-size', String(value)),
-    serverKey: undefined, fromServer: undefined, toServer: undefined,
+    serverKey: 'displayOptions',
+    fromServer: (sc: Record<string, unknown>) => {
+      const v = displayOption(sc, 'textSize');
+      return isDocumentTextSize(v) ? v : undefined;
+    },
+    toServer: (value: DocumentTextSize) => ({ displayOptions: { textSize: value } }),
   },
 
   /**
    * The document's font in plan review and annotate (#1657; see
    * `utils/documentFont`): a generic preset or an installed family name.
-   * Empty = the theme's font. Cookie-only, like Text size.
+   * Empty = the theme's font. Synced to config.json like Text size
+   * (`displayOptions.fontFamily`).
    */
   documentFontFamily: {
     defaultValue: '' as string,
     fromCookie: () =>
       normalizeFontFamilyName(storage.getItem('plannotator-document-font-family') ?? '') || undefined,
     toCookie: (value: string) => storage.setItem('plannotator-document-font-family', value),
+    serverKey: 'displayOptions',
+    // An empty string is a value here (the theme's font), so config.json can
+    // choose it over a cookie that names a family.
+    fromServer: (sc: Record<string, unknown>) => {
+      const v = displayOption(sc, 'fontFamily');
+      return typeof v === 'string' ? normalizeFontFamilyName(v) : undefined;
+    },
+    toServer: (value: string) => ({ displayOptions: { fontFamily: value } }),
+  },
+
+  /** Settings → Display → Auto-open Sidebar (the table of contents). Default ON. */
+  tocEnabled: {
+    defaultValue: true as boolean,
+    fromCookie: () => parseBooleanCookie('plannotator-toc-enabled'),
+    toCookie: (value: boolean) => storage.setItem('plannotator-toc-enabled', String(value)),
+    serverKey: 'displayOptions',
+    fromServer: (sc: Record<string, unknown>) => {
+      const v = displayOption(sc, 'autoOpenSidebar');
+      return typeof v === 'boolean' ? v : undefined;
+    },
+    toServer: (value: boolean) => ({ displayOptions: { autoOpenSidebar: value } }),
+  },
+
+  /** Settings → Display → Sticky Actions. Default ON. */
+  stickyActionsEnabled: {
+    defaultValue: true as boolean,
+    fromCookie: () => parseBooleanCookie('plannotator-sticky-actions-enabled'),
+    toCookie: (value: boolean) =>
+      storage.setItem('plannotator-sticky-actions-enabled', String(value)),
+    serverKey: 'displayOptions',
+    fromServer: (sc: Record<string, unknown>) => {
+      const v = displayOption(sc, 'stickyActions');
+      return typeof v === 'boolean' ? v : undefined;
+    },
+    toServer: (value: boolean) => ({ displayOptions: { stickyActions: value } }),
+  },
+
+  /** Settings → Display → Plan Width (see `utils/uiPreferences`). Default compact. */
+  planWidth: {
+    defaultValue: 'compact' as PlanWidth,
+    fromCookie: () => parsePlanWidth(storage.getItem('plannotator-plan-width')),
+    toCookie: (value: PlanWidth) => storage.setItem('plannotator-plan-width', value),
+    serverKey: 'displayOptions',
+    fromServer: (sc: Record<string, unknown>) => parsePlanWidth(displayOption(sc, 'planWidth')),
+    toServer: (value: PlanWidth) => ({ displayOptions: { planWidth: value } }),
+  },
+
+  /** Settings → Display → Tater Mode. Default OFF. */
+  taterMode: {
+    defaultValue: false as boolean,
+    fromCookie: () => parseBooleanCookie('plannotator-tater-mode'),
+    toCookie: (value: boolean) => storage.setItem('plannotator-tater-mode', String(value)),
+    serverKey: 'displayOptions',
+    fromServer: (sc: Record<string, unknown>) => {
+      const v = displayOption(sc, 'taterMode');
+      return typeof v === 'boolean' ? v : undefined;
+    },
+    toServer: (value: boolean) => ({ displayOptions: { taterMode: value } }),
+  },
+
+  /**
+   * The markdown surface's selection mode (the toolbar's Select / Pinpoint
+   * toggle). Same cookie as `utils/inputMethod`, which keeps reading it for
+   * hosts without a server; plan review and annotate read it here so
+   * config.json can supply it. The raw-HTML surface keeps its own expiring
+   * cookie and is not synced.
+   */
+  inputMethod: {
+    defaultValue: 'drag' as InputMethod,
+    fromCookie: () => parseMarkdownInputMethod(storage.getItem('plannotator-input-method')),
+    toCookie: (value: InputMethod) => storage.setItem('plannotator-input-method', value),
+    serverKey: 'displayOptions',
+    fromServer: (sc: Record<string, unknown>) =>
+      parseMarkdownInputMethod(displayOption(sc, 'inputMethod')),
+    toServer: (value: InputMethod) => ({ displayOptions: { inputMethod: value } }),
+  },
+
+  /**
+   * Show each rendered block's source lines in plan review and annotate
+   * (#1650). Default OFF: today's document with no gutter. Cookie-only, like
+   * Text size and Document font. `42` for one line, `42–45` for a span.
+   */
+  documentSourceLineNumbers: {
+    defaultValue: false as boolean,
+    fromCookie: () => {
+      const value = storage.getItem('plannotator-document-source-line-numbers');
+      return value === 'true' ? true : value === 'false' ? false : undefined;
+    },
+    toCookie: (value: boolean) =>
+      storage.setItem('plannotator-document-source-line-numbers', String(value)),
     serverKey: undefined, fromServer: undefined, toServer: undefined,
   },
 
@@ -619,6 +762,51 @@ export const SETTINGS = {
     toServer: (v: string) => ({ diffOptions: { fontFamily: v } }),
   },
 
+  diffSemantic: {
+    defaultValue: true as boolean,
+    fromCookie: () => {
+      const v = storage.getItem('plannotator-diff-semantic');
+      return v === 'true' ? true : v === 'false' ? false : undefined;
+    },
+    toCookie: (v: boolean) => storage.setItem('plannotator-diff-semantic', String(v)),
+    serverKey: 'diffOptions',
+    fromServer: (sc: Record<string, unknown>) => {
+      const v = (sc.diffOptions as Record<string, unknown> | undefined)?.semantic;
+      return typeof v === 'boolean' ? v : undefined;
+    },
+    toServer: (v: boolean) => ({ diffOptions: { semantic: v } }),
+  },
+
+  diffPowerUp: {
+    defaultValue: true as boolean,
+    fromCookie: () => {
+      const v = storage.getItem('plannotator-diff-power-up');
+      return v === 'true' ? true : v === 'false' ? false : undefined;
+    },
+    toCookie: (v: boolean) => storage.setItem('plannotator-diff-power-up', String(v)),
+    serverKey: 'diffOptions',
+    fromServer: (sc: Record<string, unknown>) => {
+      const v = (sc.diffOptions as Record<string, unknown> | undefined)?.powerUp;
+      return typeof v === 'boolean' ? v : undefined;
+    },
+    toServer: (v: boolean) => ({ diffOptions: { powerUp: v } }),
+  },
+
+  diffPowerUpMotion: {
+    defaultValue: 'still' as 'stream' | 'still',
+    fromCookie: () => {
+      const v = storage.getItem('plannotator-diff-power-up-motion');
+      return v === 'stream' || v === 'still' ? v : undefined;
+    },
+    toCookie: (v: 'stream' | 'still') => storage.setItem('plannotator-diff-power-up-motion', v),
+    serverKey: 'diffOptions',
+    fromServer: (sc: Record<string, unknown>) => {
+      const v = (sc.diffOptions as Record<string, unknown> | undefined)?.powerUpMotion;
+      return v === 'stream' || v === 'still' ? v : undefined;
+    },
+    toServer: (v: 'stream' | 'still') => ({ diffOptions: { powerUpMotion: v } }),
+  },
+
   diffHideWhitespace: {
     defaultValue: false as boolean,
     fromCookie: () => {
@@ -689,6 +877,17 @@ export const SETTINGS = {
       return isDiffLineBgIntensity(v) ? v : undefined;
     },
     toServer: (v: DiffLineBgIntensity) => ({ diffOptions: { lineBgIntensity: v } }),
+  },
+  diffMinimap: {
+    defaultValue: 'auto' as DiffMinimapMode,
+    fromCookie: () => {
+      const v = storage.getItem('plannotator-diff-minimap');
+      return isDiffMinimapMode(v) ? v : undefined;
+    },
+    toCookie: (v: DiffMinimapMode) => storage.setItem('plannotator-diff-minimap', v),
+    serverKey: undefined,
+    fromServer: undefined,
+    toServer: undefined,
   },
   /** Experimental: author suggestions by editing code in place in the review
    *  all-files view. Cookie-only (no server sync) while the feature is
@@ -824,6 +1023,25 @@ export const SETTINGS = {
       return value === undefined ? {} : { agentSwitch: value };
     },
   },
+  /**
+   * Whether an HTML page or live app opens in Annotate (pinpoint armed) or in
+   * Interact. Default on, as sessions always opened. Synced to config.json
+   * like the other Display settings (`displayOptions.htmlAnnotateOnStartup`),
+   * so every browser and computer that opens a session gets the same start.
+   */
+  htmlAnnotateOnStartup: {
+    defaultValue: true as boolean,
+    fromCookie: () => parseBooleanCookie('plannotator-html-annotate-on-startup'),
+    toCookie: (value: boolean) =>
+      storage.setItem('plannotator-html-annotate-on-startup', String(value)),
+    serverKey: 'displayOptions',
+    fromServer: (sc: Record<string, unknown>) => {
+      const v = displayOption(sc, 'htmlAnnotateOnStartup');
+      return typeof v === 'boolean' ? v : undefined;
+    },
+    toServer: (value: boolean) => ({ displayOptions: { htmlAnnotateOnStartup: value } }),
+  },
+
   /**
    * Where the annotate-mode Agent TUI docks: 'left' (where it always docked),
    * 'right', or 'hidden' (no slot until the user opens it for the session).

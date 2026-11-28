@@ -18,7 +18,7 @@
  * PLANNOTATOR_SEND_NOW_SHOTS when it names a folder.
  */
 
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';

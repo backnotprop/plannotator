@@ -22,7 +22,7 @@ import { inboxImageSrcResolver } from './images';
 
 const hasDom = typeof document !== 'undefined';
 const { MessageBody } = (hasDom ? await import('./components/Thread') : {}) as typeof import('./components/Thread');
-const { PrototypeWindow, PICK_CLOSE_MS, openingOption } = (hasDom ? await import('./components/PrototypeWindow') : {}) as typeof import('./components/PrototypeWindow');
+const { PrototypeWindow, PICK_CLOSE_MS, openingOption, followPrototypeLink, optionForLink } = (hasDom ? await import('./components/PrototypeWindow') : {}) as typeof import('./components/PrototypeWindow');
 
 let root: Root | null = null;
 let host: HTMLElement | null = null;
@@ -192,6 +192,116 @@ test.skipIf(!hasDom)('the window opens on the recommended page; ‹ › skip an 
     await act(async () => Bun.sleep(PICK_CLOSE_MS));
     expect(closed).toBe(1);
   } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+// A link in a prototype's page works as in a tab (the owner, 2026-11-11: "I should be able to click and navigate").
+// Before, the window's page handed every link to no one: its own switcher (`?variant=2`), a link to another
+// option's page and a link to another site all did nothing.
+test.if(hasDom)('a link in a prototype: the page itself with a query reloads it, or steps to the option at that query; another option steps; another site opens a tab', () => {
+  const dir = '/work/roster/proto';
+  const file = (id: string, name: string) => ({ id, path: `${dir}/${name}`, named_path: null, name, kind: 'html' }) as unknown as import('@plannotator/core/inbox-types').InboxAttachmentState;
+  const files = [file('a1', '1-names.html'), file('a3', '3-unfold.html')];
+  const reloads: Array<[string, string | undefined]> = [];
+  const frame = { reload: (search: string, hash?: string) => (reloads.push([search, hash]), true) };
+  const opened: string[] = [];
+  const steps: string[] = [];
+  // The window's options: 3-unfold.html at ?variant=4 is an option of its own; nothing else of it is.
+  const onOpenPage = (id: string, start: string) => {
+    const option = (id === 'a1' && start === '') || (id === 'a3' && start === '?variant=4#top');
+    if (option) steps.push(`${id}${start}`);
+    return option;
+  };
+  const realOpen = window.open;
+  window.open = ((url: string) => (opened.push(url), null)) as typeof window.open;
+  try {
+    const follow = (href: string) => followPrototypeLink(href, frame, { attachment: files[1]!, html: '<p>page</p>', attachments: files }, onOpenPage);
+    follow('?variant=2&n=3');
+    follow('3-unfold.html?variant=4#top');
+    follow('1-names.html');
+    follow('https://example.com/docs');
+    // Not attached and not an option: the window shows no other file, so nothing moves.
+    follow('2-faces.html');
+    follow('../../etc/passwd');
+    expect(reloads).toEqual([['?variant=2&n=3', '']]);
+    expect(steps).toEqual(['a3?variant=4#top', 'a1']);
+    expect(opened).toEqual(['https://example.com/docs']);
+  } finally {
+    window.open = realOpen;
+  }
+});
+
+// Two options showing one file at different queries (`Prototype: mock.html?variant=1`, `…?variant=2`): a link
+// steps to the option at exactly that query; with no option there, the page itself reloads in place (undefined).
+test.if(hasDom)('optionForLink: the option at that file and query, else the first option of another file', () => {
+  const page = (attachmentId: string, start: string) => ({ kind: 'file' as const, attachmentId, name: 'mock.html', start });
+  const option = (letter: string, p: ReturnType<typeof page> | null) => ({ label: letter, letter, lettered: false, recommended: false, page: p });
+  const options = [option('A', page('m', '?variant=1')), option('B', page('m', '?variant=2')), option('C', null), option('D', page('o', ''))];
+  const steps = [0, 1, 3];
+  expect(optionForLink(options, steps, 'm', '?variant=2', 0)).toBe(1);
+  expect(optionForLink(options, steps, 'm', '?variant=1', 1)).toBe(0);
+  // A query no option has: the page itself reloads with it.
+  expect(optionForLink(options, steps, 'm', '?variant=3', 0)).toBeUndefined();
+  // The page itself by name with nothing after it: stay (a fresh load in place).
+  expect(optionForLink(options, steps, 'm', '', 0)).toBeUndefined();
+  // Another file by name: its first option.
+  expect(optionForLink(options, steps, 'o', '', 0)).toBe(3);
+  expect(optionForLink(options, steps, 'm', '', 3)).toBe(0);
+});
+
+test.skipIf(!hasDom)("a public page: framed through the Inbox's wrapper with open in a new tab, a whole-page Comment saved on the site, and one line when it refuses frames", async () => {
+  const { prototypePageOf } = await import('./prototypes');
+  const live_sites = [
+    { id: 'liv_00000000000000aa', url: 'https://preview.example.com/a', web: true as const },
+    { id: 'liv_00000000000000bb', url: 'https://preview.example.com/b', web: true as const, framed: false as const },
+  ];
+  const options = ['A', 'B'].map((letter) => ({
+    label: letter,
+    letter,
+    lettered: false,
+    recommended: false,
+    page: prototypePageOf(`https://preview.example.com/${letter.toLowerCase()}`, { live_sites }, '/work'),
+  }));
+  const posted: { url: string; body: { annotation: { type: string; text: string } } }[] = [];
+  const settings = (window as unknown as { happyDOM: { settings: { disableIframePageLoading: boolean } } }).happyDOM.settings;
+  const loadedFrames = settings.disableIframePageLoading;
+  settings.disableIframePageLoading = true;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: string, init?: RequestInit) => {
+    posted.push({ url: String(url), body: JSON.parse(String(init?.body ?? '{}')) });
+    return new Response(JSON.stringify({ annotation: { id: 'x' } }), { headers: { 'Content-Type': 'application/json' } });
+  }) as unknown as typeof fetch;
+  try {
+    await mount(
+      <PrototypeWindow threadId={ID} options={options} start={0} shared={false} picked={[]} readOnly={false} records={[]} attachments={[]} onSaved={() => {}} onPick={() => {}} onClose={() => {}} />,
+    );
+    const frame = host!.querySelector<HTMLIFrameElement>('[data-prototype-web]')!;
+    expect(frame.getAttribute('src')).toBe(`/api/inbox/threads/${ID}/live/liv_00000000000000aa/frame`);
+    expect(host!.querySelector('[data-prototype-open]')!.getAttribute('href')).toBe('https://preview.example.com/a');
+    expect(host!.querySelector('[data-prototype-annotate]')).toBeNull();
+
+    await act(async () => host!.querySelector<HTMLButtonElement>('[data-prototype-comment]')!.click());
+    const box = document.querySelector<HTMLTextAreaElement>('[data-comment-popover] textarea')!;
+    const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(box), 'value')!.set!;
+    await act(async () => {
+      setter.call(box, 'Pay should be bigger');
+      box.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => {
+      box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true, cancelable: true }));
+    });
+    expect(posted.map((p) => [p.url, p.body.annotation.type, p.body.annotation.text])).toEqual([
+      [`/api/inbox/threads/${ID}/live/liv_00000000000000aa/annotations`, 'GLOBAL_COMMENT', 'Pay should be bigger'],
+    ]);
+
+    await act(async () => host!.querySelector<HTMLButtonElement>('[data-prototype-step="next"]')!.click());
+    expect(host!.querySelector('[data-prototype-web]')).toBeNull();
+    const line = host!.querySelector('[data-prototype-not-framed]')!;
+    expect(line.textContent).toContain('preview.example.com');
+    expect(line.querySelector('a')!.getAttribute('href')).toBe('https://preview.example.com/b');
+  } finally {
+    settings.disableIframePageLoading = loadedFrames;
     globalThis.fetch = realFetch;
   }
 });

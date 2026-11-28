@@ -45,6 +45,7 @@ export default defineConfig({
       // Highlights, Pierre's second highlighter (WASM), never runs. See build/pierre-highlights-stub.ts.
       "@pierre/highlights/themes/loader": path.resolve(__dirname, "../../build/pierre-highlights-stub.ts"),
       "@pierre/highlights": path.resolve(__dirname, "../../build/pierre-highlights-stub.ts"),
+      "@pierre/patches": path.resolve(__dirname, "../../build/pierre-patches-stub.ts"),
       "katex/dist/katex.min.css": path.resolve(__dirname, "../guides-show/viewer/stubs/empty.css"),
       // Overview diagrams are Mermaid only: Graphviz's 1.3 MB engine stays out (as in the webview build).
       "@viz-js/viz": path.resolve(__dirname, "src/guides/webview/stubs/viz.ts"),

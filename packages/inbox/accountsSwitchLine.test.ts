@@ -42,7 +42,7 @@ describe('switchLine', () => {
 
   test('every other answer is its own line', () => {
     expect(switchLine({ state: 'not_installed' }, notShown, PERSONAL)).toBe('not_installed');
-    for (const reason of ['changed', 'renumbered', 'busy', 'run_failed', 'bad_output', 'unknown_schema', 'owner_only', 'unreachable'] as const) {
+    for (const reason of ['changed', 'renumbered', 'busy', 'run_failed', 'bad_output', 'unknown_schema', 'unreachable'] as const) {
       expect(switchLine({ state: 'failed', reason }, notShown, PERSONAL)).toBe(reason);
     }
   });

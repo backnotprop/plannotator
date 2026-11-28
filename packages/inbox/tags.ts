@@ -11,7 +11,7 @@
  * "Claude Code (plannotator)" in another one, and a number after those when
  * two would still read the same.
  */
-import { INBOX_HOST_NAMES, type InboxMessageWire, type InboxParticipant, type InboxTag, type InboxThread } from '@plannotator/core/inbox-types';
+import { INBOX_AGENT_LABELS, INBOX_HOST_NAMES, inboxRemovedNow, type InboxMessageWire, type InboxParticipant, type InboxTag, type InboxThread } from '@plannotator/core/inbox-types';
 import { sanitizeMentionLabel, type MentionPerson } from '@plannotator/ui/utils/mentions';
 import type { TagMode, TaggableModel, TaggableSession } from './api';
 import { shortLabel } from './sessionLabels';
@@ -30,6 +30,10 @@ export interface TagOption {
   host: string | null;
   /** Its readable label: the `@<label>` token and the chip. */
   label: string;
+  /** The name the person gave it in the Inbox: what the picker row leads with. Never in the token (an agent never sees it). */
+  name?: string;
+  /** The label with its session's whole title, for the row's hover: `label` cuts a long one. Null when untitled. */
+  full?: string | null;
   /** The agent's own name ("Claude Code", "Pi", an MCP agent's name). */
   agent: string;
   /** The picker row's second line: "billing-api · working · since 9:14 AM". */
@@ -43,19 +47,44 @@ export interface TagOption {
   taggable: boolean;
   /** The project it works in, or null. */
   project: string | null;
+  /** A session on another linked computer (packages/server/inbox-far-tags.ts): that computer's Inbox id, sent with the tag. */
+  machine?: string;
+}
+
+/**
+ * A row of another linked computer's agent in the taggable answer, and the answer's own computer (the thread's),
+ * present only when it lists agents of more than one computer (packages/server/inbox-tags.ts).
+ */
+type FarTaggable = TaggableSession & { machine?: string; machine_name?: string };
+type FarTaggableModel = TaggableModel & { machine?: { id: string; name: string } };
+
+/** The computer a row's agent runs on when the list spans computers ("MacBook"), else null. */
+function computerOf(model: FarTaggableModel, session: FarTaggable): string | null {
+  if (!model.machine) return null;
+  return session.machine ? (session.machine_name ?? null) : model.machine.name;
 }
 
 /** The person's name for an agent: an MCP agent's own name, else its host's, else "An agent". */
 export function agentName(host: string | null | undefined, name?: string | null): string {
-  if (name) return name;
+  // An agent that named itself by its host's id ("gemini") reads by its product's name ("Gemini CLI").
+  if (name) return knownAgentLabel(name) ?? name;
   // Own keys only: a host string like "constructor" is its own name, never Object's.
-  if (host) return Object.hasOwn(INBOX_HOST_NAMES, host) ? INBOX_HOST_NAMES[host]! : host;
+  if (host) return Object.hasOwn(INBOX_HOST_NAMES, host) ? INBOX_HOST_NAMES[host]! : (knownAgentLabel(host) ?? host);
   return 'An agent';
 }
 
-function stateWords(session: TaggableSession, time: (iso: string) => string): string {
+/** The product name of a known agent id in any case ("gemini" → "Gemini CLI"), else null. */
+function knownAgentLabel(id: string): string | null {
+  const key = id.toLowerCase();
+  if (Object.hasOwn(INBOX_AGENT_LABELS, key)) return INBOX_AGENT_LABELS[key as keyof typeof INBOX_AGENT_LABELS] ?? null;
+  return null;
+}
+
+function stateWords(session: TaggableSession, time: (iso: string) => string, computer: string | null = null): string {
   const parts: string[] = [];
-  if (session.project) parts.push(session.project.name);
+  // "billing-api · MacBook" once the list spans computers, as the list names another machine's project.
+  if (session.project) parts.push(computer ? `${session.project.name} · ${computer}` : session.project.name);
+  else if (computer) parts.push(computer);
   if (session.kind === 'mcp') {
     parts.push(session.wrote_thread ? `wrote here at ${time(session.last_at)}` : `seen ${time(session.last_at)}`);
     return parts.join(' · ');
@@ -74,6 +103,7 @@ function stateWords(session: TaggableSession, time: (iso: string) => string): st
  */
 export function tagOptions(model: TaggableModel | null, ownerSession: string | null, threadProjectId: string | null, time: (iso: string) => string): TagOption[] {
   if (!model || !Array.isArray(model.sessions)) return [];
+  const farModel: FarTaggableModel = model;
   const owner = ownerSession ?? model.owner?.session ?? null;
   const live = model.sessions.filter((s) => s.kind === 'live');
   const readers = model.sessions.filter((s) => s.kind === 'mcp');
@@ -96,6 +126,9 @@ export function tagOptions(model: TaggableModel | null, ownerSession: string | n
     // Named sessions count too, so an unnamed one beside them reads exactly as it did.
     const sameAgent = sorted.filter((o) => (o.taggable || o === s) && agentName(o.host, o.kind === 'mcp' ? o.name : null) === agent);
     if (s.session === owner || sameAgent.length < 2) return agent;
+    // Another computer's agent reads by its computer: "Claude Code (MacBook)".
+    const far = (s as FarTaggable).machine ? computerOf(farModel, s) : null;
+    if (far) return `${agent} (${far})`;
     const here = !s.project || s.project.id === threadProjectId;
     return here ? `${agent} (another session)` : `${agent} (${s.project!.name})`;
   };
@@ -120,13 +153,15 @@ export function tagOptions(model: TaggableModel | null, ownerSession: string | n
       id: s.session,
       host: s.host,
       label,
+      full: own ? sanitizeMentionLabel(s.label as string) + label.slice(own.length) : null,
       agent,
-      detail: stateWords(s, time),
+      detail: stateWords(s, time, computerOf(farModel, s)),
       group: groupOf(s),
       owner: s.session === owner,
       wakes: s.kind === 'live',
       taggable: s.taggable,
       project: s.project?.name ?? null,
+      ...((s as FarTaggable).machine ? { machine: (s as FarTaggable).machine } : {}),
     };
   });
 }
@@ -146,7 +181,10 @@ export function tagsToSend(ids: readonly string[], options: readonly TagOption[]
     if (id === ownerSession || out.some((t) => t.session === id)) continue;
     const option = options.find((o) => o.id === id);
     const mode = modes.get(id);
-    out.push({ ...(option ? { host: option.host, session: id, label: option.label } : { session: id }), ...(mode && mode !== 'ask' ? { mode } : {}) });
+    out.push({
+      ...(option ? { host: option.host, session: id, label: option.label, ...(option.machine ? { machine: option.machine } : {}) } : { session: id }),
+      ...(mode && mode !== 'ask' ? { mode } : {}),
+    });
   }
   return out;
 }
@@ -158,6 +196,8 @@ export interface TagToSend {
   label?: string;
   /** Add or Hand off (the reply box's line); absent: an Ask. */
   mode?: TagMode;
+  /** A session on another linked computer: that computer's Inbox id. */
+  machine?: string;
 }
 
 /**
@@ -214,9 +254,11 @@ export function effectiveTagMode(tagged: readonly TagOption[], chosen: TagMode):
  * Its `to` owns the thread now. Null: no hand-off.
  */
 export function activeHandoff(thread: InboxThread): InboxMessageWire | null {
+  // A hand-off to an agent the person removed from the thread since no longer holds it (core inbox-removed.ts).
+  const removed = inboxRemovedNow(thread.messages);
   for (let index = thread.messages.length - 1; index >= 0; index--) {
     const message = thread.messages[index]!;
-    if (message.author.kind === 'person' && message.handoff && !message.handoff.undone_at && message.to) return message;
+    if (message.author.kind === 'person' && message.handoff && !message.handoff.undone_at && message.to) return removed.has(message.to.session) ? null : message;
     // A later reply took over from the session that ended: the thread is no longer that hand-off's.
     if (message.took_over) return null;
   }
@@ -319,12 +361,14 @@ export function messageTags(message: InboxMessageWire): InboxTag[] {
 
 /**
  * The agent sessions a thread involves, in order of first appearance (the
- * row's `participants`, worked out the same way for the thread head).
+ * row's `participants`, worked out the same way for the thread head). An
+ * agent the person removed is not one until they write to it again (core inbox-removed.ts).
  */
 export function threadParticipants(thread: InboxThread): InboxParticipant[] {
   const out: InboxParticipant[] = [];
+  const removed = inboxRemovedNow(thread.messages);
   const add = (host: string | null, session: string | null | undefined, name?: string | null) => {
-    if (!session || out.some((p) => p.session === session)) return;
+    if (!session || removed.has(session) || out.some((p) => p.session === session)) return;
     out.push({ host, session, ...(name ? { name } : {}) });
   };
   for (const message of thread.messages) {

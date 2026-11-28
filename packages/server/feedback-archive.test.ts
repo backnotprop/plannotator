@@ -169,7 +169,7 @@ describe("code review submissions are archived", () => {
       expect(sidecarBody(dataDir, records[0])).toContain("parse() still drops the null case.");
 
       // The record exists, so the draft may go.
-      expect((await fetch(`${server.url}/api/draft`)).status).toBe(404);
+      expect((await fetch(`${server.url}/api/draft`)).status).toBe(204);
     } finally {
       server.stop();
     }
@@ -324,7 +324,7 @@ describe("code review submissions are archived", () => {
       });
       expect(response.status).toBe(200);
       expect(existsSync(feedbackDir(dataDir))).toBe(false);
-      expect((await fetch(`${server.url}/api/draft`)).status).toBe(404);
+      expect((await fetch(`${server.url}/api/draft`)).status).toBe(204);
     } finally {
       server.stop();
     }

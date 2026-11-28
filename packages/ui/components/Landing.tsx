@@ -359,7 +359,7 @@ export const Landing: React.FC<LandingProps> = ({ onEnter, shareBaseUrl }) => {
                   <div className="p-2 rounded-md border border-accent/30 bg-accent/5">
                     <div className="flex items-center gap-1 mb-1.5">
                       <div className="w-3 h-3 rounded bg-accent/20" />
-                      <span className="text-[9px] font-semibold text-accent uppercase">
+                      <span className="text-[9px] font-semibold text-accent-text uppercase">
                         Comment
                       </span>
                     </div>

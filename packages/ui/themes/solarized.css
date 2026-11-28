@@ -34,17 +34,19 @@
 
 .theme-solarized.light {
   --background: #fdf6e3;
-  --foreground: #657b83;
+  /* Was #657b83: base01 darkened at the same hue, so body text stays clearly stronger than the muted text (about 7:1 on the background). */
+  --foreground: #47565c;
   --card: #eee8d5;
-  --card-foreground: #657b83;
+  --card-foreground: #47565c;
   --popover: #eee8d5;
-  --popover-foreground: #657b83;
+  --popover-foreground: #47565c;
   --primary: #268bd2;
   --primary-foreground: #fdf6e3;
   --secondary: #eee8d5;
   --secondary-foreground: #586e75;
   --muted: #ddd6c1;
-  --muted-foreground: #93a1a1;
+  /* Was #93a1a1: darker, same hue and chroma, so it reads at 4.5:1 on the background. */
+  --muted-foreground: #667373;
   --accent: #2aa198;
   --accent-foreground: #002b36;
   --destructive: #dc322f;

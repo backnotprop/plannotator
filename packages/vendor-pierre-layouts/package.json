@@ -1,0 +1,23 @@
+{
+  "name": "@plannotator/vendor-pierre-layouts",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "A pinned, unmodified mirror of @pierre/layouts (unpublished), behind a thin wrapper. See README.md.",
+  "license": "Apache-2.0",
+  "sideEffects": [
+    "./src/styles.css",
+    "./upstream/src/styles.css"
+  ],
+  "exports": {
+    ".": "./src/index.ts",
+    "./react": "./src/react.ts",
+    "./styles.css": "./src/styles.css"
+  },
+  "dependencies": {
+    "react": "^19.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0"
+  }
+}

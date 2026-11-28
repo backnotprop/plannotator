@@ -41,26 +41,32 @@ export interface DiffLayoutToggleProps extends Omit<React.ButtonHTMLAttributes<H
   onChange: (next: DiffLayout) => void;
   /** A native tooltip (`title`). Off when the host wraps the button in its own tooltip. Default: on. */
   nativeTitle?: boolean;
+  splitTooNarrow?: boolean;
 }
+
+const SPLIT_TOO_NARROW_TIP = 'Split needs a wider pane. Showing Unified.';
 
 /** Other button props (a tooltip trigger's handlers) and the ref reach the button. */
 export const DiffLayoutToggle = React.forwardRef<HTMLButtonElement, DiffLayoutToggleProps>(function DiffLayoutToggle(
-  { value, onChange, nativeTitle = true, onClick, ...rest },
+  { value, onChange, nativeTitle = true, splitTooNarrow = false, onClick, className, ...rest },
   ref,
 ) {
   const next: DiffLayout = value === 'split' ? 'unified' : 'split';
+  const tooNarrow = splitTooNarrow && value === 'split';
   return (
     <button
       type="button"
       {...rest}
       ref={ref}
+      className={tooNarrow ? `${className ?? ''} opacity-50` : className}
       onClick={(event) => {
         onClick?.(event);
         if (!event.defaultPrevented) onChange(next);
       }}
-      aria-label={next === 'unified' ? 'Switch to Unified view' : 'Switch to Split view'}
-      title={nativeTitle ? diffLayoutToggleTip(value) : undefined}
+      aria-label={tooNarrow ? SPLIT_TOO_NARROW_TIP : next === 'unified' ? 'Switch to Unified view' : 'Switch to Split view'}
+      title={nativeTitle ? (tooNarrow ? SPLIT_TOO_NARROW_TIP : diffLayoutToggleTip(value)) : undefined}
       data-diff-layout-toggle={value}
+      data-split-too-narrow={tooNarrow || undefined}
     >
       <DiffLayoutIcon layout={value} />
     </button>

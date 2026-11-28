@@ -24,7 +24,6 @@ const WINDOWS = JSON.parse(readFileSync(join(FIXTURES, "usage-windows.json"), "u
 
 const MAGIC = "macbook-pro.tail0000.ts.net";
 const OWNER = "ramos@example.com";
-const GUEST = "guest@example.com";
 const FAR = "ibx_01K00000000000000000000002";
 
 const roots: string[] = [];
@@ -68,7 +67,6 @@ async function world({ cswap = { stdout: LIST }, cswapSwitch, timeoutMs, hardLim
   mkdirSync(home);
   mkdirSync(bin);
   process.env.PLANNOTATOR_DATA_DIR = dataDir;
-  if (tailnet) writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTailscaleAllow: [GUEST] }));
   if (cswap) writeFakeCswap(bin, cswap, cswapSwitch);
   if (linkedTo) {
     const link = { id: FAR, name: "Mini", token: "tok_x", transport: { kind: "tailnet", url: linkedTo }, device_id: null, linked_at: "2026-11-01T00:00:00Z" };
@@ -480,22 +478,11 @@ describe.skipIf(process.platform === "win32")("one read at a time", () => {
 });
 
 describe.skipIf(process.platform === "win32")("who may read", () => {
-  test("a tailnet guest gets 403 owner_only and starts nothing; the owner reads", async () => {
+  test("the owner reads over the tailnet", async () => {
     const w = await world({ tailnet: true });
-    const refused = await w.through(GUEST);
-    expect(refused.status).toBe(403);
-    expect(((await refused.json()) as { code: string }).code).toBe("owner_only");
-    expect(fakeCswapCalls(w.bin)).toEqual([]);
     const owner = await w.through(OWNER);
     expect(owner.status).toBe(200);
     expect(listed((await owner.json()) as InboxAccountsRead)).toHaveLength(3);
-  });
-
-  test("settings tell a tailnet guest cswap is not here; the owner is told it is", async () => {
-    const w = await world({ tailnet: true });
-    const asked = async (login: string) => ((await (await w.through(login, "/api/inbox/settings")).json()) as { cswap: boolean }).cswap;
-    expect(await asked(GUEST)).toBe(false);
-    expect(await asked(OWNER)).toBe(true);
   });
 
   test("another site gets nothing and starts nothing", async () => {
@@ -802,22 +789,16 @@ describe.skipIf(process.platform === "win32")("a linked machine's accounts, thro
     expect((await fetch(`${w.base}/api/inbox/accounts/${FAR}`)).status).toBe(404);
   });
 
-  test("a tailnet guest gets nothing on any path, and starts nothing on the far machine; the owner reads it from a phone's browser", async () => {
+  test("the forward is no way to a linked machine's accounts; the owner reads them from a phone's browser", async () => {
     const far = await world();
     const near = await world({ tailnet: true, cswap: null });
     const machine = await link(near, far);
     await onlineMachine(near);
-    const direct = await near.through(GUEST, `/api/inbox/accounts/${machine}`);
-    expect(direct.status).toBe(403);
-    expect(((await direct.json()) as { code: string }).code).toBe("owner_only");
-    expect((await near.through(GUEST, `/api/inbox/accounts/${machine}?fresh=1`)).status).toBe(403);
-    // The forward passes whatever the far door allows: that way there is no route at all, for anyone.
+    // The forward passes whatever the far door allows: that way there is no route at all.
     for (const route of ["accounts", "accounts?fresh=1", "acc%6Funts", "%61ccounts"]) {
-      for (const login of [GUEST, OWNER]) {
-        const forwarded = await near.through(login, `/api/inbox/m/${machine}/${route}`);
-        expect(forwarded.status).toBe(404);
-        expect(await forwarded.text()).not.toContain("@fake.test");
-      }
+      const forwarded = await near.through(OWNER, `/api/inbox/m/${machine}/${route}`);
+      expect(forwarded.status).toBe(404);
+      expect(await forwarded.text()).not.toContain("@fake.test");
     }
     expect(fakeCswapCalls(far.bin)).toEqual([]);
 
@@ -924,7 +905,7 @@ describe.skipIf(process.platform === "win32" || INBOX_ACCOUNT_SWITCHING)("switch
       expect(refused.status).toBe(404);
       expect(((await refused.json()) as { code: string }).code).toBe("not_found");
     }
-    for (const login of [OWNER, GUEST]) expect((await w.switchTo(PERSONAL, { login })).ok).toBe(false);
+    expect((await w.switchTo(PERSONAL, { login: OWNER })).ok).toBe(false);
     expect(switchCalls(w.bin)).toEqual([]);
     expect(inUse(await w.read())).toBe(2);
   });
@@ -1122,12 +1103,8 @@ describe.skipIf(withSwitching)("switch", () => {
 });
 
 describe.skipIf(withSwitching)("who may switch", () => {
-  test("a tailnet guest gets 403 owner_only from the server and runs nothing; the owner switches from a phone's browser", async () => {
+  test("the owner switches from a phone's browser", async () => {
     const w = await world({ tailnet: true, cswapSwitch: { stdout: SWITCH_OK, listAfter: LIST_AFTER } });
-    const refused = await w.switchTo(PERSONAL, { login: GUEST });
-    expect(refused.status).toBe(403);
-    expect(((await refused.json()) as { code: string }).code).toBe("owner_only");
-    expect(fakeCswapCalls(w.bin)).toEqual([]);
     const owner = await w.switchTo(PERSONAL, { login: OWNER });
     expect(owner.status).toBe(200);
     expect(await owner.json()).toEqual({ state: "switched", number: 1 });
@@ -1167,7 +1144,7 @@ describe.skipIf(process.platform === "win32")("nothing else reaches a switch", (
     for (const route of ["accounts/switch", "%61ccounts/switch", "accounts/x"]) {
       const path = `/api/inbox/m/${machine}/${route}`;
       expect((await near.switchTo(PERSONAL, { path })).status).toBe(404);
-      for (const login of [GUEST, OWNER]) expect((await near.switchTo(PERSONAL, { path, login })).status).toBe(404);
+      expect((await near.switchTo(PERSONAL, { path, login: OWNER })).status).toBe(404);
     }
     expect(fakeCswapCalls(far.bin)).toEqual([]);
     expect(filesUnder(near.dataDir).filter((file) => readFileSync(file, "latin1").includes("a@fake.test"))).toEqual([]);

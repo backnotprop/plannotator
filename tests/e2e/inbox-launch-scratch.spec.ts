@@ -36,14 +36,14 @@
  * Pictures: LAUNCH_PR3_SHOTS_DIR (default .local/proof/launch-pr3), wide light at 2x.
  * Build the binary first, then `bunx playwright test -c tests/e2e/playwright.config.ts inbox-launch-scratch.spec.ts`.
  */
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { markTourDecided } from '../helpers/tour-decided';
 import { installFakeClaude, type FakeClaude } from '../helpers/fake-claude';
-import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
+import { E2E_GROUP_TIP_SEEN, inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -170,7 +170,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const fake = installFakeClaude({ bin, state: join(root, 'fake-claude'), config: { trustCheck: true, workMs: 300 } });
   world = { root, home, dataDir, url: '', port: 0, fake, project: '', context: undefined as never, page: undefined as never, errors: [], launched: {} };
   markTourDecided(dataDir);
-  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ inboxLaunch: { enabled: true, fullPermissions: false } }));
+  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ inboxLaunch: { enabled: true, fullPermissions: false }, inboxReveals: { ...E2E_GROUP_TIP_SEEN } }));
   // The default scratch root is trusted through a folder above it (the data dir), as a child inherits a trusted parent's trust.
   trust([dataDir]);
   const env: Record<string, string> = {

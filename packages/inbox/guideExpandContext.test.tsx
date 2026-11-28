@@ -21,10 +21,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { resolve } from 'node:path';
 import { buildGuideSnapshot } from '@plannotator/core/guide-format';
 import type { InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
-import type { ShapeHost } from '@plannotator/ui/components/shape';
-import type { InboxShapes } from './shape/useInboxShapes';
 
-const NO_BOARDS: InboxShapes = { shapes: null, byThread: new Map(), changed: 0, rowShown: false, subscribe: () => () => {}, refresh: () => {} };
 
 // The window's tsconfig points `#guide-reader` at the reader's type shape (reader-module.d.ts), which Bun
 // would load as the module; the real reader is package.json's `imports` entry (as guideDiffStyle.test.tsx).
@@ -175,7 +172,7 @@ test.skipIf(!hasDom)("a thread's guided review: the arrows come from the message
     if (path.includes('/attachments')) return Response.json({ serverSession: 's', attachments: [], annotations: [] });
     return Response.json({});
   }) as typeof fetch;
-  await draw(<ReviewPane thread={thread} message={message} codeReview={false} onBack={() => {}} onClose={() => {}} onSent={() => {}} shapeHost={{} as ShapeHost} shapes={NO_BOARDS} board={null} onBoard={() => {}} />);
+  await draw(<ReviewPane thread={thread} message={message} codeReview={false} onBack={() => {}} onClose={() => {}} onSent={() => {}} />);
   // Nobody opened anything: the arrows are there, and the file is not read.
   expect(asked).toEqual([]);
   expect(arrows().length).toBeGreaterThan(0);
@@ -189,24 +186,6 @@ test.skipIf(!hasDom)("a thread's guided review: the arrows come from the message
   expect(rows()).toBeGreaterThan(before);
   await act(async () => observers.forEach((heard) => heard()));
   expect(boxHeight('a.ts')).toBeGreaterThan(boxBefore);
-});
-
-test.skipIf(!hasDom)("a tailnet guest's page asks nothing (each file would be a silent 403) and still reads the diff", async () => {
-  const asked: string[] = [];
-  globalThis.fetch = (async (input: RequestInfo | URL) => {
-    const path = String(input);
-    if (path.includes('/guide/file')) {
-      asked.push(path);
-      return Response.json({ error: 'local only', code: 'local_only' }, { status: 403 });
-    }
-    if (path.includes('/guide')) return Response.json({ message_id: MESSAGE, guide: message.guide, snapshot: snapshotOf(MODIFIED, ['a.ts']) });
-    if (path.includes('/attachments')) return Response.json({ serverSession: 's', attachments: [], annotations: [] });
-    return Response.json({});
-  }) as typeof fetch;
-  await draw(<ReviewPane thread={thread} message={message} codeReview guest onBack={() => {}} onClose={() => {}} onSent={() => {}} shapeHost={{} as ShapeHost} shapes={NO_BOARDS} board={null} onBoard={() => {}} />);
-  expect(rows()).toBeGreaterThan(0);
-  expect(asked).toEqual([]);
-  expect(arrows().length).toBe(0);
 });
 
 test.skipIf(!hasDom)('a read-only diff (a resolved thread, a PR with no comments) still has its arrows', async () => {

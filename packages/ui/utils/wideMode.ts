@@ -1,5 +1,6 @@
 import type { SidebarTab } from '@plannotator/ui/hooks/useSidebar';
 import type { WideModeType } from '@plannotator/ui/types';
+import { parseAnnotateView } from '@plannotator/core/config-types';
 export type { WideModeType } from '@plannotator/ui/types';
 
 export type WideModeLayoutSnapshot = {
@@ -65,4 +66,32 @@ export function resolveWideModeExitLayout(
     sidebarTab: restore && snapshot?.sidebarIsOpen ? snapshot.sidebarTab : null,
     panelOpen: options?.panelOpen ?? (restore ? (snapshot?.panelOpen ?? false) : undefined),
   };
+}
+
+/** The views an annotate session can open in (config.json `annotateView`). */
+export type AnnotateOpenView = WideModeType | 'edit';
+
+/**
+ * Narrow serverConfig's `annotateView` to a view the toolbar offers; anything
+ * else (unset, a typo, another type) is null, today's default.
+ */
+export function parseAnnotateOpenView(value: unknown): AnnotateOpenView | null {
+  return parseAnnotateView(value) ?? null;
+}
+
+/**
+ * The view to open an annotate session in, or null for today's default
+ * (panels as they are, not editing). A configured view the toolbar does not
+ * offer for this document falls back to null, silently: the toolbar hidden
+ * (HTML, a compact touch layout, archive, plan diff, no document yet), Wide
+ * or Focus where the view switch is off, Edit where the document cannot be
+ * edited.
+ */
+export function resolveAnnotateOpenView(
+  configured: AnnotateOpenView | null | undefined,
+  state: { toolbarShown: boolean; canUseWideMode: boolean; canEditMarkdown: boolean },
+): AnnotateOpenView | null {
+  if (!configured || !state.toolbarShown) return null;
+  if (configured === 'edit') return state.canEditMarkdown ? 'edit' : null;
+  return state.canUseWideMode ? configured : null;
 }

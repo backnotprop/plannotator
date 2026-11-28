@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import type { InboxStore } from "@plannotator/shared/inbox/store";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { InboxStore } from "@plannotator/shared/inbox/store";
 import { INBOX_AUTO_RELOAD_POLL_FIELD, INBOX_RELOAD_FIELD, parseInboxReloadOffer } from "@plannotator/shared/inbox/connection";
 import { claudeSessionOutdated, type ClaudePluginInstall, type LoadedPlugin } from "./inbox-restart";
 import { createInboxLiveSessions } from "./inbox-sessions";
@@ -44,10 +47,10 @@ describe("which sessions the Inbox tells to reload", () => {
   test("the poll that reports the new version ends the offer (and the manual notice with it)", async () => {
     const live = liveWith([installAt("0.28.51")], "0.28.51");
     await live.pollStarted("ses-a", "claude-code", { plugin: pluginOf("0.28.50") });
-    expect(live.restartCount()).toBe(1);
+    expect(live.restartAgents().runtimes["claude-code"]).toBe(1);
     await live.pollStarted("ses-a", "claude-code", { plugin: pluginOf("0.28.51") });
     expect(live.reloadOfferFor("ses-a")).toBeNull();
-    expect(live.restartCount()).toBe(0);
+    expect(live.restartAgents().runtimes["claude-code"]).toBeUndefined();
   });
 
   test("never when a reload cannot help: the installed plugin is behind this Inbox, a checkout, another host, an unknown session", async () => {
@@ -86,4 +89,45 @@ describe("the poll answer as the mod reads it", () => {
     expect(parseInboxReloadOffer(JSON.stringify({ [INBOX_RELOAD_FIELD]: "0.28.51" }))).toBeNull();
     expect(parseInboxReloadOffer("not json")).toBeNull();
   });
+});
+
+test("the thread's session route judges a repeated recipient only once", async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "plannotator-session-read-"));
+  try {
+    const store = InboxStore.open(dataDir);
+    const project = store.ensureProject({ name: "Scratch", root: dataDir });
+    const session = "ses-live";
+    const thread = store.sendMessage({
+      author: { kind: "agent", host: "claude-code", session, name: null },
+      project_id: project.id,
+      body: "A quick check",
+    }).message;
+    const outdated = { loaded: "0.28.66", installed: "0.28.67", fix: "restart" as const };
+    let judgments = 0;
+    const live = createInboxLiveSessions({
+      store,
+      serverSession: "s",
+      resolveRoot: async (path) => path,
+      outdatedOf: () => {
+        judgments++;
+        return outdated;
+      },
+    });
+    await live.pollStarted(session, "claude-code", { project_path: dataDir });
+    const path = `/api/inbox/threads/${thread.thread_id}/sessions`;
+    const recipients = [...Array.from({ length: 16 }, () => session), "unknown"].join(",");
+    const response = await live.route(new Request(`http://localhost${path}?asker=${session}&recipients=${recipients}`), path);
+    expect(response?.status).toBe(200);
+    const answer = await response!.json();
+    expect(answer.asker.connection.outdated).toEqual(outdated);
+    expect(answer.recipients).toEqual({ [session]: answer.asker.connection, unknown: null });
+    expect(judgments).toBe(1);
+
+    judgments = 0;
+    const onlyRecipients = await live.route(new Request(`http://localhost${path}?recipients=${recipients}`), path);
+    expect((await onlyRecipients!.json()).recipients).toEqual(answer.recipients);
+    expect(judgments).toBe(1);
+  } finally {
+    rmSync(dataDir, { recursive: true, force: true });
+  }
 });

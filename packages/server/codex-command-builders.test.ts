@@ -1,5 +1,5 @@
 /**
- * Schema materialization for the Codex output-schema flag, across all three
+ * Schema materialization for the Codex output-schema flag, across both
  * review surfaces.
  *
  * Run: bun test packages/server/codex-command-builders.test.ts
@@ -14,7 +14,6 @@ import { join } from "node:path";
 // left every derived path (and the materialized schema) in the old location.
 import { buildCodexCommand, CODEX_REVIEW_SCHEMA } from "./codex-review";
 import { buildGuideCodexCommand, GUIDE_SCHEMA_JSON } from "./guide/guide-review";
-import { buildTourCodexCommand, TOUR_SCHEMA_JSON } from "./tour/tour-review";
 
 import { createTestEnvironment } from "../../tests/helpers/environment";
 
@@ -50,7 +49,6 @@ describe("Codex command builders", () => {
     const commands = await Promise.all([
       buildCodexCommand(OPTIONS),
       buildGuideCodexCommand(OPTIONS),
-      buildTourCodexCommand(OPTIONS),
     ]);
 
     for (const command of commands) {
@@ -64,7 +62,6 @@ describe("Codex command builders", () => {
     const surfaces = [
       [await buildCodexCommand(OPTIONS), "codex-review-schema.json"],
       [await buildGuideCodexCommand(OPTIONS), "guide-schema.json"],
-      [await buildTourCodexCommand(OPTIONS), "tour-schema.json"],
     ] as const;
 
     for (const [command, fileName] of surfaces) {
@@ -98,7 +95,6 @@ describe("Codex command builders", () => {
     const surfaces = [
       [buildCodexCommand, "codex-review-schema.json", CODEX_REVIEW_SCHEMA],
       [buildGuideCodexCommand, "guide-schema.json", GUIDE_SCHEMA_JSON],
-      [buildTourCodexCommand, "tour-schema.json", TOUR_SCHEMA_JSON],
     ] as const;
 
     for (const [build, fileName, currentSchema] of surfaces) {

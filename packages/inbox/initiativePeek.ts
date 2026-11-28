@@ -57,7 +57,7 @@ export interface InitiativePeekModel {
   moreMentions: number;
 }
 
-function threadOf(row: InboxListRow): PeekThread {
+export function threadOf(row: InboxListRow): PeekThread {
   return {
     id: row.thread_id,
     title: displayInboxSubject(row.subject) ?? row.thread_name ?? 'Untitled thread',

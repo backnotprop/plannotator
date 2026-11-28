@@ -2,14 +2,41 @@
 export interface InboxLaunchChoice {
   model?: string;
   effort?: string;
+  /** OpenCode's own primary agent for the session (build, plan, or one the person made): `agent` on its new session. */
+  primary_agent?: string;
 }
+
+/**
+ * Why OpenCode's model list could not be read, as a code: the window says it in its own words (never stderr, never a
+ * path). `empty`: the list was read and holds no model.
+ */
+export type InboxLaunchChoicesUnread = "timeout" | "exit" | "unreadable" | "missing" | "not_started" | "empty";
 
 export interface InboxLaunchChoices {
   models: string[];
   efforts: string[];
   effort_word: string;
   model_efforts?: Record<string, string[]>;
+  /** OpenCode's own agents a session may start as (`GET /api/agent`: primary, not hidden). Absent: no Agent column. */
+  primary_agents?: string[];
+  /**
+   * The model the agent's CLI most likely starts on when none is picked, provider/model, for the folder picked in To:
+   * the project config's own `model` (read as data), else OpenCode's `GET /api/model/default` read in the home folder.
+   * Absent: unknown, uncertain, or not read yet for that folder.
+   */
+  default_model?: string;
+  /** The folder `default_model` was read for: the project id To named, or the scratch pick. The window names it only for that one. */
+  default_for?: string;
+  /** OpenCode's list could not be read (the lists are empty): the menu has Default and says why. */
+  unread?: InboxLaunchChoicesUnread;
+  /** OpenCode's list is being read (the lists are empty): the menu has Default and says so. */
+  reading?: true;
   last?: InboxLaunchChoice;
+}
+
+/** Lists a model or an effort can be checked against: none while being read or when they could not be read. */
+export function launchChoicesReadable<T extends Pick<InboxLaunchChoices, "unread" | "reading">>(lists: T | null | undefined): T | null {
+  return lists && !lists.unread && !lists.reading ? lists : null;
 }
 
 /** Goes on argv as one entry: never a leading "-", which the CLI would read as a flag. */
@@ -74,6 +101,14 @@ export function parseCodexModels(answer: unknown): Omit<InboxLaunchChoices, "las
   return { models, efforts, effort_word: "Effort", model_efforts: modelEfforts };
 }
 
+/** OpenCode's default model (`GET /api/model/default`: `{ data: { providerID, id } }`) as provider/model, or null. */
+export function parseOpenCodeDefaultModel(answer: unknown): string | null {
+  const data = (answer as { data?: { providerID?: unknown; id?: unknown } | null } | null)?.data;
+  if (typeof data?.providerID !== "string" || typeof data.id !== "string" || !data.providerID || !data.id) return null;
+  const model = `${data.providerID}/${data.id}`;
+  return inboxLaunchTokenOk(model) ? model : null;
+}
+
 export function parseOpenCodeModels(answer: unknown): Omit<InboxLaunchChoices, "last"> | null {
   const data = (answer as { data?: unknown } | null)?.data;
   if (!Array.isArray(data)) return null;
@@ -92,12 +127,34 @@ export function parseOpenCodeModels(answer: unknown): Omit<InboxLaunchChoices, "
   return { models, efforts, effort_word: "Variant", model_efforts: modelEfforts };
 }
 
+/** OpenCode's agents a session can start as: a primary one (or one for either use) that is not hidden, in its order. */
+export function parseOpenCodeAgents(answer: unknown): string[] | null {
+  const data = (answer as { data?: unknown } | null)?.data;
+  if (!Array.isArray(data)) return null;
+  const agents: string[] = [];
+  for (const entry of data as { id?: unknown; mode?: unknown; hidden?: unknown }[]) {
+    if (entry?.mode === "subagent" || entry?.hidden === true || !inboxLaunchTokenOk(entry?.id) || agents.includes(entry.id)) continue;
+    agents.push(entry.id);
+  }
+  return agents;
+}
+
 export function launchEffortsFor(choices: Pick<InboxLaunchChoices, "efforts" | "model_efforts">, model: string | undefined): string[] {
   return (model && choices.model_efforts?.[model]) || choices.efforts;
 }
 
+export function initialLaunchChoice(choices: InboxLaunchChoices | null | undefined): InboxLaunchChoice {
+  const last = choices?.last;
+  if (!choices || !last) return {};
+  return {
+    ...(last.model ? { model: last.model } : {}),
+    ...(last.effort && launchEffortsFor(choices, last.model).includes(last.effort) ? { effort: last.effort } : {}),
+    ...(last.primary_agent && choices.primary_agents?.includes(last.primary_agent) ? { primary_agent: last.primary_agent } : {}),
+  };
+}
+
 /** `efforts` null: the lists are not read yet, so only the token is checked (a slow CLI never refuses a start). */
-export function parseLaunchChoice(raw: { model?: unknown; effort?: unknown }, efforts: readonly string[] | null): InboxLaunchChoice {
+export function parseLaunchChoice(raw: { model?: unknown; effort?: unknown; primary_agent?: unknown }, efforts: readonly string[] | null): InboxLaunchChoice {
   const choice: InboxLaunchChoice = {};
   if (raw.model !== undefined && raw.model !== null) {
     if (!inboxLaunchTokenOk(raw.model)) throw new LaunchChoiceError("model", "to.launch.model: a model name, such as opus.");
@@ -109,12 +166,16 @@ export function parseLaunchChoice(raw: { model?: unknown; effort?: unknown }, ef
     }
     choice.effort = raw.effort;
   }
+  if (raw.primary_agent !== undefined && raw.primary_agent !== null) {
+    if (!inboxLaunchTokenOk(raw.primary_agent)) throw new LaunchChoiceError("primary_agent", "to.launch.primary_agent: an agent's name, such as plan.");
+    choice.primary_agent = raw.primary_agent;
+  }
   return choice;
 }
 
 export class LaunchChoiceError extends Error {
   constructor(
-    readonly field: "model" | "effort",
+    readonly field: "model" | "effort" | "primary_agent",
     message: string,
   ) {
     super(message);
@@ -145,6 +206,6 @@ export function openCodeSessionModel(model: string | undefined, variant: string 
 }
 
 export function launchChoiceLine(choice: InboxLaunchChoice | null | undefined, shortModel = (model: string) => model): string | null {
-  if (!choice?.model && !choice?.effort) return null;
-  return [choice.model ? shortModel(choice.model) : null, choice.effort ?? null].filter(Boolean).join(" · ");
+  if (!choice?.model && !choice?.effort && !choice?.primary_agent) return null;
+  return [choice.model ? shortModel(choice.model) : null, choice.effort ?? null, choice.primary_agent ?? null].filter(Boolean).join(" · ");
 }

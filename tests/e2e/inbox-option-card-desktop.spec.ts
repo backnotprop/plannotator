@@ -21,7 +21,7 @@
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-option-card-desktop.spec.ts`.
  */
 
-import { chromium, expect, test, type Browser, type Page } from '@playwright/test';
+import { chromium, expect, test, type Browser, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';

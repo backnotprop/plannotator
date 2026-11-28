@@ -9,7 +9,7 @@
  * rows name those. A thread's tag lives on the thread's own machine, like its Priority.
  */
 import { createContext, useContext } from 'react';
-import { inboxInitiativeNameKey, type InboxInitiative, type InboxListRow, type InboxListSection } from '@plannotator/core/inbox-types';
+import { inboxGroupWaitsOnPerson, inboxInitiativeNameKey, type InboxInitiative, type InboxListRow, type InboxListSection, type InboxTagLook } from '@plannotator/core/inbox-types';
 import { plural } from '@plannotator/core/inbox-format';
 import type { MachinesModel } from './machines';
 
@@ -25,10 +25,39 @@ export interface ThreadTagsHost {
   can: (threadId: string) => boolean;
   /** Put the thread in the tag or take it out; the toast says so, with Undo. */
   set: (threadId: string, tag: InboxInitiative, on: boolean) => void;
+  /** Put several threads in the tag or take them out (the picks' bar): one toast, one Undo. */
+  setMany?: (threadIds: readonly string[], tag: InboxInitiative, on: boolean) => void;
   /** Make a tag and put the thread in it (`New tag "Billing"`). */
   createAndSet: (threadId: string, name: string) => void;
   /** The tag whose list the window shows: its rows' menu offers Remove from <tag>. */
   listed: InboxInitiative | null;
+  /** Every row the window lists, the snoozed too (step 2: the Filter and the preview read them). */
+  rows?: readonly InboxListRow[];
+  /** A row's tags by the window's rule (`rowTagsHere`). */
+  rowTags?: RowTags;
+  /** The tags the listed threads search can filter carry (`tagsOnOwnRows`): Search's Tag chip offers these. */
+  here?: readonly InboxInitiative[];
+  /** A row's tags for the filters: its own and its project's (projectTags.ts). */
+  filterTags?: (row: InboxListRow) => readonly string[];
+  /** A project's tags (its ⋯ → Add tag, projectTags.ts); absent on an Inbox that keeps none. */
+  projects?: ProjectTagsHost;
+}
+
+/** What Add tag's list does to the thread or project it was opened on. */
+export interface TagTarget {
+  /** The tags it is in. */
+  on: readonly string[];
+  set: (tag: InboxInitiative, on: boolean) => void;
+  /** Make a tag of the typed name and put it in it. */
+  create: (name: string) => void;
+}
+
+/** The projects' tags in the window (useProjectTags.ts). */
+export interface ProjectTagsHost {
+  /** Add tag is offered on the project: this Inbox's, or a linked machine's that takes project tags. */
+  can: (projectId: string) => boolean;
+  /** The project's tags as a target for Add tag's list. */
+  target: (projectId: string) => TagTarget;
 }
 
 export const ThreadTagsContext = createContext<ThreadTagsHost | null>(null);
@@ -39,7 +68,7 @@ export type RowTags = (row: Pick<InboxListRow, 'thread_id' | 'tags' | 'machine'>
 const ownTags: RowTags = (row) => row.tags ?? [];
 
 /** A tag of the list: on the merged view, with its id on each machine that holds one of its name. */
-export type ListTag = InboxInitiative & { machines?: Record<string, string> };
+export type ListTag = InboxInitiative & { machines?: Record<string, string>; look?: InboxTagLook };
 
 /** Whether `machine` (a row's, or a thread's owner) is this Inbox, or a linked machine that takes tags from it. */
 function takesTags(machine: string | null | undefined, model: Pick<MachinesModel, 'self' | 'linked'>): boolean {
@@ -54,6 +83,15 @@ function takesTags(machine: string | null | undefined, model: Pick<MachinesModel
 export function rowTagsHere(row: Pick<InboxListRow, 'thread_id' | 'tags' | 'machine'>, machines: Pick<MachinesModel, 'self' | 'linked'>, patches: ReadonlyMap<string, readonly string[]>): readonly string[] {
   if (!takesTags(row.machine, machines)) return [];
   return patches.get(row.thread_id) ?? row.tags ?? [];
+}
+
+/**
+ * A thread's tags in this window: its listed row's, else the open thread's own read's (an archived thread, which the
+ * list leaves out, keeps its header line), else what the window just set on it.
+ */
+export function threadTagsHere(threadId: string, rows: readonly InboxListRow[], openRow: InboxListRow | null, machines: Pick<MachinesModel, 'self' | 'linked'>, patches: ReadonlyMap<string, readonly string[]>): readonly string[] {
+  const row = rows.find((r) => r.thread_id === threadId) ?? (openRow?.thread_id === threadId ? openRow : undefined);
+  return row ? rowTagsHere(row, machines, patches) : (patches.get(threadId) ?? []);
 }
 
 /**
@@ -85,6 +123,15 @@ export function tagWrite(tag: ListTag, machine: string | null, self: string | nu
   return id ? { tag: id } : { name: tag.name };
 }
 
+/**
+ * The tags this Inbox's own rows carry (`here` on the host), and a linked machine's rows where `searched` says its
+ * search takes a Tag filter (`linked-reads`); any other machine's rows and tags left out.
+ */
+export function tagsOnOwnRows<T extends ListTag>(tags: readonly T[], rows: readonly InboxListRow[], self: string | null, tagsOf: RowTags = ownTags, searched: (machine: string) => boolean = () => false): T[] {
+  const carried = new Set(rows.filter((row) => !row.machine || row.machine === self || searched(row.machine)).flatMap((row) => tagsOf(row)));
+  return tags.filter((tag) => carried.has(tag.id));
+}
+
 /** This Inbox's own tags (the `#` picker's: a typed `#Name` tags only by a tag this Inbox holds). */
 export function thisInboxTags<T extends ListTag>(tags: readonly T[], self: string | null): T[] {
   return tags.filter((tag) => tagIdOn(tag, null, self) !== null);
@@ -100,7 +147,7 @@ export function filterTagRows(sections: readonly InboxListSection[], tag: string
 export function tagWaitingCounts(sections: readonly InboxListSection[], tagsOf: RowTags = ownTags): Map<string, number> {
   const counts = new Map<string, number>();
   for (const section of sections) {
-    if (section.id !== 'stopped' && section.id !== 'holding' && section.id !== 'waiting') continue;
+    if (!inboxGroupWaitsOnPerson(section.id)) continue;
     for (const row of section.threads) for (const tag of tagsOf(row)) counts.set(tag, (counts.get(tag) ?? 0) + 1);
   }
   return counts;

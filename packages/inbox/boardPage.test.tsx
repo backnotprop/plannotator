@@ -639,3 +639,55 @@ test.if(hasDom)('a Board card never shows a checklist, on the lane or opened, ev
   }
   expect(lane.querySelector('[data-card-open]')!.getAttribute('aria-label')).not.toMatch(/checklist|waiting on you/i);
 });
+
+// One Board across linked machines: a linked machine's card on this Board.
+const SELF_ID = `ibx_01K${'0'.repeat(22)}S`;
+const MINI = `ibx_01K${'0'.repeat(22)}M`;
+
+test.if(hasDom)("a linked machine's card: its project names the machine, bold by that machine's look, opened and moved there; a held move is no failure", async () => {
+  const { rememberMachine, resetMachineRoutes, setSelfMachine } = await import('./inboxUrl');
+  const { machinesModel } = await import('./machines');
+  setSelfMachine(SELF_ID);
+  restorers.push(() => resetMachineRoutes());
+  const own = card('crd_own', { title: 'Release notes', column: 'todo', heard_seq: 50 });
+  const far = card('crd_far', { title: 'Refund webhook', column: 'in_progress', project_id: 'prj_far', heard_seq: 50, machine: MINI });
+  rememberMachine([far.id, far.project_id], MINI);
+  scriptFetch();
+  const drawn = draw({
+    model: { serverSession: 's', cursor: 1, cards: [own, far], dropped_unseen: 0, seen_seq: LOOK },
+    machineLooks: { [MINI]: 100 },
+    projects: [
+      { id: 'prj_1', key: 'web', name: 'web', root: '/Users/ada/src/web', created_at: OLD, threads: 1, unread: 0 },
+      { id: 'prj_far', key: 'web', name: 'web', root: '/srv/web', created_at: OLD, threads: 1, unread: 0, machine: MINI },
+    ] as BoardPageProps['projects'],
+    machines: machinesModel([
+      { id: SELF_ID, name: 'Studio', self: true, state: 'online', since: OLD, reason: null, version: '1', address: null, both_ways: true, waiting: 0 },
+      { id: MINI, name: 'Mac-mini', self: false, state: 'online', since: OLD, reason: null, version: '1', address: null, both_ways: true, waiting: 0, marks: ['cards'] },
+    ] as Parameters<typeof machinesModel>[0]),
+    onMove: async (target, move) => {
+      drawn.moves.push({ id: target.id, move });
+      return 'held';
+    },
+  });
+  await settle();
+  // Its machine the quiet way a list row has it; this Inbox's own card as before.
+  expect(cardEl('crd_far')!.textContent).toContain('web · Mac-mini');
+  expect(cardEl('crd_own')!.textContent).not.toContain('Mac-mini');
+  // Heard at 50: unread by this Inbox's look (10), read by Mac-mini's own (100).
+  expect(cardEl('crd_own')!.hasAttribute('data-unread')).toBe(true);
+  expect(cardEl('crd_far')!.hasAttribute('data-unread')).toBe(false);
+
+  // Opened: its history and its agents are read on Mac-mini, through the forward.
+  drawn.rerender({ openCard: 'crd_far' });
+  await settle();
+  const paths = calls.map((c) => `${c.method} ${c.path}`);
+  expect(paths).toContain(`GET /api/inbox/m/${MINI}/cards/crd_far`);
+  expect(paths).toContain(`GET /api/inbox/m/${MINI}/sessions`);
+  expect(paths).not.toContain('GET /api/inbox/cards/crd_far');
+
+  // Mac-mini asleep: Mark done waits for it, and the Board says no failure.
+  act(() => $('[data-card-panel="crd_far"]')!.querySelector<HTMLButtonElement>('[data-card-ship]')!.click());
+  await settle();
+  expect(drawn.moves).toEqual([{ id: 'crd_far', move: { op: 'move', column: 'done' } }]);
+  expect($('.ib-bfail')).toBeNull();
+});

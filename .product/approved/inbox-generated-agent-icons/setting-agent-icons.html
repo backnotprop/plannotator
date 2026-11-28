@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<title>Setting · Agent icons · generated agent icons</title>
+<style>
+:root, .dark {
+  --background: oklch(0.15 0.02 260); --foreground: oklch(0.90 0.01 260); --card: oklch(0.22 0.02 260);
+  --popover: oklch(0.28 0.025 260); --primary: oklch(0.75 0.18 280); --muted: oklch(0.26 0.02 260);
+  --muted-foreground: oklch(0.72 0.02 260); --border: oklch(0.35 0.02 260); --ring: oklch(0.75 0.18 280);
+  --host-ink: #f2f2f2; --host-paper: #1b1b1b;
+}
+.light {
+  --background: oklch(0.97 0.005 260); --foreground: oklch(0.18 0.02 260); --card: oklch(1 0 0);
+  --popover: oklch(1 0 0); --primary: oklch(0.50 0.25 280); --muted: oklch(0.92 0.01 260);
+  --muted-foreground: oklch(0.40 0.02 260); --border: oklch(0.88 0.01 260); --ring: oklch(0.50 0.25 280);
+  --host-ink: #1b1b1b; --host-paper: #ffffff;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--background); color: var(--foreground); font: 13px/1.4 'Inter Variable', Inter, system-ui, -apple-system, sans-serif; -webkit-font-smoothing: antialiased; }
+.page { width: 1440px; padding: 28px 32px 40px; }
+h1 { font-size: 20px; font-weight: 650; margin: 0 0 4px; }
+.lede { color: var(--muted-foreground); margin: 0 0 18px; max-width: 980px; font-size: 13.5px; }
+.note { color: var(--muted-foreground); font-size: 12px; }
+/* generated icon, variant A (recommended) */
+.g { --rot: 0; --hc: oklch(from var(--primary) 0.62 0.14 calc(h + var(--rot))); position: relative; display: inline-flex; align-items: center; justify-content: center; flex: none; width: var(--s); height: var(--s); border-radius: calc(var(--s) * 0.28); line-height: 1; }
+.g[data-hue="1"] { --rot: 45; } .g[data-hue="2"] { --rot: 90; } .g[data-hue="3"] { --rot: 135; } .g[data-hue="4"] { --rot: 180; } .g[data-hue="5"] { --rot: 225; } .g[data-hue="6"] { --rot: 270; } .g[data-hue="7"] { --rot: 315; }
+.g > b { font-weight: 680; letter-spacing: -0.03em; font-size: calc(var(--s) * 0.44); }
+.g[data-n="1"] > b { font-size: calc(var(--s) * 0.54); }
+.g-A { background: oklch(from var(--hc) 0.53 0.135 h); color: oklch(0.985 0.005 260); }
+.g-badge { position: absolute; right: calc(var(--b) * -0.22); bottom: calc(var(--b) * -0.22); width: var(--b); height: var(--b); border-radius: 50%; box-shadow: 0 0 0 1.5px var(--ring-bg, var(--background)); display: block; }
+.g-badge > svg, .g-host > svg { width: 100%; height: 100%; display: block; }
+.g-host { display: inline-flex; width: var(--s); height: var(--s); flex: none; }
+.atile { display: inline-flex; width: 20px; height: 20px; border-radius: 6px; background: var(--muted); align-items: center; justify-content: center; }
+.atile > .g-host { --s: 13px; }
+
+.win { display: grid; grid-template-columns: 220px 1fr; height: 760px; border-radius: 12px; overflow: hidden; background: var(--background); box-shadow: 0 0 0 1px var(--border), 0 18px 50px rgba(0,0,0,.18); }
+.snav { padding: 18px 10px; background: color-mix(in oklch, var(--background) 92%, var(--foreground) 3%); border-right: 1px solid color-mix(in oklch, var(--border) 70%, transparent); }
+.snav .t { font-weight: 650; font-size: 15px; padding: 0 10px 12px; }
+.snav a { display: block; height: 32px; line-height: 32px; padding: 0 10px; border-radius: 8px; color: var(--foreground); text-decoration: none; }
+.snav a.on { background: var(--muted); font-weight: 550; }
+.spg { display: grid; grid-template-columns: 560px 1fr; gap: 32px; padding: 26px 32px; overflow: hidden; }
+h2 { font-size: 17px; font-weight: 650; margin: 0 0 4px; }
+.sub { color: var(--muted-foreground); margin: 0 0 16px; }
+.presets { display: flex; gap: 6px; margin-bottom: 14px; }
+.presets span { padding: 6px 12px; border-radius: 8px; background: var(--muted); }
+.presets span.on { background: var(--foreground); color: var(--background); font-weight: 550; }
+.prow { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 14px; min-height: 48px; padding: 7px 0; border-bottom: 1px solid color-mix(in oklch, var(--border) 55%, transparent); }
+.prow .txt { flex: 1 1 140px; }
+.prow .txt .d { color: var(--muted-foreground); font-size: 12px; margin-top: 2px; }
+.prow.new { background: color-mix(in oklab, var(--primary) 9%, transparent); margin: 0 -12px; padding: 9px 12px; border-radius: 10px; border-bottom-color: transparent; }
+.seg { display: inline-flex; padding: 2px; gap: 2px; border-radius: 8px; background: var(--muted); border: 1px solid var(--border); }
+.seg > span { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 11px; border-radius: 6px; color: var(--muted-foreground); white-space: nowrap; }
+.seg > span.on { background: var(--card); color: var(--foreground); font-weight: 550; box-shadow: 0 1px 2px rgba(0,0,0,.12); --ring-bg: var(--card); }
+.seg span .g, .seg span .atile { --ring-bg: inherit; }
+.sw { width: 34px; height: 20px; border-radius: 10px; background: var(--primary); position: relative; }
+.sw::after { content: ''; position: absolute; right: 2px; top: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; }
+.more { color: var(--muted-foreground); padding: 12px 0; }
+.prev h3 { font-size: 13px; font-weight: 600; margin: 0 0 8px; color: var(--muted-foreground); }
+.plist { background: var(--background); border-radius: 12px; box-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 70%, transparent); padding: 6px 0; }
+.row { padding: 10px 16px 11px; margin: 0 6px; border-radius: 10px; }
+.row.sel { background: var(--muted); --ring-bg: var(--muted); }
+.l1 { display: flex; align-items: center; gap: 6px; height: 20px; }
+.l1 .proj { font-weight: 500; }
+.l1 .tm { margin-left: auto; color: var(--muted-foreground); font-size: 12px; }
+.tiles { display: inline-flex; } .tiles > * + * { margin-left: -5px; }
+.l2 { font-size: 13.5px; margin-top: 3px; font-weight: 600; }
+.l3 { color: var(--muted-foreground); font-size: 12.5px; margin-top: 2px; }
+.agents { margin-top: 18px; }
+.arow { height: 36px; display: flex; align-items: center; gap: 10px; padding: 0 8px; }
+</style>
+</head>
+<body>
+<div class="page" id="page"></div>
+<script>
+const VARIANT = 'A';
+// Generated agent icons: the letters, the hue, the pattern, and the three looks. Mock code, not product code.
+const SEG = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+const LETTER = /^[\p{L}\p{N}]/u;
+const PAIRS = /^[\p{Script=Latin}\p{Script=Greek}\p{Script=Cyrillic}\p{Script=Armenian}\p{Script=Georgian}\p{N}]/u;
+const PICTO = /\p{Extended_Pictographic}|\p{Regional_Indicator}/u;
+const graphemes = (s) => Array.from(SEG.segment(s), (x) => x.segment);
+
+/** The label as the Inbox shows it: "api · work" when two folders share a name. Letters from the base, colour from the whole. */
+function splitLabel(label) {
+  const s = label.normalize('NFC').trim().replace(/\s+/g, ' ');
+  const i = s.indexOf(' · ');
+  return { base: i < 0 ? s : s.slice(0, i), seed: s.toLocaleLowerCase('en-US') };
+}
+
+/** Words: drop an npm scope, split camel humps, split on anything that is not a letter, digit or mark. */
+function wordsOf(base) {
+  let b = base.replace(/^@[^/\s]+\//, '');
+  b = b.replace(/(\p{Ll})(\p{Lu})/gu, '$1 $2').replace(/(\p{Lu})(\p{Lu}\p{Ll})/gu, '$1 $2');
+  return b.split(/[^\p{L}\p{N}\p{M}]+/u).filter(Boolean);
+}
+
+/** Proposed rule: two or more words, the first letter of the first and of the last; one word, its first letter and its first digit, else its last letter. */
+function genLetters(label) {
+  const { base } = splitLabel(label);
+  const ws = wordsOf(base).map((w) => graphemes(w).filter((g) => LETTER.test(g))).filter((w) => w.length);
+  if (!ws.length) {
+    const emoji = graphemes(base).find((g) => PICTO.test(g));
+    return emoji ? { text: emoji, n: 1, kind: 'emoji' } : { text: '', n: 0, kind: 'none' };
+  }
+  const first = ws[0][0];
+  let second = null;
+  if (ws.length > 1) second = ws[ws.length - 1][0];
+  else {
+    const w = ws[0];
+    second = w.slice(1).find((g) => /\p{N}/u.test(g)) ?? (w.length > 1 ? w[w.length - 1] : null);
+  }
+  if (!second || !PAIRS.test(first) || !PAIRS.test(second)) return { text: first.toLocaleUpperCase(), n: 1, kind: 'letters' };
+  return { text: (first + second).toLocaleUpperCase(), n: 2, kind: 'letters' };
+}
+
+/** Today's letter-mark rule (letterMarks.tsx markLetters), for the comparison column: first and last letter of the whole name. */
+function todayLetters(name) {
+  const parts = graphemes(name.normalize('NFC').trim());
+  const letters = parts.filter((g) => LETTER.test(g));
+  if (!letters.length) {
+    const e = parts.find((g) => PICTO.test(g));
+    return e ? e : '·';
+  }
+  const f = letters[0], l = letters[letters.length - 1];
+  if (letters.length === 1 || !PAIRS.test(f) || !PAIRS.test(l)) return f.toLocaleUpperCase();
+  return (f + l).toLocaleUpperCase();
+}
+
+/** 32-bit FNV-1a with a final mix (the same family as letterMarks.tsx hueOf), over UTF-16 units. */
+function h32(seed) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < seed.length; i++) { h ^= seed.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+  h ^= h >>> 16; h = Math.imul(h, 0x85ebca6b); h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35); h ^= h >>> 16;
+  return h >>> 0;
+}
+const HUES = 8;
+const baseHue = (label) => h32(splitLabel(label).seed) % HUES;
+
+/**
+ * On-screen tie-break: projects that would draw the same letters in the same hue. Sorted by their seed (the same
+ * order on every machine that has both), the first keeps its hue, each next one steps 3 hues (135°) until free.
+ */
+function hueTable(labels) {
+  const out = new Map();
+  const groups = new Map();
+  for (const l of new Set(labels)) {
+    const k = genLetters(l).text;
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(l);
+  }
+  for (const group of groups.values()) {
+    group.sort((a, b) => (splitLabel(a).seed < splitLabel(b).seed ? -1 : 1));
+    const taken = new Set();
+    for (const l of group) {
+      let hue = baseHue(l);
+      for (let step = 0; step < HUES && taken.has(hue); step++) hue = (hue + 3) % HUES;
+      taken.add(hue);
+      out.set(l, hue);
+    }
+  }
+  return out;
+}
+
+// ── host marks: stand-ins drawn for the mock, NOT the real agent logos ──
+const HOSTS = {
+  claude: { name: 'Claude Code', svg: '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="8" fill="#d9774f"/><g stroke="#fff" stroke-width="1.6" stroke-linecap="round"><path d="M8 3.2v9.6M3.2 8h9.6M4.6 4.6l6.8 6.8M11.4 4.6l-6.8 6.8"/></g></svg>' },
+  codex: { name: 'Codex', svg: '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="8" fill="var(--host-ink)"/><path d="M8 3.6l3.8 2.2v4.4L8 12.4 4.2 10.2V5.8z" fill="none" stroke="var(--host-paper)" stroke-width="1.5" stroke-linejoin="round"/></svg>' },
+  pi: { name: 'Pi', svg: '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="8" fill="#2f6f5e"/><path d="M4.4 5.4h7.2M6.4 5.4v6M9.6 5.4v4.8c0 .7.4 1 1 1" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/></svg>' },
+  opencode: { name: 'OpenCode', svg: '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="8" fill="var(--host-ink)"/><path d="M6.2 4.6H4.8v6.8h1.4M9.8 4.6h1.4v6.8H9.8" fill="none" stroke="var(--host-paper)" stroke-width="1.5"/></svg>' },
+};
+
+// ── the looks ──
+const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+
+function ditherSvg(label, hue, size, letters) {
+  const h = h32('pattern:' + splitLabel(label).seed);
+  const cells = size >= 36 ? 14 : size >= 26 ? 12 : 10;
+  const cell = 100 / cells;
+  const ang = ((h >>> 3) % 8) * (Math.PI / 4);
+  const dx = Math.cos(ang), dy = Math.sin(ang);
+  const shape = (h >>> 9) % 3; // 0 linear, 1 radial from a corner, 2 band
+  const lift = ((h >>> 12) % 3) * 0.08;
+  let rects = '';
+  for (let y = 0; y < cells; y++) for (let x = 0; x < cells; x++) {
+    const u = (x + 0.5) / cells - 0.5, v = (y + 0.5) / cells - 0.5;
+    let t;
+    if (shape === 0) t = 0.5 + (u * dx + v * dy) * 1.25;
+    else if (shape === 1) t = 1 - Math.hypot(u - dx * 0.5, v - dy * 0.5) * 1.15;
+    else t = 1 - Math.abs(u * dx + v * dy) * 2.4;
+    t = Math.min(0.92, Math.max(0.06, t * 0.86 + lift));
+    if (BAYER[(y % 4) * 4 + (x % 4)] / 16 < t) rects += `<rect x="${(x * cell).toFixed(2)}" y="${(y * cell).toFixed(2)}" width="${cell.toFixed(2)}" height="${cell.toFixed(2)}"/>`;
+  }
+  const fs = letters.n === 2 ? 50 : letters.kind === 'emoji' ? 56 : 62;
+  const stroke = size >= 30 ? 9 : 12;
+  const txt = letters.text
+    ? `<text x="50" y="${letters.kind === 'emoji' ? 70 : 69}" text-anchor="middle" font-size="${fs}" font-weight="760" class="g-dt" style="paint-order:stroke;stroke:var(--g-paper);stroke-width:${stroke};stroke-linejoin:round">${esc(letters.text)}</text>`
+    : '';
+  return `<svg viewBox="0 0 100 100" aria-hidden="true"><rect width="100" height="100" fill="var(--g-paper)"/><g fill="var(--g-ink)">${rects}</g>${txt}</svg>`;
+}
+
+function esc(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+
+/**
+ * One generated icon. `host` adds the agent's mark as a corner badge (from 20 px up). Variant: A solid squircle,
+ * B soft round monogram, C dither field.
+ */
+function genIcon(label, size, { host = null, hue = null, variant = VARIANT } = {}) {
+  const letters = genLetters(label);
+  const hu = hue ?? baseHue(label);
+  const badge = host && size >= 20 ? `<span class="g-badge" style="--b:${Math.round(size * (size >= 30 ? 0.42 : 0.5))}px">${HOSTS[host].svg}</span>` : '';
+  if (letters.kind === 'none') return `<span class="g g-none" data-size="${size}" style="--s:${size}px">${host ? HOSTS[host].svg : ''}</span>`;
+  let inner;
+  if (variant === 'C') inner = ditherSvg(label, hu, size, letters);
+  else inner = `<b>${esc(letters.text)}</b>`;
+  return `<span class="g g-${variant}" data-hue="${hu}" data-n="${letters.n}" data-kind="${letters.kind}" style="--s:${size}px">${inner}${badge}</span>`;
+}
+
+/** A host's own mark at a size (what an agent shows today). */
+function hostMark(host, size) {
+  return `<span class="g-host" style="--s:${size}px">${HOSTS[host].svg}</span>`;
+}
+
+// ── the stand-in faces of the dial (Glass colours, Transparent, Face): simple drawings for the mock ──
+const GLASS = ['#1d1d1f', '#b8443c', '#d9773a', '#e8c95a', '#3f8a4f', '#3f8d88', '#3d6fc4', '#7a4cc0', '#d77fa8', '#eef1f4'];
+function goggles(lens = '#f2a33a') {
+  return `<svg viewBox="0 0 28 28" aria-hidden="true"><rect x="4" y="10" width="20" height="7" rx="3" fill="#1b1b1b"/><rect x="5.5" y="11.2" width="7.4" height="4.6" rx="1.8" fill="${lens}"/><rect x="15.1" y="11.2" width="7.4" height="4.6" rx="1.8" fill="${lens}"/><rect x="12.4" y="20" width="3.2" height="1.4" rx=".7" fill="#e0457b"/></svg>`;
+}
+function glassTile(c) { return `<span class="f-tile" style="background:${c}">${goggles()}</span>`; }
+const FACE_MASCOT = `<span class="f-bare"><svg viewBox="0 0 28 28" aria-hidden="true"><circle cx="14" cy="14" r="11" fill="#e98a3c"/><rect x="5" y="10.5" width="18" height="6" rx="3" fill="#1b1b1b"/><rect x="6.4" y="11.6" width="6.4" height="3.8" rx="1.6" fill="#9fd3f0"/><rect x="15.2" y="11.6" width="6.4" height="3.8" rx="1.6" fill="#9fd3f0"/></svg></span>`;
+const FACE_TRANSPARENT = `<span class="f-bare">${goggles()}</span>`;
+const FACE_OWN = `<span class="f-own" aria-hidden="true"><svg viewBox="0 0 28 28"><rect x="4.5" y="4.5" width="19" height="19" rx="5" fill="none" stroke="currentColor" stroke-dasharray="3 2.4"/><path d="M14 9.5v9M9.5 14h9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>`;
+const FACE_SETS = `<span class="f-own" aria-hidden="true"><svg viewBox="0 0 28 28"><g fill="currentColor" opacity=".7"><rect x="6" y="6" width="7" height="7" rx="2"/><rect x="15" y="6" width="7" height="7" rx="2"/><rect x="6" y="15" width="7" height="7" rx="2"/><rect x="15" y="15" width="7" height="7" rx="2"/></g></svg></span>`;
+
+if (new URLSearchParams(location.search).get('mode') === 'light') document.documentElement.className = 'light';
+const P = ['orchard', 'kestrel · work', 'tidepool-web'];
+const HUE = hueTable(P);
+const icon = (l, s, h) => genIcon(l, s, { host: h, hue: HUE.get(l) });
+const rows = [
+  ['orchard', ['codex', 'claude'], 'Sync engine: two ways to split the queue', 'Option B keeps the retry budget per tenant.', '9:41 PM', true],
+  ['kestrel · work', ['claude'], 'Postgres 17 dry run passed', 'Two slow queries flagged; plan attached.', '9:12 PM'],
+  ['tidepool-web', ['claude'], 'Hero spacing on mobile', 'Screenshots at 390 and 768 px.', '8:50 PM'],
+].map(([p, hs, t, pre, tm, sel]) => `<div class="row${sel ? ' sel' : ''}"><div class="l1"><span class="tiles">${hs.map((h) => icon(p, 20, h)).join('')}</span><span class="proj">${esc(p)}</span><span class="tm">${tm}</span></div><div class="l2">${esc(t)}</div><div class="l3">${esc(pre)}</div></div>`).join('');
+const agents = [['orchard', 'claude', 'Fix login redirect'], ['orchard', 'codex', 'Refactor sync engine'], ['kestrel · work', 'claude', 'Migrate to Postgres 17'], ['tidepool-web', 'claude', 'Landing page polish']]
+  .map(([p, h, n]) => `<div class="arow">${icon(p, 24, h)}<span>${esc(n)}</span></div>`).join('');
+const seg = (opts, on) => `<span class="seg">${opts.map((o, i) => `<span class="${i === on ? 'on' : ''}">${o}</span>`).join('')}</span>`;
+document.getElementById('page').innerHTML = `
+<h1>Setting · Agent icons, in Settings → Rows</h1>
+<p class="lede">The Rows page's "Agent icons" switch (show or hide) becomes one three-way choice. "From the project name" changes the icon every agent shows when nobody picked one for it, in rows, the Agents list, threads and pickers; a face picked in the dial for one agent stays. The highlighted fill marks the changed control in this mock only.</p>
+<div class="win">
+  <nav class="snav"><div class="t">Settings</div><a>General</a><a class="on">Rows</a><a>Agents</a><a>Capabilities</a><a>Notifications</a><a>Machines</a><a>Phones</a><a>Accounts</a></nav>
+  <div class="spg">
+    <div>
+      <h2>Rows</h2><p class="sub">A change applies everywhere you use the Inbox.</p>
+      <div class="presets"><span class="on">Balanced</span><span>Dense</span><span>Minimal</span><span>Detailed</span></div>
+      <div class="prow"><div class="txt">Spacing</div>${seg(['Compact', 'Comfortable', 'Roomy'], 1)}</div>
+      <div class="prow"><div class="txt">Grey line under the name</div>${seg(['None', '1 line', '2 lines'], 1)}</div>
+      <div class="prow"><div class="txt">First on the row</div>${seg(['Project', 'Thread name'], 0)}</div>
+      <div class="prow"><div class="txt">Time</div>${seg(['9:12 PM', '10m ago'], 0)}</div>
+      <div class="prow"><div class="txt">When a thread needs you</div>${seg(['Question count', 'One mark'], 0)}</div>
+      <div class="prow new"><div class="txt">Agent icons<div class="d">Also the Agents list and threads. A face picked for one agent stays.</div></div>${seg([`<span class="atile">${hostMark('claude', 13)}</span>Each agent's own`, `${icon('orchard', 20)}From the project name`, 'Hidden'], 1)}</div>
+      <div class="prow"><div class="txt">Project name</div><span class="sw"></span></div>
+      <div class="prow"><div class="txt">Pull requests<div class="d">Their state at the end of the row</div></div><span class="sw"></span></div>
+      <div class="more">More choices ›</div>
+    </div>
+    <div class="prev"><h3>Your list</h3><div class="plist">${rows}</div>
+      <h3 style="margin-top:22px">The Agents list follows</h3><div class="agents" style="margin-top:0">${agents}</div></div>
+  </div>
+</div>
+<p class="note" style="margin-top:18px">Mock only. Names are made up; host marks are stand-ins. Icons drawn in variant A (solid tile).</p>`;
+</script>
+</body>
+</html>

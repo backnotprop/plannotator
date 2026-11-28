@@ -1,0 +1,221 @@
+{
+  "generatedFrom": "Positions measured on the Viewer of origin/main 20d2a0c7f (raw HTML printed as text): each document rendered there with the real sanitizer (tests/helpers/chat-sanitizer-dom.ts); for the quote's copy, the text node's parent element, its index among the article's elements of that tag, and the offset of the quote in that parent's text, as web-highlighter stores them (startMeta/endMeta). The block id is the block that copy rendered in.",
+  "docs": [
+    {
+      "name": "a sentence written twice after an iframe line that printed as a paragraph: the first copy",
+      "markdown": "# Plan\n\nIntro words.\n\n<iframe src=\"https://example.invalid/embed\" width=\"100%\" height=\"320\"></iframe>\n\nThen run the tests.\n\n## Rollout\n\nThen run the tests.\n",
+      "annotation": {
+        "id": "dropped-line-first-copy",
+        "blockId": "block-3",
+        "startOffset": 0,
+        "endOffset": 19,
+        "type": "COMMENT",
+        "text": "a comment",
+        "originalText": "Then run the tests.",
+        "createdA": 1,
+        "startMeta": {
+          "parentTagName": "P",
+          "parentIndex": 2,
+          "textOffset": 0
+        },
+        "endMeta": {
+          "parentTagName": "P",
+          "parentIndex": 2,
+          "textOffset": 19
+        }
+      }
+    },
+    {
+      "name": "a sentence written twice after an iframe line that printed as a paragraph: the second copy",
+      "markdown": "# Plan\n\nIntro words.\n\n<iframe src=\"https://example.invalid/embed\" width=\"100%\" height=\"320\"></iframe>\n\nThen run the tests.\n\n## Rollout\n\nThen run the tests.\n",
+      "annotation": {
+        "id": "dropped-line-second-copy",
+        "blockId": "block-5",
+        "startOffset": 0,
+        "endOffset": 19,
+        "type": "COMMENT",
+        "text": "a comment",
+        "originalText": "Then run the tests.",
+        "createdA": 1,
+        "startMeta": {
+          "parentTagName": "P",
+          "parentIndex": 3,
+          "textOffset": 0
+        },
+        "endMeta": {
+          "parentTagName": "P",
+          "parentIndex": 3,
+          "textOffset": 19
+        }
+      }
+    },
+    {
+      "name": "words after an iframe tag that printed mid-sentence (with a link drawn inside it)",
+      "markdown": "Notes: see <iframe src=\"https://example.invalid/mid\"></iframe> here. Then ship it.\n",
+      "annotation": {
+        "id": "after-a-mid-sentence-iframe",
+        "blockId": "block-0",
+        "startOffset": 0,
+        "endOffset": 13,
+        "type": "COMMENT",
+        "text": "a comment",
+        "originalText": "Then ship it.",
+        "createdA": 1,
+        "startMeta": {
+          "parentTagName": "P",
+          "parentIndex": 0,
+          "textOffset": 69
+        },
+        "endMeta": {
+          "parentTagName": "P",
+          "parentIndex": 0,
+          "textOffset": 82
+        }
+      }
+    },
+    {
+      "name": "words after <kbd> and <sub> that printed as text",
+      "markdown": "Press <kbd>Ctrl</kbd> with H<sub>2</sub>O and then save the file.\n",
+      "annotation": {
+        "id": "after-inline-kbd-and-sub",
+        "blockId": "block-0",
+        "startOffset": 0,
+        "endOffset": 23,
+        "type": "COMMENT",
+        "text": "a comment",
+        "originalText": "and then save the file.",
+        "createdA": 1,
+        "startMeta": {
+          "parentTagName": "P",
+          "parentIndex": 0,
+          "textOffset": 42
+        },
+        "endMeta": {
+          "parentTagName": "P",
+          "parentIndex": 0,
+          "textOffset": 65
+        }
+      }
+    },
+    {
+      "name": "a script line that printed as a paragraph, above a list and a paragraph with the same words",
+      "markdown": "<script>document.title = \"ran\"</script>\n\n- Check the logs.\n- Check the logs.\n\nCheck the logs.\n",
+      "annotation": {
+        "id": "a-script-block-above-a-list",
+        "blockId": "block-3",
+        "startOffset": 0,
+        "endOffset": 15,
+        "type": "COMMENT",
+        "text": "a comment",
+        "originalText": "Check the logs.",
+        "createdA": 1,
+        "startMeta": {
+          "parentTagName": "P",
+          "parentIndex": 1,
+          "textOffset": 0
+        },
+        "endMeta": {
+          "parentTagName": "P",
+          "parentIndex": 1,
+          "textOffset": 15
+        }
+      }
+    },
+    {
+      "name": "a sentence written twice after a paragraph with an iframe line inside it: the second copy",
+      "markdown": "Intro.\n<iframe src=\"https://example.invalid/e\" width=\"100%\" height=\"320\"></iframe>\nCaption.\n\nThen run the tests.\n\nThen run the tests.\n",
+      "annotation": {
+        "id": "in-paragraph-second-copy",
+        "blockId": "block-2",
+        "startOffset": 0,
+        "endOffset": 19,
+        "type": "COMMENT",
+        "text": "a comment",
+        "originalText": "Then run the tests.",
+        "createdA": 1,
+        "startMeta": {
+          "parentTagName": "P",
+          "parentIndex": 2,
+          "textOffset": 0
+        },
+        "endMeta": {
+          "parentTagName": "P",
+          "parentIndex": 2,
+          "textOffset": 19
+        }
+      }
+    },
+    {
+      "name": "a sentence written twice after a paragraph with an iframe line inside it: the first copy",
+      "markdown": "Intro.\n<iframe src=\"https://example.invalid/e\" width=\"100%\" height=\"320\"></iframe>\nCaption.\n\nThen run the tests.\n\nThen run the tests.\n",
+      "annotation": {
+        "id": "in-paragraph-first-copy",
+        "blockId": "block-1",
+        "startOffset": 0,
+        "endOffset": 19,
+        "type": "COMMENT",
+        "text": "a comment",
+        "originalText": "Then run the tests.",
+        "createdA": 1,
+        "startMeta": {
+          "parentTagName": "P",
+          "parentIndex": 1,
+          "textOffset": 0
+        },
+        "endMeta": {
+          "parentTagName": "P",
+          "parentIndex": 1,
+          "textOffset": 19
+        }
+      }
+    },
+    {
+      "name": "the caption after an iframe line inside the same paragraph (its offset counted the tag's text)",
+      "markdown": "Intro.\n<iframe src=\"https://example.invalid/e\" width=\"100%\" height=\"320\"></iframe>\nCaption under the video.\n\nCaption under the video.\n",
+      "annotation": {
+        "id": "in-paragraph-caption",
+        "blockId": "block-0",
+        "startOffset": 0,
+        "endOffset": 24,
+        "type": "COMMENT",
+        "text": "a comment",
+        "originalText": "Caption under the video.",
+        "createdA": 1,
+        "startMeta": {
+          "parentTagName": "P",
+          "parentIndex": 0,
+          "textOffset": 83
+        },
+        "endMeta": {
+          "parentTagName": "P",
+          "parentIndex": 0,
+          "textOffset": 107
+        }
+      }
+    },
+    {
+      "name": "a sentence written twice after a script line right under a heading (no blank line): the second copy",
+      "markdown": "## Setup\n<script>track()</script>\n\nRun it twice.\n\nRun it twice.\n",
+      "annotation": {
+        "id": "script-after-heading-then-copies",
+        "blockId": "block-3",
+        "startOffset": 0,
+        "endOffset": 13,
+        "type": "COMMENT",
+        "text": "a comment",
+        "originalText": "Run it twice.",
+        "createdA": 1,
+        "startMeta": {
+          "parentTagName": "P",
+          "parentIndex": 2,
+          "textOffset": 0
+        },
+        "endMeta": {
+          "parentTagName": "P",
+          "parentIndex": 2,
+          "textOffset": 13
+        }
+      }
+    }
+  ]
+}

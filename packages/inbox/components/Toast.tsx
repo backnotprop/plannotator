@@ -3,8 +3,10 @@ import { Icon, type IconName } from '../icons';
 import { hintText, ShortcutHint, useShortcutAria } from '../shortcuts/hint';
 import { shortcutPrefs } from '../shortcuts/prefs';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
+import { liveReviewKeys, useLiveReviewKeys } from '../shortcuts/review';
 import { useTouchPhone } from '../phone';
 import { Tip } from './Tip';
+import { useTouchPress } from './touchPress';
 
 /** `thumb`: 👍 Looks good (the emoji itself, as plan review's button draws it). */
 export type InboxToastIcon = 'check' | 'warn' | 'archive' | 'mute' | 'thumb' | 'unpin' | 'clock' | 'unread';
@@ -58,8 +60,8 @@ export function toastSpeech(toast: Pick<InboxToastModel, 'lead' | 'detail' | 'on
   const sentence = (text: string) => (/[.!?…”"]$/.test(text) ? text : `${text}.`);
   const said = toast.speech ? sentence(toast.speech) : toast.detail ? `${sentence(toast.lead)} ${sentence(toast.detail)}` : sentence(toast.lead);
   if (!toast.onUndo) return said;
-  // With single keys off Z does nothing, so it is not offered.
-  return `${said} ${phone || !singleKeys ? 'Undo is available.' : `Press ${hintText({ scope: inboxThreadShortcuts, action: 'undo' })} to undo.`}`;
+  // With single keys off Z does nothing, so it is not offered; nor while a review on screen has Z (re-expand).
+  return `${said} ${phone || !singleKeys || liveReviewKeys() ? 'Undo is available.' : `Press ${hintText({ scope: inboxThreadShortcuts, action: 'undo' })} to undo.`}`;
 }
 
 /**
@@ -119,8 +121,12 @@ function cutWithin(el: Element): boolean {
 function ToastBody({ toast, phone, onDismiss }: { toast: InboxToastModel; phone: boolean; onDismiss?: () => void }) {
   // Reply is a phone's foot's on a touch phone; a narrow desktop window (the phone layout, a mouse and keys) keeps it.
   const touchPhone = useTouchPhone();
+  // A review on screen has Z (re-expand a file) while its keys act: the Undo button offers no key then, as a phone's
+  // does not. While they stand down (Details, a menu, a repository file over the diff) Z is the Inbox's Undo again.
+  const reviewKeys = useLiveReviewKeys();
   const reply = !(phone && touchPhone) && toast.onReply;
   const undoKeys = useShortcutAria({ scope: inboxThreadShortcuts, action: 'undo' });
+  const undoPress = useTouchPress(toast.onUndo);
   const lead = phone ? (toast.phoneLead ?? toast.lead) : toast.lead;
   const detail = phone ? (toast.phoneDetail ?? toast.detail) : toast.detail;
   const error = toast.wrap && !detail ? splitErrorAction(lead) : null;
@@ -164,10 +170,10 @@ function ToastBody({ toast, phone, onDismiss }: { toast: InboxToastModel; phone:
             </button>
           )}
           {toast.onUndo && (
-            <button type="button" className="ib-tundo" onClick={toast.onUndo} data-toast-undo="" aria-keyshortcuts={toast.noKey || (phone && touchPhone) ? undefined : undoKeys}>
+            <button type="button" className="ib-tundo" {...undoPress} data-toast-undo="" aria-keyshortcuts={toast.noKey || reviewKeys || (phone && touchPhone) ? undefined : undoKeys}>
               Undo
               {/* A narrow desktop window (the phone layout, a mouse and keys) keeps Z, as it keeps Reply. */}
-              {!toast.noKey && !(phone && touchPhone) && <ShortcutHint scope={inboxThreadShortcuts} action="undo" className="" touchOnly />}
+              {!toast.noKey && !reviewKeys && !(phone && touchPhone) && <ShortcutHint scope={inboxThreadShortcuts} action="undo" className="" touchOnly />}
             </button>
           )}
           {onDismiss && (
@@ -249,9 +255,11 @@ function useFit(ref: RefObject<HTMLDivElement | null>, toast: InboxToastModel, p
 
 /**
  * What a phone's toast keeps clear of, at the window's bottom: the open
- * thread's foot (Reply, the reply box) and a full-screen file's bar, its name
- * chip and its captions. The image and video composers have their own place
- * for it (inbox.css), so their windows are left to the stylesheet.
+ * thread's foot (Reply, the reply box), and a full-screen file's bar,
+ * its name chip and its captions, and its Comment / Reply card (whose tabs a
+ * fixed height above the bottom covered: "Added to your reply" over them) or
+ * that card's pill. The image composer outside full screen has its own place
+ * for it (inbox.css), so its window is left to the stylesheet.
  */
 const PHONE_FLOOR = [
   'section.ib-pane .ib-pfoot',
@@ -260,8 +268,30 @@ const PHONE_FLOOR = [
   '.ib-view.ib-phone .ib-fvchip',
   '.ib-view.ib-phone .ib-optcap',
   '.ib-view.ib-phone .ib-linknote',
+  '.ib-fcomp.ib-phone',
+  '.ib-fcomp-pillwrap.ib-phone',
 ].join(', ');
-const PHONE_FLOOR_OWN = '.ib-imgcompose, .ib-fcomp';
+const PHONE_FLOOR_OWN = '.ib-imgcompose';
+/**
+ * Gathered into the corner control (full screen's tools tucked, inbox.css): gone for the toast from the moment the
+ * attribute flips, though its fade and its visibility take 340 ms to follow. The corner control is what is there.
+ */
+const PHONE_FLOOR_GATHERED = '[data-tools="tucked"] :is(.ib-fcomp, .ib-fcomp-pillwrap), .ib-fvdock[data-bar="tucked"] .ib-fvbar';
+
+/**
+ * Where a floor element's top rests, its own transform taken out: a card flying back from the corner control is
+ * measured where it lands, not low in mid-flight (it would land over the toast; a transform tells no observer).
+ */
+function restingTop(node: HTMLElement): number {
+  const box = node.getBoundingClientRect();
+  const style = getComputedStyle(node);
+  if (!style.transform || style.transform === 'none' || typeof DOMMatrixReadOnly === 'undefined') return box.top;
+  const m = new DOMMatrixReadOnly(style.transform);
+  if (m.m22 <= 0) return box.top;
+  // top' = top + origin·(1 − scaleY) + translateY, for the translate and scale the gathering uses.
+  const origin = parseFloat(style.transformOrigin.split(' ')[1] ?? '') || 0;
+  return box.top - m.m42 - origin * (1 - m.m22);
+}
 
 /**
  * How far above the window's bottom a phone's toast sits: 8 px over the
@@ -287,7 +317,7 @@ function usePhoneFloor(ref: RefObject<HTMLDivElement | null>): number | null {
       let top = Infinity;
       for (const node of found) {
         const box = node.getBoundingClientRect();
-        if (box.width > 0 && box.height > 0) top = Math.min(top, box.top);
+        if (box.width > 0 && box.height > 0 && !node.matches(PHONE_FLOOR_GATHERED)) top = Math.min(top, restingTop(node));
       }
       setFloor(top === Infinity ? null : Math.max(0, Math.round(container - top)) + 8);
       if (resize) {
@@ -307,13 +337,22 @@ function usePhoneFloor(ref: RefObject<HTMLDivElement | null>): number | null {
       });
     };
     const mutations = typeof MutationObserver === 'undefined' ? null : new MutationObserver(soon);
-    mutations?.observe(document.body, { childList: true, subtree: true });
+    // `data-tools`: full screen's tools gathered into the corner or brought back, the card with them.
+    mutations?.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-tools'] });
     window.addEventListener('resize', measure);
+    // A floor element done moving (the card landed, the bar came back): measured where it ended.
+    const landed = (event: Event) => {
+      if (event.target instanceof HTMLElement && event.target.matches(PHONE_FLOOR)) soon();
+    };
+    document.addEventListener('transitionend', landed, true);
+    document.addEventListener('transitioncancel', landed, true);
     return () => {
       if (frame) cancelAnimationFrame(frame);
       mutations?.disconnect();
       resize?.disconnect();
       window.removeEventListener('resize', measure);
+      document.removeEventListener('transitionend', landed, true);
+      document.removeEventListener('transitioncancel', landed, true);
     };
   }, [ref]);
   return floor;

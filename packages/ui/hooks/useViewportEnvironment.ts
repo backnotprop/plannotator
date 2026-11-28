@@ -190,11 +190,21 @@ export function hasPrimaryCoarsePointer(targetWindow?: Window): boolean {
   return resolvedWindow.matchMedia('(pointer: coarse)').matches;
 }
 
+/**
+ * The height of the box `position: fixed` is laid out in. iOS 26 Safari reports `innerHeight` as the visual
+ * viewport's height once it has panned to a focused field (the keyboard up), while the layout viewport, where a
+ * fixed box's `bottom` is measured from, keeps its full height (`documentElement.clientHeight`). Elsewhere the
+ * two agree, or `innerHeight` is the larger (a desktop scrollbar), so the larger one is kept.
+ */
+export function layoutViewportHeight(targetWindow: Window): number {
+  return Math.max(targetWindow.innerHeight, targetWindow.document?.documentElement?.clientHeight ?? 0);
+}
+
 function readViewportEnvironment(targetWindow: Window): ViewportEnvironment {
   const visualViewport = targetWindow.visualViewport;
   return calculateViewportEnvironment({
     layoutWidth: targetWindow.innerWidth,
-    layoutHeight: targetWindow.innerHeight,
+    layoutHeight: layoutViewportHeight(targetWindow),
     visualViewport: visualViewport
       ? {
           width: visualViewport.width,

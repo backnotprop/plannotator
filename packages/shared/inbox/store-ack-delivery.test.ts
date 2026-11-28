@@ -224,7 +224,7 @@ describe("a reaction from the 👍's tray (approval \"inbox-reaction-tray\")", (
     plain.clock.now += WINDOW;
     const [thumbs] = plain.store.settleAcks(WINDOW);
     const thumbsNote = plain.store.message(thumbs!.ack!.note_id!)!;
-    expect(thumbsNote.body).toBe(`The person reacted 👍 Looks good to your message (${plain.sent.id}).`);
+    expect(thumbsNote.body).toBe(`The person reacted 👍 Looks good to your message (${plain.sent.id}). Take it as a go.`);
     expect(thumbsNote.ack_reaction).toBeUndefined();
     // An ack always carries a reaction as an agent reads it, 👍 included (addendum 2026-11-07T12:20Z).
     expect(plain.store.agentThread(plain.sent.id)!.messages[0]!.ack).toEqual({ label: "Looks good", at: thumbs!.ack!.at, reaction: { emoji: "👍", label: "Looks good" } });

@@ -11,7 +11,7 @@
  *   Escape, or an unbounded height.
  */
 import { describe, expect, test } from "bun:test";
-import { buildEmbedDocument, EMBED_BOOTSTRAP, EMBED_MAX_HEIGHT, EMBED_REMOTE_SOURCES, EMBED_RESPONSE_CSP, EMBED_SANDBOX, embedFragment, readEmbedMessage } from "./html-embed";
+import { buildEmbedDocument, EMBED_BOOTSTRAP, EMBED_MAX_HEIGHT, EMBED_REMOTE_SOURCES, EMBED_RESPONSE_CSP, EMBED_SANDBOX, embedFragment, embedIdFromUrl, readEmbedMessage } from "./html-embed";
 
 const directives = new Map(
   EMBED_RESPONSE_CSP.split(";").map((part) => {
@@ -73,6 +73,84 @@ describe("the bootstrap takes a theme from the Inbox's window only", () => {
   });
 });
 
+describe("the bootstrap loads the page again for a link or a GET form to itself", () => {
+  // An agent's ```html page with its own switcher (`<a href="?view=2">`) or a search form: in a tab both load the
+  // page again with the query. The embed is served at /api/inbox/embeds/<id>, so the same works there, in place
+  // (location.replace: no history entry), keeping the theme's fragment the page was first given.
+  type Handler = (event: Record<string, unknown>) => void;
+  const run = (hash = "#pn=%7B%7D") => {
+    const replaced: string[] = [];
+    const onDocument: Record<string, Handler> = {};
+    const onWindow: Record<string, Handler> = {};
+    const location = { hash, pathname: "/api/inbox/embeds/abc", replace: (url: string) => replaced.push(url) };
+    const root = { style: { setProperty() {}, colorScheme: "" }, setAttribute() {}, getBoundingClientRect: () => ({ height: 0 }) };
+    /** The fields a fake form holds, read by `new FormData(form, submitter)`. */
+    class FakeFormData {
+      private entries: [string, unknown][];
+      constructor(form: { fields: [string, unknown][] }, submitter?: { field?: [string, unknown] } | null) {
+        this.entries = [...form.fields, ...(submitter?.field ? [submitter.field] : [])];
+      }
+      forEach(fn: (value: unknown, key: string) => void) {
+        for (const [key, value] of this.entries) fn(value, key);
+      }
+    }
+    new Function("window", "document", "location", "addEventListener", "setTimeout", "ResizeObserver", "FormData", EMBED_BOOTSTRAP)(
+      { parent: { postMessage() {} } },
+      { documentElement: root, body: null, addEventListener: (type: string, fn: Handler) => (onDocument[type] = fn) },
+      location,
+      (type: string, fn: Handler) => (onWindow[type] = fn),
+      () => 0,
+      undefined,
+      FakeFormData,
+    );
+    const click = (href: string, isTrusted = true) => {
+      const event = { target: { closest: () => ({ getAttribute: () => href }) }, defaultPrevented: false, isTrusted, preventDefault() {} };
+      onDocument.click!(event);
+    };
+    const attr = (values: Record<string, string>) => (name: string) => values[name] ?? null;
+    const submit = (form: Record<string, string>, fields: [string, unknown][], submitter: Record<string, string> | null = null) => {
+      let prevented = false;
+      onWindow.submit!({
+        target: { tagName: "FORM", getAttribute: attr(form), fields },
+        submitter: submitter ? { getAttribute: attr(submitter), field: submitter.name ? [submitter.name, submitter.value] : undefined } : null,
+        defaultPrevented: false,
+        preventDefault: () => (prevented = true),
+      });
+      return prevented;
+    };
+    return { replaced, click, submit };
+  };
+
+  test("a link that is only a query loads this page with it, the theme's fragment kept unless the link has one", () => {
+    const page = run();
+    page.click("?view=2&n=3");
+    page.click("?x=1#top");
+    expect(page.replaced).toEqual(["/api/inbox/embeds/abc?view=2&n=3#pn=%7B%7D", "/api/inbox/embeds/abc?x=1#top"]);
+  });
+
+  test("another page's address, a web link or a script's click does not reload", () => {
+    const page = run();
+    for (const href of ["other.html?x=1", "https://example.com/?x=1", "/api/inbox/threads?x=1", "javascript:void(0)"]) page.click(href);
+    page.click("?x=1", false);
+    expect(page.replaced).toEqual([]);
+  });
+
+  test("a GET form with no action, or only a query, loads this page with its fields; text fields only", () => {
+    const page = run();
+    expect(page.submit({}, [["q", "a b"], ["file", { name: "x.png" }]], { name: "view", value: "grid" })).toBe(true);
+    page.submit({ action: "?old=1" }, [["q", "c"]]);
+    expect(page.replaced).toEqual(["/api/inbox/embeds/abc?q=a+b&view=grid#pn=%7B%7D", "/api/inbox/embeds/abc?q=c#pn=%7B%7D"]);
+  });
+
+  test("a POST form, or one with an address of its own, is left alone (the frame's policy refuses it)", () => {
+    const page = run();
+    expect(page.submit({ method: "post" }, [["q", "1"]])).toBe(false);
+    expect(page.submit({ action: "https://example.com/search" }, [["q", "1"]])).toBe(false);
+    expect(page.submit({}, [["q", "1"]], { formmethod: "post" })).toBe(false);
+    expect(page.replaced).toEqual([]);
+  });
+});
+
 describe("buildEmbedDocument", () => {
   const ourHead = (doc: string) => doc.indexOf(EMBED_BOOTSTRAP);
 
@@ -129,5 +207,42 @@ describe("readEmbedMessage", () => {
     for (const data of [null, "height", { kind: "height", height: 10 }, { pnEmbed: 2, kind: "escape" }, { pnEmbed: 1, kind: "navigate", url: "https://x" }, { pnEmbed: 1, kind: "focus" }]) {
       expect(readEmbedMessage(data)).toBeNull();
     }
+  });
+});
+
+describe("the document a host adds its own script to (closeHead: an annotatable block)", () => {
+  test("without the option the document is the one it always was", () => {
+    expect(buildEmbedDocument("<p>hi</p>", {})).toBe(buildEmbedDocument("<p>hi</p>"));
+    expect(buildEmbedDocument("<p>hi</p>")).not.toContain("</head>");
+  });
+
+  test("our head ends before the page, so a script put before the first </head> runs ahead of everything the page wrote", () => {
+    const hostile = '<script>window.first = "page"</script></head><p>hi</p>';
+    const page = buildEmbedDocument(hostile, { closeHead: true });
+    expect(page.startsWith("<!doctype html>")).toBe(true);
+    const ours = page.indexOf("</head>");
+    expect(ours).toBeGreaterThan(page.indexOf(EMBED_BOOTSTRAP));
+    expect(ours).toBeLessThan(page.indexOf(hostile));
+    // Nothing of ours holds a </head> a page could not also hold: the first one is always ours.
+    expect(page.slice(0, ours)).not.toContain("</head>");
+  });
+
+  test("it is the same page otherwise: the same defaults and first script, then the agent's HTML as written", () => {
+    const plain = buildEmbedDocument("<p>hi</p>");
+    const closed = buildEmbedDocument("<p>hi</p>", { closeHead: true });
+    expect(closed).toBe(plain.replace("<p>hi</p>", "</head><p>hi</p>"));
+  });
+});
+
+describe("the embed's id, read from its document's URL", () => {
+  const id = "0123456789abcdef0123456789abcdef";
+  test("the last path segment, with or without a query and fragment", () => {
+    expect(embedIdFromUrl(`/api/inbox/embeds/${id}`)).toBe(id);
+    expect(embedIdFromUrl(`http://127.0.0.1:1/api/inbox/embeds/${id}?v=2#pn=x`)).toBe(id);
+  });
+  test("a URL that does not end in an id has none", () => {
+    expect(embedIdFromUrl("/api/inbox/embeds/abc")).toBeNull();
+    expect(embedIdFromUrl(`/api/inbox/embeds/${id}/more`)).toBeNull();
+    expect(embedIdFromUrl("")).toBeNull();
   });
 });

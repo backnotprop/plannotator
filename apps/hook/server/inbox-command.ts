@@ -50,6 +50,8 @@ import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { isAskAiChild } from "@plannotator/shared/child-env";
 import { isNewerStableVersion } from "@plannotator/shared/update-check";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
+import { INBOX_OFF_LINE } from "@plannotator/shared/inbox/connection";
+import { isInboxTurnedOn, markInboxTurnedOn } from "@plannotator/shared/inbox/turned-on";
 import {
   acquireInboxStartLock,
   inboxStartLockStale,
@@ -58,20 +60,26 @@ import {
   INBOX_START_LOCK,
   INBOX_START_LOCK_STALE_MS,
   inboxRegistryPath,
+  inboxOutOfReach,
   inboxStatus,
+  InboxUnreachableError,
   readInboxRegistry,
   stopInbox,
   waitForInbox,
   type InboxRegistryEntry,
+  type InboxStatus,
   type InboxStopResult,
 } from "@plannotator/shared/inbox/registry";
 import { handleInboxServerReady, startInboxServer } from "@plannotator/server/inbox";
 import { INBOX_DB_FILE, InboxReturnError, inboxReturnFailedWords } from "@plannotator/shared/inbox/store-log/sqlite-return/return";
 import { exposureWarning, type InboxTailscaleState } from "@plannotator/server/inbox-tailscale";
+import { describeCfAccessRecord, runCfAccessCommand } from "./inbox-cf-access-command";
 import { openBrowser, openBrowserDetached } from "@plannotator/server/browser";
 import { isRemoteSession } from "@plannotator/server/remote";
 import { assertTestHome } from "@plannotator/server/test-home-guard";
 import { agentSpec, createAgentEnvironment, formatConnectReport, inboxConnectDisabled } from "@plannotator/server/inbox-agents";
+import { withoutRexPane } from "@plannotator/server/inbox-launch-env";
+import { INBOX_REX_SERVER_ENV, inboxRexServerSocket } from "@plannotator/server/inbox-rex-where";
 import { addInboxNote, INBOX_NOTE_BODY, inboxNotesDisabled, markNotesAsked } from "@plannotator/server/inbox-agent-notes";
 import { INBOX_AGENT_LABELS, INBOX_AUTO_SEND_AFTER_MS, INBOX_NOTE_AGENT_IDS, type InboxConnectReport, type InboxNoteAgentId } from "@plannotator/core/inbox-types";
 import { writeUrlQr } from "@plannotator/server/qr";
@@ -84,6 +92,8 @@ import { INBOX_CONNECTION_USAGE, runInboxConnectionCommand, stdinLines } from ".
 import { runInboxProjectsCommand } from "./inbox-projects-command";
 import { writeWholeToStdout } from "./write-whole-stdout";
 import { inboxStartTrace } from "./inbox-start-trace";
+import { inboxPairedRouteFetch } from "./inbox-call-command";
+import { loadEmbeddedSemDiff } from "./sem-diff";
 
 export const INBOX_LOG_FILE = "inbox.log";
 /** Set by a starter that holds the start lock for the detached Inbox it spawns. */
@@ -141,7 +151,12 @@ function spawnDetachedInbox(dataDir: string, tailscale: boolean): number | undef
  * real sessions. Without the marker, both switches pass through as before.
  */
 export function detachedInboxEnv(env: Readonly<Record<string, string | undefined>>, dataDir: string): Record<string, string | undefined> {
-  const out: Record<string, string | undefined> = { ...env, PLANNOTATOR_DATA_DIR: dataDir, [LOCK_HELD_ENV]: "1", [DETACHED_ENV]: "1" };
+  // Not the Rex pane it was started from (`withoutRexPane`): the Inbox outlives it, and its agents are not in it.
+  const out: Record<string, string | undefined> = { ...withoutRexPane(env), PLANNOTATOR_DATA_DIR: dataDir, [LOCK_HELD_ENV]: "1", [DETACHED_ENV]: "1" };
+  // Which Rex server is this computer's stays known (the person's `REX_SERVER`, or the one Rex's terminal named), under
+  // the Inbox's own name: only a socket on this computer, and never the pane's ids.
+  const rexServer = inboxRexServerSocket(env.REX_SERVER);
+  if (rexServer && !out[INBOX_REX_SERVER_ENV]) out[INBOX_REX_SERVER_ENV] = rexServer;
   if (isAskAiChild(env)) {
     delete out.PLANNOTATOR_ASK_AI_CHILD;
     delete out.PLANNOTATOR_INBOX_TOOL;
@@ -193,6 +208,8 @@ async function waitForBusyInbox(dataDir: string, pid: number): Promise<InboxRegi
  * needed. Never opens a browser. Throws when it cannot be started.
  */
 export async function ensureInboxRunning(dataDir: string, options: { tailscale?: boolean } = {}): Promise<InboxRegistryEntry> {
+  // Until the person turns the Inbox on here (turned-on.ts), nothing reaches or starts it.
+  if (!isInboxTurnedOn(dataDir)) throw new Error(INBOX_OFF_LINE);
   const trace = inboxStartTrace(dataDir, "starter");
   const status = await inboxStatus(dataDir);
   if (status.state === "running") return status.entry;
@@ -200,7 +217,19 @@ export async function ensureInboxRunning(dataDir: string, options: { tailscale?:
     trace.step("busy_wait", { inbox: status.entry.pid });
     return waitForBusyInbox(dataDir, status.entry.pid);
   }
+  const unreachable = await outOfReach(status);
+  if (unreachable) {
+    trace.step("out_of_reach", { inbox: unreachable.pid });
+    throw unreachable.error;
+  }
   return startDetachedInbox(dataDir, acquireInboxStartLock(dataDir), options.tailscale === true);
+}
+
+/** The running Inbox this process cannot reach (`inboxOutOfReach`): its pid and the error a start gives. Null when there is none. */
+async function outOfReach(status: InboxStatus): Promise<{ pid: number; error: InboxUnreachableError } | null> {
+  if (status.state !== "stopped" || status.reason !== "no_answer") return null;
+  const detail = await inboxOutOfReach(status.entry);
+  return detail === null ? null : { pid: status.entry.pid, error: new InboxUnreachableError(detail) };
 }
 
 /**
@@ -340,13 +369,16 @@ function reportConnect(report: InboxConnectReport | undefined): void {
  * computer, through its token-guarded connection route. An Inbox that
  * predates the route answers 404, and connects nothing.
  */
-async function connectRunningInbox(entry: InboxRegistryEntry): Promise<void> {
+/** `--open` returns within this, the connect included (its callers wait 30 s). */
+const OPEN_DONE_WITHIN_MS = 25_000;
+
+async function connectRunningInbox(entry: InboxRegistryEntry, timeoutMs = 40_000): Promise<void> {
   try {
     const response = await fetch(`http://127.0.0.1:${entry.port}/api/inbox/control/connect`, {
       method: "POST",
       headers: { Authorization: `Bearer ${entry.token}`, "Content-Type": "application/json" },
       body: "{}",
-      signal: AbortSignal.timeout(40_000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     if (!response.ok) return;
     const body = (await response.json()) as { connect?: InboxConnectReport };
@@ -399,12 +431,21 @@ async function serveInbox(dataDir: string, open: boolean, htmlContent: string | 
       if (connect) await connectRunningInbox(entry);
       process.exit(0);
     }
+    // A detached Inbox's starter has decided already (the window's Restart runs inside the Inbox it replaces).
+    const unreachable = lockHeldByStarter ? null : await outOfReach(status);
+    if (unreachable) {
+      trace.step("out_of_reach", { inbox: unreachable.pid });
+      release?.();
+      process.stderr.write(`${unreachable.error.message}\n`);
+      process.exit(1);
+    }
     inbox = await startInboxServer({
       dataDir,
       version: getCliVersion() ?? "dev",
       htmlContent,
       // Live sites (packages/server/inbox-live.ts): the live bridge's sources, as annotate's live sessions get them.
       liveBridge: { bridgeScript: BRIDGE_SCRIPT, bridgeBootstrap: LIVE_BRIDGE_BOOTSTRAP, annotationCss: ANNOTATION_HIGHLIGHT_CSS },
+      semDiff: loadEmbeddedSemDiff,
       selfCommand: selfCommand(),
       publishTailnet: tailscale,
       // Testing knob: how long a reply waits on a busy agent before it goes in by itself (default 5 minutes).
@@ -537,6 +578,7 @@ async function statusCommand(dataDir: string, asJson: boolean): Promise<number> 
       version: status.state === "running" ? status.health.version : (entry?.version ?? null),
       started_at: entry?.startedAt ?? null,
       tailnet_url: status.state === "running" ? (entry?.tailscale?.url ?? null) : null,
+      ...(status.state === "running" && entry?.cloudflare_access ? { cloudflare_access: entry.cloudflare_access } : {}),
       data_dir: dataDir,
       record: inboxRegistryPath(dataDir),
       cli_version: cliVersion,
@@ -557,6 +599,7 @@ async function statusCommand(dataDir: string, asJson: boolean): Promise<number> 
     out(status.state === "running" ? "Plannotator Inbox: running" : `Plannotator Inbox: not answering (pid ${live.pid} holds port ${live.port} but did not answer)`);
     out(`  URL:      ${live.url}`);
     if (status.state === "running" && live.tailscale?.url) out(`  tailnet:  ${live.tailscale.url}`);
+    if (status.state === "running" && live.cloudflare_access) out(`  cloudflare: ${describeCfAccessRecord(live.cloudflare_access)}`);
     out(`  pid:      ${live.pid}`);
     out(`  version:  ${status.state === "running" ? status.health.version : live.version}`);
     out(`  started:  ${live.startedAt}`);
@@ -662,6 +705,15 @@ async function stopCommand(dataDir: string): Promise<number> {
  * in between waits for this start instead of racing it.
  */
 async function restartCommand(dataDir: string, tailscale: boolean): Promise<number> {
+  if (!isInboxTurnedOn(dataDir)) {
+    process.stderr.write(`${INBOX_OFF_LINE}\n`);
+    return 1;
+  }
+  const unreachable = await outOfReach(await inboxStatus(dataDir));
+  if (unreachable) {
+    process.stderr.write(`${unreachable.error.message}\n`);
+    return 1;
+  }
   const release = await takeStartLock(dataDir);
   if (!release) {
     process.stderr.write("Another Plannotator Inbox start holds the start lock and did not finish; try again.\n");
@@ -782,17 +834,31 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
     process.exit(await restartCommand(dataDir, rest.includes("--tailscale")));
   }
 
+  // A paired cloud agent's machine (PLANNOTATOR_PAIRING) has no Inbox of its own: these reach the person's Inbox
+  // through the agent door instead, and work as they do on that computer (inbox-call-command.ts `inboxPairedRouteFetch`).
+  const pairedRoute = (args[0] === "projects" || args[0] === "rows" || args[0] === "icon") && process.env.PLANNOTATOR_PAIRING && !isInboxTurnedOn(dataDir) ? inboxPairedRouteFetch({ env: process.env }) : null;
+  if (pairedRoute && "code" in pairedRoute) {
+    process.stderr.write(`${pairedRoute.code}: ${pairedRoute.message}\n`);
+    process.exit(1);
+  }
+  const fetchRoute = pairedRoute ? { fetchRoute: pairedRoute } : {};
+
   if (args[0] === "projects") {
-    process.exit(await runInboxProjectsCommand(args.slice(1), { json: assets.json === true, self: shellLine(selfCommand()), ensureRunning: () => ensureInboxRunning(dataDir) }));
+    process.exit(await runInboxProjectsCommand(args.slice(1), { json: assets.json === true, self: shellLine(selfCommand()), ensureRunning: () => ensureInboxRunning(dataDir), ...fetchRoute }));
   }
 
   if (args[0] === "rows") {
-    const session = inboxHostSessionFromEnv(process.env);
-    process.exit(await runInboxRowsCommand(args.slice(1), { json: assets.json === true, by: session ? { host: session.host, session: session.session } : null, ensureRunning: () => ensureInboxRunning(dataDir) }));
+    // Through the door the change is the pairing's agent's, named by the Inbox.
+    const session = pairedRoute ? null : inboxHostSessionFromEnv(process.env);
+    process.exit(await runInboxRowsCommand(args.slice(1), { json: assets.json === true, by: session ? { host: session.host, session: session.session } : null, ensureRunning: () => ensureInboxRunning(dataDir), ...fetchRoute }));
   }
 
   if (args[0] === "icon") {
-    process.exit(await runInboxIconCommand(args.slice(1), { json: assets.json === true, ensureRunning: () => ensureInboxRunning(dataDir) }));
+    process.exit(await runInboxIconCommand(args.slice(1), { json: assets.json === true, ensureRunning: () => ensureInboxRunning(dataDir), ...fetchRoute }));
+  }
+
+  if (args[0] === "cloudflare-access") {
+    process.exit(await runCfAccessCommand(args.slice(1), { dataDir, json: assets.json === true, ensureRunning: () => ensureInboxRunning(dataDir) }));
   }
 
   if (args[0] === "link" || args[0] === "unlink") {
@@ -832,9 +898,23 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
     usageError(`--open does not go with ${background ? "--background" : "--no-open"}: it starts the Inbox in the background itself and opens it.`);
   }
 
+  // A person's run (bare, --no-open, --open) turns the Inbox on here; Plannotator's own
+  // starts (--background, a detached start) never do, and start nothing until the person
+  // has (turned-on.ts). Where it is on already (every existing install) a run does what it
+  // did before the mark. The start at login runs --no-open, as before: a login item exists
+  // only where the Inbox ran, so it is on there.
+  const personRun = !detached && !background;
+  const turnsOnNow = !isInboxTurnedOn(dataDir);
+  if (turnsOnNow && !personRun) {
+    process.stderr.write(`${INBOX_OFF_LINE}\n`);
+    process.exit(1);
+  }
+  if (turnsOnNow) markInboxTurnedOn(dataDir);
+
   await reportDebugNeedsStart(dataDir);
 
   if (background || open) {
+    const startedAt = Date.now();
     try {
       const before = await inboxStatus(dataDir);
       const entry = await ensureInboxRunning(dataDir, { tailscale });
@@ -860,6 +940,11 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
         process.stderr.write(`${inboxRemoteOpenHint(entry.port)}\n`);
       }
       process.stdout.write(`${url}\n`);
+      // --open is the setup's one step: the run that turns the Inbox on connects the agents it finds after the URL
+      // is out, as the person's bare run does, within the wait of the callers that run it (the mod's
+      // /plannotator-inbox and Droid give the whole command 30 s). The Inbox finishes a connect cut short; only this
+      // report of it is lost. Where the Inbox was on already, --open connects nothing and returns at once.
+      if (open && connect && turnsOnNow) await connectRunningInbox(entry, Math.max(1_000, OPEN_DONE_WITHIN_MS - (Date.now() - startedAt)));
       process.exit(0);
     } catch (error) {
       process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);

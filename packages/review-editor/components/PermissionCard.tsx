@@ -75,20 +75,20 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
           </svg>
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-[10px] font-medium text-warning uppercase tracking-wider mb-1">
-            Permission Request
+          <p className="text-xs font-medium text-warning mb-1">
+            Permission request
           </p>
           <p className="text-xs font-mono text-foreground/80 break-all">
             {prefix}{label}
           </p>
           {description && (
-            <p className="text-[10px] text-muted-foreground mt-0.5">{description}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
           )}
         </div>
       </div>
 
       {decided ? (
-        <div className={`mt-2 text-[10px] font-medium flex items-center gap-1 ${decided === 'allow' ? 'text-success' : 'text-destructive'}`}>
+        <div className={`mt-2 text-xs font-medium flex items-center gap-1 ${decided === 'allow' ? 'text-success' : 'text-destructive'}`}>
           {decided === 'allow' ? (
             <>
               <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -110,14 +110,14 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
           <button
             onClick={() => handleDecision(true)}
             disabled={loading}
-            className="review-toolbar-btn primary disabled:opacity-50 flex-1 text-[10px]"
+            className="review-toolbar-btn primary disabled:opacity-50 flex-1 text-xs"
           >
             Allow
           </button>
           <button
             onClick={() => handleDecision(false)}
             disabled={loading}
-            className="review-toolbar-btn flex-1 text-[10px]"
+            className="review-toolbar-btn flex-1 text-xs"
           >
             Deny
           </button>

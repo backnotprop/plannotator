@@ -39,12 +39,12 @@ export const SuggestionModal: React.FC<SuggestionModalProps> = ({
           <div className="flex items-center gap-2">
             <span className="text-xs font-medium text-foreground">Suggest Changes</span>
             {language && (
-              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+              <span className="text-xs font-mono px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
                 {language}
               </span>
             )}
             {toolbarState && (
-              <span className="text-[10px] font-mono text-muted-foreground">
+              <span className="text-xs font-mono text-muted-foreground">
                 L{Math.min(toolbarState.range.start, toolbarState.range.end)}
                 {toolbarState.range.start !== toolbarState.range.end &&
                   `-${Math.max(toolbarState.range.start, toolbarState.range.end)}`}
@@ -84,7 +84,7 @@ export const SuggestionModal: React.FC<SuggestionModalProps> = ({
           {/* Original code (read-only) */}
           <div className={`flex-1 flex flex-col min-w-0 min-h-0 ${modalLayout === 'vertical' ? 'border-b border-border' : 'border-r border-border'}`}>
             <div className="px-3 py-1.5 border-b border-border/50 bg-muted/30">
-              <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Original</span>
+              <span className="text-xs font-medium text-muted-foreground">Original</span>
             </div>
             <pre className="flex-1 overflow-auto p-3 m-0 text-xs leading-relaxed suggestion-modal-original">
               <HighlightedCode code={selectedOriginalCode || '(no lines selected)'} language={fileHighlightLanguage(filePath)} />
@@ -94,7 +94,7 @@ export const SuggestionModal: React.FC<SuggestionModalProps> = ({
           {/* Suggested code input */}
           <div className="flex-1 flex flex-col min-w-0 min-h-0">
             <div className="px-3 py-1.5 border-b border-border/50 bg-muted/30">
-              <span className="text-[10px] font-medium text-success uppercase tracking-wider">Suggestion</span>
+              <span className="text-xs font-medium text-success">Suggestion</span>
             </div>
             <textarea
               value={suggestedCode}
@@ -116,7 +116,7 @@ export const SuggestionModal: React.FC<SuggestionModalProps> = ({
 
         {/* Footer */}
         <div className="flex items-center justify-between px-4 py-3 border-t border-border">
-          <span className="text-[10px] text-muted-foreground">Tip: Edit the suggestion based on the original code on the left</span>
+          <span className="text-xs text-muted-foreground">Tip: Edit the suggestion based on the original code on the left</span>
           <button
             onClick={onClose}
             className="review-toolbar-btn primary"

@@ -71,6 +71,30 @@ describe("Mark unread", () => {
     expect(again.markSeen(first.id)).toMatchObject({ section: "quiet", unread: false });
   });
 
+  test("an opened thread whose questions still wait stays in Waiting on you, bold, its questions and counts as they were", () => {
+    const { store, dir, project } = setup();
+    const two = [QUESTION, "", ":::question", "Ship it today?", "", "- [ ] Yes", "- [ ] No", ":::"].join("\n");
+    const asked = store.sendMessage({ project_id: project.id, author: { ...AGENT, session: "ses_b" }, body: two }).message;
+    store.markSeen(asked.id);
+    const opened = rowOf(store, asked.id);
+    expect(opened).toMatchObject({ section: "waiting", unread: false, unseen: 0, read_at: null });
+    expect(opened.questions.open).toBe(2);
+    const states = questionStates(store, asked.id);
+    expect(states).toEqual(["open", "open"]);
+
+    const { thread: row, wrote } = store.markUnread(asked.id);
+    expect(wrote).toBe(true);
+    // Only the look moves: same group, same questions and counts, bold again, nothing written to the thread.
+    expect(row).toMatchObject({ section: "waiting", unread: true, unseen: 1, read_at: null, sent: null });
+    expect(row.questions).toEqual(opened.questions);
+    expect(row.waiting_on_person).toBe(opened.waiting_on_person);
+    expect(questionStates(store, asked.id)).toEqual(states);
+    expect(store.thread(asked.id)!.messages).toHaveLength(1);
+    expect(rowOf(InboxStore.open(dir), asked.id)).toMatchObject({ section: "waiting", unread: true, unseen: 1 });
+    // The next look reads it again, still waiting on its questions.
+    expect(store.markSeen(asked.id)).toMatchObject({ section: "waiting", unread: false, unseen: 0 });
+  });
+
   test("on a thread marked read the row is New and bold, its question stays closed, and the agent is still told once", () => {
     const { store, asked, clock } = markedRead();
 

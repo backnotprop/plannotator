@@ -8,7 +8,11 @@
  *  - the note on a decision lost when its send fails, or a retry of the same
  *    verdict going with a new idempotency key (two replies for one verdict);
  *  - a verdict whose answer comes after the person left the review pulling
- *    them back to its thread.
+ *    them back to its thread;
+ *  - the next round covering the whole change again: a verdict asking for
+ *    changes, to the live session that wrote the review, carries
+ *    /review-recheck's instructions; one to another session, or waiting for
+ *    the next agent, carries none (that session never saw the review).
  *
  * The diff reader is stubbed: this file is about the header's decision.
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
@@ -20,15 +24,12 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { buildGuideSnapshot } from '@plannotator/core/guide-format';
 import type { InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
-import type { ShapeHost } from '@plannotator/ui/components/shape';
-import type { InboxShapes } from './shape/useInboxShapes';
 import { inboxApi } from './api';
 
-const NO_BOARDS: InboxShapes = { shapes: null, byThread: new Map(), changed: 0, rowShown: false, subscribe: () => () => {}, refresh: () => {} };
 
 const hasDom = typeof document !== 'undefined';
 if (hasDom) {
-  mock.module('#guide-reader', () => ({ default: () => null }));
+  mock.module('#guide-reader', () => ({ default: () => null, PullChangesTree: () => null }));
   // The real review-app dialog and submit (tsconfig `paths` points the window's typecheck at its .d.ts).
   // By a path in a variable: the window's strict typecheck must not follow it into review-editor.
   const seam: string = './guide/PlatformPost.tsx';
@@ -75,6 +76,8 @@ let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
 let posted: Record<string, unknown>[] = [];
 let others: (typeof OTHER)[] = [];
+/** Whether the session that wrote the review polls now (`/sessions`' asker). */
+let askerLive = false;
 let replyAnswer: () => Response = () => Response.json({ reply: {}, questions: [], replayed: false });
 let backs = 0;
 /** Post to GitHub/GitLab: what went to `POST /api/inbox/pulls/review`, and the list the review reads its PR from. */
@@ -109,6 +112,7 @@ beforeEach(() => {
   pullDiffAnswer = null;
   window.localStorage.clear();
   others = [OTHER];
+  askerLive = false;
   backs = 0;
   replyAnswer = () => Response.json({ reply: {}, questions: [], replayed: false });
   clearReviewNotes(REVIEW);
@@ -137,7 +141,7 @@ beforeEach(() => {
     if (path.includes('/guide')) return Response.json({ message_id: REVIEW, guide: message.guide, snapshot });
     if (path.includes('/attachments')) return Response.json({ serverSession: 's', attachments: [], annotations });
     if (path.includes('/sessions')) {
-      return Response.json({ serverSession: 's', home: '/home/me', project: PROJECT, sessions: others, asker: { session: 'ses_review', live: false } });
+      return Response.json({ serverSession: 's', home: '/home/me', project: PROJECT, sessions: others, asker: { session: 'ses_review', live: askerLive } });
     }
     return Response.json({});
   }) as typeof fetch;
@@ -168,7 +172,7 @@ async function render(on: InboxThread = thread, review: InboxMessageWire = messa
     root = createRoot(host!);
     root.render(
       <div className="pn-inbox">
-        <ReviewPane thread={on} message={review} codeReview onBack={() => (backs += 1)} onClose={() => {}} onSent={() => {}} shapeHost={{} as ShapeHost} shapes={NO_BOARDS} board={null} onBoard={() => {}} />
+        <ReviewPane thread={on} message={review} codeReview onBack={() => (backs += 1)} onClose={() => {}} onSent={() => {}} />
       </div>,
     );
   });
@@ -462,6 +466,58 @@ test.skipIf(!hasDom)('a verdict answered after the review closed leaves the pers
   answer(Response.json({ reply: {}, questions: [], replayed: false }));
   await settle();
   expect(backs).toBe(0);
+});
+
+const globalComment = (text: string) => ({
+  id: 'ann-guide-global', project_id: PROJECT.id, thread_id: REVIEW, message_id: REVIEW, attachment_id: '', path: '', version: 'a',
+  guide: { title: 'Token refresh', file: '', side: 'new', line_start: 0, line_end: 0, scope: 'general' },
+  annotation: { id: 'ann-guide-global', type: 'comment', scope: 'general', filePath: '', lineStart: 0, lineEnd: 0, side: 'new', text, createdAt: 1 },
+  created_at: '2026-10-11T10:45:00.000Z', updated_at: '2026-10-11T10:45:00.000Z', removed_at: null, sent_reply_id: null,
+});
+const RECHECK = '`review-recheck`';
+
+test.skipIf(!hasDom)('asking for changes from the live session that wrote the review asks it for only what changed since, after the comments; an approval asks nothing', async () => {
+  askerLive = true;
+  annotations = [globalComment('Split the guard and the retry.')];
+  await render();
+  expect(document.querySelector('[data-asker-ended]')).toBeNull();
+  await click('[data-review-decision] [data-decision-primary]');
+  expect(posted).toHaveLength(1);
+  expect(posted[0]).toMatchObject({ review_verdict: 'changes_requested' });
+  expect(posted[0]!.to).toBeUndefined();
+  const feedback = String(posted[0]!.feedback);
+  expect(feedback).toContain(RECHECK);
+  expect(feedback.indexOf('Split the guard and the retry.')).toBeLessThan(feedback.indexOf(RECHECK));
+
+  act(() => root?.unmount());
+  host?.remove();
+  annotations = [];
+  posted = [];
+  await render();
+  await click('[data-review-decision] [data-decision-primary]');
+  expect(posted[0]).toMatchObject({ review_verdict: 'approved' });
+  expect(JSON.stringify(posted[0])).not.toContain(RECHECK);
+});
+
+test.skipIf(!hasDom)('changes asked of another session (the reviewer ended), or left for the next agent, carry no recheck: that session gets the whole change', async () => {
+  annotations = [globalComment('Split the guard and the retry.')];
+  await render();
+  await click('[data-review-decision] [data-decision-primary]');
+  await click('[data-route-send]');
+  expect(posted).toHaveLength(1);
+  expect(posted[0]).toMatchObject({ review_verdict: 'changes_requested', to: { session: 'ses_other' } });
+  expect(String(posted[0]!.feedback)).toContain('Split the guard and the retry.');
+  expect(String(posted[0]!.feedback)).not.toContain(RECHECK);
+
+  act(() => root?.unmount());
+  host?.remove();
+  others = [];
+  posted = [];
+  await render();
+  await click('[data-review-decision] [data-decision-primary]');
+  expect(posted).toHaveLength(1);
+  expect(posted[0]!.to).toBeUndefined();
+  expect(String(posted[0]!.feedback)).not.toContain(RECHECK);
 });
 
 // A global comment (on the whole review) is a comment like a line comment: it flips Approve to Send feedback and

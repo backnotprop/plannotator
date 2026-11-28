@@ -69,7 +69,7 @@ function loopback(path: string, method = 'GET', body?: string): Promise<{ status
   });
 }
 
-const TESTS = 39;
+const TESTS = 45;
 
 beforeAll(async () => {
   if (!hasDom) return;
@@ -446,8 +446,8 @@ test.skipIf(!hasDom)('typing during a slow Send never brings back a draft holdin
   await until(() => posted.some((p) => p.path.endsWith('/reply')), 'the reply posted');
   expect((el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement).readOnly).toBe(true);
   type(el, 'First words. And more.');
-  // The box keeps the words the Send carries.
-  expect((el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement).value).toBe('First words.');
+  expect((el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement).value).toBe('');
+  expect(el.querySelector('[data-sending]')?.textContent).toContain('First words.');
   await until(() => el.querySelector('textarea:not([data-question-other])') === null, 'the Send');
   await settle(200);
   expect(await serverDraft(world.waiting)).toBeNull();
@@ -663,10 +663,37 @@ test.skipIf(!hasDom)('a Send whose answer is lost after it went is read back: th
   await until(() => box(el) === null, 'the box closed');
   globalThis.fetch = real;
   expect(el.textContent).not.toContain('Failed to fetch');
-  expect(liveText(el)).toContain('Your reply went.');
+  await until(() => liveText(el).includes('Your reply went.'), 'the went line');
   await settle(200);
   expect(await serverDraft(world.waiting)).toBeNull();
   expect(await personReplies('Went, answer lost.')).toHaveLength(1);
+}, 30_000);
+
+test.skipIf(!hasDom)('a Send whose answer is lost keeps its "Sending…" reply while the thread is read for it', async () => {
+  const { el } = await openWithSaved('Lost, still drawn.');
+  const real = globalThis.fetch;
+  let release = () => {};
+  const held = new Promise<void>((done) => (release = done));
+  let lost = false;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = String(input);
+    if (lost && /\/api\/inbox\/threads\/[^/?]+(\?|$)/.test(path)) await held;
+    const answer = await real(input, init);
+    if ((init?.method ?? 'GET') === 'POST' && path.endsWith('/reply')) {
+      lost = true;
+      throw new TypeError('Failed to fetch');
+    }
+    return answer;
+  }) as typeof fetch;
+  act(() => button(el, 'Send').click());
+  await until(() => lost, 'the answer lost');
+  await settle();
+  expect(el.querySelectorAll('[data-sending]').length).toBe(1);
+  release();
+  await until(() => box(el) === null, 'the box closed');
+  globalThis.fetch = real;
+  expect(el.querySelectorAll('[data-sending]').length).toBe(0);
+  expect(await personReplies('Lost, still drawn.')).toHaveLength(1);
 }, 30_000);
 
 test.skipIf(!hasDom)('a Send carrying a comment whose answer is lost after it went: the box closes; the reply and its comment went once', async () => {
@@ -843,6 +870,162 @@ test.skipIf(!hasDom)('an unconfirmed Send is forgotten when the person leaves: t
   expect(second).not.toBe(first);
   expect(second.path).toContain(asked);
   expect(await personReplies('Yes.')).toHaveLength(2);
+}, 30_000);
+
+test.skipIf(!hasDom)('a Send that goes as two replies keeps its "Sending…" reply until the one with the words lands', async () => {
+  const made = await loopback(
+    `/api/inbox/messages/${world.waiting}/annotations`,
+    'POST',
+    JSON.stringify({ annotation: { id: 'ann-two-replies', blockId: 'block-1', startOffset: 0, endOffset: 13, type: 'COMMENT', text: 'On the first.', originalText: 'The docs site', createdA: 1 } }),
+  );
+  expect(made.status).toBe(200);
+  await agentSend('A word from another agent.', world.waiting);
+  const { el } = await openWithSaved('Two replies.');
+  const real = globalThis.fetch;
+  let release = () => {};
+  const held = new Promise<void>((done) => (release = done));
+  let replies = 0;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if ((init?.method ?? 'GET') === 'POST' && String(input).endsWith('/reply') && ++replies === 2) await held;
+    return real(input, init);
+  }) as typeof fetch;
+  act(() => button(el, 'Send').click());
+  await until(() => replies === 2, 'the second reply on its way');
+  await act(async () => emit('record', { seq: 1_000_000 + ++emitted }));
+  await until(() => el.querySelectorAll('article[data-author="person"]:not([data-sending])').length === 1, 'the first reply drawn');
+  expect(el.querySelectorAll('[data-sending]').length).toBe(1);
+  release();
+  await until(() => box(el) === null, 'the box closed');
+  globalThis.fetch = real;
+  expect(el.querySelectorAll('[data-sending]').length).toBe(0);
+  expect(await personReplies('Two replies.')).toHaveLength(1);
+}, 30_000);
+
+/** The next reply POST waits for `release`, then answers with `answer` (or as the Inbox does). */
+function holdReply(real: typeof fetch, answer?: () => Response) {
+  let release = () => {};
+  const held = new Promise<void>((done) => (release = done));
+  let posting = false;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if ((init?.method ?? 'GET') === 'POST' && String(input).endsWith('/reply')) {
+      posting = true;
+      await held;
+      if (answer) return answer();
+    }
+    return real(input, init);
+  }) as typeof fetch;
+  return { release, posting: () => posting };
+}
+
+test.skipIf(!hasDom)('while a reply sends its words show once, in the thread; a refused Send puts them back in the box with the reason', async () => {
+  const { el } = await openWithSaved('Shown once.');
+  const real = globalThis.fetch;
+  const hold = holdReply(real, () => Response.json({ error: 'The agent is not taking replies.' }, { status: 409 }));
+  act(() => button(el, 'Send').click());
+  await until(hold.posting, 'the reply on its way');
+  await settle();
+  expect(el.querySelector('[data-sending]')?.textContent).toContain('Shown once.');
+  expect(box(el)!.value).toBe('');
+  expect(box(el)!.readOnly).toBe(true);
+  expect(liveText(el)).toContain('Sending your reply to');
+  hold.release();
+  await until(() => el.querySelectorAll('[data-sending]').length === 0, 'the drawing gone');
+  await settle();
+  globalThis.fetch = real;
+  expect(box(el)!.value).toBe('Shown once.');
+  expect(box(el)!.readOnly).toBe(false);
+  expect(el.textContent).toContain('The agent is not taking replies.');
+  expect(await personReplies('Shown once.')).toHaveLength(0);
+  expect((await serverDraft(world.waiting))?.body).toBe('Shown once.');
+}, 30_000);
+
+test.skipIf(!hasDom)('a reply from another device while a Send is on its way never hides its "Sending…" words', async () => {
+  const { el } = await openWithSaved('Mine, still going.');
+  const real = globalThis.fetch;
+  const hold = holdReply(real);
+  act(() => button(el, 'Send').click());
+  await until(hold.posting, 'the reply on its way');
+  await loopback(`/api/inbox/messages/${world.waiting}/reply`, 'POST', JSON.stringify({ idempotency_key: 'phone-1', words: 'From the phone.' }));
+  await act(async () => emit('record', { seq: 1_000_000 + ++emitted }));
+  await until(() => el.textContent!.includes('From the phone.'), 'the other reply drawn');
+  expect(el.querySelector('[data-sending]')?.textContent).toContain('Mine, still going.');
+  hold.release();
+  await until(() => el.querySelectorAll('[data-sending]').length === 0, 'the drawing gone once its own reply landed');
+  globalThis.fetch = real;
+  expect(await personReplies('Mine, still going.')).toHaveLength(1);
+}, 30_000);
+
+test.skipIf(!hasDom)('a Send pressed while scrolled up goes to the reply at the press, before the Inbox answers', async () => {
+  const { el } = await openWithSaved('Take me down.');
+  const pane = el.querySelector<HTMLElement>('.ib-pbody')!;
+  const real = globalThis.fetch;
+  const hold = holdReply(real);
+  const scrolled: number[] = [];
+  const scrollTo = pane.scrollTo.bind(pane);
+  pane.scrollTo = ((options: ScrollToOptions) => {
+    scrolled.push(options.top ?? -1);
+    scrollTo(options);
+  }) as typeof pane.scrollTo;
+  Object.defineProperty(pane, 'scrollHeight', { configurable: true, get: () => 5000 });
+  pane.scrollTop = 0;
+  act(() => button(el, 'Send').click());
+  await until(hold.posting, 'the reply on its way');
+  await settle();
+  expect(scrolled).toContain(5000);
+  hold.release();
+  await until(() => box(el) === null, 'the box closed');
+  globalThis.fetch = real;
+  expect(await personReplies('Take me down.')).toHaveLength(1);
+}, 30_000);
+
+test.skipIf(!hasDom)('a Send that lands after the person moved to another thread finishes on its own thread: the other draft is untouched, and words typed later in the first are saved', async () => {
+  await loopback(`/api/inbox/threads/${world.picked}/draft`, 'POST', JSON.stringify({ body: 'B words kept.', base: null }));
+  const el = await renderApp(`#thread=${world.picked}`);
+  await until(() => el.querySelector(`section.ib-pane[data-thread-id="${world.picked}"]`) !== null, 'thread B read first');
+  await settle(200);
+  await act(async () => {
+    window.location.hash = `#thread=${world.waiting}`;
+  });
+  const footA = () => [...el.querySelectorAll('.ib-pfoot button')].find((b) => ['Reply', 'Edit draft'].includes(b.textContent?.replace(/\s+/g, ' ').trim() ?? '')) as HTMLButtonElement | undefined;
+  await until(() => el.querySelector(`section.ib-pane[data-thread-id="${world.waiting}"]`) !== null && footA() !== undefined, 'thread A');
+  act(() => footA()!.click());
+  await until(() => box(el) !== null, 'the box in A');
+  type(el, 'A goes.');
+  await until(async () => (await serverDraft(world.waiting))?.body === 'A goes.', 'the words saved');
+  await settle();
+  const real = globalThis.fetch;
+  const hold = holdReply(real);
+  act(() => button(el, 'Send').click());
+  await until(hold.posting, 'the reply on its way');
+  await act(async () => {
+    window.location.hash = `#thread=${world.picked}`;
+  });
+  await until(() => el.querySelector(`section.ib-pane[data-thread-id="${world.picked}"]`) !== null, 'thread B open');
+  await settle(200);
+  const editB = () => [...el.querySelectorAll('.ib-pfoot button')].find((b) => ['Reply', 'Edit draft'].includes(b.textContent?.replace(/\s+/g, ' ').trim() ?? '')) as HTMLButtonElement | undefined;
+  if (!box(el)) {
+    await until(() => editB() !== undefined, 'thread B foot');
+    act(() => editB()!.click());
+  }
+  await until(() => box(el) !== null, 'thread B box');
+  await settle(100);
+  expect(box(el)!.value).toBe('B words kept.');
+  expect(box(el)!.readOnly).toBe(false);
+  hold.release();
+  await until(async () => (await personReplies('A goes.')).length === 1, 'the reply landed');
+  await settle(200);
+  globalThis.fetch = real;
+  expect((await serverDraft(world.picked))?.body).toBe('B words kept.');
+  await act(async () => {
+    window.location.hash = `#thread=${world.waiting}`;
+  });
+  const opener = () => [...el.querySelectorAll('.ib-pfoot button')].find((b) => ['Reply', 'Edit draft'].includes(b.textContent?.replace(/\s+/g, ' ').trim() ?? '')) as HTMLButtonElement | undefined;
+  await until(() => el.querySelector(`section.ib-pane[data-thread-id="${world.waiting}"]`) !== null && (opener() !== undefined || box(el) !== null), 'thread A again');
+  if (!box(el)) act(() => opener()!.click());
+  await until(() => box(el) !== null, 'the box in thread A');
+  type(el, 'Typed after.');
+  await until(async () => (await serverDraft(world.waiting))?.body === 'Typed after.', 'the later words saved');
+  expect(await personReplies('A goes.')).toHaveLength(1);
 }, 30_000);
 
 test.skipIf(!hasDom)('an unconfirmed Send that a thread read shows landed is finished while the box still holds its words', async () => {

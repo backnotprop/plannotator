@@ -40,7 +40,7 @@
 import { blockKeyHash8, findDirectiveBlocks, MAX_QUESTION_PROMPT_CHARS, normalizeQuestionText } from "./question-block";
 import { INBOX_REPLY_SENTENCE_LINE, isNegativeWaitValue } from "./inbox-questions";
 import { cutText } from "./text-cut";
-import type { InboxActionFacts, InboxActionResult, InboxQuestionRecord } from "./inbox-types";
+import type { InboxActionFacts, InboxActionOutcome, InboxActionResult, InboxQuestionRecord } from "./inbox-types";
 
 /** The directive an agent writes: `:::action`. */
 export const INBOX_ACTION_DIRECTIVE = "action";
@@ -326,19 +326,20 @@ export function parseInboxActionBlocks(markdown: string): ParsedInboxAction[] {
 export const INBOX_ACTION_NOTE_MAX = Number.POSITIVE_INFINITY;
 
 /**
- * The person's Done or Can't do it, checked: `outcome` "done" (with an
- * optional note) or "cant" (with a reason, required). Null outcome: the Undo.
+ * The person's Done, Can't do it or Skip, checked: `outcome` "done" (with an
+ * optional note), "cant" (with a reason, required) or "skip" (they chose not
+ * to do it; it takes no note: one sent is dropped). Null outcome: the Undo.
  */
 export function checkInboxActionResult(
   raw: { outcome?: unknown; note?: unknown },
-): { ok: true; outcome: "done" | "cant" | null; note: string | null } | { ok: false; field: string; message: string } {
+): { ok: true; outcome: InboxActionOutcome | null; note: string | null } | { ok: false; field: string; message: string } {
   const outcome = raw.outcome;
   if (outcome === null) return { ok: true, outcome: null, note: null };
-  if (outcome !== "done" && outcome !== "cant") return { ok: false, field: "outcome", message: 'outcome: "done", "cant", or null to undo.' };
+  if (outcome !== "done" && outcome !== "cant" && outcome !== "skip") return { ok: false, field: "outcome", message: 'outcome: "done", "cant", "skip", or null to undo.' };
   if (raw.note !== undefined && raw.note !== null && typeof raw.note !== "string") return { ok: false, field: "note", message: "note: text." };
   const note = typeof raw.note === "string" ? raw.note.trim() : "";
   if (outcome === "cant" && note === "") return { ok: false, field: "note", message: "note: say why you can't do it; the agent gets it word for word." };
-  return { ok: true, outcome, note: note === "" ? null : note };
+  return { ok: true, outcome, note: note === "" || outcome === "skip" ? null : note };
 }
 
 // ─────────────────────────────── What the agent gets ───────────────────────────────
@@ -377,7 +378,7 @@ export interface InboxActionsReportGroup {
  * "Couldn't do 1 action item." over "You saw it done" and their reason, never "Did 1 action item.". The
  * "x of y done." line still counts it done: it is.
  */
-function personOutcome(result: InboxActionResult): "done" | "cant" {
+function personOutcome(result: InboxActionResult): InboxActionOutcome {
   return result.by === "agent" ? (result.person?.outcome ?? "done") : result.outcome;
 }
 
@@ -395,6 +396,8 @@ function reportedItem(r: ReportedAction, heading: "###" | "####", timeZone: stri
     return [head, `You saw it done, ${inboxActionTime(result.at, timeZone)}.`, ...(note ? [`${label}: ${note}`] : [])].join("\n");
   }
   if (result.outcome === "cant") return `${head}\nCan't do it: ${flatNote(result.note)}`;
+  // A skip carries no note (`checkInboxActionResult` drops one).
+  if (result.outcome === "skip") return `${head}\nSkipped by the person, ${inboxActionTime(result.at, timeZone)}.`;
   return [head, `Done, ${inboxActionTime(result.at, timeZone)}.`, ...(result.note ? [`Note: ${flatNote(result.note)}`] : [])].join("\n");
 }
 
@@ -416,10 +419,28 @@ function doneLine(group: InboxActionsReportGroup, reported: readonly ReportedAct
 }
 
 /**
+ * How many action items the person did, couldn't do and skipped, in words, lower case: "did 1 action item",
+ * "did 2 action items, couldn't do 1, skipped 1", "skipped 1 action item". The first count names the kind; the
+ * reply's first sentence capitalizes it, the window's sent list puts "You" in front. Empty when all are 0.
+ */
+export function inboxActionCountWords(counts: { done: number; cant: number; skip: number }): string {
+  const parts: string[] = [];
+  const add = (verb: string, n: number) => {
+    if (n > 0) parts.push(parts.length === 0 ? `${verb} ${actionsWord(n)}` : `${verb} ${n}`);
+  };
+  add("did", counts.done);
+  add("couldn't do", counts.cant);
+  add("skipped", counts.skip);
+  return parts.join(", ");
+}
+
+/**
  * The person's action items as a reply carries them: "Did 1 action item." (or
- * "Couldn't do 1 action item.", "Did 1 action item, couldn't do 1."), then the
+ * "Couldn't do 1 action item.", "Did 1 action item, couldn't do 1.", "Skipped 1
+ * action item.", `inboxActionCountWords`), then the
  * "Action items you asked for" section, each action item A-numbered as the
- * card, with "Done, 3:12 PM." and the note, or "Can't do it: <reason>" (an item
+ * card, with "Done, 3:12 PM." and the note, "Skipped by the person, 3:12 PM.",
+ * or "Can't do it: <reason>" (an item
  * the agent saw done itself while the person's mark waited in their draft:
  * "You saw it done, 3:14 PM." and the person's note). One message: "x of y
  * done." then its items. Several (one reply answers one session's messages),
@@ -442,10 +463,9 @@ export function composeInboxActionsSection(input: {
     .filter((g) => g.reported.length > 0);
   if (groups.length === 0) return "";
   const all = groups.flatMap((g) => g.reported);
-  const done = all.filter((r) => personOutcome(r.action_result!) === "done").length;
-  const cant = all.length - done;
-  const sentence =
-    done > 0 && cant > 0 ? `Did ${actionsWord(done)}, couldn't do ${cant}.` : done > 0 ? `Did ${actionsWord(done)}.` : `Couldn't do ${actionsWord(cant)}.`;
+  const count = (outcome: InboxActionOutcome) => all.filter((r) => personOutcome(r.action_result!) === outcome).length;
+  const words = inboxActionCountWords({ done: count("done"), cant: count("cant"), skip: count("skip") });
+  const sentence = `${words.charAt(0).toUpperCase()}${words.slice(1)}.`;
   const open = inboxActionsStillOpenLine(input.stillOpen ?? [], input.replyTo);
   const labelled = groups.length > 1 || (input.replyTo !== undefined && groups[0]!.group.message_id !== input.replyTo);
   const body =
@@ -480,22 +500,38 @@ export function composeInboxActionsReply(input: {
  * "inbox-action-items-in-reply"): the action sentence joins the reply's own
  * first line when it has one ("Answered 1 question, did 1 action item."),
  * else opens the reply; the "Action items you asked for" section goes after
- * everything else (the words, the still-open line, the answers).
+ * everything else (the words, the still-open line, the answers). When the
+ * person skipped an action item, every skip in the joined line names its
+ * kind: "Answered 1 question, skipped 1 question, did 1 action item, skipped
+ * 1 action item." With no action item skipped the answers' line is left as
+ * the store has always written it, a bare skip and all ("Answered 1
+ * question, skipped 1, did 1 action item.").
  */
 export function withInboxActionsSection(replyBody: string, actionsSection: string): string {
   if (actionsSection === "") return replyBody;
   const [actionSentence, ...section] = actionsSection.split("\n\n");
   const parts = replyBody === "" ? [] : replyBody.split("\n\n");
   if (INBOX_REPLY_SENTENCE_LINE.test(parts[0] ?? "")) {
-    parts[0] = `${parts[0]!.slice(0, -1)}, ${actionSentence!.charAt(0).toLowerCase()}${actionSentence!.slice(1)}`;
+    let joined = `${actionSentence!.charAt(0).toLowerCase()}${actionSentence!.slice(1)}`;
+    let answers = parts[0]!.slice(0, -1);
+    if (/^skipped \d+ action items?|, skipped \d+\.$/.test(joined)) {
+      joined = joined.replace(/, skipped (\d+)\.$/, (_, n: string) => `, skipped ${actionsWord(Number(n))}.`);
+      answers = answers.replace(/, skipped (\d+)$/, (_, n: string) => `, skipped ${n} question${n === "1" ? "" : "s"}`);
+    }
+    parts[0] = `${answers}, ${joined}`;
   } else parts.unshift(actionSentence!);
   return [...parts, ...section].join("\n\n");
 }
 
-/** The action sentence a reply opens with, alone or joined to the answers' ("…, did 1 action item."). */
-const ACTION_SENTENCE = String.raw`(?:Did \d+ action items?(?:, couldn't do \d+)?|Couldn't do \d+ action items?)`;
+/** The action sentence a reply opens with, alone or joined to the answers' ("…, did 1 action item."; joined, a skip names its kind). */
+const actionSentencePattern = (did: string, cant: string, skipped: string): string => {
+  const skip = String.raw`, skipped \d+(?: action items?)?`;
+  return String.raw`(?:${did} \d+ action items?(?:, couldn't do \d+)?(?:${skip})?|${cant} \d+ action items?(?:${skip})?|${skipped} \d+ action items?)`;
+};
 
-const ACTION_SENTENCE_JOINED = String.raw`(?:did \d+ action items?(?:, couldn't do \d+)?|couldn't do \d+ action items?)`;
+const ACTION_SENTENCE = actionSentencePattern("Did", "Couldn't do", "Skipped");
+
+const ACTION_SENTENCE_JOINED = actionSentencePattern("did", "couldn't do", "skipped");
 
 /**
  * A person's reply as the window draws it once the action items it carried
@@ -506,7 +542,10 @@ const ACTION_SENTENCE_JOINED = String.raw`(?:did \d+ action items?(?:, couldn't 
  * Display only: the agent got every word.
  */
 export function withoutInboxActionsSection(body: string): string {
-  let text = body.replace(new RegExp(String.raw`^((?:Answered|Skipped) [^\n]*?), ${ACTION_SENTENCE_JOINED}\.(?=\n|$)`), "$1.");
+  // The answers' half as the store wrote it before the join named a skip's kind ("Answered 1 question, skipped 1.").
+  let text = body.replace(new RegExp(String.raw`^((?:Answered|Skipped) [^\n]*?), ${ACTION_SENTENCE_JOINED}\.(?=\n|$)`), (_, answers: string) =>
+    `${answers.replace(/^(Answered \d+ questions?, skipped \d+) questions?$/, "$1")}.`,
+  );
   text = text.replace(new RegExp(String.raw`^${ACTION_SENTENCE}\.(?:\n\n|$)`), "");
   // The section is paragraphs: its heading, "x of y done.", the items (### / ####), the still-open line.
   const paragraphs = text.split("\n\n");
@@ -546,11 +585,12 @@ export function inboxActionsStillOpenLine(items: readonly InboxStillOpenItem[], 
   return `Still open: ${names.join("; ")} — the person will ${verb} ${one ? "it" : "them"} in the Inbox; don't ask again.`;
 }
 
-/** The card's words for an action item's result ("Done 3:12 PM", "Can't do it: …", "Claude Code saw it done"). */
+/** The card's words for an action item's result ("Done 3:12 PM", "Skipped 3:12 PM", "Can't do it: …", "Claude Code saw it done"). */
 export function inboxActionResultLine(result: InboxActionResult, agent: string, timeZone?: string): string {
   const time = inboxActionTime(result.at, timeZone);
   if (result.by === "agent") return `${agent} saw it done, ${time}`;
   if (result.outcome === "cant") return `Can't do it: ${result.note ?? ""}`.trim();
+  if (result.outcome === "skip") return `Skipped ${time}`;
   return `Done ${time}`;
 }
 
@@ -595,7 +635,7 @@ export const INBOX_ACTION_EXAMPLE = [
  */
 export const INBOX_ACTION_GUIDE = [
   "An action item, only for a true blocker: something the person must go and do outside this conversation before you can go on, that you cannot do yourself (approve a deploy, sign in, touch a security key, click something in another app, merge a pull request you cannot merge). Write it as an Inbox-only `:::action` block: the first line is what to do, as an order; then why, in a line or two, then any commands. Each command the person must run goes in the why in its own fenced code block (```), one block per command in the order to run them, so each gets a copy button. Optional lines: `Where: <url or place>` (a URL becomes an Open button), `Stopped:` / `Holds up:` as for questions, and `Watching: <what you watch>` when you will notice it done by yourself (then pass its id in `done`).",
-  "Never use it for a decision or a question (ask a :::question), for anything you can do yourself, or as a checklist or a status update: one block per real blocker, and most messages need none. The person marks it Done or Can't do it (with a reason); that comes back in their reply under \"Action items you asked for\".",
+  "Never use it for a decision or a question (ask a :::question), for anything you can do yourself, or as a checklist or a status update: one block per real blocker, and most messages need none. The person marks it Done, Can't do it (with a reason) or Skip; that comes back in their reply under \"Action items you asked for\". Skipped means the person chose not to do it: carry on without it where you can, say what stays blocked, and don't ask for it again unless they bring it up.",
 ].join("\n");
 
 /** send_message's (and submit_guide's) `done`, as an agent reads it. */

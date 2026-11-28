@@ -6,7 +6,7 @@
  * annotation caching per filepath, and highlight re-application.
  */
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { normalizeBrowserPath } from "@plannotator/core/browser-paths";
 import { isDocumentRenderKind } from "@plannotator/core/annotatable";
 import type { Annotation, DocumentRenderAs, ImageAttachment } from "../types";
@@ -314,6 +314,15 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const pendingNavigation = useRef<AbortController | null>(null);
+  const cancelPendingNavigation = useCallback(() => {
+    const pending = pendingNavigation.current;
+    if (!pending) return;
+    pendingNavigation.current = null;
+    pending.abort();
+    setIsLoading(false);
+  }, []);
+  useEffect(() => () => { pendingNavigation.current?.abort(); }, []);
   const [docAnnotationCount, setDocAnnotationCount] = useState(0);
   // Bumped whenever a stored (non-active) document's annotations change in
   // place. docCache is a ref, so without this the memos keyed on
@@ -406,6 +415,7 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
   }, [cancelScrollRestore]);
 
   const back = useCallback((backOptions?: { restoreScroll?: boolean }) => {
+    cancelPendingNavigation();
     if (!savedPlanState.current) return;
     // `back` may be handed straight to an onClick, so only an explicit false
     // turns the restore off.
@@ -473,6 +483,7 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
     onAfterBack,
     restoreScrollAnchorSettled,
     cancelScrollRestore,
+    cancelPendingNavigation,
   ]);
 
   const activateDocument = useCallback((
@@ -635,18 +646,23 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
     restoreScrollAnchorSettled,
   ]);
 
+  // The current document can be edited while the response is in flight.
+  const activateCurrentDocument = useRef(activateDocument);
+  useLayoutEffect(() => { activateCurrentDocument.current = activateDocument; }, [activateDocument]);
+
   const openLoaded = useCallback((
     doc: LinkedDocLoadData & { filepath: string },
     targetTab?: SidebarTab,
     options?: { notifyDocumentLoaded?: boolean; revealSidebar?: boolean; restoreScroll?: boolean },
   ) => {
+    cancelPendingNavigation();
     activateDocument(doc, targetTab, {
       snapshotCurrent: true,
       notifyDocumentLoaded: options?.notifyDocumentLoaded,
       revealSidebar: options?.revealSidebar,
       restoreScroll: options?.restoreScroll,
     });
-  }, [activateDocument]);
+  }, [activateDocument, cancelPendingNavigation]);
 
   const open = useCallback(
     async (
@@ -656,16 +672,21 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
       options?: { revealSidebar?: boolean; restoreScroll?: boolean },
     ) => {
       onBeforeNavigate?.();
+      pendingNavigation.current?.abort();
+      const request = new AbortController();
+      pendingNavigation.current = request;
       setIsLoading(true);
       setError(null);
 
       try {
         const url = (buildUrl ?? defaultBuildUrl)(docPath);
-        const res = await fetch(url);
+        const res = await fetch(url, { signal: request.signal });
         const data = (await res.json()) as LinkedDocLoadData & {
           error?: string;
           matches?: string[];
         };
+
+        if (request.signal.aborted) return;
 
         if (!res.ok || data.error) {
           setError(data.error || "Failed to load document");
@@ -676,21 +697,21 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
           setError("Failed to load document");
           return;
         }
-        activateDocument({ ...data, filepath: data.filepath }, targetTab, {
+        activateCurrentDocument.current({ ...data, filepath: data.filepath }, targetTab, {
           snapshotCurrent: false,
           revealSidebar: options?.revealSidebar,
           restoreScroll: options?.restoreScroll,
         });
       } catch {
-        setError("Failed to connect to server");
+        if (!request.signal.aborted) setError("Failed to connect to server");
       } finally {
-        setIsLoading(false);
+        if (!request.signal.aborted && pendingNavigation.current === request) {
+          pendingNavigation.current = null;
+          setIsLoading(false);
+        }
       }
     },
-    [
-      onBeforeNavigate,
-      activateDocument,
-    ]
+    [onBeforeNavigate, defaultBuildUrl]
   );
 
   const dismissError = useCallback(() => setError(null), []);
@@ -732,6 +753,7 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
   }, [linkedDoc, annotations, globalAttachments, markdown, renderAs, rawHtml, shareHtml, selectedAnnotationId, getDocumentMarkdown]);
 
   const restoreSession = useCallback((state: LinkedDocSessionState) => {
+    cancelPendingNavigation();
     viewerRef.current?.clearAllHighlights();
     cancelScrollRestore();
 
@@ -769,6 +791,8 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
     setRawHtml,
     setShareHtml,
     viewerRef,
+    cancelPendingNavigation,
+    cancelScrollRestore,
   ]);
 
   const updateStoredAnnotations = useCallback((

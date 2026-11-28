@@ -1,64 +1,59 @@
 /**
- * The PR page's All files, drawn by the review app's own parts: its tree (`RepoFileTree`, fed by `useRepoFiles`, its
+ * The PR page's All files, drawn by the review app's own parts: its tree (`RepoTreeView`, fed by `useRepoFiles`, its
  * "Listing the repository…" and failure words through `RepoListingPlaceholder`) and its whole-file view
  * (`RepoFileView`, read-only here). Their reads go to the Inbox's routes for this PR (`pullRepoFetch`). In the reader's
  * chunk (re-exported by GuideReader.tsx), so the window's first load carries none of it; checked by
  * tsconfig.guide.json.
  */
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useImperativeHandle, useMemo, useRef } from 'react';
 import type { CodeAnnotation } from '@plannotator/ui/types';
 import type { DiffFile } from '@plannotator/core/diff-files';
-import { RepoFileTree } from '@plannotator/review-editor/components/RepoFileTree';
+import { useCompactTouchLayout } from '@plannotator/ui/hooks/useIsMobile';
+import { RepoTreeView, type RepoTreeHandle } from '@plannotator/review-editor/components/RepoTreeView';
 import { RepoListingPlaceholder } from '@plannotator/review-editor/components/FileTree';
 import { RepoFileView } from '@plannotator/review-editor/components/RepoFileView';
 import { useRepoFiles } from '@plannotator/review-editor/hooks/useRepoFiles';
 import { pullRepoFetch } from '../pulls/RailScope';
+import { useRiskLead } from './PullChangesTree';
 import type { PullAllFilesProps, PullRepoFileProps } from './pullRepoTypes';
 
-const NONE = new Set<string>();
 const NO_COMMENTS: CodeAnnotation[] = [];
 const noop = () => {};
 
-export function PullAllFiles({ pullKey, sha, files, viewed, comments, activePath, openPath, head, onSelect, onOpen, onToggleViewed }: PullAllFilesProps) {
-  // The rail's list scrolls in this box, as Changes does; the tree draws the rows in view of it.
-  const scroller = useRef<HTMLDivElement>(null);
-  const getScrollElement = useCallback(() => scroller.current, []);
+export function PullAllFiles({ pullKey, sha, files, viewed, comments, activePath, openPath, head, onSelect, onOpen, handleRef, risk }: PullAllFilesProps) {
   const fetchImpl = useMemo(() => pullRepoFetch(pullKey), [pullKey]);
   const repo = useRepoFiles({ enabled: true, snapshotId: sha, fetchImpl });
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
-  const toggle = useCallback((path: string) => {
-    setExpanded((was) => {
-      const next = new Set(was);
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
-      return next;
-    });
-  }, []);
   const list = files as DiffFile[];
-  const active = activePath ? list.findIndex((file) => file.path === activePath) : -1;
+  const counts = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const comment of comments as CodeAnnotation[]) map.set(comment.filePath, (map.get(comment.filePath) ?? 0) + 1);
+    return map;
+  }, [comments]);
+  const fileLead = useRiskLead(risk);
+  const touch = useCompactTouchLayout();
+  const inner = useRef<RepoTreeHandle>(null);
+  useImperativeHandle(handleRef, () => ({ focus: () => inner.current?.focus() }), []);
   return (
-    <div ref={scroller} className="ib-prp-files ib-prp-tree" data-pull-all-files="">
+    <div className="ib-prp-files ib-prp-tree ib-prp-pierre" data-pull-all-files="">
       {head}
       {repo.state.status === 'ready' ? (
-        <RepoFileTree
+        <RepoTreeView
+          key={touch ? 'touch' : 'pointer'}
+          touch={touch}
           repo={repo.state}
           loadDir={repo.loadDir}
           files={list}
-          activeFileIndex={active}
-          activeRepoPath={openPath}
-          expanded={expanded}
-          onToggleFolder={toggle}
+          activePath={openPath ?? activePath ?? null}
           onSelectFile={(index) => {
             const file = list[index];
             if (file) onSelect(file.path);
           }}
           onOpenRepoFile={(path) => onOpen(path)}
           viewedFiles={viewed as Set<string>}
-          onToggleViewed={onToggleViewed}
-          annotations={comments as CodeAnnotation[]}
-          stagedFiles={NONE}
-          showStageControls={false}
-          getScrollElement={getScrollElement}
+          showViewedControls
+          annotationCounts={counts}
+          fileLead={fileLead}
+          handleRef={inner}
         />
       ) : (
         <RepoListingPlaceholder state={repo.state} onRetry={repo.reload} />

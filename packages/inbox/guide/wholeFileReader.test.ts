@@ -47,3 +47,53 @@ test('a renamed file reads; an added or deleted one is already whole and asks no
   expect(asked.count).toBe(0);
   expect(await read({ ...file, oldPath: 'b.ts', status: 'renamed' }, signal)).toEqual(TEXTS);
 });
+
+test('reads made in the background go two at a time, and an arrow read does not wait behind them', async () => {
+  const started: string[] = [];
+  const answers = new Map<string, (contents: InboxFileContents) => void>();
+  const reader = wholeFileReader(
+    (path) => {
+      started.push(path);
+      return new Promise((resolve) => answers.set(path, resolve));
+    },
+    new Map(),
+  );
+  const file = (path: string): DiffFile => ({ path, patch: `p ${path}`, additions: 1, deletions: 1, status: 'modified' });
+  const signal = new AbortController().signal;
+  const later = new AbortController();
+  const background = ['a.ts', 'b.ts', 'c.ts', 'd.ts'].map((path) => reader(file(path), path === 'd.ts' ? later.signal : signal, { background: true }));
+  void background[3]!.catch(() => {});
+  const arrow = reader(file('e.ts'), signal);
+  await Promise.resolve();
+  await Promise.resolve();
+  expect([...started].sort()).toEqual(['a.ts', 'b.ts', 'e.ts']);
+  later.abort();
+  await expect(background[3]!).rejects.toBeDefined();
+  answers.get('a.ts')!({ oldContent: 'a', newContent: 'a' });
+  await background[0];
+  await Promise.resolve();
+  expect([...started].sort()).toEqual(['a.ts', 'b.ts', 'c.ts', 'e.ts']);
+  answers.get('e.ts')!({ oldContent: 'e', newContent: 'e' });
+  expect(await arrow).toEqual({ oldContent: 'e', newContent: 'e' });
+  for (const path of ['b.ts', 'c.ts']) answers.get(path)!({ oldContent: path, newContent: path });
+  await Promise.all([background[1], background[2]]);
+});
+
+test('a background read that never answers gives up its place in the queue, and the read is told to stop', async () => {
+  const signals: AbortSignal[] = [];
+  const reader = wholeFileReader(
+    (path, readSignal) => {
+      signals.push(readSignal);
+      return path === 'hung.ts' ? new Promise(() => {}) : Promise.resolve({ oldContent: 'x', newContent: 'x' });
+    },
+    new Map(),
+    30,
+  );
+  const file = (path: string): DiffFile => ({ path, patch: `p ${path}`, additions: 1, deletions: 1, status: 'modified' });
+  const hung = [reader(file('hung.ts'), signal, { background: true }), reader(file('hung.ts'), signal, { background: true })];
+  const next = reader(file('next.ts'), signal, { background: true });
+  const settled = await Promise.allSettled(hung);
+  expect(settled.map((one) => (one.status === 'rejected' ? String((one.reason as Error).message) : 'answered'))).toEqual(['Reading hung.ts took too long.', 'Reading hung.ts took too long.']);
+  expect(signals.slice(0, 2).every((stopped) => stopped.aborted)).toBe(true);
+  expect(await next).toEqual({ oldContent: 'x', newContent: 'x' });
+});

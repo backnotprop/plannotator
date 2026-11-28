@@ -1,0 +1,342 @@
+.pierre-layout {
+  --layout-accent: #5489ed;
+  --layout-border: #dce1e8;
+  --layout-duration: 240ms;
+
+  container-type: size;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  isolation: isolate;
+  font-family: inherit;
+}
+
+/* Style the layout's own elements only; pane content belongs to the app. */
+.pierre-layout-pane,
+.pierre-layout-pane-inner,
+.pierre-layout-header,
+.pierre-layout-header *,
+.pierre-layout-content,
+.pierre-layout-focus,
+.pierre-layout-separator,
+.pierre-layout-corner,
+.pierre-layout-drop {
+  box-sizing: border-box;
+}
+
+.pierre-layout-pane {
+  position: absolute;
+  /* An identity transform makes the host a containing block at all times, so
+     the transform that moves a covered pane out does not lay the host out
+     again. */
+  transform: translate(0);
+  min-width: 0;
+  min-height: 0;
+  /* Clip content at the rounded border with no scroll container, so that a
+     scroll into view never moves the header. The content area scrolls. */
+  overflow: clip;
+  border: 1px solid var(--layout-border);
+  border-radius: 10px;
+  background: var(--layout-pane-background, #fff);
+  /* `content-visibility: hidden` includes style containment. A change of style
+     containment makes Chromium update the style of the whole document, so a
+     host always has it. It scopes CSS counters and quotes to the pane. */
+  contain: style;
+}
+
+/* With `paneLayers`, each pane host is its own compositor layer, from a 3D
+   transform. Blink then groups the paint of each pane inside its layer, which
+   roughly halves the Layerize step of an update in one pane with real content
+   at 16 panes, but costs tile memory at small pane counts. `will-change:
+   transform` also makes a layer, but Chromium then keeps the raster scale of a
+   scale animation after it ends: after a move or a restore, a pane kept up to
+   3 times its tiles. The 2D transform of a covered pane replaces this one, so
+   a covered host is not a layer and keeps no tiles. A host that does not show,
+   such as a tab that is not active, is not a layer either, so a stack has one
+   layer whatever the number of its tabs. */
+.pierre-layout[data-pane-layers='true']
+  > .pierre-layout-pane:not([data-pane-hidden='true']) {
+  transform: translateZ(0);
+}
+
+/* Layout changes animate with transforms from each element's old box (FLIP). */
+.pierre-layout [data-layout-flip],
+.pierre-layout-pane-inner {
+  transform-origin: 0 0;
+}
+
+/* The header and the content of a pane. During a FLIP animation it takes the
+   inverse of the host's scale, so text keeps its shape. It always has an
+   identity transform: a transform that starts with the animation would change
+   the containing block of the content and force a layout. */
+.pierre-layout-pane-inner {
+  transform: scale(1);
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.pierre-layout-pane[data-focused='true'] {
+  border-color: var(--layout-accent);
+}
+
+.pierre-layout-focus {
+  position: absolute;
+  z-index: 2;
+  border: 2px solid var(--layout-accent);
+  border-radius: 10px;
+  pointer-events: none;
+}
+
+.pierre-layout-pane[data-zoomed='true'] {
+  z-index: 2;
+}
+
+/* A hidden pane (store.setHidden) and a tab that is not active keep their
+   content mounted, with its state and scroll position, but do not show: the
+   view gives each the box that it would have, and it does not render or take
+   input. */
+.pierre-layout-pane[data-pane-hidden='true'] {
+  content-visibility: hidden;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* A collapsed pane (store.setCollapsed) shows its header only. Its content
+   keeps its DOM, its state, and its scroll position, and skips its style,
+   layout, and paint. */
+.pierre-layout-pane[data-collapsed='true']
+  > .pierre-layout-pane-inner
+  > .pierre-layout-content {
+  content-visibility: hidden;
+}
+
+/* A pane under a zoomed pane skips the style, layout, and paint of its
+   content. The content keeps its DOM, its state, and its scroll position. The
+   property is on the host: a scroller with it reads scrollTop 0 while hidden. */
+.pierre-layout-pane[data-hidden='true'] {
+  content-visibility: hidden;
+}
+
+.pierre-layout-pane[data-moving='true'] {
+  opacity: 0.6;
+}
+
+.pierre-layout-pane:focus-visible {
+  outline: 2px solid var(--layout-accent);
+  outline-offset: -3px;
+}
+
+.pierre-layout-header {
+  display: flex;
+  align-items: center;
+  flex: 0 0 36px;
+  gap: 6px;
+  min-width: 0;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--layout-border);
+  font-size: 12px;
+}
+
+.pierre-layout-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pierre-layout-header button {
+  padding: 2px 5px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.pierre-layout-header button:hover,
+.pierre-layout-header button:focus-visible {
+  background: var(--layout-border);
+}
+
+.pierre-layout-header button:disabled,
+.pierre-layout-header button[aria-disabled='true'] {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.pierre-layout-header .pierre-layout-grip {
+  touch-action: none;
+  cursor: grab;
+}
+
+/* The tabs of a stack take the place of the title. They fill the height of
+   the header, so the underline of the selected tab meets the border of the
+   pane, and their text is centered as the title's is. A selection changes
+   colors only, so nothing moves. Themes set the `--layout-tab-*` colors. */
+.pierre-layout-tabs {
+  position: relative;
+  display: flex;
+  flex: 1;
+  align-self: stretch;
+  min-width: 0;
+  margin: -4px 0;
+  overflow: hidden;
+}
+
+.pierre-layout-header .pierre-layout-tab {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 48px;
+  max-width: 180px;
+  /* The right padding holds the close mark, so the mark takes no width from
+     the title when it shows. */
+  padding: 0 22px 0 10px;
+  border-radius: 0;
+  background: transparent;
+  color: var(--layout-tab-color, #6b7586);
+}
+
+.pierre-layout-header .pierre-layout-tab:hover {
+  background: var(--layout-tab-hover-background, rgb(41 49 61 / 5%));
+  color: var(--layout-tab-hover-color, #29313d);
+}
+
+.pierre-layout-header .pierre-layout-tab[aria-selected='true'] {
+  background: transparent;
+  box-shadow: inset 0 -2px 0 var(--layout-tab-accent, var(--layout-accent));
+  color: var(--layout-tab-selected-color, #29313d);
+}
+
+.pierre-layout-header .pierre-layout-tab:focus {
+  outline: none;
+}
+
+.pierre-layout-header .pierre-layout-tab:focus-visible {
+  outline: 2px solid var(--layout-accent);
+  outline-offset: -2px;
+}
+
+.pierre-layout-tab-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The close mark shows on the selected tab and on the tab under the pointer. */
+.pierre-layout-tab-close {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  width: 16px;
+  height: 16px;
+  margin-top: -8px;
+  border-radius: 3px;
+  line-height: 16px;
+  text-align: center;
+  visibility: hidden;
+}
+
+.pierre-layout-tab:hover > .pierre-layout-tab-close,
+.pierre-layout-tab[aria-selected='true'] > .pierre-layout-tab-close {
+  visibility: visible;
+}
+
+.pierre-layout-tab-close:hover {
+  background: var(--layout-tab-close-hover-background, rgb(41 49 61 / 10%));
+}
+
+/* Where a tab that the pointer drags goes. The view moves it with a
+   transform from the left edge of the tab list. */
+:where(.pierre-layout [data-layout-tablist]) {
+  position: relative;
+}
+
+.pierre-layout-tab-drop {
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  left: 0;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--layout-accent);
+  pointer-events: none;
+}
+
+.pierre-layout-tab[data-dragging='true'] {
+  opacity: 0.6;
+}
+
+.pierre-layout-content {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+.pierre-layout-separator {
+  position: absolute;
+  z-index: 3;
+  border-radius: 4px;
+  touch-action: none;
+}
+
+.pierre-layout-separator[data-direction='horizontal'] {
+  cursor: col-resize;
+}
+
+.pierre-layout-separator[data-direction='vertical'] {
+  cursor: row-resize;
+}
+
+.pierre-layout-separator:hover,
+.pierre-layout-separator:focus-visible,
+.pierre-layout-separator[data-preview='true'] {
+  outline: none;
+  background: var(--layout-accent);
+}
+
+.pierre-layout-corner {
+  position: absolute;
+  z-index: 4;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--layout-border);
+  cursor: move;
+  touch-action: none;
+}
+
+.pierre-layout-corner:hover,
+.pierre-layout-corner:focus-visible {
+  background: var(--layout-accent);
+  outline: 2px solid var(--layout-accent);
+  outline-offset: 2px;
+}
+
+.pierre-layout-drop {
+  position: absolute;
+  z-index: 5;
+  border: 2px solid var(--layout-accent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--layout-accent) 20%, transparent);
+  pointer-events: none;
+}
+
+.pierre-layout-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

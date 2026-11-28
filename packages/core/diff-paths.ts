@@ -142,6 +142,13 @@ export function parseDiffGitHeader(header: string): DiffPathPair {
     }
   }
 
+  // Like git apply: when both sides name the same path, split the header at its
+  // middle, so a path containing " b/" is not cut at that inner " b/".
+  const half = (rest.length - 1) / 2;
+  if (Number.isInteger(half) && rest.startsWith("a/") && rest.slice(half, half + 3) === " b/" && rest.slice(2, half) === rest.slice(half + 3)) {
+    return { oldPath: rest.slice(2, half), newPath: rest.slice(2, half) };
+  }
+
   const match = header.match(/^diff --git a\/(.+) b\/(.+)$/);
   if (!match) return {};
   return { oldPath: match[1], newPath: match[2] };
@@ -204,6 +211,21 @@ export const OVERSIZED_REVIEW_STUB_MARKER = "#plannotator-oversized-file";
  * review-core test asserts the two never drift.
  */
 export const OVERSIZED_REVIEW_STUB_LIMIT_LABEL = "5 MB";
+
+export const OVERSIZED_REVIEW_STUB_BYTES_PREFIX = "#plannotator-file-bytes";
+
+export function oversizedReviewStubBytes(patch: string): { old?: number; new?: number } | null {
+  const line = patch.split("\n").find((row) => row.startsWith(`${OVERSIZED_REVIEW_STUB_BYTES_PREFIX} `));
+  if (!line) return null;
+  const sizes: { old?: number; new?: number } = {};
+  for (const match of line.matchAll(/\b(old|new)=(\d+)\b/g)) sizes[match[1] as "old" | "new"] = Number(match[2]);
+  return sizes;
+}
+
+export function oversizedReviewStubBytesLine(sizes: { old?: number | null; new?: number | null }): string | null {
+  const parts = (["old", "new"] as const).flatMap((side) => (typeof sizes[side] === "number" ? [`${side}=${sizes[side]}`] : []));
+  return parts.length > 0 ? `${OVERSIZED_REVIEW_STUB_BYTES_PREFIX} ${parts.join(" ")}` : null;
+}
 
 /** True when `patch` is one of our oversized-file stubs (see the marker above). */
 export function isOversizedReviewStubPatch(patch: string): boolean {

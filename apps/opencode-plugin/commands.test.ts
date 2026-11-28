@@ -155,6 +155,7 @@ describe("handleReviewCommand open state (--base / --diff-type)", () => {
     const caller = initGitRepo("caller");
     const target = initGitRepo("target");
     mkdirSync(path.join(target, "src"));
+    mkdirSync(path.join(caller, "src"));
     const hostCwd = process.cwd();
     writeFileSync(path.join(caller, "caller.ts"), "caller-only\n");
     writeFileSync(path.join(target, "target.ts"), "target-only\n");
@@ -182,9 +183,14 @@ describe("handleReviewCommand open state (--base / --diff-type)", () => {
     deps.startReviewServer.mockClear();
     await handleReviewCommand({ properties: { arguments: "./missing-directory", sessionID: "original-session" } }, deps as any);
     expect(deps.startReviewServer).not.toHaveBeenCalled();
-    expect(deps.client.app.log.mock.calls.map((call: any[]) => call[0].message).join("\n")).toContain("does not exist");
+    expect(deps.client.app.log.mock.calls.map((call: any[]) => call[0].message).join("\n")).toContain('No folder "./missing-directory"');
     // app.log never reaches the TUI, so the refusal must also be toasted.
-    expect(deps.client.tui.showToast.mock.calls.map((call: any[]) => call[0].body.message).join("\n")).toContain("does not exist");
+    expect(deps.client.tui.showToast.mock.calls.map((call: any[]) => call[0].body.message).join("\n")).toContain('No folder "./missing-directory"');
+
+    // A sole bare folder name that is not there stops too, naming the close folder.
+    await handleReviewCommand({ properties: { arguments: "srx", sessionID: "original-session" } }, deps as any);
+    expect(deps.startReviewServer).not.toHaveBeenCalled();
+    expect(deps.client.tui.showToast.mock.calls.map((call: any[]) => call[0].body.message).join("\n")).toContain("Did you mean src? Run: plannotator review src");
 
     // Prose that names no directory keeps the pre-directory behavior (#1483):
     // the invoking repo is reviewed and the ignored words are reported.
@@ -529,6 +535,24 @@ describe("handleAnnotateLastCommand", () => {
     expect(options.filePath).toBe("last-message");
     expect(options.pasteApiUrl).toBe("https://paste.example.test");
     expect(options.markdown).toBe("Latest assistant message");
+  });
+
+  test("opens the reply to the person's prompt, not a newer reply to an injected one", async () => {
+    const deps = makeDeps();
+    deps.client.session.messages = mock(async (_input: unknown) => ({
+      data: [
+        { info: { role: "user", id: "u1" }, parts: [{ type: "text", text: "Explain the fix" }] },
+        { info: { role: "assistant", id: "explanation", parentID: "u1" }, parts: [{ type: "text", text: "Here is the fix" }] },
+        { info: { role: "user", id: "s1" }, parts: [{ type: "text", text: "Wake", synthetic: true }] },
+        { info: { role: "assistant", id: "ack", parentID: "s1" }, parts: [{ type: "text", text: "Done" }] },
+      ],
+    }));
+
+    await handleAnnotateLastCommand({ properties: { sessionID: "session-123" } }, deps);
+
+    const options = startAnnotateServerMock.mock.calls[0]?.[0];
+    expect(options.markdown).toBe("Here is the fix");
+    expect(options.recentMessages.map((m: { messageId: string }) => m.messageId)).toEqual(["explanation", "ack"]);
   });
 });
 

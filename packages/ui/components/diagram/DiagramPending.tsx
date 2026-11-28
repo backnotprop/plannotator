@@ -1,6 +1,7 @@
 import React from 'react';
 import type { DiagramKind } from '@plannotator/core/diagram-anchor';
 import type { Block } from '../../types';
+import { sourceLineAttrs } from '../../utils/sourceLineAttrs';
 
 /**
  * The diagram fence before there is a diagram: the source under a quiet
@@ -15,8 +16,9 @@ import type { Block } from '../../types';
  * both places, so a document with a diagram paints the source fence once and
  * never flashes or jumps between the two.
  *
- * Keep it dependency-free: anything imported here lands in the closure of
- * every document read, diagram or not.
+ * Keep it free of diagram engines: anything imported here lands in the
+ * closure of every document read, diagram or not. The source-line gutter is
+ * display chrome (the same cookie as the rest of the document).
  */
 
 /** The fence's own text, as the document would show it unrendered. */
@@ -53,7 +55,7 @@ export const DiagramPending: React.FC<{ block: Block; kind: DiagramKind }> = ({ 
  * notice takes the status line's place over the same source.
  */
 export const DiagramBlockPending: React.FC<{ block: Block; kind: DiagramKind; notice?: React.ReactNode }> = ({ block, kind, notice }) => (
-  <div className="annotation-exclude my-5 group relative" data-block-id={block.id} data-pinpoint-ignore="" data-diagram-block={kind}>
+  <div className="annotation-exclude my-5 group relative" data-block-id={block.id} data-pinpoint-ignore="" data-diagram-block={kind} {...sourceLineAttrs(block)}>
     <div data-diagram-inline="">
       <div data-diagram-fallback="" className="h-full min-h-0 w-full">
         {notice === undefined ? (

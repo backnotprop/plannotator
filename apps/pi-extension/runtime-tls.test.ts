@@ -43,6 +43,26 @@ describe("runtimeTlsWarning", () => {
 		}
 	});
 
+	test("an affected Electron runtime directs the user to update the host app", () => {
+		expect(runtimeTlsWarning({ electron: "43.3.0", node: "24.18.1" }, "/x", UNFIXED_ROOTS)).toBe(
+			"Plannotator: this app runs on Electron v43.3.0 (Node v24.18.1), which is missing the October 2026 TLS fixes (a compromised certificate authority); update the host app to a build that includes the fixes.",
+		);
+	});
+
+	test("on Electron the bundled roots decide, not the Node version it reports", () => {
+		expect(runtimeTlsWarning({ electron: "43.3.0", node: "24.18.1" }, "/x", FIXED_ROOTS)).toBeNull();
+		expect(runtimeTlsWarning({ electron: "43.8.4", node: "24.22.1" }, "/x", UNFIXED_ROOTS)).toBe(
+			"Plannotator: this app runs on Electron v43.8.4 (Node v24.22.1), which is missing the October 2026 TLS fixes (a compromised certificate authority); update the host app to a build that includes the fixes.",
+		);
+	});
+
+	test("on Electron with an empty root store the Node version decides", () => {
+		expect(runtimeTlsWarning({ electron: "43.8.4", node: "24.22.1" }, "/x", [])).toBeNull();
+		expect(runtimeTlsWarning({ electron: "43.3.0", node: "24.18.1" }, "/x", [])).toBe(
+			"Plannotator: this app runs on Electron v43.3.0 (Node v24.18.1), which is missing the October 2026 TLS fixes (a compromised certificate authority); update the host app to a build that includes the fixes.",
+		);
+	});
+
 	test("on Bun only Bun's version counts, whatever Node version it reports", () => {
 		expect(runtimeTlsWarning({ bun: "1.4.4", node: "24.3.0" }, "/usr/local/bin/bun")).toBeNull();
 		expect(runtimeTlsWarning({ bun: "1.5.0", node: "20.0.0" }, "/usr/local/bin/bun")).toBeNull();

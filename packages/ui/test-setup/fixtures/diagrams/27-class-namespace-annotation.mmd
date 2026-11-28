@@ -1,0 +1,11 @@
+classDiagram
+  namespace Shop {
+    class Cart
+    class Item
+  }
+  class Shape {
+    <<interface>>
+    +area() float
+  }
+  Cart *-- Item : holds
+  Shape <|.. Cart

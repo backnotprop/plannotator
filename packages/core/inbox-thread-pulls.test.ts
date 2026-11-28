@@ -42,12 +42,14 @@ describe("refs", () => {
       const parsed = parseInboxThreadPullRef(text, host);
       return "key" in parsed ? [parsed.key, parsed.url] : parsed.error;
     };
-    for (const host of ["gitlab.acme.dev", "GitLab.Acme.Dev:2222", "code.gitlab.acme.dev"]) {
+    // Only GitLab writes `!45`: any project host but GitHub's or Bitbucket's is where it is, whatever it is called.
+    // Never gitlab.com for a self-managed project: that would send its private path to a public site.
+    for (const host of ["gitlab.acme.dev", "GitLab.Acme.Dev:2222", "code.gitlab.acme.dev", "gitlab-master.example.com", "code.gitlab-prod.example.org", "code.corp.example", "git.acme.internal", "gitlab.com-evil.example", "gitlab.com.evil.example"]) {
       const at = host.toLowerCase().replace(/:\d+$/, "");
       expect(keyOf("acme/platform/api!61", host)).toEqual([`${at}/acme/platform/api#61:pull`, `https://${at}/acme/platform/api/-/merge_requests/61`]);
     }
-    // gitlab.com's own aliases, a GitHub project, an unknown self-hosted name, no remote: gitlab.com as before.
-    for (const host of [undefined, null, "gitlab.com", "altssh.gitlab.com", "github.com", "github.acme.dev", "git.acme.internal", "work-gl"]) {
+    // No usable remote host (none, an SSH alias), gitlab.com and its aliases, a GitHub or Bitbucket project: gitlab.com.
+    for (const host of [undefined, null, "", "work-gl", "gitlab.com", "altssh.gitlab.com", "github.com", "github.acme.dev", "bitbucket.org"]) {
       expect(keyOf("acme/platform/api!61", host)).toEqual(["gitlab.com/acme/platform/api#61:pull", "https://gitlab.com/acme/platform/api/-/merge_requests/61"]);
     }
     expect(keyOf("https://gitlab.com/acme/platform/api/-/merge_requests/61", "gitlab.acme.dev")).toEqual(["gitlab.com/acme/platform/api#61:pull", "https://gitlab.com/acme/platform/api/-/merge_requests/61"]);
@@ -59,7 +61,7 @@ describe("refs", () => {
     expect(inboxThreadPullText({ pull: "gitlab.acme.dev/acme/api#3:pull", url: "https://gitlab.acme.dev/acme/api/-/merge_requests/3" })).toBe("https://gitlab.acme.dev/acme/api/-/merge_requests/3");
   });
 
-  test("a self-managed GitLab at any address: its MR URL reads by shape, its short ref once its host is known", () => {
+  test("a self-managed GitLab at any address: its MR URL reads by shape, its short ref by the project's host", () => {
     const keyOf = (text: string, host?: string | null) => {
       const parsed = parseInboxThreadPullRef(text, host);
       return "key" in parsed ? [parsed.key, parsed.url] : parsed.error;
@@ -71,11 +73,16 @@ describe("refs", () => {
       expect(keyOf(url)).toEqual(["git.acme.com/acme/platform/api#61:pull", url]);
       expect(keyOf("https://git.acme.com:8443/acme/api/-/merge_requests/2")).toEqual(["git.acme.com:8443/acme/api#2:pull", "https://git.acme.com:8443/acme/api/-/merge_requests/2"]);
       expect(inboxThreadPullText({ pull: "git.acme.com:8443/acme/api#2:pull", url: "https://moved.example/x" })).toBe("https://git.acme.com:8443/acme/api/-/merge_requests/2");
-      expect(keyOf("acme/platform/api!61", "git.acme.com")).toEqual(["gitlab.com/acme/platform/api#61:pull", "https://gitlab.com/acme/platform/api/-/merge_requests/61"]);
+      expect(keyOf("acme/platform/api!61", "git.acme.com")).toEqual(["git.acme.com/acme/platform/api#61:pull", url]);
       learnGitlabHosts(["git.acme.com"]);
       expect(parseForgePullRef("acme/platform/api!61", "git.acme.com")).toMatchObject({ platform: "gitlab", host: "git.acme.com" });
       expect(keyOf("acme/platform/api!61", "git.acme.com")).toEqual(["git.acme.com/acme/platform/api#61:pull", url]);
-      expect(keyOf("acme/platform/api!61", "source.acme.io")).toEqual(["gitlab.com/acme/platform/api#61:pull", "https://gitlab.com/acme/platform/api/-/merge_requests/61"]);
+      expect(keyOf("acme/platform/api!61", "source.acme.io")).toEqual(["source.acme.io/acme/platform/api#61:pull", "https://source.acme.io/acme/platform/api/-/merge_requests/61"]);
+      // A GitLab known with its port (gitlabHosts, glab): a remote host has none, so the short ref takes the known one's.
+      learnGitlabHosts(["git.acme.com:8443"]);
+      expect(keyOf("acme/api!2", "git.acme.com")).toEqual(["git.acme.com:8443/acme/api#2:pull", "https://git.acme.com:8443/acme/api/-/merge_requests/2"]);
+      learnGitlabHosts(["git.acme.com:8443", "git.acme.com:9443"]);
+      expect(keyOf("acme/api!2", "git.acme.com")).toEqual(["git.acme.com/acme/api#2:pull", "https://git.acme.com/acme/api/-/merge_requests/2"]);
       expect(keyOf("northwind/billing-svc#412", "git.acme.com")).toEqual(["github.com/northwind/billing-svc#412", "https://github.com/northwind/billing-svc/pull/412"]);
       expect(keyOf("https://github.com/northwind/billing-svc/pull/412", "git.acme.com")).toEqual(["github.com/northwind/billing-svc#412", "https://github.com/northwind/billing-svc/pull/412"]);
       expect(keyOf("https://gitlab.com/acme/platform/api/-/merge_requests/61", "git.acme.com")).toEqual(["gitlab.com/acme/platform/api#61:pull", "https://gitlab.com/acme/platform/api/-/merge_requests/61"]);
@@ -183,5 +190,15 @@ describe("stacks, related and the headline", () => {
     const done = pull("o/r#8", "merged");
     expect(inboxThreadPullHeadline([closed, done], inboxThreadPullGroups([closed, done]))?.pull).toBe(done.pull);
     expect(inboxThreadPullsSummary([])).toBeUndefined();
+  });
+
+  test("with the live reads, the summary carries every PR's start, end, checks and review (Grid reads nothing of its own)", () => {
+    const merged = { ...pull("o/r#1", "merged", "main", "a"), read_at: "2026-11-24T03:40:00.000Z" };
+    const open = pull("o/r#2", "open", "a", "b");
+    const summary = inboxThreadPullsSummary([merged, open], (key) => (key === open.pull ? { checks: "running", review: "approved" } : undefined))!;
+    expect(summary.items).toEqual([
+      { key: merged.pull, state: "merged", added_at: merged.added_at, read_at: "2026-11-24T03:40:00.000Z", checks: null, review: null },
+      { key: open.pull, state: "open", added_at: open.added_at, read_at: open.read_at, checks: "running", review: "approved" },
+    ]);
   });
 });

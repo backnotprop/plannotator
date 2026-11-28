@@ -13,6 +13,8 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { PlanCleanDiffView, type PlanDiffBlockRenderer } from './PlanCleanDiffView';
 import { computePlanDiff } from '../../utils/planDiffEngine';
+import { ImageResolverContext } from '../ImageResolverContext';
+import { LocalLinkContext, LocalLinkMatchContext } from '../LocalLinkContext';
 
 const hasDom = typeof document !== 'undefined';
 
@@ -134,5 +136,27 @@ describe.if(hasDom)('PlanCleanDiffView seams (DOM)', () => {
     const { blocks } = computePlanDiff('Keep.\n\nA\n', 'Keep.\n\nB\n');
     const el = await render(<PlanCleanDiffView blocks={blocks} unchangedClassName="opacity-80" />);
     expect(el.querySelector('.plan-diff-unchanged')!.className).toBe('plan-diff-unchanged opacity-80');
+  });
+
+  test('a host’s image and link rules reach the diff; without them, images and links render as before', async () => {
+    const changed = 'Intro.\n\n![shot](https://img.example/a.png) [spec](docs/spec.md) [mail](mailto:a@example.com) [site](https://example.com/)\n';
+    const { blocks } = computePlanDiff('Intro.\n', changed);
+    const plain = await render(<PlanCleanDiffView blocks={blocks} wordLevel={false} />);
+    const plainHrefs = Array.from(plain.querySelectorAll('a[href]')).map((a) => a.getAttribute('href'));
+    expect(plainHrefs).toEqual(['https://img.example/a.png', 'docs/spec.md', 'mailto:a@example.com', 'https://example.com/']);
+
+    const ruled = await render(
+      <ImageResolverContext.Provider value={(src) => ({ kind: 'unavailable', title: src })}>
+        <LocalLinkMatchContext.Provider value={(href) => !/^https?:/.test(href)}>
+          <LocalLinkContext.Provider value={(href) => ({ kind: 'unavailable', title: href })}>
+            <PlanCleanDiffView blocks={blocks} wordLevel={false} />
+          </LocalLinkContext.Provider>
+        </LocalLinkMatchContext.Provider>
+      </ImageResolverContext.Provider>,
+    );
+    expect(ruled.querySelector('img')).toBeNull();
+    expect(ruled.querySelector('[data-image-unavailable]')!.textContent).toBe('shot');
+    expect(Array.from(ruled.querySelectorAll('a[href]')).map((a) => a.getAttribute('href'))).toEqual(['https://example.com/']);
+    expect(Array.from(ruled.querySelectorAll('[data-local-link="unavailable"]')).map((s) => s.textContent)).toEqual(['spec', 'mail']);
   });
 });

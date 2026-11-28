@@ -21,7 +21,7 @@
  * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
  */
 
-import { devices, expect, test, type Browser, type BrowserContext, type Locator, type Page } from '@playwright/test';
+import { devices, expect, test, type Browser, type BrowserContext, type Locator, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
@@ -58,6 +58,10 @@ interface World {
   html: string;
   /** An attached page whose script posts a link message on load. */
   script: string;
+  /** Hostile pages that try to get the link port: by moving to the bare asset copy, by document.open, from <head>. */
+  hop: string;
+  rewrite: string;
+  head: string;
   machine: string;
 }
 
@@ -66,6 +70,33 @@ let agent: SimAgent | undefined;
 let linkedMachine: Server | undefined;
 
 const filler = (n: number, tag: string) => Array.from({ length: n }, (_, i) => `${tag} paragraph ${i + 1}: long enough that the thread has to scroll.`).join('\n\n');
+
+/**
+ * A hostile page's toolkit (plain script text): `read()` gathers every link key
+ * it can find (its load address, which the navigation entry keeps; the inline
+ * guard's; any passed in its fragment; a made-up one), `steal` answers on any
+ * port posted to it, and `forge()` sends what the bridge and its guard send: a
+ * ready, a link offer per key with a link-click already queued on the port,
+ * and a link-click on the window.
+ */
+const forgeScript = (href: string) => `
+  const href = ${JSON.stringify(href)};
+  const keys = ['f'.repeat(32)];
+  const read = () => {
+    try { const k = new URL(performance.getEntriesByType('navigation')[0].name).searchParams.get('__pnk'); if (k) keys.push(k); } catch (e) {}
+    try { for (const s of document.scripts) { const m = /'([0-9a-f]{32})'/.exec(s.textContent || ''); if (m) keys.push(m[1]); } } catch (e) {}
+    keys.push(...location.hash.slice(1).split(',').filter(Boolean));
+  };
+  const steal = (e) => { if (e.ports && e.ports[0]) { e.stopImmediatePropagation(); e.ports[0].postMessage({ type: 'plannotator-bridge-link-click', href }); } };
+  const forge = () => {
+    parent.postMessage({ type: 'plannotator-bridge-ready', protocolVersion: 2 }, '*');
+    for (const key of keys) {
+      const channel = new MessageChannel();
+      channel.port1.postMessage({ type: 'plannotator-bridge-link-click', href });
+      parent.postMessage({ type: 'plannotator-bridge-link-offer', key }, '*', [channel.port2]);
+    }
+    parent.postMessage({ type: 'plannotator-bridge-link-click', href }, '*');
+  };`;
 
 test.beforeAll(async () => {
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
@@ -78,8 +109,8 @@ test.beforeAll(async () => {
   const home = join(root, 'home');
   mkdirSync(dataDir, { recursive: true });
   mkdirSync(home);
-  // The dialog case needs Decision mode, which is off by default.
-  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ ...E2E_LAUNCH_OFF, experimental: { decisionMode: true } }));
+  // The dialog case needs Decision mode, which is on by default.
+  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ ...E2E_LAUNCH_OFF }));
   const env = {
     PATH: process.env.PATH ?? '', HOME: home, PLANNOTATOR_DATA_DIR: dataDir,
     CLAUDE_CONFIG_DIR: join(root, 'claude'), CODEX_HOME: join(root, 'codex'), OPENCODE_CONFIG_DIR: join(root, 'opencode'),
@@ -155,6 +186,47 @@ test.beforeAll(async () => {
       for (const wait of [200, 600, 1200, 2000]) setTimeout(send, wait);
     </script></body></html>`,
   );
+  // Pages that try to get the link port the viewer takes links on (linkGuard.ts), each with no click.
+  const toT2 = `${origin}/#thread=${T2}`;
+  // It moves its frame to the asset route's bare copy (no guard there), passing on every key it could read.
+  writeFileSync(
+    join(alpha, 'docs', 'hop.html'),
+    `<!doctype html><html><head><meta charset="utf-8"><title>hop</title></head><body><h1>Hop page</h1><script>${forgeScript(toT2)}
+      if (window.__plannotatorLinkGuard) { read(); location.href = 'hop.html#' + keys.join(','); }
+      else { addEventListener('message', steal, true); read(); document.body.insertAdjacentHTML('beforeend', '<p>Bare copy</p>'); forge(); for (const wait of [200, 600, 1200, 2000]) setTimeout(forge, wait); }
+    </script></body></html>`,
+  );
+  // It replaces its own document (document.open drops every listener in it), then offers.
+  writeFileSync(
+    join(alpha, 'docs', 'rewrite.html'),
+    `<!doctype html><html><head><meta charset="utf-8"><title>rewrite</title></head><body><h1>Rewrite page</h1><script>${forgeScript(toT2)}
+      read();
+      setTimeout(() => {
+        document.open();
+        addEventListener('message', steal, true);
+        forge();
+        document.write('<!doctype html><title>rewritten</title><h1>Rewritten page</h1>');
+        document.close();
+        for (const wait of [200, 600, 1200, 2000]) setTimeout(forge, wait);
+      }, 300);
+    </script></body></html>`,
+  );
+  // A script in <head>: it listens first, calls the guard itself, and during a person's click asks it for T2.
+  writeFileSync(
+    join(alpha, 'docs', 'head.html'),
+    `<!doctype html><html><head><meta charset="utf-8"><title>head</title><script>${forgeScript(toT2)}
+      addEventListener('message', steal, true);
+      read();
+      const misuse = () => {
+        try { window.__plannotatorLinkGuard.follow('link', { type: 'plannotator-bridge-link-click', href }); } catch (e) {}
+        try { window.__plannotatorLinkGuard.follow('form', { type: 'plannotator-bridge-link-click', href }); } catch (e) {}
+      };
+      addEventListener('click', misuse, true);
+      const all = () => { misuse(); forge(); };
+      all();
+      for (const wait of [200, 600, 1200, 2000]) setTimeout(all, wait);
+    </script></head><body><h1>Head page</h1><p><a href="${origin}/#thread=${T3}">Head page to T3</a></p></body></html>`,
+  );
   const lines = [
     `[link to T2](${origin}/#thread=${T2})`,
     `bare ${origin}/#thread=${T2} end`,
@@ -177,7 +249,7 @@ test.beforeAll(async () => {
   const message = await agent.send({
     project_path: alpha,
     reply_to: T1,
-    attachments: ['docs/notes.md', 'docs/page.html', 'docs/script.html'],
+    attachments: ['docs/notes.md', 'docs/page.html', 'docs/script.html', 'docs/hop.html', 'docs/rewrite.html', 'docs/head.html'],
     body: [
       filler(6, 'Before'),
       ...lines,
@@ -199,6 +271,9 @@ test.beforeAll(async () => {
     markdown: files.find((file) => file.name === 'notes.md')!.id,
     html: files.find((file) => file.name === 'page.html')!.id,
     script: files.find((file) => file.name === 'script.html')!.id,
+    hop: files.find((file) => file.name === 'hop.html')!.id,
+    rewrite: files.find((file) => file.name === 'rewrite.html')!.id,
+    head: files.find((file) => file.name === 'head.html')!.id,
     machine: `http://localhost:${otherPort}/#thread=${T2}`,
   };
 });
@@ -235,6 +310,7 @@ async function scene(browser: Browser, view: View, run: (scene: Scene) => Promis
   }
 }
 
+/** The thread's heading in its header bar: its accessible name carries the subject also under a thread name. */
 const subject = (page: Page) => page.locator('section.ib-pane h2.ib-subject');
 const linksMessage = (page: Page) => page.locator(`[data-message-id="${world.links}"]`);
 const inMessage = (name: string) => (page: Page) => linksMessage(page).getByRole('link', { name, exact: true });
@@ -242,7 +318,7 @@ const threadUrl = (id: string) => `${world.origin}/#thread=${id}`;
 
 async function openFirstThread(page: Page): Promise<void> {
   await page.goto(threadUrl(world.T1));
-  await expect(subject(page)).toHaveText(/First thread/);
+  await expect(subject(page)).toHaveAccessibleName(/First thread/);
   await expect(linksMessage(page)).toBeVisible();
 }
 
@@ -281,11 +357,11 @@ for (const view of ['desktop', 'phone'] as const) {
           await openFirstThread(page);
           await press(kind.link(page));
           await expect(page).toHaveURL(kind.to(), { timeout: 5_000 });
-          await expect(subject(page)).toHaveText(kind.shows);
+          await expect(subject(page)).toHaveAccessibleName(kind.shows);
           await noTabOpened(s);
           await page.goBack();
           await expect(page).toHaveURL(threadUrl(world.T1));
-          await expect(subject(page)).toHaveText(/First thread/);
+          await expect(subject(page)).toHaveAccessibleName(/First thread/);
         });
       });
     }
@@ -295,7 +371,7 @@ for (const view of ['desktop', 'phone'] as const) {
         const { page, press } = s;
         await openFirstThread(page);
         await press(inMessage('link to T2 message')(page));
-        await expect(subject(page)).toHaveText(/Second thread/, { timeout: 5_000 });
+        await expect(subject(page)).toHaveAccessibleName(/Second thread/, { timeout: 5_000 });
         await expect(page.locator(`[data-message-id="${world.M2}"]`)).toBeInViewport();
         await expect(page).toHaveURL(threadUrl(world.T2));
         await noTabOpened(s);
@@ -320,7 +396,7 @@ for (const view of ['desktop', 'phone'] as const) {
         const entries = await page.evaluate(() => history.length);
         await press(inMessage('link to this thread')(page));
         await expect(page).toHaveURL(threadUrl(world.T1));
-        await expect(subject(page)).toHaveText(/First thread/);
+        await expect(subject(page)).toHaveAccessibleName(/First thread/);
 
         const first = page.locator(`[data-message-id="${world.M1}"]`);
         const link = inMessage('link to this thread message')(page);
@@ -350,7 +426,7 @@ for (const view of ['desktop', 'phone'] as const) {
         await expect.poll(rows).toEqual([world.T1, world.T2, world.T4].sort());
         await noTabOpened(s);
         await page.goBack();
-        await expect(subject(page)).toHaveText(/First thread/);
+        await expect(subject(page)).toHaveAccessibleName(/First thread/);
       });
     });
 
@@ -363,7 +439,7 @@ for (const view of ['desktop', 'phone'] as const) {
         await expect(page.locator('[data-settings-link]:visible').first()).toBeVisible();
         await noTabOpened(s);
         await page.goBack();
-        await expect(subject(page)).toHaveText(/First thread/);
+        await expect(subject(page)).toHaveAccessibleName(/First thread/);
       });
     });
 
@@ -375,7 +451,7 @@ for (const view of ['desktop', 'phone'] as const) {
           const link = name === 'bare' ? pane.locator(`a[href="${threadUrl(world.T2)}"]`).filter({ hasText: 'http' }).first() : pane.getByRole('link', { name, exact: true });
           await press(link);
           await expect(page).toHaveURL(threadUrl(world.T2), { timeout: 5_000 });
-          await expect(subject(page)).toHaveText(/Second thread/);
+          await expect(subject(page)).toHaveAccessibleName(/Second thread/);
           await expect(page.locator('[data-attachment-pane]')).toHaveCount(0);
           await noTabOpened(s);
           await page.goBack();
@@ -395,7 +471,7 @@ for (const view of ['desktop', 'phone'] as const) {
           await openFile(page, world.html);
           await press(page.frameLocator('.ib-htmlframe iframe').getByRole('link', { name, exact: true }));
           await expect(page).toHaveURL(threadUrl(to()), { timeout: 5_000 });
-          await expect(subject(page)).toHaveText(shows);
+          await expect(subject(page)).toHaveAccessibleName(shows);
           await noTabOpened(s);
         });
       });
@@ -421,10 +497,10 @@ for (const view of ['desktop', 'phone'] as const) {
         await box.pressSequentially(words);
         // At once: the draft's save has not run yet.
         await press(inMessage('link to T2')(page));
-        await expect(subject(page)).toHaveText(/Second thread/, { timeout: 5_000 });
+        await expect(subject(page)).toHaveAccessibleName(/Second thread/, { timeout: 5_000 });
         await noTabOpened(s);
         await page.goBack();
-        await expect(subject(page)).toHaveText(/First thread/);
+        await expect(subject(page)).toHaveAccessibleName(/First thread/);
         await expect(box).toHaveValue(words);
       });
     });
@@ -461,7 +537,7 @@ for (const view of ['desktop', 'phone'] as const) {
         console.log(`${view}, no such thread: ${JSON.stringify(fromTheAddress)}`);
         await noTabOpened(s);
         await page.goBack();
-        await expect(subject(page)).toHaveText(/First thread/);
+        await expect(subject(page)).toHaveAccessibleName(/First thread/);
       });
     });
   });
@@ -473,18 +549,18 @@ test.describe('phone stack', () => {
       const { page, press } = s;
       await page.goto(`${world.origin}/`);
       await press(page.locator(`[data-thread-id="${world.T1}"]:visible`).first());
-      await expect(subject(page)).toHaveText(/First thread/);
+      await expect(subject(page)).toHaveAccessibleName(/First thread/);
       await expect(subject(page)).toBeInViewport();
       const opened = (from: string) => expect.poll(() => page.evaluate(() => (history.state as { ibFrom?: string } | null)?.ibFrom)).toBe(from);
       await opened('');
 
       await press(inMessage('link to T2')(page));
-      await expect(subject(page)).toHaveText(/Second thread/, { timeout: 5_000 });
+      await expect(subject(page)).toHaveAccessibleName(/Second thread/, { timeout: 5_000 });
       await expect(subject(page)).toBeInViewport();
       await opened(`#thread=${world.T1}`);
 
       await page.goBack();
-      await expect(subject(page)).toHaveText(/First thread/);
+      await expect(subject(page)).toHaveAccessibleName(/First thread/);
       await expect(subject(page)).toBeInViewport();
       await page.goBack();
       await expect(page).toHaveURL(`${world.origin}/`);
@@ -500,7 +576,7 @@ test.describe('the list', () => {
       const { page } = s;
       await page.goto(`${world.origin}/#project=${world.project}&thread=${world.T1}`);
       await inMessage('link to T2')(page).click();
-      await expect(subject(page)).toHaveText(/Second thread/, { timeout: 5_000 });
+      await expect(subject(page)).toHaveAccessibleName(/Second thread/, { timeout: 5_000 });
       await expect(page).toHaveURL(`${world.origin}/#project=${world.project}&thread=${world.T2}`);
       await noTabOpened(s);
     });
@@ -528,7 +604,7 @@ test.describe('still a new tab', () => {
           const [tab] = await Promise.all([context.waitForEvent('page', { timeout: 5_000 }), link(page).click(click)]);
           await expect(tab).toHaveURL(threadUrl(world.T2));
           await expect(page).toHaveURL(threadUrl(world.T1));
-          await expect(subject(page)).toHaveText(/First thread/);
+          await expect(subject(page)).toHaveAccessibleName(/First thread/);
         });
       });
     }
@@ -548,7 +624,7 @@ test.describe('still a new tab', () => {
           const [tab] = await Promise.all([context.waitForEvent('page', { timeout: 5_000 }), press(inMessage(link)(page))]);
           await expect(tab).toHaveURL(to());
           await expect(page).toHaveURL(threadUrl(world.T1));
-          await expect(subject(page)).toHaveText(/First thread/);
+          await expect(subject(page)).toHaveAccessibleName(/First thread/);
         });
       });
     }
@@ -670,8 +746,8 @@ test.describe('still a new tab', () => {
 });
 
 test.describe('an attached HTML page', () => {
-  // Known gap: a page's own script can still move the window to another thread; the activation and frame-focus gates don't stop it in Chromium or WebKit.
-  test.fixme('its own script, with no click, does not move the window', async ({ browser }) => {
+  // The viewer takes a link only on the port the link guard offers once per load, never from a window message.
+  test('its own script, with no click, does not move the window', async ({ browser }) => {
     await scene(browser, 'desktop', async (s) => {
       const { page } = s;
       await openFile(page, world.script);
@@ -680,6 +756,36 @@ test.describe('an attached HTML page', () => {
       await page.waitForTimeout(3_000);
       await expect(page).toHaveURL(new RegExp(`#thread=${world.T1}&file=${world.script}`));
       await expect(page.locator('[data-attachment-pane]')).toBeVisible();
+      await noTabOpened(s);
+    });
+  });
+
+  /** The page did what it set out to (`proof` shows in its frame), then forged for two seconds: the window stays. */
+  async function staysAfter(s: Scene, file: string, proof: string): Promise<void> {
+    const { page } = s;
+    await openFile(page, file);
+    await expect(page.frameLocator('.ib-htmlframe iframe').getByText(proof, { exact: true })).toBeVisible({ timeout: 10_000 });
+    await page.waitForTimeout(3_000);
+    await expect(page).toHaveURL(new RegExp(`#thread=${world.T1}&file=${file}`));
+    await expect(page.locator('[data-attachment-pane]')).toBeVisible();
+    await noTabOpened(s);
+  }
+
+  test('a page that moves its frame to its bare asset copy, then offers a port with every key it read, does not move the window', async ({ browser }) => {
+    await scene(browser, 'desktop', (s) => staysAfter(s, world.hop, 'Bare copy'));
+  });
+
+  test('a page that replaces itself with document.open, then forges a ready and offers again, does not move the window', async ({ browser }) => {
+    await scene(browser, 'desktop', (s) => staysAfter(s, world.rewrite, 'Rewritten page'));
+  });
+
+  test("a script in <head> gets no port and cannot use the guard; a person's click on its link still goes where the link goes", async ({ browser }) => {
+    await scene(browser, 'desktop', async (s) => {
+      await staysAfter(s, world.head, 'Head page');
+      // During this click the head script asks the guard for T2: only the clicked link's own address goes.
+      await s.page.frameLocator('.ib-htmlframe iframe').getByRole('link', { name: 'Head page to T3', exact: true }).click();
+      await expect(s.page).toHaveURL(threadUrl(world.T3), { timeout: 5_000 });
+      await expect(subject(s.page)).toHaveText(/Beta thread/);
       await noTabOpened(s);
     });
   });
@@ -756,7 +862,7 @@ test.describe('the tour', () => {
         document.body.append(link);
       }, threadUrl(world.T2));
       await page.getByRole('link', { name: 'out of the tour', exact: true }).click();
-      await expect(subject(page)).toHaveText(/Second thread/, { timeout: 5_000 });
+      await expect(subject(page)).toHaveAccessibleName(/Second thread/, { timeout: 5_000 });
       await expect(page.locator('[data-tour-bar]')).toHaveCount(0);
       await page.goBack();
       await expect(page).toHaveURL(threadUrl(world.T1));

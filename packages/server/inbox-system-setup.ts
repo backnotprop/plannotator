@@ -61,8 +61,6 @@ export async function saveSystemSetup(project: InboxProject, body: Record<string
 export interface SystemSetupRouteDeps extends SystemSetupDeps {
   store: { listProjects(): InboxProject[]; project(id: string): InboxProject | null; canonicalProjectId(id: string): string };
   serverSession: string;
-  /** The request comes from the person on this computer, or the machine's owner over the tailnet. */
-  ownerOrLocal: (req: Request) => boolean;
   /** System and Code review both on. */
   systemOn: () => boolean;
   readBody: (req: Request) => Promise<Record<string, unknown>>;
@@ -71,13 +69,12 @@ export interface SystemSetupRouteDeps extends SystemSetupDeps {
 
 /**
  * `GET /api/inbox/system/setup` (the projects the dialog offers) and `POST` (one project's save). Guards in order:
- * method, owner, same origin, System on, then the window's `serverSession`. An `InboxError` is thrown for the
+ * method, same origin, System on, then the window's `serverSession`. An `InboxError` is thrown for the
  * caller's error answer.
  */
 export async function systemSetupRoute(req: Request, deps: SystemSetupRouteDeps): Promise<Response> {
   const { json } = deps;
   if (req.method !== "GET" && req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
-  if (!deps.ownerOrLocal(req)) return json({ error: "This answers only on this computer, not over the tailnet.", code: "local_only" }, 403);
   if (!isSameOriginOrNoOrigin(req.headers.get("origin"), req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
     return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
   }

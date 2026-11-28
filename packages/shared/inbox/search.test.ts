@@ -72,6 +72,14 @@ describe("text the index reads", () => {
     expect(text).not.toContain("Keep the budget");
   });
 
+  test("an author's coloured words (#3345) are read as words: no tag or style text", () => {
+    const body = ["Coverage fell to <span style=\"color: #d00000\">73.0%</span>.", "", "| Model | Rate |", "| --- | --- |", "| alpha | <font color=\"#b26a00\">93.5%</font> |"].join("\n");
+    const text = inboxSearchBodyText(body);
+    expect(text).toContain("Coverage fell to 73.0%.");
+    expect(text).toContain("93.5%");
+    expect(text).not.toMatch(/span|font|style|color|d00000/);
+  });
+
   test("a reply: the person's own words, not the generated first line and not the answers section", () => {
     const body = "Answered 2 questions, skipped 1.\n\nAdd jitter, please.\n\n## Answers to your questions\n\n1. Keep the budget? Yes";
     expect(inboxSearchReplyText(body)).toBe("Add jitter, please.");
@@ -137,6 +145,31 @@ describe("text the index reads", () => {
 });
 
 describe("groups and rows", () => {
+  test("a question's scenario table is searchable as its context (the table stays there, approval question-scenario-table)", async () => {
+    const store = open();
+    const project = store.ensureProject({ name: "notes", root: "/src/notes" });
+    const block = [
+      ":::question",
+      "Where should a losing edit go?",
+      "",
+      "- [ ] Nowhere — dropped",
+      "- [ ] Local only — kept here",
+      "",
+      "| Scenario | Nowhere | Local only |",
+      "| --- | --- | --- |",
+      "| You edit offline on a plane | Lost — nothing says so | Kept — in the quarantine drawer |",
+      ":::",
+    ].join("\n");
+    const root = store.sendMessage({ project_id: project.id, author: CLAUDE, subject: "Sync conflicts", thread: "sync", body: `Before I go on.\n\n${block}` }).message;
+    const q = store.questionsOf(root.id)[0]!;
+    expect(q.scenarios?.rows).toHaveLength(1);
+    const answer = search(await built(store), "quarantine");
+    expect(messageIds(answer)).toEqual([root.id]);
+    const message = answer.groups!.messages![0] as InboxSearchMessageRow;
+    expect(message.question?.key).toBe(q.key);
+    expect(marked(message.snippet.text, message.snippet.marks)).toEqual(["quarantine"]);
+  });
+
   test("a thread, its message, its question, its file, its guide and a project each land in their group", async () => {
     const store = open();
     const relay = store.ensureProject({ name: "plannotator", root: "/src/plannotator" });
@@ -534,6 +567,29 @@ describe("filters", () => {
     expect(messageIds(search(w.index, "deploy", { ...filtered, sort: "newest" }))).toEqual([w.archived.id, w.quiet.id, w.waiting.id]);
     expect(messageIds(search(w.index, "deploy", { status: "new", sort: "newest" }))).toEqual([w.fresh.id]);
   });
+
+  test("tags (Search's Tag chip): threads in any picked tag and what is in them, with the other filters; no projects; an unknown id matches nothing", async () => {
+    const w = await world();
+    const release = w.store.createInitiative({ name: "Release", by: { kind: "person" } });
+    const windows = w.store.createInitiative({ name: "Windows", by: { kind: "person" } });
+    const untagged = [search(w.index, "deploy", {}), search(w.index, "api", {}), search(w.index, "", {})].map((answer) => answer.groups ?? answer.recent);
+    w.store.setThreadTag(w.waiting.id, release.id, true);
+    w.store.setThreadTag(w.sent.id, windows.id, true);
+    w.store.setThreadTag(w.fresh.id, release.id, true);
+    // No tag picked: tagging changes no answer (tags are never results; the owner: "a filter but nothing more").
+    expect([search(w.index, "deploy", {}), search(w.index, "api", {}), search(w.index, "", { tags: [] })].map((answer) => answer.groups ?? answer.recent)).toEqual(untagged);
+    expect(threadIds(search(w.index, "deploy", { tags: [release.id] })).sort()).toEqual([w.waiting.id, w.fresh.id].sort());
+    expect(threadIds(search(w.index, "deploy", { tags: [release.id, windows.id] })).sort()).toEqual([w.waiting.id, w.sent.id, w.fresh.id].sort());
+    expect(messageIds(search(w.index, "deploy", { tags: [windows.id] })).sort()).toEqual([w.sent.id, w.sentReply.id].sort());
+    expect(threadIds(search(w.index, "deploy", { tags: [release.id], project: w.web.id }))).toEqual([w.fresh.id]);
+    expect(search(w.index, "api", { tags: [release.id] }).groups!.projects).toEqual([]);
+    expect(search(w.index, "deploy", { tags: ["ini_01ZZZZZZZZZZZZZZZZZZZZZZZZ"] }).totals).toEqual({ threads: 0, messages: 0, files: 0, projects: 0 });
+    // No words: the threads in the tag.
+    expect(threadIds(search(w.index, "", { tags: [windows.id] }))).toEqual([w.sent.id]);
+    // An untag leaves the next answer at once.
+    w.store.setThreadTag(w.fresh.id, release.id, false);
+    expect(threadIds(search(w.index, "deploy", { tags: [release.id] }))).toEqual([w.waiting.id]);
+  });
 });
 
 describe("text in every script", () => {
@@ -553,6 +609,17 @@ describe("text in every script", () => {
     const row = answer.groups!.threads![0] as InboxSearchThreadRow;
     expect(marked(row.title, row.title_marks)).toEqual(["Résumé", "café"]);
     expect(search(index, "決済サービス").groups!.projects!.map((p) => p.id)).toEqual([ja.id]);
+  });
+
+  test("a word pasted with a soft hyphen inside is found by either spelling; marks select the original word", async () => {
+    const store = open();
+    const project = store.ensureProject({ name: "notes", root: "/w/notes" });
+    const plain = store.sendMessage({ project_id: project.id, author: CLAUDE, subject: "Notes", thread: "a", body: "The finance review moved to Friday." }).message;
+    const pasted = store.sendMessage({ project_id: project.id, author: CLAUDE, subject: "Notes", thread: "b", body: "The fi\u00adnance review moved to Friday." }).message;
+    const index = await built(store);
+    for (const q of ["finance", "fi\u00adnance"]) expect(messageIds(search(index, q)).sort()).toEqual([plain.id, pasted.id].sort());
+    const row = search(index, "finance").groups!.messages!.find((m) => m.id === pasted.id) as InboxSearchMessageRow;
+    expect(marked(row.snippet.text, row.snippet.marks)).toEqual(["fi\u00adnance"]);
   });
 
   test("two projects with one name are told apart by their parent folder", async () => {

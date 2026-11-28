@@ -86,9 +86,9 @@ export function fileFilter(file: string): string {
   return `${file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`;
 }
 
-/** Runs Playwright on these spec files, with the JSON report the workflow reads. Returns its exit code. */
-function runSpecs(files: string[], passWithNoTests: boolean): number {
-  const report = resolve(process.env.E2E_REPORT ?? join(repoRoot, '.local/e2e-report/report.json'));
+/** Runs Playwright on these spec files, with the JSON report the workflow reads. Returns its exit code. Also the PR slice's runner (scripts/e2e-slice.ts). */
+export function runSpecs(files: string[], passWithNoTests: boolean, reportPath?: string): number {
+  const report = resolve(reportPath ?? process.env.E2E_REPORT ?? join(repoRoot, '.local/e2e-report/report.json'));
   const noTests = passWithNoTests ? ['--pass-with-no-tests'] : [];
   const child = Bun.spawnSync(['bunx', 'playwright', 'test', '-c', E2E_CONFIG, '--reporter=list,json', ...noTests, ...files.map(fileFilter)], {
     cwd: repoRoot,

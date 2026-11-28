@@ -10,7 +10,7 @@
  * Both are 36 px tall with a 44 px touch area (phoneComposer.css).
  */
 import type { MouseEvent, Ref } from 'react';
-import { HostMark } from '../icons';
+import { HostMark, Icon } from '../icons';
 
 interface Common {
   open: boolean;
@@ -37,6 +37,7 @@ const Chevron = () => (
 export function AgentPill({
   host,
   agent,
+  start = false,
   label,
   detail,
   ask = false,
@@ -53,6 +54,8 @@ export function AgentPill({
   host?: string | null;
   /** Its session: the mark shows the face chosen for it. */
   agent?: string | null;
+  /** A new session of that agent (the reply's start row): New message's "+" before the mark. */
+  start?: boolean;
   /** The name beside the mark. Null: the mark and the chevron alone (the mark says who). */
   label: string | null;
   /** A quiet word after the name ("ended"). */
@@ -65,6 +68,11 @@ export function AgentPill({
 }) {
   return (
     <button type="button" ref={buttonRef} className="ib-apill" data-agent-pill="" data-ask={ask ? '' : undefined} data-open={open ? '' : undefined} aria-haspopup="dialog" aria-expanded={open} aria-label={ariaLabel} disabled={disabled} onMouseDown={keepFocus ? stay : undefined} onClick={onClick} {...attrs}>
+      {start && (
+        <span className="ib-cp-plus" aria-hidden="true">
+          <Icon name="plus" size={12} />
+        </span>
+      )}
       {host !== undefined && (
         <span className="ib-apill-m">
           <HostMark host={host} agent={agent} />

@@ -27,14 +27,14 @@ const scopeKey = ({ snapshot, base }: Scope) => `${snapshot ?? ''}\u0000${base ?
 
 const cardsCache = new Map<string, Promise<PackageChangesData | null>>();
 
-function loadCards(scope: Scope): Promise<PackageChangesData | null> {
+function loadCards(scope: Scope, fetchImpl: typeof fetch = fetch): Promise<PackageChangesData | null> {
   const key = scopeKey(scope);
   let hit = cardsCache.get(key);
   if (!hit) {
     const params = new URLSearchParams();
     if (scope.snapshot) params.set('snapshot', scope.snapshot);
     if (scope.base) params.set('base', scope.base);
-    hit = fetch(`/api/package-changes?${params}`)
+    hit = fetchImpl(`/api/package-changes?${params}`)
       .then((res) => (res.ok ? res.json() : null))
       .then((body: { cards?: PackageCard[]; lookup?: { total?: number } } | null): PackageChangesData | null => (
         Array.isArray(body?.cards)
@@ -49,14 +49,18 @@ function loadCards(scope: Scope): Promise<PackageChangesData | null> {
   return hit;
 }
 
-/** This path's card: undefined while loading, null when it has none. */
-export function usePackageCard(path: string, scope: Scope, enabled: boolean): PackageCardData | null | undefined {
+/**
+ * This path's card: undefined while loading, null when it has none. `fetchImpl`: where the read goes (absent, code
+ * review's own `/api/package-changes`; the Inbox passes its route's, packages/inbox/reviewImages.ts). The cache keys by
+ * `scope`, so a host with its own reads names its own snapshot.
+ */
+export function usePackageCard(path: string, scope: Scope, enabled: boolean, fetchImpl?: typeof fetch): PackageCardData | null | undefined {
   const key = scopeKey(scope);
   const [result, setResult] = useState<{ key: string; card: PackageCardData | null } | undefined>();
   useEffect(() => {
     if (!enabled) return;
     let live = true;
-    void loadCards(scope).then((data) => {
+    void loadCards(scope, fetchImpl).then((data) => {
       const card = data?.cards.find((c) => c.path === path);
       if (live) setResult({ key: `${key}\u0000${path}`, card: card && data ? { card, sendTotal: data.sendTotal } : null });
     });
@@ -78,11 +82,11 @@ export const packageKey = (name: string, version: string | null) => `${name}@${v
 interface LookupBody { packages?: PackageMetadata[]; offline?: boolean; failure?: string }
 const lookupCache = new Map<string, Promise<PackageLookupState>>();
 
-function loadLookup(scope: Scope, path: string): Promise<PackageLookupState> {
+function loadLookup(scope: Scope, path: string, fetchImpl: typeof fetch = fetch): Promise<PackageLookupState> {
   const key = `${scopeKey(scope)}\u0000${path}`;
   let hit = lookupCache.get(key);
   if (!hit) {
-    hit = fetch('/api/package-changes/lookup', {
+    hit = fetchImpl('/api/package-changes/lookup', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ snapshot: scope.snapshot, base: scope.base, path }),
@@ -103,13 +107,13 @@ function loadLookup(scope: Scope, path: string): Promise<PackageLookupState> {
 }
 
 /** npm details for one card, fetched only while `on` (the reviewer allowed it) and the card has names to send. */
-export function usePackageLookup(path: string, scope: Scope, on: boolean, retry: number): PackageLookupState {
+export function usePackageLookup(path: string, scope: Scope, on: boolean, retry: number, fetchImpl?: typeof fetch): PackageLookupState {
   const key = `${scopeKey(scope)}\u0000${path}\u0000${retry}`;
   const [result, setResult] = useState<{ key: string; value: PackageLookupState } | undefined>();
   useEffect(() => {
     if (!on) return;
     let live = true;
-    void loadLookup(scope, path).then((value) => { if (live) setResult({ key, value }); });
+    void loadLookup(scope, path, fetchImpl).then((value) => { if (live) setResult({ key, value }); });
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, on]);

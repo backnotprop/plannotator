@@ -21,7 +21,7 @@
  * .local/proof/paste-text/ (and PASTE_TEXT_SHOTS_DIR when set).
  */
 
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';

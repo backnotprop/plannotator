@@ -30,7 +30,8 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import { INBOX_REPO_TTL_MS, inboxId, type InboxPullRiskAnswer, type InboxPullRiskModels, type InboxPullsAnswer } from "@plannotator/core/inbox-types";
+import { INBOX_REPO_TTL_MS, inboxId, PULL_DETAILS_START, PULL_THREAD_STEP, type InboxPullHidden, type InboxPullRiskAnswer, type InboxPullRiskModels, type InboxPullsAnswer, type InboxReviewsAnswer } from "@plannotator/core/inbox-types";
+import { INBOX_BRIDGE_POLL_PATH } from "@plannotator/shared/inbox/connection";
 import { startInboxServer, type InboxServer } from "./inbox";
 import {
   compareBranch,
@@ -45,6 +46,7 @@ import {
   GITLAB_PROJECTS_PER_QUERY,
   gitlabOthersQueries,
   INBOX_PULL_DIFF_MAX_BYTES,
+  INBOX_PULL_DIFF_FRESH_MS,
   INBOX_PULLS_FRESH_MS,
   INBOX_PULLS_OTHERS_CALLS_MAX,
   INBOX_PULLS_OTHERS_DEADLINE_MS,
@@ -231,7 +233,7 @@ function postForge(): PostForge {
   return f;
 }
 
-async function world(options: { codeReview?: boolean; answer?: unknown; tailscale?: TailscaleRunner; board?: boolean; gitlab?: boolean; avatars?: Partial<PullAvatarOptions>; pullRisk?: Pick<PullRiskOptions, "run" | "agents" | "listModels">; repoDelayMs?: number } = {}) {
+async function world(options: { codeReview?: boolean; answer?: unknown; tailscale?: TailscaleRunner; board?: boolean; gitlab?: boolean; avatars?: Partial<PullAvatarOptions>; pullRisk?: Pick<PullRiskOptions, "run" | "agents" | "listModels">; repoDelayMs?: number; config?: Record<string, unknown> } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-pulls-")));
   roots.push(root);
   const project = join(root, "billing-svc");
@@ -240,6 +242,7 @@ async function world(options: { codeReview?: boolean; answer?: unknown; tailscal
   const dataDir = join(root, "data");
   mkdirSync(dataDir, { recursive: true });
   process.env.PLANNOTATOR_DATA_DIR = dataDir;
+  if (options.config) writeFileSync(join(dataDir, "config.json"), JSON.stringify(options.config));
   const f = options.gitlab ? gitlabForge() : forge(options.answer);
   const post = postForge();
   // The project's origin as git reads it; `setRepo` changes it (read again at the project's next message).
@@ -267,8 +270,8 @@ async function world(options: { codeReview?: boolean; answer?: unknown; tailscal
   const client = new Client({ name: "inbox-pulls-test", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`)));
   clients.push(client);
-  const send = async (body: string, thread: string) => {
-    const result = (await client.callTool({ name: "send_message", arguments: { project_path: project, body, thread, agent_session: `ses_${thread}`, agent_name: "Claude Code", agent_host: "claude-code" } })) as { structuredContent: { thread_id: string } };
+  const send = async (body: string, thread: string, extra: Record<string, unknown> = {}) => {
+    const result = (await client.callTool({ name: "send_message", arguments: { project_path: project, body, thread, agent_session: `ses_${thread}`, agent_name: "Claude Code", agent_host: "claude-code", ...extra } })) as { structuredContent: { thread_id: string } };
     return result.structuredContent.thread_id;
   };
   const pulls = async (query = "") => fetch(`${base}/api/inbox/pulls${query}`);
@@ -307,11 +310,11 @@ const GL_MR = (iid: number, fields: Record<string, unknown> = {}) => ({
 });
 
 /** glab signed in to gitlab.com only; gh signed in nowhere. One MR, !61, by jun, asking dana for a review. */
-function gitlabForge(): Forge {
+function gitlabForge(mr = GL_MR(61)): Forge {
   const f: Forge = {
     calls: [],
     fail: null,
-    othersAnswer: { data: { currentUser: { username: "dana" }, p0: { mergeRequests: { count: 1, nodes: [GL_MR(61)] } } } },
+    othersAnswer: { data: { currentUser: { username: "dana" }, p0: { mergeRequests: { count: 1, nodes: [mr] } } } },
     othersFail: null,
     heads: null,
     bodies: {},
@@ -328,7 +331,7 @@ function gitlabForge(): Forge {
         return { stdout: JSON.stringify(f.othersAnswer), stderr: "", exitCode: 0 };
       }
       if (cli === "glab" && args.includes("graphql")) {
-        return { stdout: JSON.stringify({ data: { currentUser: { username: "dana", requested: { nodes: [GL_MR(61)] }, authored: { nodes: [] }, merged: { nodes: [] } } } }), stderr: "", exitCode: 0 };
+        return { stdout: JSON.stringify({ data: { currentUser: { username: "dana", requested: { nodes: [mr] }, authored: { nodes: [] }, merged: { nodes: [] } } } }), stderr: "", exitCode: 0 };
       }
       if (cli === "glab" && args[3]?.endsWith("/commits?per_page=100")) return { stdout: JSON.stringify((f.mrCommits ?? []).map((id) => ({ id }))), stderr: "", exitCode: 0 };
       if (cli === "glab" && args[3]?.endsWith("/versions?per_page=100")) return { stdout: JSON.stringify((f.mrVersions ?? []).map((head_commit_sha, id) => ({ id, head_commit_sha }))), stderr: "", exitCode: 0 };
@@ -392,8 +395,73 @@ describe("risk ranking", () => {
       answer = (await (await fetch(`${w.base}/api/inbox/pulls/risk`)).json()) as InboxPullRiskAnswer;
     } while (answer.pending > 0 && Date.now() - started < 5_000);
     expect(answer.rules).toBe("Anything in billing.");
-    expect(answer.judgments["github.com/northwind/billing-svc#412"]).toEqual({ level: "high", why: "It changes the retry schedule." });
+    expect(answer.judgments["github.com/northwind/billing-svc#412"]).toEqual({ level: "high", why: "It changes the retry schedule.", head: "412".padStart(40, "a") });
     expect(runs.length).toBe(3);
+  });
+
+  const member = { author: { login: "tomas" }, authorAssociation: "MEMBER" };
+  const key = (n: number) => `github.com/northwind/billing-svc#${n}`;
+  const memberWorld = async (others: number[], othersDelayMs = 0, issueCount = others.length) => {
+    const w = await world({
+      codeReview: true,
+      answer: { data: { ...GH_ANSWER.data, requested: { nodes: [ghPull(601, member), ghPull(602, member)] }, authored: { nodes: [] } } },
+      config: { inboxPullRisk: { ...settings, auto: { level: "high", make: "guide" } } },
+      pullRisk: { run: async () => (await Bun.sleep(200), { text: '{"risk":"high","why":"It changes the retry schedule."}' }), agents: () => [{ id: "pi-sdk", label: "Pi" }], listModels: async () => [] },
+    });
+    w.forge.othersAnswer = { data: { viewer: { login: "dana" }, others0: { issueCount, nodes: others.map((n) => ghPull(n, member)) } } };
+    w.forge.othersDelayMs = othersDelayMs;
+    await w.send("Looking at the retries.", "retries");
+    return w;
+  };
+  const settledRisk = async (base: string) => {
+    const started = Date.now();
+    let answer: InboxPullRiskAnswer;
+    do {
+      answer = (await (await fetch(`${base}/api/inbox/pulls/risk`)).json()) as InboxPullRiskAnswer;
+    } while (answer.pending > 0 && Date.now() - started < 5_000);
+    expect(answer.pending).toBe(0);
+    return answer;
+  };
+
+  test("the Pull requests page's read while ranking runs: the answer in which nothing is left ranking still has every judgment and what waits", async () => {
+    const w = await memberWorld([601, 602]);
+    expect((await fetch(`${w.base}/api/inbox/reviews`)).status).toBe(200);
+    expect((await w.pulls("?everywhere=1&machines=1")).status).toBe(200);
+    const answer = await settledRisk(w.base);
+    expect(Object.keys(answer.judgments).sort()).toEqual([key(601), key(602)]);
+    expect([...(answer.auto_waiting ?? [])].sort()).toEqual([key(601), key(602)]);
+    expect((await save(w.base, { make_now: true })).status).toBe(200);
+    expect((await settledRisk(w.base)).auto_runs).toEqual({});
+  });
+
+  test("a PR the Pull requests page's read no longer finds open (closed elsewhere) leaves the judgments and what waits", async () => {
+    const w = await memberWorld([601], 300);
+    expect((await fetch(`${w.base}/api/inbox/reviews`)).status).toBe(200);
+    expect([...((await settledRisk(w.base)).auto_waiting ?? [])].sort()).toEqual([key(601), key(602)]);
+    await Bun.sleep(400);
+    expect((await w.pulls("?everywhere=1&machines=1")).status).toBe(200);
+    const answer = await settledRisk(w.base);
+    expect(Object.keys(answer.judgments)).toEqual([key(601)]);
+    expect(answer.auto_waiting).toEqual([key(601)]);
+  });
+
+  test("a repository whose Others came back cut: a PR the Pull requests page's read no longer has stops waiting there too", async () => {
+    const w = await memberWorld([601], 300, 150);
+    expect((await fetch(`${w.base}/api/inbox/reviews`)).status).toBe(200);
+    expect([...((await settledRisk(w.base)).auto_waiting ?? [])].sort()).toEqual([key(601), key(602)]);
+    await Bun.sleep(400);
+    expect((await w.pulls("?everywhere=1&machines=1")).status).toBe(200);
+    expect((await settledRisk(w.base)).auto_waiting).toEqual([key(601)]);
+  });
+
+  test("Make them now while starting agents is off: refused with launch_off, and no PR is marked", async () => {
+    const w = await riskWorld(async () => ({ text: '{"risk":"high","why":"It changes the retry schedule."}' }));
+    expect((await fetch(`${w.base}/api/inbox/launch/settings`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: false }) })).status).toBe(200);
+    expect((await save(w.base, { ...settings, auto: { level: "high", make: "guide" } })).status).toBe(200);
+    const refused = await save(w.base, { make_now: true });
+    expect(refused.status).toBe(409);
+    expect(((await refused.json()) as { code: string }).code).toBe("launch_off");
+    expect(((await (await fetch(`${w.base}/api/inbox/pulls/risk`)).json()) as InboxPullRiskAnswer).auto_runs).toEqual({});
   });
 
   test("Code review off: refused before anything runs", async () => {
@@ -495,6 +563,256 @@ describe("merge (the Pull requests page)", () => {
   });
 });
 
+describe("hide (Reviews' and the board's Hide; inbox-pull-hidden.ts)", () => {
+  const KEY = "github.com/northwind/billing-svc#412";
+  const call = (base: string, fields: Record<string, unknown>, headers: Record<string, string> = {}) =>
+    fetch(`${base}/api/inbox/pulls/hidden`, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(fields) });
+  const reviews = async (base: string) => (await (await fetch(`${base}/api/inbox/reviews`)).json()) as InboxReviewsAnswer;
+  const listed = async (w: { pulls: (query?: string) => Promise<Response> }, query = "") => (await (await w.pulls(query)).json()) as InboxPullsAnswer;
+  /**
+   * GitHub's answer with the board's half too (`every…`, asked in the same call as the scoped searches): the board lists
+   * what the scoped read lists. Mutable, so a test can change what the forge says next.
+   */
+  const everywhere = () => {
+    const answer = structuredClone(GH_ANSWER) as { data: Record<string, unknown> };
+    answer.data.everyRequested = structuredClone(answer.data.requested);
+    answer.data.everyAuthored = structuredClone(answer.data.authored);
+    answer.data.everyAssigned = { issueCount: 0, nodes: [] };
+    answer.data.everyMerged = { nodes: [] };
+    return answer;
+  };
+  const SEARCHES = ["requested", "authored", "assigned", "merged", "everyRequested", "everyAuthored", "everyAssigned", "everyMerged"];
+  const threadRows = async (base: string) => ((await (await fetch(`${base}/api/inbox/threads`)).json()) as { sections: { threads: { thread_id: string; hide_pulls?: string[] }[] }[] }).sections.flatMap((section) => section.threads);
+
+  test("Code review off: refused before anything runs", async () => {
+    const w = await world();
+    const before = w.forge.calls.length;
+    const res = await call(w.base, { show: [KEY] });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { code: string }).code).toBe("code_review_off");
+    expect(w.forge.calls.length).toBe(before);
+  });
+
+  test("a hidden PR leaves the list, the board and Reviews' rows, runs nothing on the forge, and Show again brings it back", async () => {
+    const w = await world({ codeReview: true, answer: everywhere() });
+    await w.send("Working.", "retries");
+    const pr = (await listed(w)).pulls.find((p) => p.key === KEY)!;
+    expect(pr).toBeDefined();
+    // The board lists it before the hide, so its leaving the board below proves the hide.
+    expect((await listed(w, "?everywhere=1")).pulls.some((p) => p.key === KEY)).toBe(true);
+    expect((await reviews(w.base)).rows.some((row) => row.pull_keys.includes(KEY))).toBe(true);
+    const before = w.forge.calls.length;
+    const hid = await call(w.base, { hide: [{ key: KEY, title: pr.title, url: pr.url }] });
+    expect(hid.status).toBe(200);
+    expect(((await hid.json()) as { hidden: InboxPullHidden[] }).hidden.map((h) => [h.key, h.title, h.url])).toEqual([[KEY, pr.title, pr.url]]);
+    // Nothing goes to the forge about it: no close, no comment, no read of the PR (a background Others read may run).
+    expect(w.forge.calls.slice(before).filter((c) => c.args.some((arg) => /PATCH|POST|pulls\/412|issues\/412/.test(arg)))).toEqual([]);
+    const after = await listed(w);
+    expect(after.pulls.some((p) => p.key === KEY)).toBe(false);
+    expect(after.hidden?.map((h) => h.key)).toEqual([KEY]);
+    expect((await listed(w, "?everywhere=1")).pulls.some((p) => p.key === KEY)).toBe(false);
+    const rows = await reviews(w.base);
+    expect(rows.rows.some((row) => row.pull_keys.includes(KEY) || row.stacks.some((s) => s.layers.some((l) => l.key === KEY)))).toBe(false);
+    expect(rows.hidden?.map((h) => h.key)).toEqual([KEY]);
+    expect((await call(w.base, { show: [KEY] })).status).toBe(200);
+    expect((await listed(w)).pulls.some((p) => p.key === KEY)).toBe(true);
+    expect((await reviews(w.base)).rows.some((row) => row.pull_keys.includes(KEY))).toBe(true);
+  });
+
+  test("a read that no longer lists a hidden PR forgets nothing; a read that sees it merged does", async () => {
+    const answer = everywhere();
+    const w = await world({ codeReview: true, answer });
+    await w.send("Working.", "retries");
+    const board = await listed(w, "?everywhere=1");
+    const pr = board.pulls.find((p) => p.key === KEY)!;
+    expect(pr).toBeDefined();
+    expect((await call(w.base, { hide: [{ key: KEY, title: pr.title, url: pr.url }] })).status).toBe(200);
+    // Each re-read below is past the list's fresh window, so the forge is really asked again.
+    let now = Date.now();
+    const later = () => {
+      now += INBOX_PULLS_FRESH_MS + 1_000;
+      setSystemTime(new Date(now));
+    };
+    try {
+      // Every search now lists nothing (cut short, another account, a repository no longer a project): still hidden.
+      for (const name of SEARCHES) answer.data[name] = { issueCount: 0, nodes: [] };
+      later();
+      const asked = w.forge.graphql().length;
+      const empty = await listed(w, "?everywhere=1&refresh=1");
+      expect(w.forge.graphql().length).toBeGreaterThan(asked);
+      expect(empty.pulls.some((p) => p.key === KEY)).toBe(false);
+      expect(empty.hidden?.map((h) => h.key)).toEqual([KEY]);
+      expect((await listed(w, "?everywhere=1&machines=1")).hidden?.map((h) => h.key)).toEqual([KEY]);
+      expect((await reviews(w.base)).hidden?.map((h) => h.key)).toEqual([KEY]);
+      // Seen merged: its record goes.
+      answer.data.merged = { nodes: [ghPull(412, { state: "MERGED", headRefName: "retry/schedule", mergedAt: "2026-11-04T10:00:00Z" })] };
+      answer.data.everyMerged = structuredClone(answer.data.merged);
+      later();
+      const before = w.forge.graphql().length;
+      const merged = await listed(w, "?refresh=1");
+      expect(w.forge.graphql().length).toBeGreaterThan(before);
+      expect(merged.hidden ?? []).toEqual([]);
+    } finally {
+      setSystemTime();
+    }
+  });
+
+  test("the Inbox list: a thread whose PRs are all hidden leaves it (and its counts); Show again brings it back", async () => {
+    const w = await world({ codeReview: true, answer: everywhere() });
+    const handed = await w.send("Ready for review.", "handed");
+    await w.pulls();
+    expect((await w.own([KEY], handed)).status).toBe(200);
+    const before = (await threadRows(w.base)).find((row) => row.thread_id === handed)!;
+    expect(before.hide_pulls).toContain(KEY);
+    const res = await call(w.base, { threads: [handed] });
+    expect(res.status).toBe(200);
+    const hid = ((await res.json()) as { hid: string[]; hidden: InboxPullHidden[] });
+    expect(hid.hid).toContain(KEY);
+    // The hidden record keeps its thread: Reviews' Hidden opens it.
+    expect(hid.hidden.find((h) => h.key === KEY)?.thread_id).toBe(handed);
+    expect((await threadRows(w.base)).some((row) => row.thread_id === handed)).toBe(false);
+    // Nothing was written to the thread: it is still there to open.
+    expect((await fetch(`${w.base}/api/inbox/threads/${handed}`)).status).toBe(200);
+    expect((await call(w.base, { show: hid.hid })).status).toBe(200);
+    expect((await threadRows(w.base)).some((row) => row.thread_id === handed)).toBe(true);
+  });
+
+  /** A thread handed #412, then hidden from the Inbox list by its row's Hide. */
+  type Agent = { session: string; state: string; waiting: number };
+  const agentsNow = async (base: string) => ((await (await fetch(`${base}/api/inbox/threads`)).json()) as { agents: { agents: Agent[] }[] }).agents.flatMap((group) => group.agents);
+  /** `switchable`: Code review on through Settings (config.json), not fixed by the server's options, so it can be turned off. */
+  const handedAndHidden = async (switchable = false) => {
+    const w = await world(switchable ? { answer: everywhere() } : { codeReview: true, answer: everywhere() });
+    const handed = await w.send("Ready for review.", "handed");
+    if (switchable) expect((await w.setCodeReview(true)).status).toBe(200);
+    await w.pulls();
+    expect((await w.own([KEY], handed)).status).toBe(200);
+    const res = (await (await call(w.base, { threads: [handed] })).json()) as { hid: string[]; threads_left: string[] };
+    // The toast's "with its thread": this write took it out of the list.
+    expect(res.threads_left).toEqual([handed]);
+    expect((await threadRows(w.base)).some((row) => row.thread_id === handed)).toBe(false);
+    return { w, handed };
+  };
+
+  test("the Inbox list: a hidden thread is no wait; its agent waits on nothing and shows only its own state", async () => {
+    const asks = ["Ready for review.", "", ":::question", "Merge it now or after the release?", "", "- [ ] Now", "- [ ] After the release", ":::"].join("\n");
+    const waitsOn = async (base: string) => (await agentsNow(base)).find((agent) => agent.session === "ses_handed");
+    const w = await world({ codeReview: true, answer: everywhere() });
+    const handed = await w.send(asks, "handed");
+    await w.pulls();
+    expect((await w.own([KEY], handed)).status).toBe(200);
+    // Before the Hide, its agent waits on the person for it.
+    expect(await waitsOn(w.base)).toMatchObject({ state: "waiting", waiting: 1 });
+    expect((await call(w.base, { threads: [handed] })).status).toBe(200);
+    expect((await threadRows(w.base)).some((row) => row.thread_id === handed)).toBe(false);
+    // After: no count, no "Waiting on you"; an ended agent with nothing waiting is not listed at all.
+    const after = await waitsOn(w.base);
+    expect(after?.waiting ?? 0).toBe(0);
+    expect(after?.state).not.toBe("waiting");
+  });
+
+  test("the Inbox list: a new agent message brings the thread back; the PR stays hidden", async () => {
+    const { w, handed } = await handedAndHidden();
+    // Nothing new: it stays out, read after read.
+    await w.pulls();
+    expect((await threadRows(w.base)).some((row) => row.thread_id === handed)).toBe(false);
+    await Bun.sleep(5);
+    await w.send("I pushed a fix; have another look?", "handed");
+    expect((await threadRows(w.base)).some((row) => row.thread_id === handed)).toBe(true);
+    expect((await reviews(w.base)).hidden?.map((h) => h.key)).toContain(KEY);
+    // It stays back once that message is old news.
+    expect((await threadRows(w.base)).some((row) => row.thread_id === handed)).toBe(true);
+  });
+
+  test("the Inbox list: a thread that came back offers Hide again; that hides the thread, not its PRs again, and Undo brings it back", async () => {
+    const { w, handed } = await handedAndHidden();
+    await Bun.sleep(5);
+    await w.send("I pushed a fix; have another look?", "handed");
+    const back = (await threadRows(w.base)).find((row) => row.thread_id === handed)!;
+    expect(back.hide_pulls).toEqual([KEY]);
+    await Bun.sleep(5);
+    const res = (await (await call(w.base, { threads: [handed] })).json()) as { hid: string[]; rehid: string[]; threads_left: string[] };
+    expect(res).toMatchObject({ hid: [], rehid: [handed], threads_left: [handed] });
+    expect((await threadRows(w.base)).some((row) => row.thread_id === handed)).toBe(false);
+    // Undo: the thread is back (the window puts it back in place: `threads_back`); its PR stays hidden.
+    const undone = await call(w.base, { show_threads: [handed] });
+    expect(undone.status).toBe(200);
+    expect(((await undone.json()) as { threads_back: string[] }).threads_back).toEqual([handed]);
+    expect((await threadRows(w.base)).some((row) => row.thread_id === handed)).toBe(true);
+    expect((await reviews(w.base)).hidden?.map((h) => h.key)).toContain(KEY);
+  });
+
+  test("the Inbox list: a thread begun after its PR was hidden offers Hide, and it hides", async () => {
+    const w = await world({ codeReview: true, answer: everywhere() });
+    // A first thread makes the project, so the list reads its repository.
+    await w.send("Starting on the billing service.", "first");
+    const pr = (await listed(w)).pulls.find((p) => p.key === KEY)!;
+    expect((await call(w.base, { hide: [{ key: KEY, title: pr.title, url: pr.url }] })).status).toBe(200);
+    await Bun.sleep(5);
+    const later = await w.send("Picking up #412.", "later");
+    expect((await w.own([KEY], later)).status).toBe(200);
+    await w.pulls();
+    expect((await threadRows(w.base)).find((row) => row.thread_id === later)?.hide_pulls).toEqual([KEY]);
+    await Bun.sleep(5);
+    expect(((await (await call(w.base, { threads: [later] })).json()) as { rehid: string[] }).rehid).toEqual([later]);
+    expect((await threadRows(w.base)).some((row) => row.thread_id === later)).toBe(false);
+  });
+
+  test("the Inbox list: Code review off leaves nothing out and offers no Hide", async () => {
+    const { w, handed } = await handedAndHidden(true);
+    expect((await w.setCodeReview(false)).status).toBe(200);
+    const row = (await threadRows(w.base)).find((r) => r.thread_id === handed);
+    expect(row).toBeDefined();
+    expect(row!.hide_pulls).toBeUndefined();
+    expect((await threadRows(w.base)).every((r) => r.hide_pulls === undefined)).toBe(true);
+    expect((await w.setCodeReview(true)).status).toBe(200);
+    expect((await threadRows(w.base)).some((r) => r.thread_id === handed)).toBe(false);
+  });
+
+  test("a hidden repository: every PR in it leaves the board and Reviews, never a thread from the Inbox list; Show again brings them back; nothing goes to the forge", async () => {
+    const w = await world({ codeReview: true, answer: everywhere() });
+    const handed = await w.send("Ready for review.", "handed");
+    const board = await listed(w, "?everywhere=1");
+    const REPO = "github.com/northwind/billing-svc";
+    const inRepo = board.pulls.filter((p) => p.key.startsWith(`${REPO}#`));
+    expect(inRepo.length).toBeGreaterThan(0);
+    expect((await w.own([KEY], handed)).status).toBe(200);
+    const before = w.forge.calls.length;
+    const res = await call(w.base, { hide_repos: [{ key: REPO, label: "billing-svc" }] });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { hidden_repos: { key: string }[]; threads_left: string[] };
+    expect(body.hidden_repos.map((r) => r.key)).toEqual([REPO]);
+    expect(body.threads_left).toEqual([]);
+    expect(w.forge.calls.slice(before).filter((c) => c.args.some((arg) => /PATCH|POST|pulls\/\d|issues\/\d/.test(arg)))).toEqual([]);
+    const after = await listed(w, "?everywhere=1");
+    expect(after.pulls.some((p) => p.key.startsWith(`${REPO}#`))).toBe(false);
+    expect(after.hidden_repos?.map((r) => r.key)).toEqual([REPO]);
+    const rows = await reviews(w.base);
+    expect(rows.rows.some((row) => row.pull_keys.some((k) => k.startsWith(`${REPO}#`)))).toBe(false);
+    // The thread handed #412 stays in the Inbox list, and still offers Hide for that PR on its own.
+    expect((await threadRows(w.base)).find((row) => row.thread_id === handed)?.hide_pulls).toEqual([KEY]);
+    expect((await call(w.base, { show_repos: [REPO] })).status).toBe(200);
+    expect((await listed(w, "?everywhere=1")).pulls.filter((p) => p.key.startsWith(`${REPO}#`)).length).toBe(inRepo.length);
+    expect((await threadRows(w.base)).some((row) => row.thread_id === handed)).toBe(true);
+  });
+
+  test("the Inbox list: a pinned thread is never left out", async () => {
+    const { w, handed } = await handedAndHidden();
+    const pin = await fetch(`${w.base}/api/inbox/threads/${handed}/pin`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pinned: true }) });
+    expect(pin.status).toBe(200);
+    expect((await threadRows(w.base)).some((row) => row.thread_id === handed)).toBe(true);
+    const pins = ((await (await fetch(`${w.base}/api/inbox/threads`)).json()) as { pins: { thread_id: string }[] }).pins;
+    expect(pins.map((p) => p.thread_id)).toContain(handed);
+  });
+
+  test("refuses another site, a link that is not https and an empty write", async () => {
+    const w = await world({ codeReview: true });
+    expect((await call(w.base, { show: [KEY] }, { Origin: "https://evil.example", "Sec-Fetch-Site": "cross-site" })).status).toBe(403);
+    expect((await call(w.base, { hide: [{ key: KEY, title: "x", url: "javascript:alert(1)" }] })).status).toBe(422);
+    expect((await call(w.base, {})).status).toBe(422);
+  });
+});
+
 describe("close and reopen (the board's Close and its Undo)", () => {
   const KEY = "github.com/northwind/billing-svc#412";
   const PULL = "repos/northwind/billing-svc/pulls/412";
@@ -552,6 +870,28 @@ describe("close and reopen (the board's Close and its Undo)", () => {
     expect(again.status).toBe(409);
     expect(((await again.json()) as { code: string }).code).toBe("reopen_not_closed_here");
     expect(writes(w)).toHaveLength(2);
+  });
+
+  test("Undo still reopens after a fresh list no longer holds the closed PR (the forge lists open ones only)", async () => {
+    const answer = structuredClone(GH_ANSWER);
+    const w = await world({ codeReview: true, answer });
+    await w.send("Working.", "retries");
+    await w.pulls();
+    await w.pulls("?everywhere=1");
+    hostSays(w, "open");
+    expect((await call(w.base, "close", { key: KEY })).status).toBe(200);
+    answer.data.authored.nodes = answer.data.authored.nodes.filter((n) => n.number !== 412);
+    setSystemTime(new Date(Date.now() + INBOX_PULLS_FRESH_MS + 1_000));
+    try {
+      await w.pulls();
+      await w.pulls("?everywhere=1");
+      expect(await stateOf(w)).toBeUndefined();
+      const reopened = await call(w.base, "reopen", { key: KEY });
+      expect(reopened.status).toBe(200);
+      expect(writes(w).map((c) => c.args.at(-1))).toEqual(["state=closed", "state=open"]);
+    } finally {
+      setSystemTime();
+    }
   });
 
   test("a reopen of a PR this Inbox did not close is refused before the host is asked; another site and an unknown PR too", async () => {
@@ -680,6 +1020,131 @@ describe("on", () => {
     // The person hands one of their own PRs to the same thread: it is theirs to give a verdict in again.
     expect((await w.own(["github.com/northwind/billing-svc#413"], theirs)).status).toBe(200);
     expect((await thread(theirs)).pull_theirs).toBeUndefined();
+  });
+
+  test("a PR page's Start a thread: the `thread` ask is kept and served with the page mark; a guided review asked in that thread keeps the mark; another thread drops it; any other ask is refused", async () => {
+    const w = await world({ codeReview: true });
+    const talk = await w.send("Ready.", "talk");
+    const other = await w.send("Ready.", "other");
+    await w.pulls();
+    const key = "github.com/northwind/billing-svc#412";
+    const linkOf = async () => ((await (await w.pulls()).json()) as InboxPullsAnswer).links[key];
+    for (const bad of ["Thread", "page", "anything", 7]) expect((await w.own([key], talk, { ask: bad })).status).toBe(422);
+    expect((await w.own([key], talk, { ask: "thread" })).status).toBe(200);
+    expect(await linkOf()).toMatchObject({ via: "owner", thread_id: talk, ask: "thread", page: true });
+    expect((await w.own([key], talk, { ask: "guide" })).status).toBe(200);
+    expect(await linkOf()).toMatchObject({ via: "owner", thread_id: talk, ask: "guide", page: true });
+    expect((await w.own([key], other, { ask: "guide" })).status).toBe(200);
+    const moved = await linkOf();
+    expect(moved).toMatchObject({ thread_id: other, ask: "guide" });
+    expect(moved?.page).toBeUndefined();
+  });
+
+  test("a Picture it asked of a PR's thread keeps its guided review on the way beside it, and its page is served once the agent sends one", async () => {
+    const w = await world({ codeReview: true });
+    const talk = await w.send("Ready.", "talk");
+    await w.pulls();
+    const key = "github.com/northwind/billing-svc#412";
+    const linkOf = async () => ((await (await w.pulls()).json()) as InboxPullsAnswer).links[key];
+    expect((await w.own([key], talk, { ask: "guide" })).status).toBe(200);
+    expect((await w.own([key], talk, { ask: "picture_it" })).status).toBe(200);
+    const asked = await linkOf();
+    expect(asked).toMatchObject({ via: "owner", thread_id: talk, ask: "guide" });
+    expect(typeof asked?.picture_it_asked_at).toBe("string");
+    expect(asked?.picture_it_page).toBeUndefined();
+    const page = join(w.root, "picture-it.html");
+    writeFileSync(page, '<html><head><meta name="plannotator-page" content="picture-it"><title>Retries</title></head><body></body></html>');
+    await w.send("Here it is.", "talk", { attachments: [page] });
+    expect((await linkOf())?.picture_it_page).toMatchObject({ title: "Retries" });
+    expect((await w.own([key], talk, { ask: "picture-it" })).status).toBe(422);
+  });
+
+  test("a Picture page is marked seen once the person has looked at its thread", async () => {
+    const w = await world({ codeReview: true });
+    const talk = await w.send("Ready.", "talk");
+    await w.pulls();
+    const key = "github.com/northwind/billing-svc#412";
+    const linkOf = async () => ((await (await w.pulls()).json()) as InboxPullsAnswer).links[key];
+    expect((await w.own([key], talk, { ask: "picture_it" })).status).toBe(200);
+    const page = join(w.root, "picture-it.html");
+    writeFileSync(page, '<html><head><meta name="plannotator-page" content="picture-it"><title>Retries</title></head><body></body></html>');
+    await w.send("Here it is.", "talk", { attachments: [page] });
+    expect((await linkOf())?.picture_it_page?.seen).toBeUndefined();
+    w.server.store.markSeen(talk);
+    expect((await linkOf())?.picture_it_page).toMatchObject({ title: "Retries", seen: true });
+  });
+
+  test("validate_only says which thread a PR is already given to (another window's Start a thread), and none for a free one", async () => {
+    const w = await world({ codeReview: true });
+    const talk = await w.send("Ready.", "talk");
+    await w.pulls();
+    const projectId = w.server.store.allProjects()[0]!.id;
+    expect(await (await w.check(["github.com/northwind/billing-svc#412"], projectId)).json()).toMatchObject({ ok: true, owner: null });
+    expect((await w.own(["github.com/northwind/billing-svc#412"], talk, { ask: "thread" })).status).toBe(200);
+    expect(await (await w.check(["github.com/northwind/billing-svc#412"], projectId)).json()).toMatchObject({ ok: true, owner: talk });
+  });
+
+  // A thread the person starts from a PR's page with the window's own details, never tied by the window.
+  const startPageThread = async (w: Awaited<ReturnType<typeof world>>, n: number, session: string) => {
+    // The session polls, so the person's new thread can go to it (a live session).
+    const polled = await fetch(`${w.base}${INBOX_BRIDGE_POLL_PATH}`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${w.server.token}` }, body: JSON.stringify({ session, host: "claude-code", waitMs: 0, project_path: w.project, started_at: Date.now(), busy: false }) });
+    expect(polled.status).toBe(200);
+    const body = `Tell me about it.\n\n${PULL_DETAILS_START}pull request.\n\nPull request\n- Title: PR ${n}\n- Number: #${n}\n- Repository: northwind/billing-svc\n- Link: https://github.com/northwind/billing-svc/pull/${n}\n\nWhat to do\n${PULL_THREAD_STEP} Talk.`;
+    const started = await fetch(`${w.base}/api/inbox/messages`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ to: { session }, body, idempotency_key: `started-${n}` }) });
+    expect(started.status).toBe(200);
+    return ((await started.json()) as { message: { thread_id: string } }).message.thread_id;
+  };
+  const threadRead = async (w: Awaited<ReturnType<typeof world>>, id: string) => ((await (await fetch(`${w.base}/api/inbox/threads/${id}`)).json()) as { thread: { pull_keys?: string[]; pull_theirs?: true } }).thread;
+
+  test("a thread started from a PR's page and never tied (a failed tie, then a reload): the list links it as the PR's own and couples it as a tie would; validate_only names it", async () => {
+    const w = await world({ codeReview: true });
+    await w.send("Ready.", "talk");
+    await w.pulls();
+    const own = "github.com/northwind/billing-svc#412";
+    const theirs = "github.com/northwind/billing-svc#880";
+    const ownThread = await startPageThread(w, 412, "ses_talk");
+    const theirThread = await startPageThread(w, 880, "ses_talk");
+    const links = ((await (await w.pulls()).json()) as InboxPullsAnswer).links;
+    expect(links[own]).toMatchObject({ via: "owner", ask: "thread", page: true, thread_id: ownThread });
+    expect(links[theirs]).toMatchObject({ via: "owner", ask: "thread", page: true, thread_id: theirThread });
+    // The same coupling as a tie: its PR list, and a teammate's PR's thread takes no verdict.
+    expect(await threadRead(w, ownThread)).toMatchObject({ pull_keys: [own] });
+    expect((await threadRead(w, ownThread)).pull_theirs).toBeUndefined();
+    expect(await threadRead(w, theirThread)).toMatchObject({ pull_keys: [theirs], pull_theirs: true });
+    const projectId = w.server.store.allProjects()[0]!.id;
+    expect(await (await w.check([own], projectId)).json()).toMatchObject({ ok: true, owner: ownThread });
+  });
+
+  test("archiving a started thread that has no review frees its PR; so does taking its message back", async () => {
+    const w = await world({ codeReview: true });
+    await w.send("Ready.", "talk");
+    await w.pulls();
+    const archivedThread = await startPageThread(w, 412, "ses_talk");
+    expect(((await (await w.pulls()).json()) as InboxPullsAnswer).links["github.com/northwind/billing-svc#412"]?.thread_id).toBe(archivedThread);
+    w.server.store.resolveThread(archivedThread, true, "person");
+    expect(((await (await w.pulls()).json()) as InboxPullsAnswer).links["github.com/northwind/billing-svc#412"]).toBeUndefined();
+    const projectId = w.server.store.allProjects()[0]!.id;
+    expect(await (await w.check(["github.com/northwind/billing-svc#412"], projectId)).json()).toMatchObject({ owner: null });
+    const backThread = await startPageThread(w, 413, "ses_talk");
+    const back = await fetch(`${w.base}/api/inbox/messages/${backThread}/take-back`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    expect(back.status).toBe(200);
+    expect(((await (await w.pulls()).json()) as InboxPullsAnswer).links["github.com/northwind/billing-svc#413"]?.thread_id).not.toBe(backThread);
+  });
+
+  test("a started thread tied at once, then its message taken back: the PR has no owner again (its link, validate_only), so its page offers Start a thread", async () => {
+    const w = await world({ codeReview: true });
+    await w.send("Ready.", "talk");
+    await w.pulls();
+    const key = "github.com/northwind/billing-svc#412";
+    const thread = await startPageThread(w, 412, "ses_talk");
+    expect((await w.own([key], thread, { ask: "thread" })).status).toBe(200);
+    expect(((await (await w.pulls()).json()) as InboxPullsAnswer).links[key]).toMatchObject({ via: "owner", thread_id: thread, ask: "thread", page: true });
+    const back = await fetch(`${w.base}/api/inbox/messages/${thread}/take-back`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    expect(back.status).toBe(200);
+    // No link at all: the window's launchpad then offers Start a thread (`canStartPullThread` needs no link).
+    expect(((await (await w.pulls()).json()) as InboxPullsAnswer).links[key]).toBeUndefined();
+    const projectId = w.server.store.allProjects()[0]!.id;
+    expect(await (await w.check([key], projectId)).json()).toMatchObject({ ok: true, owner: null });
   });
 
   test("checked before the send: validate_only writes nothing, refuses another project, and needs no thread", async () => {
@@ -838,7 +1303,7 @@ describe("parsing", () => {
       JSON.stringify({
         data: {
           viewer: { login: "dana" },
-          requested: { nodes: [ghPull(880, { author: { login: "tomas" } })] },
+          requested: { nodes: [ghPull(880, { author: { login: "tomas" } }), ghPull(881, { author: { login: "ines" }, authorAssociation: "COLLABORATOR" }), ghPull(882, { author: { login: "zed" }, authorAssociation: "CONTRIBUTOR" })] },
           authored: {
             nodes: [
               ghPull(872, { reviewDecision: "APPROVED", latestReviews: { nodes: [{ state: "APPROVED", author: { login: "priya" } }] } }),
@@ -853,6 +1318,7 @@ describe("parsing", () => {
     const by = Object.fromEntries(answer.pulls.map((p) => [p.number, p]));
     expect(answer.login).toBe("dana");
     expect(by[880]).toMatchObject({ requested: true, mine: false, author: "tomas" });
+    expect([by[880]!.author_member, by[881]!.author_member, by[882]!.author_member]).toEqual([undefined, true, undefined]);
     expect(by[872]).toMatchObject({ mine: true, review: "approved", approved_by: "priya", checks: "success" });
     expect(by[414]).toMatchObject({ state: "draft", checks: "pending" });
     expect(by[411]).toMatchObject({ state: "merged", merged_at: "2026-11-02T10:00:00Z" });
@@ -1029,6 +1495,28 @@ describe("the whole stack's diff (finding C and merged layers)", () => {
     f.heads = [newer, newer];
     expect((await pulls.diff(key, "layer")).head_sha).toBe(newer);
     expect(f.heads).toEqual([]);
+  });
+
+  test("a file read naming the head it was drawn from reuses that diff at any age, and reads at once share one", async () => {
+    const f = forge(stackAnswer);
+    let clock = 1_000_000;
+    const pulls = createInboxPulls({ run: f.run, now: () => clock });
+    await pulls.list([{ host: "github.com", repo: "northwind/billing-svc", project_id: "prj_1" }]);
+    const key = "github.com/northwind/billing-svc#22";
+    const head = "b".repeat(40);
+    f.heads = [head, head];
+    const start = f.calls.length;
+    expect((await pulls.diff(key, "layer")).head_sha).toBe(head);
+    const one = f.calls.length - start;
+    clock += INBOX_PULL_DIFF_FRESH_MS * 3;
+    const pinnedAt = f.calls.length;
+    expect((await pulls.diff(key, "layer", undefined, head)).head_sha).toBe(head);
+    expect(f.calls.length).toBe(pinnedAt);
+    f.heads = [head, head];
+    const together = f.calls.length;
+    const answers = await Promise.all([pulls.diff(key, "layer"), pulls.diff(key, "layer"), pulls.diff(key, "layer")]);
+    expect(answers.map((answer) => answer.head_sha)).toEqual([head, head, head]);
+    expect(f.calls.length - together).toBe(one);
   });
 
   test("a label moving updated_at reads nothing again; a new head does", async () => {
@@ -1227,6 +1715,151 @@ describe("the whole stack's diff (finding C and merged layers)", () => {
       const answer = await pulls.diff("gitlab.com/northwind/data/ledger#61:pull", "layer");
       expect(answer.description).toBe("Adds the CSV export.");
       expect(answer.head_sha).toBe("c".repeat(40));
+    });
+  });
+
+  describe("a GitLab layer whose raw diff endpoint is missing", () => {
+    const endpoint = "projects/northwind%2Fdata%2Fledger/merge_requests/61";
+    const pagedEndpoint = `${endpoint}/diffs?per_page=100`;
+    const key = "gitlab.com/northwind/data/ledger#61:pull";
+    const head = "c".repeat(40);
+    const entry = (path: string) => ({
+      old_path: path, new_path: path, new_file: false, deleted_file: false, renamed_file: false,
+      diff: "@@ -1 +1 @@\n-before\n+after\n",
+    });
+    const pages = JSON.stringify([entry("ledger.py")]) + "\n" + JSON.stringify([entry("format.py")]);
+
+    async function layer(
+      { rawError = "glab: 404 Not Found (HTTP 404)", paged = pages, pagedError, listedHead = head, firstHead = head, lastHead = head, changesCount }:
+      { rawError?: string; paged?: string; pagedError?: string; listedHead?: string; firstHead?: string | null; lastHead?: string; changesCount?: string } = {},
+    ) {
+      const f = gitlabForge(GL_MR(61, { diffHeadSha: listedHead }));
+      let headReads = 0;
+      f.rest = (cli, args) => {
+        if (cli !== "glab" || args[2] !== "gitlab.com") return null;
+        if (args[3] === endpoint) {
+          const sha = headReads++ === 0 ? firstHead : lastHead;
+          const counted = changesCount === undefined ? {} : { changes_count: changesCount };
+          return sha
+            ? { stdout: JSON.stringify({ sha, state: "opened", description: "Adds the ledger.", ...counted }), stderr: "", exitCode: 0 }
+            : { stdout: "", stderr: "glab: 404 Not Found (HTTP 404)", exitCode: 1 };
+        }
+        if (args[3] === `${endpoint}/raw_diffs`) return { stdout: "", stderr: rawError, exitCode: 1 };
+        if (args[3] === pagedEndpoint) return { stdout: paged, stderr: pagedError ?? "", exitCode: pagedError ? 1 : 0 };
+        return null;
+      };
+      const pulls = createInboxPulls({ run: f.run });
+      await pulls.list([{ host: "gitlab.com", repo: "northwind/data/ledger", project_id: "prj_1" }]);
+      return {
+        diff: () => pulls.diff(key, "layer"),
+        pagedCalls: () => f.calls.filter(({ args }) => args[3] === pagedEndpoint),
+      };
+    }
+
+    test("reads both pages through the same glab host and preserves the reviewed head", async () => {
+      const { diff, pagedCalls } = await layer();
+      const answer = await diff();
+      expect(answer).toMatchObject({ head_sha: head, description: "Adds the ledger.", state: "open" });
+      for (const path of ["ledger.py", "format.py"]) {
+        expect(answer.patch).toContain(`diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n@@ -1 +1 @@\n-before\n+after\n`);
+      }
+      expect(pagedCalls()).toEqual([{ cli: "glab", args: ["api", "--hostname", "gitlab.com", pagedEndpoint, "--paginate"] }]);
+    });
+
+    test.each(["HTTP 401 Unauthorized", "HTTP 403 Forbidden", "HTTP 429 Too Many Requests"])(
+      "does not fall back on %s", async (rawError) => {
+        const { diff, pagedCalls } = await layer({ rawError });
+        await expect(diff()).rejects.toMatchObject({ code: "pull_diff_failed" });
+        expect(pagedCalls()).toEqual([]);
+      },
+    );
+
+    test.each(["ERROR: 404 Not Found", "glab: 404 Project Not Found (HTTP 404)", "error: HTTP 404: 404 Not Found (https://gitlab.com/api/v4/projects/northwind%2Fdata%2Fledger/merge_requests/61/raw_diffs)"])(
+      "falls back on %s", async (rawError) => {
+        const { diff, pagedCalls } = await layer({ rawError });
+        expect((await diff()).patch).toContain("diff --git a/format.py b/format.py\n");
+        expect(pagedCalls()).toHaveLength(1);
+      },
+    );
+
+    test("a repeated entry does not stand in for a missing file", async () => {
+      const { diff } = await layer({ paged: JSON.stringify([entry("ledger.py"), entry("ledger.py")]), changesCount: "2" });
+      await expect(diff()).rejects.toMatchObject({ code: "pull_diff_failed" });
+    });
+
+    test("does not read a second diff endpoint when the merge request itself is missing", async () => {
+      const { diff, pagedCalls } = await layer({ firstHead: null });
+      await expect(diff()).rejects.toMatchObject({ code: "pull_diff_failed" });
+      expect(pagedCalls()).toEqual([]);
+    });
+
+    test("the existing byte cap also applies to the paginated response", async () => {
+      const { diff } = await layer({ paged: "x".repeat(INBOX_PULL_DIFF_MAX_BYTES + 1) });
+      await expect(diff()).rejects.toMatchObject({ code: "pull_diff_too_large" });
+    });
+
+    test("rejects malformed or incomplete fallback results", async () => {
+      const heldBack = { ...entry("format.py"), diff: "", collapsed: true };
+      for (const paged of ["not JSON", JSON.stringify([entry("ledger.py")]), JSON.stringify([entry("ledger.py"), heldBack])]) {
+        const { diff } = await layer({ paged });
+        await expect(diff()).rejects.toMatchObject({ code: "pull_diff_failed" });
+      }
+    });
+
+    test("refuses an empty added file that an older GitLab may have held back", async () => {
+      const emptyAdded = { ...entry("seed.sql"), new_file: true, diff: "" };
+      const { diff } = await layer({ paged: JSON.stringify([entry("ledger.py"), emptyAdded]) });
+      await expect(diff()).rejects.toMatchObject({ code: "pull_diff_failed" });
+      const added = { ...entry("seed.sql"), new_file: true, diff: "@@ -0,0 +1 @@\n+insert into ledger\n" };
+      const complete = await layer({ paged: JSON.stringify([entry("ledger.py"), added]) });
+      expect((await complete.diff()).patch).toContain("+insert into ledger\n");
+    });
+
+    test("checks the count only against the head it describes", async () => {
+      const paged = JSON.stringify([entry("ledger.py")]);
+      const { diff } = await layer({ paged, listedHead: "b".repeat(40), changesCount: "1", rawError: "glab: Not Found (HTTP 404)" });
+      const answer = await diff();
+      expect(answer.head_sha).toBe(head);
+      expect(answer.patch).toContain("+after\n");
+    });
+
+    test("refuses when a push since the list leaves GitLab's own count short", async () => {
+      // The list (an older head) counted 2, which no longer applies; GitLab counts 3 for the head read now, 2 came.
+      const stale = await layer({ listedHead: "b".repeat(40), changesCount: "3" });
+      await expect(stale.diff()).rejects.toMatchObject({ code: "pull_diff_failed" });
+      // With no count for the head read now, nothing says every file came.
+      const uncounted = await layer({ listedHead: "b".repeat(40) });
+      await expect(uncounted.diff()).rejects.toMatchObject({ code: "pull_diff_failed" });
+      // GitLab's count is checked with the list's current one too.
+      const short = await layer({ changesCount: "3" });
+      await expect(short.diff()).rejects.toMatchObject({ code: "pull_diff_failed" });
+    });
+
+    test("refuses a merge request GitLab stopped storing files for", async () => {
+      const { diff } = await layer({ changesCount: "2+" });
+      await expect(diff()).rejects.toMatchObject({ code: "pull_diff_failed" });
+    });
+
+    test("refuses an empty renamed or deleted file that an older GitLab may have held back", async () => {
+      const renamed = { ...entry("ledger_v2.py"), old_path: "ledger.py", renamed_file: true, diff: "" };
+      const deleted = { ...entry("seed.sql"), deleted_file: true, diff: "" };
+      for (const held of [renamed, deleted]) {
+        const { diff } = await layer({ paged: JSON.stringify([entry("format.py"), held]) });
+        await expect(diff()).rejects.toMatchObject({ code: "pull_diff_failed" });
+      }
+      const withLines = { ...renamed, diff: "@@ -1 +1 @@\n-before\n+after\n" };
+      const complete = await layer({ paged: JSON.stringify([entry("format.py"), withLines]) });
+      expect((await complete.diff()).patch).toContain("rename from ledger.py\nrename to ledger_v2.py\n");
+    });
+
+    test("refuses when a page fails partway", async () => {
+      const { diff } = await layer({ paged: JSON.stringify([entry("ledger.py")]), pagedError: "glab: 500 Internal Server Error (HTTP 500)" });
+      await expect(diff()).rejects.toMatchObject({ code: "pull_diff_failed" });
+    });
+
+    test("refuses when the head moves during the paged read", async () => {
+      const { diff } = await layer({ lastHead: "d".repeat(40) });
+      await expect(diff()).rejects.toMatchObject({ code: "pull_diff_failed" });
     });
   });
 
@@ -1499,6 +2132,25 @@ describe("the worst case (break-ui on #2590)", () => {
     expect(links["github.com/northwind/billing-svc#1"]!.agent).toMatchObject({ session: "ses_gone", ended: true });
     expect(links["github.com/northwind/billing-svc#2"]!.agent!.ended).toBeUndefined();
     expect(links["github.com/northwind/billing-svc#3"]!.agent!.ended).toBeUndefined();
+  });
+
+  test("the thread's latest review names the session that sent it, so a PR verdict to another agent asks it for the whole change", () => {
+    const pull = parseGithubPulls(JSON.stringify(answerOf([ghPull(1)])), "github.com")!.pulls;
+    const guide = { sha256: "a", input_sha256: "b", bytes: 1, title: "Retries", sections: 2, files: 1, additions: 1, deletions: 0, review: true };
+    const messages = new Map([
+      ["m1", { id: "m1", thread_id: "t1", project_id: "prj_1", created_at: "2026-11-03T10:00:00.000Z", author: { kind: "agent", host: "claude-code", session: "ses_review", name: null }, body: "Up: https://github.com/northwind/billing-svc/pull/1", guide }],
+      ["m2", { id: "m2", thread_id: "t1", project_id: "prj_1", created_at: "2026-11-03T11:00:00.000Z", author: { kind: "agent", host: "codex", session: "ses_next", name: null }, body: "I took this over." }],
+    ]);
+    const store = {
+      threadsOf: () => [{ thread_id: "t1", last_at: "2026-11-03T11:00:00.000Z" }],
+      threadMessageIds: () => ["m1", "m2"],
+      message: (id: string) => (messages.get(id) as never) ?? null,
+      threadSubject: () => "Subject",
+      threadProject: () => "prj_1",
+    };
+    const link = linkInboxPulls(pull, store, new Map([["github.com/northwind/billing-svc", ["prj_1"]]]))["github.com/northwind/billing-svc#1"]!;
+    expect(link.guide).toMatchObject({ message_id: "m1", review: true, session: "ses_review" });
+    expect(link.agent?.session).toBe("ses_next");
   });
 });
 
@@ -2143,19 +2795,18 @@ describe("Post to GitHub/GitLab (the owner's answer C: the person chooses at the
 });
 
 describe("who may read it", () => {
-  test("a tailnet guest is refused and runs nothing; the owner over the tailnet reads", async () => {
+  test("the owner over the tailnet reads", async () => {
     const MAGIC = "macbook-pro.tail0000.ts.net";
     const OWNER = "ramos@example.com";
-    const GUEST = "guest@example.com";
     const savedTailscale = process.env.PLANNOTATOR_INBOX_TAILSCALE;
     delete process.env.PLANNOTATOR_INBOX_TAILSCALE;
     try {
-      const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-pulls-guest-")));
+      const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-pulls-owner-")));
       roots.push(root);
       const dataDir = join(root, "data");
       mkdirSync(dataDir, { recursive: true });
       process.env.PLANNOTATOR_DATA_DIR = dataDir;
-      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTailscale: true, inboxTailscaleAllow: [GUEST], inboxCodeReview: true }));
+      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTailscale: true, inboxCodeReview: true }));
       const f = forge();
       const serve = new Map<number, string>();
       const tailscale: TailscaleRunner = (args) => {
@@ -2177,49 +2828,6 @@ describe("who may read it", () => {
       expect(listener).not.toBeNull();
       const through = (login: string) =>
         fetch(`http://127.0.0.1:${listener}/api/inbox/pulls`, { headers: { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": login } });
-      const guest = await through(GUEST);
-      expect(guest.status).toBe(403);
-      expect(((await guest.json()) as { code: string }).code).toBe("local_only");
-      // Nor may a guest read the risk rules, change them, or ask for an agent's models.
-      for (const [path, init] of [
-        ["/api/inbox/pulls/risk", {}],
-        ["/api/inbox/pulls/risk/models?provider=pi-sdk", {}],
-        ["/api/inbox/pulls/risk", { method: "POST", body: JSON.stringify({ rules: "x", provider: null, model: null }) }],
-      ] as const) {
-        const answer = await fetch(`http://127.0.0.1:${listener}${path}`, { ...init, headers: { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": GUEST, "Content-Type": "application/json" } });
-        expect(((await answer.json()) as { code: string }).code).toBe("local_only");
-      }
-      // Nor read a project's files through a guide's expand arrows.
-      const guestFile = await fetch(`http://127.0.0.1:${listener}/api/inbox/messages/msg_any/guide/file?path=a.ts`, { headers: { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": GUEST } });
-      expect(guestFile.status).toBe(403);
-      expect(((await guestFile.json()) as { code: string }).code).toBe("local_only");
-      // Nor may a guest hand a PR to an agent.
-      const handGuest = await fetch(`http://127.0.0.1:${listener}/api/inbox/pulls/owner`, {
-        method: "POST",
-        headers: { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": GUEST, "Content-Type": "application/json" },
-        body: JSON.stringify({ keys: ["github.com/northwind/billing-svc#412"], thread_id: "msg_01M4H6G73M9H3Z32T859E72NOP" }),
-      });
-      expect(handGuest.status).toBe(403);
-      // Nor post a review with the owner's gh account: the Inbox's one forge write is the owner's alone.
-      const postGuest = await fetch(`http://127.0.0.1:${listener}/api/inbox/pulls/review`, {
-        method: "POST",
-        headers: { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": GUEST, "Content-Type": "application/json" },
-        body: JSON.stringify({ key: "github.com/northwind/billing-svc#412", head_sha: "412".padStart(40, "a"), action: "approve", body: "" }),
-      });
-      expect(postGuest.status).toBe(403);
-      expect(((await postGuest.json()) as { code: string }).code).toBe("local_only");
-      // Nor close or reopen one with the owner's gh account.
-      for (const route of ["close", "reopen"]) {
-        const asGuest = await fetch(`http://127.0.0.1:${listener}/api/inbox/pulls/${route}`, {
-          method: "POST",
-          headers: { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": GUEST, "Content-Type": "application/json" },
-          body: JSON.stringify({ key: "github.com/northwind/billing-svc#412" }),
-        });
-        expect(asGuest.status).toBe(403);
-        expect(((await asGuest.json()) as { code: string }).code).toBe("local_only");
-      }
-      expect(f.calls).toEqual([]);
-      expect(post.calls).toEqual([]);
       expect((await through(OWNER)).status).toBe(200);
       // The owner over the tailnet may hand a PR over: past the guards, the route answers on the request itself.
       const handOwner = await fetch(`http://127.0.0.1:${listener}/api/inbox/pulls/owner`, {

@@ -95,6 +95,15 @@ function holdUploads() {
   return heldUploads;
 }
 
+/** The upload of the file named `name` waits for `release()` while set: the others finish first. */
+let heldUpload: { name: string; promise: Promise<void>; release: () => void } | null = null;
+function holdUploadOf(name: string) {
+  let release = () => {};
+  const promise = new Promise<void>((done) => (release = done));
+  heldUpload = { name, promise, release: () => ((heldUpload = null), release()) };
+  return heldUpload;
+}
+
 /** The window's upload (api.ts uploadFile): an XMLHttpRequest, carried over loopback with the file's bytes. */
 class LoopbackXhr {
   status = 0;
@@ -116,6 +125,7 @@ class LoopbackXhr {
   send(file: Blob) {
     void (async () => {
       if (heldUploads) await heldUploads.promise;
+      if (heldUpload && new URL(this.path, 'http://x').searchParams.get('name') === heldUpload.name) await heldUpload.promise;
       if (this.aborted) return;
       const bytes = Buffer.from(await file.arrayBuffer());
       const answer = await loopback(this.path, 'POST', bytes, { 'Content-Type': 'application/octet-stream' });
@@ -197,6 +207,7 @@ beforeEach(() => {
 afterEach(() => {
   if (!hasDom) return;
   heldUploads?.release();
+  heldUpload?.release();
   gate = null;
   offline = false;
   dropAnswer = null;
@@ -328,6 +339,29 @@ test.skipIf(!hasDom)('a file attached with the paperclip is in the draft: closin
   act(() => (replyBox(el)!.querySelector('[data-compose-file] .ib-cp-fx') as HTMLButtonElement).click());
   await until(async () => (await serverDraft())?.files === undefined, 'the file out of the draft');
   expect((await serverDraft())?.body).toBe('See the chart.');
+}, 30_000);
+
+test.skipIf(!hasDom)('two files picked together keep the order they were picked in, in the box, the draft, a reload and the Send, when the second finishes uploading first', async () => {
+  let el = await renderApp(`#thread=${world.waiting}`);
+  const text = await openReply(el);
+  type(text, 'Both, in order.');
+  const first = holdUploadOf('first.png');
+  attach(el, [image('first.png', 6), image('second.png', 7)]);
+  await until(async () => (await draftNames()).join() === 'second.png', 'the second file in the draft first');
+  first.release();
+  await until(async () => (await draftNames()).length === 2, 'both files in the draft');
+  expect(await draftNames()).toEqual(['first.png', 'second.png']);
+  await until(() => tiles(el).join() === 'first.png:done,second.png:done', 'both tiles done');
+
+  unmount();
+  el = await renderApp(`#thread=${world.waiting}`);
+  await until(() => replyBox(el) !== null && tiles(el).length === 2, 'the box and its tiles after a reload');
+  expect(tiles(el)).toEqual(['first.png:done', 'second.png:done']);
+
+  act(() => (replyBox(el)!.querySelector('[data-reply-send]') as HTMLButtonElement).click());
+  await until(async () => (await serverDraft()) === null, 'the draft done');
+  const model = JSON.parse((await loopback(`/api/inbox/threads/${world.waiting}`)).text) as { thread: { messages: InboxMessage[] } };
+  expect(model.thread.messages.at(-1)!.attachments!.map((a) => a.name)).toEqual(['first.png', 'second.png']);
 }, 30_000);
 
 test.skipIf(!hasDom)("another window's file comes into a box with no edits, and goes when it removes it; two windows adding at once both keep theirs, with no conflict line", async () => {

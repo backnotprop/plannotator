@@ -67,6 +67,41 @@ describe("files edited since the guide was written", () => {
   });
 });
 
+describe("a user's diff.suppressBlankEmpty does not make a guide's file read as changed", () => {
+  const { mkdtempSync, rmSync, writeFileSync } = require("node:fs") as typeof import("node:fs");
+  const { tmpdir } = require("node:os") as typeof import("node:os");
+  const { join } = require("node:path") as typeof import("node:path");
+  const { spawnSync } = require("node:child_process") as typeof import("node:child_process");
+  const { changedSinceDiffArgs } = require("./reader-mapping") as typeof import("./reader-mapping");
+  const git = (cwd: string, args: string[]) => {
+    const r = spawnSync("git", args, { cwd, encoding: "utf8", env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null" } });
+    if (r.status !== 0) throw new Error(r.stderr);
+    return r.stdout;
+  };
+
+  it("an unchanged file with a blank context line reads as unchanged; an edit after the guide reads as changed", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pn-blank-context-"));
+    try {
+      git(dir, ["init", "-q", "-b", "main"]);
+      git(dir, ["config", "user.email", "t@example.com"]);
+      git(dir, ["config", "user.name", "T"]);
+      writeFileSync(join(dir, "notes.ts"), "export const a = 1;\n\nexport const b = 2;\n");
+      git(dir, ["add", "."]);
+      git(dir, ["commit", "-q", "-m", "base"]);
+      git(dir, ["config", "diff.suppressBlankEmpty", "true"]);
+      writeFileSync(join(dir, "notes.ts"), "export const a = 1;\n\nexport const b = 3;\n");
+      // The guide's patch as review-core makes it: diff.suppressBlankEmpty pinned off.
+      const guidePatch = git(dir, ["-c", "core.quotePath=false", "-c", "diff.suppressBlankEmpty=false", "diff", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/", "HEAD"]);
+      const run = () => changedSinceDiffArgs("HEAD", [{ path: "notes.ts" }]).map((args) => git(dir, args)).join("");
+      expect(changedPatchFiles(guidePatch, run())).toEqual([]);
+      writeFileSync(join(dir, "notes.ts"), "export const a = 1;\n\nexport const b = 4;\n");
+      expect(changedPatchFiles(guidePatch, run())).toEqual(["notes.ts"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("a renamed file is not 'changed on disk since the guide'", () => {
   const { mkdtempSync, rmSync, writeFileSync } = require("node:fs") as typeof import("node:fs");
   const { tmpdir } = require("node:os") as typeof import("node:os");

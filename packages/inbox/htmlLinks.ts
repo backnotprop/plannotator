@@ -9,6 +9,9 @@
  * folder, the query dropped, the fragment kept), then mapped onto what the
  * Inbox has:
  *
+ * - the page itself with a query (`?variant=2`, `page.html?variant=2`, or a
+ *   GET form's fields): the same page loads again with that query, so its
+ *   scripts read it in `location.search`, as in a tab (`self`);
  * - a file attached to the thread (by realpath or the path the agent named):
  *   it opens in the pane, as its tile does;
  * - another `.html`/`.htm` page in the attached page's folder that is not
@@ -27,8 +30,13 @@ import { resolveHtmlLinkIntent } from '@plannotator/ui/utils/htmlLinkNavigation'
 import { normalizeLinkPath, type LinkableAttachment } from './links';
 
 export type InboxHtmlLink =
-  /** An attachment of the thread: open it in the pane. `hash` is the fragment, without `#`. */
-  | { kind: 'attachment'; id: string; name: string; hash: string }
+  /** The page the link is in, again: `search` is `""` or `?…`, `hash` is `""` or `#…`. */
+  | { kind: 'self'; search: string; hash: string }
+  /**
+   * An attachment of the thread: open it in the pane. `hash` is the fragment, without `#`. `search`: an HTML
+   * page's query (`mock.html?variant=2` → `?variant=2`), which the page opens with; absent for none.
+   */
+  | { kind: 'attachment'; id: string; name: string; hash: string; search?: string }
   /** A page in the attached page's folder that is not attached: `relative` is its path in that folder. */
   | { kind: 'page'; path: string; relative: string; name: string; hash: string }
   /** A local image in the attached page's folder, not attached: `url` is the asset route. */
@@ -53,6 +61,21 @@ export interface InboxHtmlLinkContext {
   serverOrigin: string;
   /** Markdown attachments follow sibling Markdown documents, not executable HTML. */
   markdown?: boolean;
+  /**
+   * The path of the page the link is in (an attached page's, or a linked page's). A link to it that carries a
+   * query, or names it with no fragment, is `self`. Absent: only a bare query (`?x=1`) is.
+   */
+  selfPath?: string;
+}
+
+/** An href's query (`""` or `?…`, before any `#`) and fragment (`""` or `#…`). */
+export function queryAndHash(href: string): { search: string; hash: string } {
+  const raw = href.trim();
+  const at = raw.indexOf('#');
+  const before = at < 0 ? raw : raw.slice(0, at);
+  const hash = at < 0 ? '' : raw.slice(at);
+  const q = before.indexOf('?');
+  return { search: q < 0 ? '' : before.slice(q), hash: hash === '#' ? '' : hash };
 }
 
 const trimSlash = (path: string) => path.replace(/\/+$/, '');
@@ -89,6 +112,8 @@ const baseName = (path: string) => normalizeLinkPath(path).split('/').pop() || p
 
 export function resolveInboxHtmlLink(href: string, context: InboxHtmlLinkContext): InboxHtmlLink {
   const folder = trimSlash(normalizeLinkPath(context.folder));
+  // Only a query (`?variant=2`, `?x=1#top`): the page itself, as a browser reads it. Not in a Markdown file.
+  if (!context.markdown && href.trim().startsWith('?') && !/[\u0000-\u001f\u007f]/.test(href)) return { kind: 'self', ...queryAndHash(href) };
   const intent = resolveHtmlLinkIntent(href, {
     baseDir: context.baseDir,
     // A root-relative link (`/x.html`) means the site this page belongs to: its folder.
@@ -112,9 +137,18 @@ export function resolveInboxHtmlLink(href: string, context: InboxHtmlLinkContext
   }
   const path = intent.path;
   const name = baseName(path);
+  // The page itself by name: with a query, or with neither query nor fragment (a fresh load, as a tab does). A
+  // fragment alone keeps today's way (the page scrolls).
+  if (!context.markdown && context.selfPath && intent.kind === 'document' && normalizeLinkPath(path) === normalizeLinkPath(context.selfPath)) {
+    const { search, hash } = queryAndHash(href);
+    if (search || !hash) return { kind: 'self', search, hash };
+  }
   // An attachment of the thread opens as itself, whatever kind it is.
   const attached = attachmentAt(path, context.attachments);
-  if (attached) return { kind: 'attachment', id: attached.id, name: attached.name, hash: intent.kind === 'document' ? intent.hash : '' };
+  if (attached) {
+    const search = intent.kind === 'document' && attached.kind === 'html' ? queryAndHash(href).search : '';
+    return { kind: 'attachment', id: attached.id, name: attached.name, hash: intent.kind === 'document' ? intent.hash : '', ...(search.length > 1 ? { search } : {}) };
+  }
   const relative = inside(path, folder);
   if (relative === null) {
     return { kind: 'refused', name, note: `${name} is outside this page's folder and is not attached, so it does not open here.` };

@@ -346,7 +346,7 @@ function saveUnanswered(threadId: string, session: string, question: string) {
   writeInboxAsk(world.inboxDir, { v: 1, thread_id: threadId, seen_at: null, turns: [{ id: `saved-${threadId.slice(-12)}`, at: new Date().toISOString(), session, host: 'claude-code', question }] });
 }
 
-test('a resolved thread offers no Side; an open one does, with no Ask icon in its top bar, and Side opens and the × minimizes the window', async () => {
+test('a resolved thread offers no Side; an open one does, with no Ask icon in its top bar, and Side opens and the chevron minimizes the window (no ×)', async () => {
   if (!hasDom) return;
   await openInbox(on, on.resolved);
   await wait(300);
@@ -363,9 +363,12 @@ test('a resolved thread offers no Side; an open one does, with no Ask icon in it
   // The window is outside the thread's section, which is what keeps its keys off the reply.
   expect(askWindow()!.closest('.ib-pane')).toBeNull();
   expect(askWindow()!.closest('.pn-inbox')).not.toBeNull();
-  act(() => askWindow()!.querySelector<HTMLElement>('[aria-label="Close"]')!.click());
+  // The header keeps the chevron and has no × (the owner, 2026-11-20: "Drop the ×, keep the chevron").
+  expect(askWindow()!.querySelector('[aria-label="Close"]')).toBeNull();
+  act(() => askWindow()!.querySelector<HTMLElement>('[aria-label="Minimize"]')!.click());
   expect(askWindow()).toBeNull();
-  // The × minimizes: the thread's chat stays, and Side gives it back.
+  // Nothing asked yet: no chat, so no circle in the corner. The thread's chat stays, and Side gives it back.
+  expect(document.querySelector('[data-side-chat-corner]')).toBeNull();
   await openChat();
 });
 

@@ -21,8 +21,10 @@
  * teammate or the forge is Waiting on others.
  */
 
-import { inboxPullIsOpen, inboxPullLongLived, inboxPullRefOfUrl, type InboxPull, type InboxPullHost, type InboxPullLink, type InboxPullReason, type InboxPullStack } from "./inbox-pulls";
+import { sameCommit, type InboxBranchReportRow } from "./inbox-branch-reports";
+import { inboxPullIsOpen, inboxPullLongLived, inboxPullRefOfKey, inboxPullRefOfUrl, type InboxPull, type InboxPullHidden, type InboxRepoHidden, type InboxPullHost, type InboxPullLink, type InboxPullReason, type InboxPullStack } from "./inbox-pulls";
 import type { InboxReviewVerdict } from "./inbox-review";
+import type { InboxShipMergedPull } from "./inbox-ship";
 
 /** Where a review's changes came from: the guide snapshot's `source` and `review` (base), as the message records them. */
 export interface InboxReviewSource {
@@ -171,7 +173,9 @@ export type InboxReviewReason =
   | "forge_review"
   | "others"
   | "assigned"
-  | "not_reviewed";
+  | "not_reviewed"
+  /** An agent reported its branch ready for review (inbox-branch-reports.ts); no review yet. */
+  | "branch_ready";
 
 /**
  * A PR a review thread owned that merged or closed, recorded once the Inbox has seen it (`inbox/pull-links.json`):
@@ -191,6 +195,8 @@ export interface InboxReviewLanding {
   platform: InboxPull["platform"];
   /** The PR's head branch, when known: a review of that branch is a review of this PR. */
   head: string | null;
+  /** The commit it merged or closed at, when the list said: a report of that very commit is that PR's work. */
+  head_sha?: string | null;
   /**
    * The thread's latest review when this was first seen, when that review was not newer than the landing; else null.
    * Later on the row compares review ids, never clocks: a review with another id came after the record.
@@ -211,13 +217,13 @@ export function inboxReviewLandingId(landing: Pick<InboxReviewLanding, "key" | "
 
 /** The record for a PR seen merged or closed now, against the thread's review as it stands. */
 export function inboxReviewLandingOf(
-  pull: Pick<InboxReviewLanding, "key" | "url" | "number" | "title" | "platform" | "state" | "at" | "head">,
+  pull: Pick<InboxReviewLanding, "key" | "url" | "number" | "title" | "platform" | "state" | "at" | "head" | "head_sha">,
   threadId: string,
   review: Pick<InboxReviewThread, "latest_review_id" | "reviewed_at"> | null,
 ): InboxReviewLanding {
   const landedAt = pull.at ? Date.parse(pull.at) : NaN;
   const newer = !!review && !Number.isNaN(landedAt) && Date.parse(review.reviewed_at) > landedAt + INBOX_REVIEW_CLOCK_SKEW_MS;
-  return { key: pull.key, thread_id: threadId, state: pull.state, at: pull.at, url: pull.url, number: pull.number, title: pull.title, platform: pull.platform, head: pull.head, through_review: review && !newer ? review.latest_review_id : null };
+  return { key: pull.key, thread_id: threadId, state: pull.state, at: pull.at, url: pull.url, number: pull.number, title: pull.title, platform: pull.platform, head: pull.head, ...(pull.head_sha ? { head_sha: pull.head_sha } : {}), through_review: review && !newer ? review.latest_review_id : null };
 }
 
 /** Which local changes a New review is of. */
@@ -236,7 +242,8 @@ export interface InboxReviewLinkPull {
 
 /** New review on local changes or a link: what the box asked for, so its row shows "Curating…" before any review arrives. */
 export interface InboxReviewStart {
-  kind: "local" | "link" | "walkthrough";
+  /** `branch`: an agent's report that its branch is ready (inbox-branch-reports.ts), kept in its own file, never in pull-links.json. */
+  kind: "local" | "link" | "walkthrough" | "branch";
   /** Local changes only. */
   changes: InboxReviewChanges | null;
   /** A link only. */
@@ -244,13 +251,15 @@ export interface InboxReviewStart {
   branch: string | null;
   base: string | null;
   /** The words decide: none is a guided review, the person's own make it a custom curation. */
-  ask: "guide" | "custom";
+  ask: "guide" | "custom" | "picture_it";
   /** The agent it went to, and the project it works in. */
   host: string;
   project_id: string;
   at: string;
   /** The thread's name now, for its row. On a row, not stored. */
   name?: string | null;
+  /** A branch report's row (`kind: "branch"`): what the agent reported, where, and its risk. On a row, not stored. */
+  report?: InboxBranchReportRow;
 }
 
 /** A `review` field from a Send, checked; null when it isn't one. */
@@ -261,12 +270,12 @@ export function inboxReviewStartOf(value: unknown, where: Pick<InboxReviewStart,
     const ref = typeof review.url === "string" ? inboxPullRefOfUrl(review.url) : null;
     if (!ref) return null;
     const pull = { key: ref.key, url: review.url as string, number: ref.number, title: typeof review.title === "string" ? review.title.slice(0, 300) : "", platform: ref.platform, mine: review.mine === true };
-    return { kind: "link", changes: null, pull, branch: null, base: null, ask: review.ask === "custom" ? "custom" : "guide", ...where };
+    return { kind: "link", changes: null, pull, branch: null, base: null, ask: review.ask === "custom" || review.ask === "picture_it" ? review.ask : "guide", ...where };
   }
   if (review.kind === "walkthrough") return { kind: "walkthrough", changes: null, branch: null, base: null, ask: "custom", ...where };
   if (review.kind !== "local" || (review.changes !== "uncommitted" && review.changes !== "last" && review.changes !== "branch")) return null;
   const ref = (ref: unknown) => (typeof ref === "string" && ref.length > 0 && ref.length <= 200 ? ref : null);
-  return { kind: "local", changes: review.changes, branch: ref(review.branch), base: ref(review.base), ask: review.ask === "custom" ? "custom" : "guide", ...where };
+  return { kind: "local", changes: review.changes, branch: ref(review.branch), base: ref(review.base), ask: review.ask === "custom" || review.ask === "picture_it" ? review.ask : "guide", ...where };
 }
 
 /**
@@ -374,6 +383,14 @@ export interface InboxReviewsAnswer {
   rows: InboxReviewRow[];
   /** `host/repo` (lowercased) → the Inbox projects on it. */
   projects: Record<string, string[]>;
+  /** Branch reviews is on (config.json `inboxBranchReviews`): absent while off, so a window off draws nothing new. */
+  branch_reviews?: true;
+  /** A linked machine's reported branches are still being read: the window asks again soon. */
+  branches_pending?: true;
+  /** The PRs the person hid (as `InboxPullsAnswer.hidden`): left out of `rows`. Absent from an older Inbox. */
+  hidden?: InboxPullHidden[];
+  /** The repositories hidden (every PR in them left out): Hidden lists them too. Absent from an older Inbox. */
+  hidden_repos?: InboxRepoHidden[];
 }
 
 /**
@@ -478,6 +495,7 @@ const landingFields = (pull: InboxPull) => ({
   state: pull.state === "closed" ? ("closed" as const) : ("merged" as const),
   at: pull.merged_at ?? pull.updated_at,
   head: pull.head,
+  head_sha: pull.head_sha ?? null,
 });
 
 /** The review is of a landed PR: its source names it or its branch; a review with no source is taken to be of it. */
@@ -505,6 +523,9 @@ function reviewOwned(byThread: ReadonlyMap<string, InboxReviewThread>, pulls: It
   }
   return owned;
 }
+
+/** Where a row kept for its merged ship's words goes instead of On you: calm, and in no count. */
+const SHIP_MERGED_MOVE = { move: "waiting", reason: "others" } as const;
 
 /**
  * What a read of the list changes in the records: a PR a thread owns seen merged is recorded (once: it keeps the review
@@ -542,6 +563,7 @@ export function inboxReviewLandingChanges(input: {
  *   work). A later review is listed, as a review with no open PR and links to
  *   the PRs (`landed`), until the person approves it. `landed`: the records
  *   (`inboxReviewLandingChanges`), which outlive the list's read of merged PRs.
+ *   A thread whose ship merged stays while its Merged words show (`shipMerged`).
  * - Archived: a resolved thread is left out while its latest review is no
  *   newer than the archive, unless it still owns an open PR. A review sent
  *   after the archive brings it back, as the Inbox brings the thread back.
@@ -563,11 +585,29 @@ export function inboxReviewRows(input: {
   ended?: (threadId: string) => boolean;
   /** The person's last review posted on a PR from here, by pull key: their answer to any review before it. */
   posted?: ReadonlyMap<string, InboxReviewPosted>;
+  /**
+   * The PRs whose ship merged and still shows "Merged <time>", this computer's ships and each linked one's, by key (core
+   * `shipsMergedShown`): a thread whose PRs all landed, one of them among these, keeps its row while it shows, its agent
+   * ended or not (inbox-ship.md, How a ship ends).
+   */
+  shipMerged?: ReadonlyMap<string, InboxShipMergedPull>;
+  /**
+   * The PRs whose ship is still going (shipping or stuck) as last read, here and on linked machines: a PR the list saw
+   * land before its ship was marked merged keeps its row meanwhile, as `shipMerged` would.
+   */
+  shipActive?: ReadonlySet<string>;
 }): InboxReviewRow[] {
+  const shipKept = (key: string) => !!input.shipMerged?.has(key) || !!input.shipActive?.has(key);
   const byThread = new Map(input.threads.map((thread) => [thread.thread_id, thread]));
   const all = new Map<string, InboxPull>();
   for (const pull of input.pulls ?? input.stacks.flatMap((s) => s.layers)) if (!all.has(pull.key)) all.set(pull.key, pull);
   const owned = reviewOwned(byThread, all.values(), input.links);
+  // A shipped PR merged off the list (a teammate's: the list keeps only the person's own merged PRs): the thread the
+  // person tied it to (its link, the server's `linkUnlistedPulls`) still owns it while its Merged words show.
+  for (const key of input.shipMerged?.keys() ?? []) {
+    const link = input.links[key];
+    if (link?.via === "owner" && !all.has(key) && !owned.has(link.thread_id)) owned.set(link.thread_id, { pulls: [], link });
+  }
   const recorded = input.landed ?? [];
   const ownersOf = new Map<string, string[]>();
   for (const [key, owner] of input.owners ?? []) ownersOf.set(owner.thread_id, [...(ownersOf.get(owner.thread_id) ?? []), key]);
@@ -575,10 +615,29 @@ export function inboxReviewRows(input: {
     const named = review?.source?.pr ? inboxPullRefOfUrl(review.source.pr.url)?.key : null;
     return [...(ownersOf.get(threadId) ?? []), ...(owned.get(threadId)?.pulls.map((pull) => pull.key) ?? []), ...(named ? [named] : [])];
   };
-  const landingsOf = (threadId: string, pulls: readonly InboxPull[], review: InboxReviewThread | null): InboxReviewLanding[] => [
-    ...recorded.filter((landing) => landing.thread_id === threadId),
-    ...pulls.filter((pull) => !inboxPullIsOpen(pull) && !recorded.some((landing) => landing.key === pull.key && landing.thread_id === threadId)).map((pull) => inboxReviewLandingOf(landingFields(pull), threadId, review)),
-  ];
+  // A reported branch's thread: a landing from before its latest report is earlier work (a report after a merge is new
+  // work, and brings the row back), unless it merged at the very commit reported (that report is of merged code).
+  const earlierWork = (landing: InboxReviewLanding): boolean => {
+    const start = input.started?.get(landing.thread_id);
+    const report = start?.kind === "branch" ? start.report : undefined;
+    if (!report || !landing.at || !(Date.parse(landing.at) < Date.parse(report.at))) return false;
+    return !(landing.head_sha && report.head && sameCommit(landing.head_sha, report.head));
+  };
+  const landingsOf = (threadId: string, pulls: readonly InboxPull[], review: InboxReviewThread | null): InboxReviewLanding[] => {
+    const out = [
+      ...recorded.filter((landing) => landing.thread_id === threadId && !earlierWork(landing)),
+      ...pulls.filter((pull) => !inboxPullIsOpen(pull) && !recorded.some((landing) => landing.key === pull.key && landing.thread_id === threadId)).map((pull) => inboxReviewLandingOf(landingFields(pull), threadId, review)),
+    ];
+    // A merged ship knows its PR and when it merged: that is its landing until a read records one (a teammate's PR is
+    // off the list once merged, and only a review thread's PR is read for its state). No forge call.
+    for (const key of input.shipMerged ? ownedKeys(threadId, review) : []) {
+      const ship = input.shipMerged!.get(key);
+      if (!ship || out.some((landing) => landing.key === key) || recorded.some((landing) => landing.key === key && landing.thread_id === threadId)) continue;
+      const landing = inboxReviewLandingOf({ key, url: ship.url, number: ship.number, title: ship.title, platform: inboxPullRefOfKey(key)?.platform ?? "github", state: "merged", at: ship.at, head: null }, threadId, review);
+      if (!earlierWork(landing)) out.push(landing);
+    }
+    return out;
+  };
   const stacksOf = (pulls: readonly InboxPull[]) => input.stacks.filter((stack) => stack.layers.some((layer) => inboxPullIsOpen(layer) && pulls.some((p) => p.key === layer.key)));
 
   const rows: InboxReviewRow[] = [];
@@ -591,14 +650,25 @@ export function inboxReviewRows(input: {
     const landed = open.length === 0 ? landingsOf(threadId, pulls, review) : [];
     // Only when every PR it owns is accounted for: one with no record may be open, just off this list.
     const allDone = landed.length > 0 && ownedKeys(threadId, review).every((key) => landed.some((landing) => landing.key === key));
-    if (allDone && (!review || landed.some((landing) => landing.through_review === review.latest_review_id) || (review.verdict?.verdict === "approved" && reviewIsOfLanding(review, landed)))) return;
+    const done = allDone && (!review || landed.some((landing) => landing.through_review === review.latest_review_id) || (review.verdict?.verdict === "approved" && reviewIsOfLanding(review, landed)));
+    // A ship that just merged keeps its row for its Merged words: only that, so it never asks anything of the person.
+    const shipMerged = done && landed.some((landing) => shipKept(landing.key));
+    if (done && !shipMerged) return;
     if (review?.resolved_at && review.reviewed_at <= review.resolved_at && open.length === 0) return;
     const stacks = stacksOf(open);
     for (const stack of stacks) attached.add(stack.id);
+    // A reported branch with no review yet waits on the person: they start the review (the owner, 2026-11-16).
+    const reported = !review && input.started?.get(threadId)?.kind === "branch";
+    // A thread started from the PR's page asked for no review: nobody is curating, so the PR stays where its own state puts it.
+    // Its ship merged, its stack gone with the merge: not reviewed, where its own PR's row was while open.
+    const talk = !review && own?.link.via === "owner" && own.link.ask === "thread" ? (stacks[0] ? inboxReviewPullMove(stacks[0], input.posted) : shipMerged ? { move: "not_reviewed" as const, reason: "not_reviewed" as const } : null) : null;
+    const move = reported ? { move: "on_you" as const, reason: "branch_ready" as const } : (talk ?? inboxReviewMove(review, open, !!review && open.every((pull) => (input.posted?.get(pull.key)?.at ?? "") >= review.reviewed_at)));
     rows.push({
       id: threadId,
       reviewed: true,
-      ...inboxReviewMove(review, open, !!review && open.every((pull) => (input.posted?.get(pull.key)?.at ?? "") >= review.reviewed_at)),
+      // Its PRs gone, the forge can't say what On you was (a teammate's PR the person answered there reads as unanswered):
+      // the group it had, else Waiting on others, never On you (inbox-ship.md, How a ship ends).
+      ...(shipMerged && move.move === "on_you" ? SHIP_MERGED_MOVE : move),
       thread_id: threadId,
       review,
       stacks,
@@ -613,8 +683,10 @@ export function inboxReviewRows(input: {
   for (const thread of input.threads) push(thread.thread_id, thread, owned.get(thread.thread_id));
   // Curating only while someone can: with the agent ended the PR is back to not reviewed (its stack row, the stack view's Start a new review thread).
   // A thread archived before its review drops out earlier, as the PR's owner (the server's `pullOwnersNow`).
-  for (const [threadId, own] of owned) if (!byThread.has(threadId) && own.link.agent?.ended !== true) push(threadId, null, own);
-  for (const threadId of input.started?.keys() ?? []) if (!byThread.has(threadId) && !owned.has(threadId) && !input.ended?.(threadId)) push(threadId, null, undefined);
+  // A ship that merged keeps its thread's row only once the thread owns no open PR: an open layer is its own row then.
+  for (const [threadId, own] of owned) if (!byThread.has(threadId) && (own.link.agent?.ended !== true || input.started?.get(threadId)?.kind === "branch" || (!own.pulls.some(inboxPullIsOpen) && ownedKeys(threadId, null).some(shipKept)))) push(threadId, null, own);
+  // A reported branch keeps its row with its agent ended: the person starts the review, with any agent.
+  for (const [threadId, start] of input.started ?? []) if (!byThread.has(threadId) && !owned.has(threadId) && (start.kind === "branch" || !input.ended?.(threadId))) push(threadId, null, undefined);
   for (const stack of input.stacks) {
     if (attached.has(stack.id)) continue;
     // The agent's own thread, when its message names one of the layers (topmost open first): shown, never a review.

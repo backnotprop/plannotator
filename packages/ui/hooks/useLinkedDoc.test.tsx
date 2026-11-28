@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { act } from 'react';
 import { useLinkedDoc, type UseLinkedDocReturn } from './useLinkedDoc';
 import type { ViewerHandle } from '../components/Viewer';
-import type { Annotation, DocumentRenderAs, ImageAttachment } from '../types';
+import { AnnotationType, type Annotation, type DocumentRenderAs, type ImageAttachment } from '../types';
 
 // Integration coverage for the diff-baseline seam useLinkedDoc gained for
 // annotate folder sessions: a document's own previousPlan/versionInfo
@@ -17,6 +17,7 @@ import type { Annotation, DocumentRenderAs, ImageAttachment } from '../types';
 // mistake (e.g. forgetting one of the cache-write call sites) would show up.
 
 const hasDom = typeof document !== 'undefined';
+const realFetch = globalThis.fetch;
 
 const noopViewerHandle: ViewerHandle = {
   removeHighlight: () => {},
@@ -24,7 +25,9 @@ const noopViewerHandle: ViewerHandle = {
   applySharedAnnotations: () => {},
 };
 
-function LinkedDocHarness(props: { onLatest: (v: UseLinkedDocReturn) => void }) {
+type HarnessState = UseLinkedDocReturn & { setAnnotations: (annotations: Annotation[]) => void };
+
+function LinkedDocHarness(props: { onLatest: (v: HarnessState) => void }) {
   const [markdown, setMarkdown] = useState('root markdown');
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
@@ -53,19 +56,19 @@ function LinkedDocHarness(props: { onLatest: (v: UseLinkedDocReturn) => void }) 
     sidebar: { open: () => {} },
   });
 
-  props.onLatest(hook);
+  props.onLatest({ ...hook, setAnnotations });
   return null;
 }
 
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 
-async function mountHarness(): Promise<() => UseLinkedDocReturn> {
+async function mountHarness() {
   host = document.createElement('div');
   document.body.appendChild(host);
   root = createRoot(host);
 
-  let latest: UseLinkedDocReturn | null = null;
+  let latest: HarnessState | null = null;
   await act(async () => {
     root!.render(<LinkedDocHarness onLatest={(v) => { latest = v; }} />);
   });
@@ -77,6 +80,7 @@ async function mountHarness(): Promise<() => UseLinkedDocReturn> {
 }
 
 afterEach(async () => {
+  globalThis.fetch = realFetch;
   if (root) {
     await act(async () => {
       root!.unmount();
@@ -203,5 +207,53 @@ describe('useLinkedDoc — per-document diff baseline', () => {
     });
     expect(current().diffPreviousPlan).toBe('a v1');
     expect(current().diffVersionInfo).toEqual(VERSION_INFO_A);
+  });
+});
+
+describe('useLinkedDoc — pending navigation', () => {
+  function deferDocumentRequests() {
+    const requests = new Map<string, (response: Response) => void>();
+    globalThis.fetch = ((input: string) => new Promise<Response>((resolve) => {
+      requests.set(new URL(input, 'http://localhost').searchParams.get('path')!, resolve);
+    })) as typeof fetch;
+    return (filepath: string) => requests.get(filepath)!(Response.json({ filepath, markdown: filepath }));
+  }
+
+  test.skipIf(!hasDom)('a slow response cannot reopen a file after a later selection', async () => {
+    const current = await mountHarness();
+    const respond = deferDocumentRequests();
+    await act(async () => {
+      void current().open('/root/slow.md');
+      void current().open('/root/latest.md');
+    });
+    await act(async () => { respond('/root/latest.md'); });
+    expect(current().filepath).toBe('/root/latest.md');
+    await act(async () => { respond('/root/slow.md'); });
+    expect(current().filepath).toBe('/root/latest.md');
+  });
+
+  test.skipIf(!hasDom)('Back cancels a pending link from the current document', async () => {
+    const current = await mountHarness();
+    const respond = deferDocumentRequests();
+    await act(async () => { current().openLoaded({ filepath: '/root/first.md' }); });
+    await act(async () => { void current().open('/root/pending.md'); });
+    await act(async () => { current().back(); });
+    await act(async () => { respond('/root/pending.md'); });
+    expect(current().filepath).toBeNull();
+    expect(current().isLoading).toBe(false);
+  });
+
+  test.skipIf(!hasDom)('a comment added while loading is retained on its original document', async () => {
+    const current = await mountHarness();
+    const respond = deferDocumentRequests();
+    const annotation: Annotation = {
+      id: 'new-note', type: AnnotationType.GLOBAL_COMMENT, text: 'Added while loading',
+      blockId: '', startOffset: 0, endOffset: 0, originalText: '', createdA: 1,
+    };
+    await act(async () => { current().openLoaded({ filepath: '/root/first.md' }); });
+    await act(async () => { void current().open('/root/second.md'); });
+    await act(async () => { current().setAnnotations([annotation]); });
+    await act(async () => { respond('/root/second.md'); });
+    expect(current().getFeedbackDocuments().documents.get('/root/first.md')?.annotations).toEqual([annotation]);
   });
 });

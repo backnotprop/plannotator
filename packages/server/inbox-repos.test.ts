@@ -103,6 +103,44 @@ test("a git project's origin rides on the thread payload; a folder without git, 
   // The same answers straight from git, so null here is the resolved answer, not a pending one.
   expect(await readInboxProjectRepo(notes)).toBeNull();
   expect(await readInboxProjectRepo(noOrigin)).toBeNull();
+  // Once resolved, the payload says so (`repo_known`): the window stops reading the thread again on every record
+  // for a repo that will never come.
+  const known = async (threadId: string) => {
+    for (let i = 0; i < 100; i++) {
+      const project = ((await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/threads/${threadId}`)).json()) as { thread: { project: { repo_known?: true } } }).thread.project;
+      if (project.repo_known) return true;
+      await Bun.sleep(30);
+    }
+    return false;
+  };
+  expect(await known(scratchThread)).toBe(true);
+  expect(await known(notesThread)).toBe(true);
+});
+
+test("a fork checkout links refs to the remote `gh repo set-default` picked, not to origin (#3585)", async () => {
+  const root = tempRoot();
+  const fork = gitProject(root, "fork", "git@github.com:me/project.git");
+  Bun.spawnSync(["git", "remote", "add", "upstream", "git@github.com:org/project.git"], { cwd: fork });
+  // Without gh's choice, origin wins.
+  expect(await readInboxProjectRepo(fork)).toEqual({ display: "me/project", host: "github.com" });
+  Bun.spawnSync(["git", "config", "remote.upstream.gh-resolved", "base"], { cwd: fork });
+  expect(await readInboxProjectRepo(fork)).toEqual({ display: "org/project", host: "github.com" });
+  // A pick git cannot name (its URL gone) falls back to origin rather than linking nothing.
+  const stale = gitProject(root, "stale", "git@github.com:me/project.git");
+  Bun.spawnSync(["git", "config", "remote.gone.gh-resolved", "base"], { cwd: stale });
+  expect(await readInboxProjectRepo(stale)).toEqual({ display: "me/project", host: "github.com" });
+});
+
+test("a repo not resolved yet is not known: the payload carries no repo_known until its read lands", async () => {
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const cache = createInboxRepoCache({ read: async () => (await gate, null) });
+  expect(cache.get("/p")).toBeNull();
+  expect(cache.known("/p")).toBe(false);
+  release();
+  await cache.refresh("/p");
+  expect(cache.get("/p")).toBeNull();
+  expect(cache.known("/p")).toBe(true);
 });
 
 test("an Inbox that starts on an existing store resolves its projects' remotes; GitLab subgroups and https URLs parse", async () => {

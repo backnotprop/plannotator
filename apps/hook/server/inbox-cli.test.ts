@@ -417,6 +417,18 @@ describe("plannotator inbox mcp inside an agent Ask AI started (PLANNOTATOR_ASK_
     expect(fromPerson.PLANNOTATOR_INBOX_TOOL).toBe("0");
     expect(fromPerson.PLANNOTATOR_AGENT_TOOL).toBe("1");
   });
+
+  test("an Inbox started from a Rex pane does not keep that pane: its background agents would report it as theirs", () => {
+    const pane = { REX_SESSION: "session:11111111-2222-4333-8444-555555555555", REX_BLOCK: "block:11111111-2222-4333-8444-666666666666", REX_SERVER: "/tmp/rex.sock", REX_BIN_DIR: "/Applications/Rex.app/Contents/Resources/bin", TERM_PROGRAM: "rex" };
+    const detached = detachedInboxEnv({ PATH: "/bin", ...pane }, "/data");
+    expect(Object.keys(detached).filter((name) => name.startsWith("REX_") || name === "TERM_PROGRAM")).toEqual([]);
+    expect(detached.PATH).toBe("/bin");
+    // Which Rex server is this computer's stays known, under the Inbox's own name (a socket here; never another computer's address).
+    expect(detached.PLANNOTATOR_INBOX_REX_SERVER).toBe("/tmp/rex.sock");
+    expect(detachedInboxEnv({ PATH: "/bin", REX_SERVER: "https://build.example.ts.net" }, "/data").PLANNOTATOR_INBOX_REX_SERVER).toBeUndefined();
+    // As Rex writes it in a tab on a Mac (a percent-encoded URL): kept as the path it names.
+    expect(detachedInboxEnv({ PATH: "/bin", REX_SERVER: "unix:///Users/ada/Library/Application%20Support/rex/server.sock" }, "/data").PLANNOTATOR_INBOX_REX_SERVER).toBe("/Users/ada/Library/Application Support/rex/server.sock");
+  });
 });
 
 describe("plannotator inbox mcp inside an agent session", () => {
@@ -449,14 +461,17 @@ describe("plannotator inbox mcp inside an agent session", () => {
     expect(piHost).toBe("pi");
     expect(piName).toBeDefined();
     expect(INBOX_SESSION_HOST_NAMES[piHost!]).toBe(piName!);
-    // Codex, Qwen Code and T3 Code have no plannotator_inbox tool: the Inbox wakes them itself (`codex queue`, Qwen's
-    // cross-session messaging, T3's MCP API), and the shim sends as their session.
-    expect(Object.keys(INBOX_SESSION_HOST_NAMES).sort()).toEqual(["claude-code", "cline", "codex", "dsh", "hermes", "openclaw", "opencode", "pi", "qwen", "t3"]);
+    // Codex, Qwen Code, T3 Code and Antigravity have no plannotator_inbox tool: the Inbox wakes them itself (`codex queue`,
+    // Qwen's cross-session messaging, T3's MCP API, Antigravity's agentapi), and the shim sends as their session.
+    expect(Object.keys(INBOX_SESSION_HOST_NAMES).sort()).toEqual(["antigravity", "claude-code", "cline", "codex", "dsh", "hermes", "openclaw", "opencode", "pi", "qwen", "t3"]);
     expect(INBOX_SESSION_HOST_NAMES.codex).toBe("Codex");
     expect(INBOX_SESSION_HOST_NAMES.qwen).toBe("Qwen Code");
     // A Qwen session in the tag is a Qwen session id, never anything else.
     expect(inboxHostSessionFromEnv({ PLANNOTATOR_SESSION_TAG: "qwen:8e016be8-5b48-4c13-ad22-1f5326ae64ac" })).toEqual({ host: "qwen", session: "8e016be8-5b48-4c13-ad22-1f5326ae64ac", name: "Qwen Code" });
     expect(inboxHostSessionFromEnv({ PLANNOTATOR_SESSION_TAG: "qwen:ses_01ABC" })).toBeNull();
+    // An Antigravity conversation in the tag is a conversation id (a UUID).
+    expect(inboxHostSessionFromEnv({ PLANNOTATOR_SESSION_TAG: "antigravity:5067117f-74f6-4709-91b3-bb4283355316" })).toEqual({ host: "antigravity", session: "5067117f-74f6-4709-91b3-bb4283355316", name: "Antigravity" });
+    expect(inboxHostSessionFromEnv({ PLANNOTATOR_SESSION_TAG: "antigravity:ses_01ABC" })).toBeNull();
   });
 
   test("the session tag is read strictly; anything malformed is ignored", () => {

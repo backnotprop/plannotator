@@ -22,6 +22,7 @@
 
 import { loadConfig, resolveAgentTool, type PlannotatorConfig } from "../../packages/shared/config";
 import { annotateTargetWords, parseAnnotateArgs } from "../../packages/shared/annotate-args";
+import { tokenizeReviewArgs } from "../../packages/shared/review-args";
 import {
   looksLikeFilePath,
   parsePlannotatorToolInput,
@@ -35,7 +36,6 @@ import {
   plannotatorToolTargets,
   scriptOnlyAnnotateFlag,
   scriptOnlyAnnotateFlagText,
-  simpleShellCommandWords,
   type PlannotatorToolInput,
 } from "../../packages/shared/plannotator-tool";
 import { agentsServiceOf, DSH_NO_WAKE_PROFILES, rootAgentOf, type DshAgentsService, type DshInboxAgent, type DshInboxContext, type DshToolsService } from "./inbox";
@@ -130,9 +130,13 @@ export function toolSubject(call: PlannotatorToolInput): string {
   }
 }
 
-/** A command's words: shell-style quoting when it reads as one, else split on whitespace. */
+/**
+ * A command's words, the way every other host reads its review arguments
+ * (`tokenizeReviewArgs`): whitespace separates, quotes group, and a backslash
+ * is an ordinary character, so a typed `C:\dev\feature` reaches the CLI whole.
+ */
 function commandWords(raw: string): string[] {
-  return simpleShellCommandWords(raw) ?? raw.trim().split(/\s+/).filter(Boolean);
+  return tokenizeReviewArgs(raw);
 }
 
 /** One slash command's review, or the error the person sees. */

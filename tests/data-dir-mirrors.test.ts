@@ -163,7 +163,7 @@ describe("every copy of the data-dir rule picks the same folder", () => {
     }, 20_000);
   }
 
-  // The Windows workflow's checker only runs on a ci:full PR; a syntax error
+  // The Windows workflow's checker runs only on a PR that touches the installers; a syntax error
   // in it would first show there. Parsing it where pwsh exists finds it now.
   test.skipIf(!PWSH)("scripts/check-data-dir-windows.ps1 parses in PowerShell", () => {
     const script = join(REPO, "scripts", "check-data-dir-windows.ps1");

@@ -18,7 +18,7 @@
  * inbox.spec.ts), then `bun run test:e2e:inbox`.
  */
 
-import { expect, test, devices, type Browser, type BrowserContext, type Page, type Route } from '@playwright/test';
+import { expect, test, devices, type Browser, type BrowserContext, type Page, type Route } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';

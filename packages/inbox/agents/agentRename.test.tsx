@@ -224,6 +224,87 @@ const MAC = `ibx_01K${'0'.repeat(22)}M`;
 const view = (id: string, name: string): MachineView =>
   ({ id, name, self: id === SELF, state: 'online', since: '2026-11-09T08:00:00.000Z', reason: null, version: '0.29.0', address: null, both_ways: true, waiting: 0, list_cursor: 1, snoozes: true, launch: true }) as MachineView;
 
+const { setSessionTitles } = (hasDom ? await import('../sessionTitles') : {}) as typeof import('../sessionTitles');
+const probe = () => document.querySelector('[data-probe-label]')!.getAttribute('data-probe-label');
+
+test.skipIf(!hasDom)('a given name never changes by itself: a thread waiting, newer activity, the agent\'s own name or its host\'s title changing, a reload that drops its label, a list read from a linked machine', async () => {
+  const first = { id: 'thr_1', name: 'Invoice retries' };
+  const read = (over: Partial<InboxAgent>, labelsNow: Record<string, string> = {}, titlesNow: Record<string, string> = {}) => {
+    setInboxAgents([group([agent('ses_a', { first_thread: first, ...over })])]);
+    labels.setSessionLabels(labelsNow);
+    setSessionTitles(titlesNow);
+  };
+  read({});
+  mount([thread('thr_1', 'ses_a', 'Invoice retries')]);
+  await act(async () => await faces.readAgentFaces());
+  await settle();
+  expect(rowName('ses_a')).toBe('Invoice retries');
+  await openMore('ses_a');
+  await pick('rename');
+  await type('Billing fix');
+  await key(field()!, 'Enter');
+  expect([rowName('ses_a'), probe()]).toEqual(['Billing fix', 'Billing fix']);
+
+  const steps: [string, () => void][] = [
+    ['another thread waits on the person', () => read({ state: 'waiting', waiting: 1 })],
+    ['its own name changes in its host', () => read({ label: 'Own name' }, { ses_a: 'Own name' })],
+    ["its host's own title changes", () => read({ label: 'Own name', title: 'Retry backoff' }, { ses_a: 'Own name' }, { ses_a: 'Retry backoff' })],
+    ['a plugin reload: a poll with no label or title', () => read({})],
+    ['its turn starts and ends', () => read({ state: 'working' })],
+  ];
+  for (const [what, step] of steps) {
+    await act(async () => step());
+    await settle();
+    expect([what, rowName('ses_a'), probe()]).toEqual([what, 'Billing fix', 'Billing fix']);
+  }
+  // Newer activity in other threads, one of them waiting on the person.
+  act(() => root?.unmount());
+  document.body.innerHTML = '';
+  read({ state: 'waiting', waiting: 1 });
+  mount([
+    thread('thr_1', 'ses_a', 'Invoice retries'),
+    { ...thread('thr_2', 'ses_a', 'Semantic diffs'), last_at: '2026-11-09T10:00:00.000Z', waiting_on_person: true } as InboxListRow,
+    { ...thread('thr_3', 'ses_a', 'Release notes'), last_at: '2026-11-09T11:00:00.000Z' } as InboxListRow,
+  ]);
+  await settle();
+  expect([rowName('ses_a'), probe()]).toEqual(['Billing fix', 'Billing fix']);
+  // The merged list, as a read with a linked machine brings it: this machine's agent first, the other's after.
+  act(() => root?.unmount());
+  document.body.innerHTML = '';
+  setInboxAgents([{ ...group([agent('ses_a', { first_thread: first, label: 'Own name' })]), machine: SELF }, { ...group([agent('ses_m', { host: 'pi', label: 'Their name' })]), machine: MAC, faces: {}, faces_rev: 1 }]);
+  mount([], false, machinesModel([view(SELF, 'Studio'), view(MAC, 'MacBook')]));
+  await settle();
+  expect([rowName('ses_a'), probe()]).toEqual(['Billing fix', 'Billing fix']);
+  expect(rowName('ses_m')).toBe('Their name');
+});
+
+test.skipIf(!hasDom)("the @ menu leads with the name the person gave, its token's label beside it; the token itself keeps the label the agent knows", async () => {
+  const { TagPicker } = await import('../components/TagPicker');
+  const { namedTagOptions } = await import('../thread/useThreadSessions');
+  const { tagPeople, tagsToSend } = await import('../tags');
+  const base = { host: 'claude-code', agent: 'Claude Code', group: 'Claude Code', owner: false, wakes: true, taggable: true, project: 'ledger' };
+  const options = namedTagOptions(
+    [
+      { ...base, id: 'ses_a', label: 'Invoice retry backoff', detail: 'ledger · idle' },
+      { ...base, id: 'ses_b', label: 'Ledger sync', detail: 'ledger · working' },
+    ],
+    new Map([['ses_a', 'Billing fix']]),
+  );
+  const people = tagPeople(options);
+  const host = document.createElement('div');
+  document.body.appendChild(host);
+  act(() => {
+    root = createRoot(host);
+    root.render(<TagPicker id="tags" menu={{ items: people, emptyNotice: null, heading: null, activeIndex: null, anchor: null, query: '' }} options={options} onSelect={() => {}} />);
+  });
+  const row = (id: string) => [document.querySelector(`[data-tag-option="${id}"] .ib-tg-on`)!.textContent, document.querySelector(`[data-tag-option="${id}"] .ib-tg-od`)!.textContent];
+  expect(row('ses_a')).toEqual(['Billing fix', 'Invoice retry backoff · ledger · idle']);
+  expect(row('ses_b')).toEqual(['Ledger sync', 'ledger · working']);
+  // What reaches the agent: the `@` token's label and the tag's, never the Inbox name.
+  expect(people.find((p) => p.id === 'ses_a')!.label).toBe('Invoice retry backoff');
+  expect(tagsToSend(['ses_a'], options, null)).toEqual([{ host: 'claude-code', session: 'ses_a', label: 'Invoice retry backoff' }]);
+});
+
 test.skipIf(!hasDom)("an older machine's agent (its list takes no agent marks) offers no Rename…: no ⋯ and no right-click menu; this machine's agent keeps both", async () => {
   setInboxAgents([{ ...group([agent('ses_a')]), machine: SELF }, { ...group([agent('ses_m', { host: 'pi' })]), machine: MAC }]);
   mount([], false, machinesModel([view(SELF, 'Studio'), view(MAC, 'MacBook')]));

@@ -12,7 +12,9 @@
  *
  * Proved in real browsers against the built apps (apps/hook/dist: run
  * `bun run --cwd apps/review build && bun run build:hook` first), served on
- * loopback so the review app falls back to its demo diff. Each page is told
+ * loopback with no Plannotator server: `/api/diff` answers with the demo diff
+ * as a fixture (a production build shows its load error, never the demo, when
+ * `/api/diff` fails) and every other `/api/*` is a 404. Each page is told
  * its platform by a navigator stub (init script), so the Linux and macOS
  * paths both run on any host:
  *  - Linux: every monospace surface computes `font-feature-settings: normal`:
@@ -36,6 +38,7 @@ import { createServer, type Server } from 'node:http';
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { openPackedApp, type PackedApp } from '../../packages/shared/packed-app';
+import { DEMO_DIFF } from '../../packages/review-editor/demoData';
 
 const repo = resolve(__dirname, '../..');
 const pages: Record<string, string> = {
@@ -115,9 +118,15 @@ test.beforeAll(async () => {
       res.end(readFileSync(ss02FontPath));
       return;
     }
+    if (path === '/api/diff') {
+      // The review app's diff: a fixture, as a review server would answer.
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ rawPatch: DEMO_DIFF, gitRef: 'demo' }));
+      return;
+    }
     const file = pages[path];
     if (!file) {
-      // No Plannotator server: the review app shows its demo diff, the editor its demo plan.
+      // No Plannotator server: the editor shows its demo plan.
       res.writeHead(404, { 'content-type': 'application/json' });
       res.end('{}');
       return;

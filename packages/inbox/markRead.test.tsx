@@ -307,7 +307,8 @@ test.skipIf(!hasDom)('a pick never turns the default to skip (approval "inbox-ex
 
 test.skipIf(!hasDom)('E marks the open thread read; a stopped thread warns with Reply; E is not taken while typing; Z undoes', async () => {
   const el = await renderApp(`#thread=${ids.stopped}`);
-  expect(await readItems(el)).toEqual(['Mark read']);
+  // Opened, its questions still waiting: Mark read and Mark unread both (owner, 2026-11-25).
+  expect(await readItems(el)).toEqual(['Mark read', 'Mark unread']);
 
   press('e');
   await until(() => posted.at(-1)?.path === `/api/inbox/threads/${ids.stopped}/read`, 'the Mark read');
@@ -336,7 +337,7 @@ test.skipIf(!hasDom)('E marks the open thread read; a stopped thread warns with 
 
   press('z');
   await until(() => posted.at(-1)?.path === `/api/inbox/threads/${ids.stopped}/unread`, 'the undo');
-  expect(await readItems(el)).toEqual(['Mark read']);
+  expect(await readItems(el)).toEqual(['Mark read', 'Mark unread']);
   expect(document.querySelector('[data-inbox-toast]')).toBeNull();
   expect((await questionStates(ids.stopped)).map((q) => q.state)).toEqual(['open', 'open']);
 });

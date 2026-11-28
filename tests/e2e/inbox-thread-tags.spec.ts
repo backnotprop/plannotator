@@ -13,7 +13,7 @@
  * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
  */
 
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -88,8 +88,7 @@ test('Add tag from the row menu makes a tag and tags the thread; the Tags sectio
   await expect(page.locator('[data-tags-section]')).toHaveCount(0);
 
   await rowButton(page, threads.notes).click({ button: 'right' });
-  // Star thread, then Add to Priority, then Add tag.
-  await expect(rowMenu(page).getByRole('menuitem').nth(2)).toHaveText('Add tag');
+  await expect(rowMenu(page).getByRole('menuitem', { name: 'Add tag' })).toBeVisible();
   await rowMenu(page).locator('[data-add-tag-item]').click();
   const field = rowMenu(page).locator('[data-tag-find]');
   await expect(field).toBeFocused();

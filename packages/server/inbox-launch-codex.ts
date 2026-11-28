@@ -40,6 +40,7 @@ import { agentVersionRun, codexHome, createAgentEnvironmentFor, INBOX_MCP_SERVER
 import { LAUNCH_CHOICES_RUN_MS, launchChoiceCache, type LaunchChoiceLists } from "./inbox-launch-choice";
 import { shellQuote, versionAtLeast } from "./inbox-launch-claude";
 import { createCodexPermissions, CODEX_APPROVALS } from "./inbox-launch-codex-permission";
+import { createInboxCodexAccount } from "./inbox-codex-account";
 import { launchSpawnEnv, type LaunchEnv } from "./inbox-launch-env";
 import { launchNoteText, launchTurnErrorNote, writeLaunchNote, type LaunchAvailability, type LaunchDelivery, type LaunchHost, type LaunchHostContext, type LaunchHostResult, type LaunchLive, type LaunchPermissionContext } from "./inbox-launch-host";
 
@@ -635,7 +636,9 @@ export function createCodexLaunchHost(ctx: LaunchHostContext, options: { readyMs
 
   const nameOf = (launch: InboxLaunchRecord) => {
     const root = threads?.rootOf(launch.id);
-    return root?.thread_name ?? root?.subject ?? "Inbox";
+    // A reply's launch takes its thread's name.
+    const head = root ? (threads!.store.message(root.thread_id) ?? root) : null;
+    return head?.thread_name ?? head?.subject ?? "Inbox";
   };
 
   let choiceKey: string | null = null;
@@ -659,21 +662,56 @@ export function createCodexLaunchHost(ctx: LaunchHostContext, options: { readyMs
 
     /**
      * `codex` on the plain env's PATH and new enough, the person's Codex has Plannotator's Inbox MCP entry (it is
-     * how a Codex session answers in the Inbox), and Codex has a login (`codex login status`, local only).
+     * how a Codex session answers in the Inbox), and Codex has a login or a provider that requires no OpenAI account.
      */
-    async available(): Promise<LaunchAvailability> {
+    async available(folders: readonly string[] = []): Promise<LaunchAvailability> {
       const e = await ctx.environment();
       const path = e.which("codex");
       if (!path) return { ok: false, missing: true, reason: "codex is not on the Inbox's PATH", code: "missing" };
       const entry = readCodexEntry(join(codexHomeDir(), "config.toml"));
-      if (entry.kind !== "ours" && entry.kind !== "other") return { ok: false, missing: false, reason: "Plannotator's Inbox is not connected to Codex (Settings → Agents)", code: "tool_off" };
+      let connected = entry.kind === "ours" || entry.kind === "other";
+      if (!connected) {
+        try {
+          const config = Bun.TOML.parse(configText() ?? "") as { projects?: Record<string, { trust_level?: string }> };
+          connected = folders.some((folder) => {
+            const real = realPathOr(folder);
+            const root = codexTrustRoot(real);
+            const trust = [real, folder, ...(root ? [realPathOr(root), root] : [])]
+              .map((path) => config.projects?.[path])
+              .find((project) => project !== undefined);
+            if (trust?.trust_level !== "trusted") return false;
+            const projectPath = join(folder, ".codex", "config.toml");
+            const projectEntry = readCodexEntry(projectPath);
+            if (projectEntry.kind !== "ours" && projectEntry.kind !== "other") return false;
+            const projectConfig = Bun.TOML.parse(readFileSync(projectPath, "utf8")) as { mcp_servers?: Record<string, { enabled?: boolean }> };
+            return projectConfig.mcp_servers?.[INBOX_MCP_SERVER_NAME]?.enabled !== false;
+          });
+        } catch {
+          // Codex cannot read an invalid configuration either.
+        }
+      }
+      if (!connected) return { ok: false, missing: false, reason: "Plannotator's Inbox is not connected to Codex (Settings → Agents)", code: "tool_off" };
       const version = parseCodexCliVersion((await agentVersionRun(e, path, { timeoutMs: 10_000 })).stdout);
       const shown = version?.join(".") ?? null;
       if (!shown || !versionAtLeast(shown, CODEX_LAUNCH_MIN_VERSION)) return { ok: false, missing: false, reason: `Codex ${shown ?? "?"} is older than ${CODEX_LAUNCH_MIN_VERSION}`, code: "too_old" };
       choiceKey = `${path}@${shown}`;
       const home = homeEnv();
       const status = await e.run([path, "login", "status"], { timeoutMs: 10_000, ...(home ? { env: { CODEX_HOME: home } } : {}) });
-      if (codexLoginStatusSignedOut(status)) return { ok: false, missing: false, reason: "Codex isn't signed in", code: "signed_out" };
+      if (codexLoginStatusSignedOut(status)) {
+        // Codex's own account answer, for a provider that needs no OpenAI account: the same `codex` and home as the
+        // checks above. It starts an app-server each time this check runs (the engine's 30 s answer, again each time
+        // To opens while Codex is not ready), only while `codex login status` says signed out.
+        const account = createInboxCodexAccount({
+          environment: () => ({ ...e, env: { ...e.env, ...(home ? { CODEX_HOME: home } : {}) }, which: (command) => (command === "codex" ? path : e.which(command)) }),
+          dataDir: ctx.dataDir,
+          extraClis: [],
+        });
+        try {
+          if ((await account.read()).state !== "signed_in") return { ok: false, missing: false, reason: "Codex isn't signed in", code: "signed_out" };
+        } finally {
+          account.stop();
+        }
+      }
       return { ok: true, version: shown };
     },
 

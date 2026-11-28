@@ -13,7 +13,9 @@ import { join } from "node:path";
 import {
   createInboxProjectRoots,
   INBOX_PROJECT_CONTAINER_SCAN_MAX,
+  INBOX_PROJECT_NAMED_PATH_TTL_MS,
   inboxGitRunner,
+  inboxProjectFolderOf,
   checkoutsHolderOf,
   isHomeOrRootFolder,
   isHomeOrRootShape,
@@ -620,5 +622,37 @@ describe("createInboxProjectRoots", () => {
   test("validation errors come before the cache", async () => {
     const roots = createInboxProjectRoots({ git: async () => null });
     await expect(roots.resolve("not/absolute")).rejects.toThrow("must be an absolute path");
+  });
+
+  // #2788: every bridge poll names its session's folder; one started on another machine names a path this one lacks
+  // (`/home/...` on macOS is an automount), and each lookup held the Inbox.
+  test("a live session's path is looked up once a minute, a path naming nothing here too; a send's path every time", async () => {
+    const root = tempRoot();
+    const here = join(root, "here");
+    const later = join(root, "later");
+    mkdirSync(here);
+    let now = 1_000;
+    const looked: string[] = [];
+    const roots = createInboxProjectRoots({
+      git: async () => ({ exitCode: 127, stdout: "" }),
+      now: () => now,
+      folderOf: (path, home) => {
+        looked.push(path);
+        return inboxProjectFolderOf(path, home);
+      },
+    });
+    for (let i = 0; i < 20; i++) {
+      expect((await roots.resolveNamed(here)).root).toBe(here);
+      await expect(roots.resolveNamed(later)).rejects.toThrow("no such folder");
+      now += 2_000;
+    }
+    expect(looked).toEqual([here, later]);
+
+    // The folder appears: a send sees it at once; a poll once its path's minute is up.
+    mkdirSync(later);
+    expect((await roots.resolve(later)).root).toBe(later);
+    await expect(roots.resolveNamed(later)).rejects.toThrow("no such folder");
+    now = 1_000 + INBOX_PROJECT_NAMED_PATH_TTL_MS;
+    expect((await roots.resolveNamed(later)).root).toBe(later);
   });
 });

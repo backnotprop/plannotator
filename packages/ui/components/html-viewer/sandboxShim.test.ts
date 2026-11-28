@@ -96,6 +96,22 @@ describe("a page that uses history and storage as it builds itself", () => {
     expect(frame.href).toBe("http://localhost:4000/api/inbox/pages/abc#step=2");
   });
 
+  // A prototype that keeps its variant in the address (`replaceState(null, '', '?variant=2')`), as in a tab: on a
+  // served page it used to land on the folder's address (the `<base>`), so a reload or a link lost the page.
+  test("a bare query keeps the served page's own path; a srcdoc keeps only its fragment", () => {
+    const served = opaqueFrame("http://localhost:4000/api/inbox/pages/abc?variant=1#top");
+    served.run(SANDBOX_SHIM_SCRIPT);
+    served.run("history.replaceState(null, '', '?variant=2')");
+    expect(served.href).toBe("http://localhost:4000/api/inbox/pages/abc?variant=2");
+    served.run("history.pushState({ v: 3 }, '', '?variant=3#step-2')");
+    expect(served.href).toBe("http://localhost:4000/api/inbox/pages/abc?variant=3#step-2");
+    const srcdoc = opaqueFrame("about:srcdoc");
+    srcdoc.run(SANDBOX_SHIM_SCRIPT);
+    srcdoc.run("history.replaceState({ v: 2 }, '', '?variant=2#two'); window.after = true;");
+    expect(srcdoc.href).toBe("about:srcdoc#two");
+    expect(srcdoc.run("JSON.stringify(history.state) + window.after")).toBe('{"v":2}true');
+  });
+
   test("a URL the frame refuses keeps the state and the fragment, and the page runs on", () => {
     const frame = opaqueFrame("about:srcdoc");
     frame.run(SANDBOX_SHIM_SCRIPT);

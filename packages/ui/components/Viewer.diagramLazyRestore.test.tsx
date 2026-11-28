@@ -31,6 +31,10 @@ import type { ViewerHandle } from './Viewer';
 import { installInertDiagramSvgParser } from '../test-setup/diagramSvg';
 import { AnnotationType, type Annotation } from '../types';
 import { parseMarkdownToBlocks } from '../utils/parser';
+import { drawMermaidFencesWithMermaid } from '../test-setup/mermaidEngine';
+
+// A stand-in Mermaid runtime draws here; Pele is DiagramBlock.engine.test.tsx's.
+drawMermaidFencesWithMermaid();
 
 const hasDom = typeof document !== 'undefined';
 

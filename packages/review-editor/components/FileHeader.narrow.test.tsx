@@ -59,9 +59,9 @@ describe.if(hasDom)('FileHeader, narrow', () => {
     expect(folder.nextElementSibling!.textContent).toBe('Layout.tsx');
   });
 
-  test('without keepsFolder (the review app), the name alone, as before', async () => {
+  test('without keepsFolder (the review app), the name is whole and apart from the folder, which gives way first', async () => {
     const el = await mount(<FileHeader filePath="src/admin/Layout.tsx" patch={patch} />);
-    expect(el.querySelector('[data-file-header] span[title]')!.textContent).toBe('Layout.tsx');
+    expect(el.querySelector('[data-file-header] [data-ellipsis-name]')!.textContent).toBe('Layout.tsx');
     expect(el.querySelector('[data-file-header-folder]')).toBeNull();
   });
 });

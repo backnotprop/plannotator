@@ -1,5 +1,5 @@
 import { inboxPullStacks, type InboxPull, type InboxPullStack, type InboxReviewChanges, type InboxReviewChangesAnswer, type InboxReviewLinkAnswer, type InboxReviewRow, type InboxReviewsAnswer } from '@plannotator/core/inbox-types';
-import { handoffStack, inboxPullLabel, openLayers, stackProjects, stackTitle } from '../pulls/model';
+import { handoffStack, inboxPullLabel, openLayers, stackProjects, stackTitle, type PullHandoffAsk } from '../pulls/model';
 
 /**
  * New review (approval "inbox-reviews-page", DESIGN r2 section 2): the New message dialog with rows above To. This is
@@ -16,6 +16,18 @@ export type ReviewPullsRead = 'reading' | 'read' | 'failed';
 /** What the box reviews: `pick` fills it in, from a pull request's own page. */
 export interface ReviewBoxRequest {
   pick?: ReviewBoxPull | null;
+  /** Branch reviews' safety net: a local branch nobody reported, reviewed whole against its base, in its project. */
+  branch?: ReviewBoxBranch | null;
+  /** Reviews' "On this computer": a project's uncommitted changes, reviewed in that project. */
+  project?: string | null;
+  ask?: 'picture_it';
+}
+
+export const reviewBoxPullAsk = (ask: ReviewBoxRequest['ask'], body: string): PullHandoffAsk => (ask === 'picture_it' ? { kind: 'picture_it', words: body } : body.trim() ? { kind: 'custom', words: body } : { kind: 'guide' });
+
+export interface ReviewBoxBranch {
+  name: string;
+  projectId: string;
 }
 
 /**
@@ -125,10 +137,11 @@ const CHANGES_WORDS: Record<InboxReviewChanges, string> = {
 };
 
 /** The hand-off for local changes. The person's words sit with the ask; the second line is what feedback means here. */
-export function localReviewMessage(input: { changes: InboxReviewChanges; project: string | null; branch: string | null; base: string | null; words: string }): string {
+export function localReviewMessage(input: { changes: InboxReviewChanges; project: string | null; branch: string | null; base: string | null; words: string; ask?: ReviewBoxRequest['ask'] }): string {
   const where = input.project ? ` in ${input.project}` : '';
   const on = input.branch ? (input.changes === 'branch' && input.base ? ` (${input.branch}, against ${input.base})` : ` (on ${input.branch})`) : '';
   const words = input.words.trim();
+  if (input.ask === 'picture_it') return [`Please send me a Picture page of ${CHANGES_WORDS[input.changes]}${where}${on}, using /picture-it.`, words, 'If I ask for changes, make them and send me the updated page in this thread.'].filter(Boolean).join('\n\n');
   return [`Please send me a guided review of ${CHANGES_WORDS[input.changes]}${where}${on}, using /review-curate.`, words, 'If I ask for changes, make them and send me the updated review in this thread.']
     .filter(Boolean)
     .join('\n\n');
@@ -176,3 +189,13 @@ export function reviewToWithChanges(targets: readonly { session: string; project
 
 /** The change summary, once read. */
 export type ReviewSummary = InboxReviewChangesAnswer | null;
+
+/**
+ * The branch and base a local review's words name: the summary's once read. With none (not read yet, or a branch diff
+ * that could not be read or is past its cap), the branch the box was opened for, in its own project, so the words
+ * never name the checked-out branch in its place.
+ */
+export function reviewWorkOf(summary: ReviewSummary, box: ReviewBoxRequest | null | undefined, changes: InboxReviewChanges, projectId: string | null | undefined): { branch: string | null; base: string | null } {
+  if (summary) return { branch: summary.branch, base: summary.base };
+  return { branch: changes === 'branch' && box?.branch && box.branch.projectId === projectId ? box.branch.name : null, base: null };
+}

@@ -7,7 +7,7 @@
  *
  * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
  */
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page } from './inbox-test';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileUrl, pane, startWorld, stopWorld, type ListWorld, type ListThread } from './inbox-comments-list-world';

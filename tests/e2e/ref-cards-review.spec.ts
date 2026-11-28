@@ -12,14 +12,19 @@
  * shows its card. In code review: a pasted PR link in a changed Markdown
  * file's Read view shows its card. The keyboard (plan review): Tab to `#12`
  * opens its card, Tab moves into it, Escape closes it, returns the focus to
- * the link and stops there. A touch screen (plan review): a tap follows the
- * link (the opened tab is stubbed), with no card and no CLI run. The card's
+ * the link and stops there. A click (plan review): `#12` opens its card
+ * pinned, with no tab opened and only the forge's link (no Reviews outside the
+ * Inbox); a ref the forge does not know follows the link to GitHub once its
+ * answer is known (the opened tab is stubbed), and a pasted link to a comment
+ * on a PR follows the link with no card, as before. A touch screen (plan review): a tap shows the card as the
+ * bottom sheet and opens no tab. The card's
  * height (code review): a long description shows about eight lines (a 216 px
  * box) before it scrolls; in a window too short for the card (1440 by 480),
  * the header scrolls with the description and Open on GitHub stays in view.
  *
  * Screenshots (light and dark) go to PLANNOTATOR_REF_CARD_REVIEW_SHOTS when it
- * is set. Build the binary first (see inbox.spec.ts), then
+ * is set; the click's proof always goes to PLANNOTATOR_E2E_PROOF_DIR/ref-card-click
+ * (05-plan-review-pinned.png, beside ref-card-click.spec.ts's). Build the binary first (see inbox.spec.ts), then
  * `bun run test:e2e:inbox`.
  */
 
@@ -34,6 +39,7 @@ import { fakeForge, type FakeForge } from './fake-forge';
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
 const shots = process.env.PLANNOTATOR_REF_CARD_REVIEW_SHOTS ?? '';
+const proofDir = join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo, '.local/proof')), 'ref-card-click');
 
 const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString();
 const person = (login: string) => ({ login, avatarUrl: null });
@@ -142,6 +148,7 @@ The list jitters after load (#12). The fix is already open as https://github.com
 
 1. Merge the two caches into one store.
 2. Keep #99 in mind for the follow-up.
+3. Answer the note on the cache: https://github.com/acme/widgets/pull/14#discussion_r7
 `;
 
 const DOC_AFTER = `# Doc
@@ -349,7 +356,7 @@ test('code review: a PR link in a changed Markdown file shows its card', async (
     const session = await start('review');
     try {
       const page = await open(browser, session.url, scheme, [['plannotator-markdown-view', 'read']]);
-      await page.getByText('doc.md', { exact: true }).first().click();
+      await page.locator('[data-review-sidebar] [data-item-type="file"][title$="doc.md"]').first().click();
       const link = page.locator('a[href="https://github.com/acme/widgets/pull/14"]').first();
       await expect(link).toBeVisible();
       await page.waitForTimeout(600);
@@ -408,11 +415,71 @@ test('plan review: the keyboard opens the card on focus, Tab moves into it, Esca
   }
 });
 
-test('plan review on a touch screen: a tap follows the link, shows no card and runs no CLI', async () => {
+test('plan review: a click on #12 pins its card and opens no tab; a ref with no card follows the link', async () => {
+  const session = await start('plan');
+  try {
+    const page = await open(browser, session.url, 'light');
+    const context = page.context();
+    // The tab a click opens never reaches the real GitHub.
+    await context.route('https://github.com/**', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: '<title>stub</title>' }));
+    const popups: string[] = [];
+    context.on('page', (p) => popups.push(p.url()));
+    const issue = page.locator(`a[href="${ISSUE_12}"]`).first();
+    await expect(issue).toBeVisible();
+    await issue.click();
+    const card = page.locator('[data-ref-card]');
+    await expect(card).toHaveAttribute('data-ref-card-pinned', '');
+    await expect(card).toContainText('Widgets wobble on Tuesdays');
+    // Pinned: the pointer leaving does not close it.
+    await page.mouse.move(5, 5);
+    await page.waitForTimeout(600);
+    await expect(card).toBeVisible();
+    // Plan review has no Reviews: the forge's link alone.
+    await expect(card.locator('[data-ref-card-action]')).toHaveCount(0);
+    await expect(card.locator('[data-ref-card-open]')).toHaveText(/Open on GitHub/);
+    mkdirSync(proofDir, { recursive: true });
+    await page.screenshot({ path: join(proofDir, '05-plan-review-pinned.png') });
+    expect(popups).toEqual([]);
+    // A second click on the link closes it.
+    await issue.click();
+    await expect(card).toHaveCount(0);
+    expect(popups).toEqual([]);
+
+    // #99: the forge does not know it (asked by the hover), so there is no card: the click opens it on GitHub at
+    // once, as before.
+    const unknown = page.locator('a[href="https://github.com/acme/widgets/issues/99"]').first();
+    await unknown.hover();
+    await expect.poll(() => session.forge.calls()).toContain('gh number=99');
+    await page.waitForTimeout(300);
+    const opened = context.waitForEvent('page');
+    await unknown.click();
+    const tab = await opened;
+    await tab.waitForLoadState();
+    expect(tab.url()).toBe('https://github.com/acme/widgets/issues/99');
+    await expect(card).toHaveCount(0);
+    expect(session.forge.calls()).toEqual(['gh number=12', 'gh number=99']);
+    await tab.close();
+
+    // A link to a comment on #14 goes to that comment: a plain click follows it, no card pinned, nothing asked.
+    await page.mouse.move(5, 5);
+    const permalink = 'https://github.com/acme/widgets/pull/14#discussion_r7';
+    const toComment = context.waitForEvent('page');
+    await page.locator(`a[href="${permalink}"]`).first().click();
+    const commentTab = await toComment;
+    await commentTab.waitForLoadState();
+    expect(commentTab.url()).toBe(permalink);
+    await expect(page.locator('[data-ref-card-pinned]')).toHaveCount(0);
+    await context.close();
+  } finally {
+    await session.close();
+  }
+});
+
+test('plan review on a touch screen: a tap shows the card as the sheet and opens no tab', async () => {
   const session = await start('plan');
   try {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, colorScheme: 'light' });
-    // The tab the tap opens never reaches the real GitHub.
+    // Nothing the tap could open reaches the real GitHub.
     await context.route('https://github.com/**', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: '<title>stub</title>' }));
     const seen: [string, string][] = [
       ['plannotator-theme', 'light'],
@@ -436,14 +503,15 @@ test('plan review on a touch screen: a tap follows the link, shows no card and r
     const issue = page.locator(`a[href="${ISSUE_12}"]`).first();
     await issue.scrollIntoViewIfNeeded();
     await expect(issue).toBeVisible();
-    const opened = context.waitForEvent('page');
+    const popups: string[] = [];
+    context.on('page', (p) => popups.push(p.url()));
     await issue.tap();
-    const tab = await opened;
-    await tab.waitForLoadState();
-    expect(tab.url()).toBe(ISSUE_12);
+    const sheet = page.locator('[data-ref-card]');
+    await expect(sheet).toHaveAttribute('data-ref-card-sheet', '');
+    await expect(sheet).toContainText('Widgets wobble on Tuesdays');
     await page.waitForTimeout(800);
-    await expect(page.locator('[data-ref-card]')).toHaveCount(0);
-    expect(session.forge.calls()).toEqual([]);
+    expect(popups).toEqual([]);
+    expect(session.forge.calls()).toEqual(['gh number=12']);
     await context.close();
   } finally {
     await session.close();
@@ -454,7 +522,7 @@ test('code review: a long description shows about eight lines before it scrolls'
   const session = await start('review');
   try {
     const page = await open(browser, session.url, 'light', [['plannotator-markdown-view', 'read']]);
-    await page.getByText('doc.md', { exact: true }).first().click();
+    await page.locator('[data-review-sidebar] [data-item-type="file"][title$="doc.md"]').first().click();
     await page.locator('a[href="https://github.com/acme/widgets/issues/21"]').first().hover();
     const card = page.locator('[data-ref-card]');
     await expect(card).toContainText('Widget list jitters after a cold load');
@@ -478,7 +546,7 @@ test('code review in a short window: the header scrolls with the description and
     // 480: the card kept its footer but squeezed the description to a line. 400: the footer was cut off.
     for (const height of [480, 400]) {
       const page = await open(browser, session.url, 'light', [['plannotator-markdown-view', 'read']], height);
-      await page.getByText('doc.md', { exact: true }).first().click();
+      await page.locator('[data-review-sidebar] [data-item-type="file"][title$="doc.md"]').first().click();
       const link = page.locator('a[href="https://github.com/acme/widgets/pull/14"]').first();
       await link.evaluate((el) => el.scrollIntoView({ block: 'center' }));
       await page.waitForTimeout(300);

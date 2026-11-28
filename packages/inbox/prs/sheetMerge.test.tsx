@@ -5,7 +5,8 @@
  *  - the confirm not listing what merges and what stays, with why;
  *  - PRs merged at once instead of one after another, or a refusal sent again by itself;
  *  - the report not naming what merged and each refusal in the forge's words, or a refused pick leaving the selection;
- *  - a phone without its "Tap again" words.
+ *  - a phone without its "Tap again" words;
+ *  - the confirm not saying which linked machine merges a pick (with its own sign-in there).
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt. No gh: the window's fetch is stubbed.
  */
@@ -127,7 +128,8 @@ function draw(over: Partial<SheetPageProps> = {}) {
   document.body.appendChild(host);
   root = createRoot(host);
   act(() => root!.render(<div className="pn-inbox"><SidebarProvider><SheetPage {...props} /></SidebarProvider></div>));
-  return { refreshed };
+  const redraw = (changes: Partial<SheetPageProps>) => act(() => root!.render(<div className="pn-inbox"><SidebarProvider><SheetPage {...props} {...changes} /></SidebarProvider></div>));
+  return { refreshed, redraw };
 }
 
 const click = (el: HTMLElement) => act(() => el.click());
@@ -186,7 +188,7 @@ test('the second click merges one after another at the heads seen; a refusal is 
   expect(sent.map((s) => s.key)).toEqual([key(5)]);
   expect(sent[0]).toMatchObject({ head_sha: pull(5).head_sha, confirmed: true });
   expect($('[data-pr-merging]')!.textContent).toBe('Merging 1 of 3…');
-  expect($('[data-pr-clear]')).toBeNull();
+  expect($('[data-pr-select="done"]')!.hasAttribute('disabled')).toBe(true);
   sent[0]!.answer(200, { ok: true, key: key(5), method: 'merge', url: '' });
   await settle();
   expect(sent.map((s) => s.key)).toEqual([key(5), key(7)]);
@@ -210,6 +212,28 @@ test('the second click merges one after another at the heads seen; a refusal is 
   expect(sent).toHaveLength(3);
 });
 
+test('a refreshed head or destination invalidates an open merge confirmation', () => {
+  if (!hasDom) return;
+  const { redraw } = draw();
+  click($('[data-pr-select="select"]')!);
+  click(tile(key(7)));
+  click($('[data-pr-merge]')!);
+  expect($('[data-pr-merge]')!.textContent).toBe('Confirm merge');
+
+  const updated = (changes: Partial<InboxPull>) => ({ ...MODEL, pulls: MODEL.pulls.map((p) => p.number === 7 ? { ...p, ...changes } : p) });
+  redraw({ model: updated({ head_sha: 'b'.repeat(40) }) });
+  expect($('[data-pr-merge]')!.textContent).toBe('Merge 1');
+  click($('[data-pr-merge]')!);
+  expect(sent).toEqual([]);
+
+  redraw({ model: updated({ head_sha: 'b'.repeat(40), base: 'release' }) });
+  expect($('[data-pr-merge]')!.textContent).toBe('Merge 1');
+  click($('[data-pr-merge]')!);
+  expect(sent).toEqual([]);
+  click($('[data-pr-merge]')!);
+  expect(sent[0]).toMatchObject({ key: key(7), head_sha: 'b'.repeat(40) });
+});
+
 test('a phone: the sheet says Tap again, and nothing merges before the second tap', () => {
   if (!hasDom) return;
   draw({ phone: true, mode: 'page' });
@@ -222,4 +246,13 @@ test('a phone: the sheet says Tap again, and nothing merges before the second ta
   expect(sent).toEqual([]);
   click(sheet.querySelector<HTMLElement>('[data-pr-merge]')!);
   expect(sent.map((s) => s.key)).toEqual([key(7)]);
+});
+
+test('picks a linked machine merges: the confirm says which machine merges them; with none, no line', () => {
+  if (!hasDom) return;
+  const MINI = 'ibx_01K0000000000000000000000B';
+  draw({ model: { ...MODEL, pulls: MODEL.pulls.map((p) => (p.number === 5 || p.number === 7 ? { ...p, machine: MINI } : p)), machines: { [MINI]: { read_at: null, pending: false, name: 'Mini' } } } });
+  pickFive();
+  click($('[data-pr-merge]')!);
+  expect($('[data-pr-merge-hint]')!.textContent).toBe('Click again to merge 3 pull requests. A merge can’t be undone. Mini merges #5, #7 with its own sign-in.');
 });

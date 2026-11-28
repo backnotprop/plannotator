@@ -17,11 +17,14 @@
  *   up and as a sheet below. It opens by itself on a new comment and on a
  *   comment chosen elsewhere (approval "pr-view-one-surface", 11-07 18:33Z).
  * - A layer is the PR's own diff; "All N layers" is the compare from the
- *   stack's base branch to this layer's head (inbox-pulls.ts `diff`).
+ *   stack's base branch to this layer's head (inbox-pulls.ts `diff`);
+ *   "Layers i–j" the compare from layer i's base to it (`prs/stackRange.ts`);
+ *   Since you looked the compare from the head the person last opened
+ *   (`prs/looked.ts`), which the page marks as soon as a diff is read.
  * - The end of a layer's diff offers the next layer.
  * - Approve / Send feedback go into the review thread as the person's reply
  *   (`pullVerdictReply`): This layer's to the layer's own agent thread
- *   (`layerVerdictLink`), Whole stack's to the stack's one review thread
+ *   (`layerVerdictLink`), Whole stack's and a range's to the stack's one review thread
  *   (`stackVerdictLink`); a teammate's PR has no agent here, so its diff
  *   reads without a verdict. No merge button, and nothing is posted to the
  *   forge unless the person chooses to post.
@@ -31,17 +34,18 @@
  */
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { flushSync } from 'react-dom';
-import { GuideReaderPart, PanePart, PullAllFilesPart, PullRepoFilePart, ReaderPart } from '../lazyParts';
+import { GuideReaderPart, PanePart, PullAllFilesPart, PullChangesTreePart, PullRepoFilePart, ReaderPart, ReviewKeysHere } from '../lazyParts';
 import { buildGuideSnapshot } from '@plannotator/core/guide-format';
 import { patchBlobIds, type DiffFile } from '@plannotator/core/diff-files';
 import { anchorStillMatches, captureAnchor } from '@plannotator/ui/utils/codeAnnotationAnchor';
 import type { KeptComment } from '../guide/platform-post-types';
-import { inboxPullRepoKey, type InboxPullDiffAnswer, type InboxPullsAnswer } from '@plannotator/core/inbox-types';
+import { inboxPullIsOpen, inboxPullRepoKey, type InboxPullDiffAnswer, type InboxPullsAnswer } from '@plannotator/core/inbox-types';
 import type { CodeAnnotation } from '@plannotator/ui/types';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
 import { DecisionControl, type DecisionHandler } from '@plannotator/ui/components/DecisionControl';
 import { buildDecisionSpec, type DecisionActionId } from '@plannotator/ui/utils/decisionSpec';
 import { InboxApiError, inboxApi } from '../api';
+import { pullReviewImages } from '../reviewImages';
 import { guideCommentSections } from '../attachments';
 import { RefMarkIcon } from '../board/RefMark';
 import { Icon } from '../icons';
@@ -52,32 +56,45 @@ import { useNarrowerThan } from '../narrower';
 import { usePhone } from '../phone';
 import { holdBarAfterClose, usePhoneCommentsSheet } from '../components/phoneCommentsSheet';
 import { VerdictKeys, verdictOf } from '../reviewVerdict';
+import { verdictRecheckBlock } from '../skills';
 import { OpenInCodeSpans, OpenInFile } from '../components/OpenIn';
 import { REVIEW_FOLD_PANEL_BELOW } from '../components/ReviewPane';
 import { PostEnding, useReviewDestination } from './PostEnding';
 import { postablePull, postedSignature, postedWords } from './postRules';
-import { findStack, inboxPullLabel, linkAgentName, pullGroups, pullNounWord, pullVerdictReply } from './model';
+import { findStack, inboxPullLabel, linkAgentName, pullGroups, pullNounWord, pullVerdictReply, pullVerdictToReviewer } from './model';
 import { forgeName } from './labels';
 import { FileTreeMark } from './fileTreeMark';
 import { TooltipEscapePassesThrough } from '@plannotator/ui/components/Tooltip';
 import { RailStack } from './RailStack';
-import { RailTree } from './RailTree';
+import { RailFilesHead } from './RailFilesHead';
+import type { PullChangesTreeHandle } from '../guide/pullRepoTypes';
 import { DetailsButton, DetailsTitle, PullDetails, usePullDetails } from './PullDetails';
 import { FILE_BAND_HEIGHT, FILE_BAND_HEIGHT_PHONE, FileThread, fileThreadOpen, LineThread, ThreadMemory } from './LineThreads';
 import { fileThreadKey, placeThreads, threadKey } from './threadPlaces';
 import type { GuideFileNote, GuideLineNote } from '../guide/types';
-import { RailScopeSwitch } from './RailScope';
+import { RailScopeSwitch, focusScopeWhenLost } from './RailScope';
 import { useTreeScope } from '@plannotator/ui/hooks/useTreeScope';
 import { useSheetEscape } from '../shortcuts/useSheetEscape';
 import { inOverlay } from '../shortcuts/guards';
 import { reviewFiles } from './reviewFiles';
 import { layerVerdictLink, nextLayer, stackVerdictLink } from './topology';
 import { RiskMark } from './RiskMark';
-import { ContextNotesProvider, useContextNotes } from '../contextNotes/ContextNotes';
 import { placesWord, riskNotes, takeRiskPlaces } from '../contextNotes/model';
+import { riskBarsMarkFor, riskBarsOf, riskJudgedAt } from './riskBars';
+import { useRiskBarsCard } from './RiskBarsCard';
+import { riskBarsLineMarks } from './riskBarsMarks';
 import { usePullRisk } from './usePullRisk';
 import { Named } from './Face';
 import { person, wordsText, type Words } from './words';
+import { isCompare, type PullViewScope } from './viewScope';
+import { scopeOnPage } from './reviewScope';
+import { liveView } from '../prs/stackRange';
+import { lookedBefore, markLooked, useLooked } from '../prs/looked';
+import { RailScopeRows } from './RailScopeRows';
+import { drawnStackWith, hiddenIn, useKeptStack } from './keptStack';
+import { forgeSaid, loneStack, missingWords, unreadWords, useRoutePull, withForgeState } from './routePull';
+import { pageOffersPost } from './pageState';
+import { shutWord } from './stateWord';
 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
 /** The file rail's width: dragged and kept. */
@@ -90,8 +107,8 @@ export interface PullReviewProps {
   modelError: string | null;
   stackId: string;
   layerKey: string;
-  scope: 'layer' | 'stack';
-  onLayer: (key: string, scope: 'layer' | 'stack') => void;
+  scope: PullViewScope;
+  onLayer: (key: string, scope: PullViewScope) => void;
   /** Back to the stack view. */
   onBack: () => void;
   /** The verdict went. */
@@ -287,27 +304,42 @@ function forPost(comments: readonly KeptComment[], screen: Pick<OnScreen, 'stamp
   });
 }
 
-function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onBack, onSent, onPosted }: PullReviewProps) {
+function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLayer, onBack, onSent, onPosted }: PullReviewProps) {
   const phone = usePhone();
-  const item = useMemo(() => (model ? findStack(pullGroups(model, null), stackId) : null), [model, stackId]);
-  const stack = item?.stack ?? null;
+  const live = useMemo(() => (model ? findStack(pullGroups(model, null), stackId) : null), [model, stackId]);
+  // The list no longer naming this layer (merged, closed, a read without it) leaves the review as it is (keptStack.ts);
+  // after a reload or a restart, or a layer of a held stack's page, the stack drawn last or the PR the address names
+  // (routePull.ts). Its state is the forge's when it merged or closed elsewhere.
+  const listed = !!live?.stack.layers.some((l) => l.key === layerKey);
+  const kept = useKeptStack(listed ? live : null, `${stackId}\u0000${layerKey}`, model);
+  const route = useRoutePull(layerKey, model, !listed);
+  const lone = useMemo(() => (route.pull ? loneStack(route.pull) : null), [route.pull]);
+  const [said, setSaid] = useState<ReturnType<typeof forgeSaid>>(null);
+  const found = kept?.stack ?? drawnStackWith(stackId, layerKey, model) ?? (lone && model && !hiddenIn(lone, model) ? lone : null);
+  const stack = useMemo(() => withForgeState(found, layerKey, listed, said, route), [found, layerKey, listed, said, route.pull, route.fresh]); // eslint-disable-line react-hooks/exhaustive-deps
   const layer = stack?.layers.find((l) => l.key === layerKey) ?? null;
+  // A range the list no longer holds as one (a layer merged or moved) shows the layer's own diff.
+  const scope = stack ? liveView(stack, layerKey, asked) : asked;
+  const on = stack && layer ? scopeOnPage(stack, layer, scope, pullNounWord(layer.platform)) : null;
+  // What the person had opened of this layer before, while its head has moved since: the rail offers what changed.
+  const before = lookedBefore(layerKey, layer?.head_sha, useLooked(model));
   // The verdict goes to this layer's own review thread (its stack's only as a fallback), and only on the person's
   // own PR: a teammate's layer, even in a stack with theirs, reads without a verdict. A Whole stack verdict goes to the
   // stack's one review thread (its lowest linked layer's), as the stack view names it.
   const link = useMemo(() => {
     if (!stack || !model || !layer) return null;
-    return scope === 'stack' ? stackVerdictLink(layer, stack, model.links) : layerVerdictLink(layer, stack, model.links);
-  }, [stack, model, layer, scope]);
+    return on?.whole ? stackVerdictLink(layer, stack, model.links) : layerVerdictLink(layer, stack, model.links);
+  }, [stack, model, layer, on?.whole]);
   const agent = linkAgentName(link);
   // Where this layer sits on its own line of the stack (a fork's sibling branch is not counted).
   const next = stack && layer ? nextLayer(stack, layer.key) : null;
 
   // What makes this diff: its head commit and its base. `updated_at` also moves with a label, a comment or a review,
   // which change nothing here (no read, no scroll lost); it only stands in while the list names no head.
-  const diffBase = scope === 'stack' ? stack?.open_base : layer?.base;
+  const diffBase = on?.base;
   const seenId = layer ? `${layer.key}\u0000${scope}\u0000${layer.head_sha ?? layer.updated_at}\u0000${diffBase}` : '';
   const [diff, setDiff] = useState<InboxPullDiffAnswer | null>(() => seenDiff(seenId, layerKey) ?? null);
+  useEffect(() => setSaid(forgeSaid(diff, layerKey)), [diff, layerKey]);
   const [diffError, setDiffError] = useState<string | null>(null);
   // A patch this review read itself named its head. One remembered in `SEEN` can be older than what another window kept.
   const read = useRef(false);
@@ -335,7 +367,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
     const controller = new AbortController();
     // Whatever is on screen stays, and keeps its comments, until a read names a newer patch.
     inboxApi
-      .pullDiff(layer.key, scope, controller.signal)
+      .pullDiff(layer.key, on!.scope, controller.signal, on!.from)
       .then((answer) => {
         if (controller.signal.aborted) return;
         setDiffError(null);
@@ -357,6 +389,11 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
     // A new layer or scope reads again; the same one keeps its diff.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seenId, attempt]);
+  // Looked at: the layers this diff shows, at the heads it shows them (this layer's as the patch names it).
+  useEffect(() => {
+    if (diff && on) markLooked(on.covers.map((l) => ({ key: l.key, sha: l.key === layerKey ? (diff.head_sha ?? l.head_sha) : l.head_sha })), model);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [diff]);
 
   // Comments and Viewed are kept per head commit: a new commit starts clean, but for the global comments. The head is
   // the patch's when it says, in either scope (the list can be minutes behind it, and the comments are on the patch;
@@ -373,7 +410,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   const rawPatch = diff?.patch;
   const stamp = useMemo(() => (rawPatch === undefined ? null : stampOf(rawPatch)), [rawPatch]);
   // The files in the rail's order, as the review app has them: the diffs below follow it.
-  const { files, tree, loose, patch } = useMemo(() => reviewFiles(rawPatch ?? ''), [rawPatch]);
+  const { files, patch } = useMemo(() => reviewFiles(rawPatch ?? ''), [rawPatch]);
   const screen: OnScreen = { updatedAt: layer?.updated_at ?? null, listHead: layer?.head_sha ?? null, stamp, base: diff?.base ?? null, files };
   const words = (mode: 'read' | 'absorb' | 'move') => gather(layerKey, scope, keptId, screen, mode);
   const [comments, setComments] = useState<KeptComment[]>(() => words('read').comments);
@@ -436,7 +473,8 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   // a patch whose head the forge did not pin down posts nothing (Open on GitHub instead), and neither does a diff
   // that could not be read (the header then offers Open on GitHub).
   const postHead = diff?.head_sha ?? (scope === 'layer' ? null : (layer?.head_sha ?? null));
-  const canPost = !!postablePull(layer) && !diffError && (!diff || !!postHead);
+  // Not on a PR the forge says it has no such of now (pageState.ts): what shows is its last read.
+  const canPost = !!layer && !!postablePull(layer) && pageOffersPost(layer, listed, route.missing) && !diffError && (!diff || !!postHead);
   // The expand arrows' whole files, at the commits this diff runs between.
   const headMoved = !!diff && !diff.head_sha;
   const patchHead = diff?.head_sha ?? null;
@@ -444,11 +482,13 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
     async (path: string, signal: AbortSignal, patch: string) => {
       if (headMoved) return { oldContent: null, newContent: null };
       const ids = patchBlobIds(patch);
-      if (ids) return inboxApi.pullFile(layerKey, scope, path, ids, signal);
-      return patchHead && !/^index /m.test(patch) ? inboxApi.pullFile(layerKey, scope, path, { head: patchHead }, signal) : { oldContent: null, newContent: null };
+      if (ids) return inboxApi.pullFile(layerKey, on!.scope, path, ids, signal, on!.from);
+      return patchHead && !/^index /m.test(patch) ? inboxApi.pullFile(layerKey, on!.scope, path, { head: patchHead }, signal, on!.from) : { oldContent: null, newContent: null };
     },
-    [layerKey, scope, headMoved, patchHead],
+    [layerKey, on?.scope, on?.from, headMoved, patchHead], // eslint-disable-line react-hooks/exhaustive-deps
   );
+  // Code review's image previews on changed images, read at this diff's own head (reviewImages.ts).
+  const images = useMemo(() => pullReviewImages(layerKey, on?.scope ?? 'layer', on?.from, headMoved ? null : patchHead), [layerKey, on?.scope, on?.from, headMoved, patchHead]);
   const [picked, pick] = useReviewDestination();
   const [posted, setPosted] = useState<{ label: string; url: string; action: string } | null>(null);
   useEffect(() => setPosted(null), [keptId]);
@@ -462,6 +502,12 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
         : {};
     write({ comments: [...comments.filter((c) => c.id !== annotation.id), { ...annotation, ...read }] });
   };
+  // The Post dialog's summary when the PR merged or closed under it (PlatformPost's `onLeft`): kept as a global comment
+  // of this review, readable and copyable on the closed page, never dropped. The latest `save`: it runs as Post goes.
+  const saveNow = useRef(save);
+  saveNow.current = save;
+  const keepSummary = (summary: string) =>
+    saveNow.current({ id: `ann-summary-${typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`}`, type: 'comment', scope: 'general', filePath: '', lineStart: 0, lineEnd: 0, side: 'new', text: summary, createdAt: Date.now() });
   const remove = (id: string) => {
     write({ comments: comments.filter((c) => c.id !== id) });
     // Also where another window's entry still holds it, so it does not come back.
@@ -483,6 +529,8 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   const [paneRef, folded] = useNarrowerThan<HTMLElement>(REVIEW_FOLD_PANEL_BELOW, true, drawn);
   // Global comment sits in the bar. A phone keeps it in the comments' sheet.
   const [controlsHost, setControlsHost] = useState<HTMLDivElement | null>(null);
+  // A phone's Power Up face (GuideReader's PowerUpMark), in the row under the bar beside Files and the gear.
+  const [powerUpHost, setPowerUpHost] = useState<HTMLSpanElement | null>(null);
   const [railWidth, setRailWidth] = useState(() => {
     try {
       const kept = Number(window.localStorage.getItem(RAIL_WIDTH.key));
@@ -522,7 +570,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   // answer: another layer's threads are on another diff.
   const threadMemory = useRef(new ThreadMemory()).current;
   const threadsHere = details.data && details.data.key === layerKey ? details.data.threads : undefined;
-  const threads = useMemo(() => (threadsHere && diff ? placeThreads(threadsHere, files, scope) : null), [threadsHere, diff, files, scope]);
+  const threads = useMemo(() => (threadsHere && diff ? placeThreads(threadsHere, files, isCompare(scope) ? 'stack' : 'layer') : null), [threadsHere, diff, files, scope]);
   const threadHead = diff?.head_sha;
   // Which threads on whole files are open: only a change of these moves a band (other remembered choices do not
   // draw the page again).
@@ -578,6 +626,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
     return notes;
   }, [threads, layer, threadHead, threadMemory, openFileThreads, phone]);
   const openThreads = threads?.open;
+  const threadCount = useMemo(() => (openThreads ? (path: string) => openThreads.get(path) ?? 0 : undefined), [openThreads]);
   const detailsPanel = useRef<HTMLElement>(null);
   const detailsOpener = useRef<HTMLElement | null>(null);
   const toggleDetails = (event: React.MouseEvent<HTMLElement>) => {
@@ -611,9 +660,11 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   useEffect(() => {
     if (sheet) setFilesSheet(false);
   }, [sheet]);
-  // Opening the Files sheet, focus goes to its first row.
+  // Opening the Files sheet, focus goes to the file open, else the first.
+  const changesTree = useRef<PullChangesTreeHandle>(null);
+  const allFilesTree = useRef<PullChangesTreeHandle>(null);
   useEffect(() => {
-    if (filesSheet) railRef.current?.querySelector<HTMLElement>('[data-review-files] button, [data-repo-file-tree] button, [data-pull-layer-row] button')?.focus({ preventScroll: true });
+    if (filesSheet) (allFilesTree.current ?? changesTree.current)?.focus();
   }, [filesSheet]);
   const closeComments = () => {
     // At once: on a phone the button can take focus only once the page shows again.
@@ -680,7 +731,10 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   };
   // The unsaved global comment's words are named per layer and scope, not per push: they outlive a push, as the
   // global comments do.
-  const readerComments = canDecide || canPost ? { annotations: here, selectedId, onSelect: setSelectedId, onSave: saveFromReader, onDelete: remove, scrollTarget, draftScope: `${layerKey}:${scope}`, onShowGlobalComment: showGlobalComment } : undefined;
+  // A layer that merged or closed keeps its comments, the one being written and a draft kept since (a reload too):
+  // only Post goes. So does one the forge says it has no such of now (`missing`): its comments are still the person's.
+  const keepComments = !!layer && (!inboxPullIsOpen(layer) || route.missing);
+  const readerComments = canDecide || canPost || keepComments ? { annotations: here, selectedId, onSelect: setSelectedId, onSave: saveFromReader, onDelete: remove, scrollTarget, draftScope: `${layerKey}:${scope}`, onShowGlobalComment: showGlobalComment } : undefined;
 
   // Open in: what is on disk in a clone of this repository, which may not be the PR's version; nothing when no clone holds the file.
   const repoKey = stack ? inboxPullRepoKey(stack.host, stack.repo) : null;
@@ -709,34 +763,42 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   // A file of the repository the PR does not change, shown whole in place of the diff.
   const [repoOpen, setRepoOpen] = useState<string | null>(null);
   useEffect(() => setRepoOpen(null), [layerKey, scope, repoSha]);
-  // A file picked in the rail. From the sheet it closes, showing the file, and focus goes back to its button.
-  const pickFile = (path: string) => {
+  // A file picked in the rail. From the sheet it closes, showing the file, and focus goes back to its button; arrowing
+  // through the rows only shows each file.
+  const pickFile = (path: string, how?: { via: 'focus' }) => {
     setRepoOpen(null);
     move(path);
-    if (filesSheet) closeFiles();
+    if (filesSheet && how?.via !== 'focus') queueMicrotask(closeFiles);
   };
   const openRepoFile = (path: string) => {
     setRepoOpen(path);
     if (filesSheet) closeFiles();
   };
   const pickScope = (next: 'changes' | 'all') => {
+    if (railRef.current?.contains(document.activeElement)) focusScopeWhenLost(railRef.current, next);
     setTreeScope(next);
     if (next === 'changes') setRepoOpen(null);
   };
-  // A high judgment's places (context notes, approval "inbox-context-notes"): on this layer's own diff, at the head it
-  // judged, each a row under its lines. Never comments. The header's "N places" steps through them.
-  const placeNotes = useMemo(
-    () => (scope === 'layer' && judged && layer && diff?.head_sha && diff.head_sha === layer.head_sha ? riskNotes(judged, files) : []),
-    [scope, judged, layer?.head_sha, diff?.head_sha, files], // eslint-disable-line react-hooks/exhaustive-deps
-  );
-  const places = useContextNotes(placeNotes, {});
+  // The judgment whose places this diff may draw: this layer's own diff, at the head the list shows and the judgment
+  // was made at (an answer held across a failed read can be an earlier head's: riskJudgedAt).
+  const placed = scope === 'layer' && layer && diff?.head_sha && diff.head_sha === layer.head_sha ? riskJudgedAt(judged, diff.head_sha) : null;
+  // A high judgment's places (approval "inbox-context-notes"). The header's "N places" steps through them, opening
+  // each one's risk bars card (no row under the code: q-070bc2a3).
+  const placeNotes = useMemo(() => (placed ? riskNotes(placed, files) : []), [placed, files]);
+  // The risk bars (approval "review-risk-bars"): a High or Medium judgment's places, marked once on each named file's
+  // tree row and once in the diff at each named range (riskBars.ts).
+  const riskBars = useMemo(() => (placed ? riskBarsOf(placed, files) : null), [placed, files]);
+  const treeRiskKey = riskBars ? `${riskBars.level}\u0000${[...riskBars.files].join('\u0000')}` : '';
+  const treeRisk = useMemo(() => (riskBars ? { level: riskBars.level, files: riskBars.files } : null), [treeRiskKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const riskLineMarks = useMemo(() => riskBarsLineMarks(riskBars), [riskBars]);
+  const riskCard = useRiskBarsCard(riskBars);
   const placeAt = useRef(-1);
   const goToPlace = (index: number) => {
     const note = placeNotes[index];
     if (!note) return;
     placeAt.current = index;
     move(note.file);
-    places.show(note.id);
+    riskCard.show(riskBarsMarkFor(riskBars, note.file, note.side, note.lineStart));
   };
   const nextPlace = () => goToPlace((placeAt.current + 1) % placeNotes.length);
   // The PR page's "See the N places": taken as this layer's diff mounts (the ask is gone after that, whatever it
@@ -758,6 +820,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
       goToPlace(0);
       return;
     }
+    // A judgment held for this diff, whatever its head (an earlier head's draws nothing): the ask is dropped too.
     if (scope !== 'layer' || diffError || (judged && layer && diff?.head_sha && diff.head_sha === layer.head_sha)) placesWanted.current = false;
   }, [placeNotes.length, layerKey, scope, diffError, judged, diff?.head_sha, layer?.head_sha]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -779,7 +842,8 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
       const plan = verdictOf(id, comments.length > 0);
       // What the agent reads names lines of the diff on screen: one not on it says so.
       const carried = plan.withComments && !plan.discard ? comments.map((c) => (onLine(c) && !c.outdated && !isHere(c, { stamp, files }) ? { ...c, outdated: true } : c)) : [];
-      const parts = pullVerdictReply(plan.verdict, { pull: layer, scope, base: stack.base }, carried.length, carried.length > 0 ? guideCommentSections(carried) : '', note);
+      const skills = verdictRecheckBlock(plan.verdict, pullVerdictToReviewer(link));
+      const parts = pullVerdictReply(plan.verdict, { pull: layer, scope: on?.whole ? 'stack' : 'layer', base: on?.scope === 'range' && on.base ? on.base : stack.base }, carried.length, carried.length > 0 ? guideCommentSections(carried) : '', note, skills);
       const input = { words: parts.words, questions: [], ...(parts.feedback ? { feedback: parts.feedback } : {}) };
       setSending(true);
       setSendError(null);
@@ -798,7 +862,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
         if (mounted.current) setSending(false);
       }
     },
-    [sending, layer, link, stack, comments, scope, keptId, sure, stamp, files, onSent],
+    [sending, layer, link, stack, comments, scope, on?.base, keptId, sure, stamp, files, onSent],
   );
   const spec = useMemo(
     () => buildDecisionSpec({ app: 'review', gate: true, count: comments.length, hasFeedback: comments.length > 0, approvalNotesSupported: true }),
@@ -828,18 +892,27 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
           </Tip>
         </div>
         <div className="ib-pr-empty" role={modelError || model ? 'alert' : undefined}>
-          {modelError ?? (model ? 'This pull request is no longer in the list.' : 'Reading your pull requests…')}
+          {modelError ?? (model && !route.asking ? (route.rest ?? 'This pull request is no longer in the list.') : 'Reading your pull requests…')}
         </div>
       </section>
     );
   }
 
   const label = inboxPullLabel(layer);
-  const noun = pullNounWord(layer.platform);
   const wholeTip = `Whole stack: ${diff && scope === 'stack' ? `${diff.base}…${diff.head}` : `${stack.base} up to ${label}`}`;
+  const scopeTitle = on?.title ?? null;
+  const diffCounts = diff ? { add: files.reduce((sum, f) => sum + f.additions, 0), del: files.reduce((sum, f) => sum + f.deletions, 0) } : undefined;
 
   const readOnlyParts: Words = layer.mine ? ['No review thread yet'] : layer.author ? ['by ', person(layer.author)] : ['by a deleted account'];
   const readOnlyWords = wordsText(readOnlyParts);
+  // The forge not answering for a PR no list names, or saying it has no such PR now: the page stays as last read,
+  // with one line saying so, on its own line above the diff (its words whole, a phone's too). Only while a diff is on
+  // screen: one never read here (the diff's error shows instead) is no last read.
+  const unreadNote = (route.unread || route.missing) && !!diff && (
+    <p className="ib-prr-note" {...(route.missing ? { 'data-pull-review-missing': '' } : { 'data-pull-review-unread': '' })}>
+      {route.missing ? missingWords(forgeName(layer)) : unreadWords(forgeName(layer))}
+    </p>
+  );
   const readOnlyNote = !canDecide && !posted && !diffError && (
     <Tip cut content={readOnlyWords}>
       <p className="ib-prr-note" data-pull-review-readonly={layer.mine ? 'unlinked' : 'teammate'}>
@@ -848,9 +921,18 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
     </Tip>
   );
   // The title opens the PR's details (the owner's "title only"; with `DETAILS_BUTTON`, the Details button beside it too).
+  // A PR that merged or closed while open here says so beside its mark, in its Reviews row's words, a phone's too.
+  const shut = shutWord(layer.state);
+  const shutMark = shut && (
+    <span className="ib-prr-num" data-pull-review-state={layer.state}>
+      {shut}
+      {/* No break before the dot: a phone's narrow title row never wraps it under the word. */}
+      <span aria-hidden="true">&nbsp;·</span>
+    </span>
+  );
   const title = (
     <DetailsTitle
-      name={scope === 'stack' ? `Whole stack up to ${label}` : `${label} ${layer.title}`}
+      name={`${shut ? `${shut}, ` : ''}${scopeTitle ?? `${label} ${layer.title}`}`}
       tip={`${label} ${layer.title} · ${layer.author ?? 'A teammate'} wants to merge ${layer.head} into ${layer.base}`}
       open={detailsOpen}
       data={details.data}
@@ -859,8 +941,9 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
       data-pull-review-title=""
     >
       <RefMarkIcon kind="pr" state={layer.state} size={15} />
-      {scope === 'stack' ? (
-        <bdi>Whole stack up to {label}</bdi>
+      {shutMark}
+      {scopeTitle ? (
+        <bdi>{scopeTitle}</bdi>
       ) : (
         <>
           <span className="ib-prr-num">{label}</span>
@@ -873,11 +956,12 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
     setFilesSheet((open) => !open);
     setSheet(false);
   };
-  const seenCount = files.filter((f) => viewedSet.has(f.path)).length;
   const scopeSwitch = repoSha ? <RailScopeSwitch scope={allFiles ? 'all' : 'changes'} changed={files.length} onSelect={pickScope} /> : undefined;
+  const filesHead = <RailFilesHead files={files} viewed={viewedSet} lead={scopeSwitch} />;
   const rail = (
     <>
-      {stack.layers.length > 1 && <RailStack layers={stack.layers} here={layer} scope={scope} wholeTip={wholeTip} wholeCounts={scope === 'stack' && diff ? { add: files.reduce((sum, f) => sum + f.additions, 0), del: files.reduce((sum, f) => sum + f.deletions, 0) } : undefined} onLayer={onLayer} />}
+      {stack.layers.length > 1 && <RailStack layers={stack.layers} here={layer} scope={scope} wholeTip={wholeTip} wholeCounts={scope === 'stack' ? diffCounts : undefined} onLayer={onLayer} />}
+      <RailScopeRows layer={layer} alone={stack.layers.length <= 1} scope={scope} rangeName={on?.rangeName ?? null} counts={diffCounts} before={before} onLayer={onLayer} />
       {allFiles && repoSha ? (
         <PanePart>
           <PullAllFilesPart.Part
@@ -888,20 +972,28 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
             comments={comments}
             activePath={reveal?.path ?? null}
             openPath={repoOpen}
-            head={
-              <div className="ib-prp-fileshead">
-                {scopeSwitch}
-                <span className="ib-sp" />
-                {seenCount > 0 && <span>{seenCount} viewed</span>}
-              </div>
-            }
+            head={filesHead}
             onSelect={pickFile}
             onOpen={openRepoFile}
-            onToggleViewed={toggleViewed}
+            handleRef={allFilesTree}
+            risk={treeRisk}
           />
         </PanePart>
       ) : (
-        <RailTree tree={tree} loose={loose} files={files} viewed={viewedSet} commentCount={(path) => comments.filter((comment) => comment.filePath === path).length} threadCount={openThreads ? (path) => openThreads.get(path) ?? 0 : undefined} onSelect={pickFile} onToggleViewed={toggleViewed} head={scopeSwitch} />
+        <PanePart loading={<div className="ib-prp-files">{filesHead}</div>}>
+          <PullChangesTreePart.Part
+            files={files}
+            viewed={viewedSet}
+            showViewed
+            comments={comments}
+            threadCount={threadCount}
+            activePath={reveal?.path ?? null}
+            head={filesHead}
+            onSelect={pickFile}
+            handleRef={changesTree}
+            risk={treeRisk}
+          />
+        </PanePart>
       )}
     </>
   );
@@ -938,7 +1030,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
         <span className="ib-sp" />
         {/* Every review header's diff controls (approval diff-controls-headers), in the bar as in a thread's review: one
             Split / Unified button, Collapse all, the Diff display gear. No row over the code holds them: in the Inbox they
-            are always in the header (the owner). A phone has none. */}
+            are always in the header (the owner). A phone has the gear alone, in the row under the bar. */}
         {!phone && snapshot && <DiffControls files={files.length} collapseAll={collapseAll} onCollapseAll={() => setCollapseAll(nextCollapseAll)} />}
         {!phone && <div ref={setControlsHost} className="ib-prr-controls" data-pull-controls="" />}
         {(readerComments || comments.length > 0) && (
@@ -979,9 +1071,11 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
               setComments(stands);
               return forPost(stands, screen, postHead, layer.platform, scope);
             }}
-            anchor={scope === 'stack' ? 'stack' : 'diff'}
+            anchor={isCompare(scope) ? 'stack' : 'diff'}
             note={layer.mine && !canDecide ? readOnlyWords : undefined}
             headSha={postHead}
+            onClosed={listed ? undefined : route.again}
+            onLeft={keepSummary}
             busy={sending || !snapshot}
             picked={picked}
             onPick={pick}
@@ -1007,9 +1101,11 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
       <div className="ib-rsplit">
         {phone && (
           <div className="ib-prp-row2">
-            <button type="button" className={`ib-prp-this${detailsOpen ? ' ib-on' : ''}`} aria-expanded={detailsOpen} aria-label={`${stack.layers.length > 1 ? `${stack.layers.findIndex((l) => l.key === layer.key) + 1} of ${stack.layers.length} ` : ''}${scope === 'stack' ? `Whole stack up to ${label}` : layer.title}, opens details`} onClick={toggleDetails} data-pull-review-title="" data-pull-details-button="">
+            <button type="button" className={`ib-prp-this${detailsOpen ? ' ib-on' : ''}`} aria-expanded={detailsOpen} aria-label={`${shut ? `${shut}, ` : ''}${stack.layers.length > 1 ? `${stack.layers.findIndex((l) => l.key === layer.key) + 1} of ${stack.layers.length} ` : ''}${scopeTitle ?? layer.title}, opens details`} onClick={toggleDetails} data-pull-review-title="" data-pull-details-button="">
+              {shut && <RefMarkIcon kind="pr" state={layer.state} size={15} />}
+              {shutMark}
               {stack.layers.length > 1 && <span className="ib-prp-of">{stack.layers.findIndex((l) => l.key === layer.key) + 1} of {stack.layers.length}</span>}
-              <bdi className="ib-prp-title">{scope === 'stack' ? `Whole stack up to ${label}` : layer.title}</bdi>
+              <bdi className="ib-prp-title">{scopeTitle ?? layer.title}</bdi>
               <Icon name="chevD" size={13} />
             </button>
             {files.length > 0 && (
@@ -1018,6 +1114,8 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
                 <span>{files.length}</span>
               </button>
             )}
+            {snapshot && <DiffControls files={files.length} collapseAll={collapseAll} onCollapseAll={() => setCollapseAll(nextCollapseAll)} />}
+            <span ref={setPowerUpHost} className="ib-prp-powerup" data-pull-power-up-host="" />
           </div>
         )}
         {detailsOpen && (
@@ -1036,7 +1134,12 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
             onClose={closeDetails}
             onFile={move}
             keys={sheetKeys}
-            top={phone && stack.layers.length > 1 ? <RailStack layers={stack.layers} here={layer} scope={scope} wholeTip={wholeTip} onLayer={(key, next) => { setDetailsOpen(false); onLayer(key, next); }} /> : undefined}
+            top={phone && (stack.layers.length > 1 || before || scope.startsWith('since:')) ? (
+              <>
+                {stack.layers.length > 1 && <RailStack layers={stack.layers} here={layer} scope={scope} wholeTip={wholeTip} onLayer={(key, next) => { setDetailsOpen(false); onLayer(key, next); }} />}
+                <RailScopeRows layer={layer} alone={stack.layers.length <= 1} scope={scope} rangeName={on?.rangeName ?? null} counts={diffCounts} before={before} onLayer={(key, next) => { setDetailsOpen(false); onLayer(key, next); }} />
+              </>
+            ) : undefined}
           />
         )}
         <nav className="ib-rrail" id={filesSheetId} ref={railRef} aria-label="Changed files" {...sheetKeys}>
@@ -1073,6 +1176,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
           />
         )}
         <div className="ib-gbody" data-repo-open={repoOpen && repoSha ? '' : undefined}>
+          {unreadNote}
           {repoOpen && repoSha && (
             <PanePart>
               <PullRepoFilePart.Part key={repoOpen} pullKey={layer.key} sha={repoSha} path={repoOpen} />
@@ -1104,34 +1208,35 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
             </div>
           ) : diff && files.length === 0 ? (
             <p className="ib-prr-note" data-pull-diff-empty="">
-              {scope === 'stack' ? `The stack up to ${label} changes no files.` : `This ${noun} changes no files.`}
+              {on?.empty}
             </p>
           ) : snapshot ? (
             // Keyed on the code: new code brings a new reader, so a composer left open cannot save onto a moved line; the
             // same code keeps it, whatever the head reads said. The reader is a chunk loaded on first use: one that cannot
             // arrive says so here.
-            <ReaderPart key={diff?.patch} diff={snapshot.review.rawPatch}>
+            <ReaderPart key={diff?.patch} diff={snapshot.review.rawPatch} images={images}>
+              <ReviewKeysHere diff={snapshot.review.rawPatch} viewed />
               <OpenInCodeSpans scope={{ repo: repoKey ?? '', pull: layerKey }} on={!!repoKey}>
-                <ContextNotesProvider api={places.api}>
-                  <GuideReader
-                    bare
-                    controlsHost={controlsHost}
-                    hostDiffControls
-                    {...(collapseAll ? { collapseAll } : {})}
-                    snapshot={snapshot}
-                    reviewed={[]}
-                    onReviewedChange={() => {}}
-                    comments={readerComments}
-                    mode="files"
-                    reveal={reveal}
-                    viewed={{ files: viewedSet, onToggle: toggleViewed }}
-                    fileOpenIn={fileOpenIn}
-                    fileContents={fileContents}
-                    lineNotes={lineNotes}
-                    wholeFileNotes={wholeFileNotes}
-                    {...(places.anchors.length > 0 ? { contextNotes: places.anchors, renderContextNote: places.renderContextNote } : {})}
-                  />
-                </ContextNotesProvider>
+                <GuideReader
+                  bare
+                  controlsHost={controlsHost}
+                  {...(phone ? { powerUpHost } : {})}
+                  hostDiffControls
+                  {...(collapseAll ? { collapseAll } : {})}
+                  snapshot={snapshot}
+                  reviewed={[]}
+                  onReviewedChange={() => {}}
+                  comments={readerComments}
+                  mode="files"
+                  reveal={reveal}
+                  viewed={{ files: viewedSet, onToggle: toggleViewed }}
+                  fileOpenIn={fileOpenIn}
+                  fileContents={fileContents}
+                  lineNotes={lineNotes}
+                  {...(riskLineMarks.length > 0 ? { lineMarks: riskLineMarks, onLineMark: riskCard.onMark } : {})}
+                  wholeFileNotes={wholeFileNotes}
+                />
+                {riskCard.node}
               </OpenInCodeSpans>
             </ReaderPart>
           ) : (

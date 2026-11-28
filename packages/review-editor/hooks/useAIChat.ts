@@ -31,6 +31,7 @@ interface UseAIChatOptions {
   /** The selected provider is "Ask this session": send the diff's identity,
    *  never the on-screen patch, into the agent's own session. */
   sessionBridge?: boolean;
+  storageKey?: string | null;
 }
 
 export function useAIChat({
@@ -43,6 +44,7 @@ export function useAIChat({
   model,
   reasoningEffort,
   sessionBridge = false,
+  storageKey,
 }: UseAIChatOptions) {
   const chat = useSharedAIChat({
     context: {
@@ -52,6 +54,7 @@ export function useAIChat({
     providerId,
     model,
     reasoningEffort,
+    storageKey,
   });
 
   // View state changes mid-session; the session context is baked once. Read the
@@ -68,8 +71,11 @@ export function useAIChat({
   const identityRef = useRef({ patch, diffType, base });
   identityRef.current = { patch, diffType, base };
 
+  const chatRef = useRef(chat);
+  chatRef.current = chat;
   const ask = useCallback(
     (params: AskAIParams) => {
+      const chat = chatRef.current;
       if (sessionBridge) {
         // The session wrote (or can read) the changes; a pasted patch would stay
         // in its context window for good.
@@ -88,7 +94,7 @@ export function useAIChat({
       lastSentContextRef.current = ctx;
       return chat.ask({ viewing: viewingRef.current, contextPreamble, ...params });
     },
-    [chat, sessionBridge],
+    [sessionBridge],
   );
 
   // Re-asking on a separate provider starts a fresh session there, so it gets

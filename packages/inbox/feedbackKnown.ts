@@ -8,8 +8,9 @@
  * list's ⋮ menu → View → Simple list (listView.ts); `settings-<section>` opens that Settings section;
  * `settings-experimental` opens Capabilities on its Experimental group. A link opens real release notes or docs.
  *
- * Experimental features held until 0.29 (packages/server/inbox.ts `heldSwitch`: Code review, Shape, System) are
- * not here: their switches are hidden, so nothing may offer them.
+ * Code review, Shape and System are not here. The window has no Shape, and System is held (packages/server/inbox.ts
+ * `SYSTEM_SETTINGS_ROW_VISIBLE`): its switch is hidden, so nothing may offer either. Code review's switch shows to
+ * everyone since the owner's call of 2026-11-17, but it has no answer here yet.
  *
  * Matching is whole words and whole phrases, no stems: "moves" never finds "remove". An entry matches on one of its
  * `phrases`, or when every `near` group has a word that is not negated ("doesn't move" is praise) and they sit
@@ -118,10 +119,10 @@ export const KNOWN_ANSWERS: readonly KnownAnswer[] = [
   {
     id: 'phone',
     answer: 'Use the Inbox on your phone, over your tailnet',
-    action: { kind: 'settings-devices', label: 'Open Settings → Devices' },
+    action: { kind: 'settings-devices', label: 'Open Settings → Remote devices' },
     faq: {
       question: 'Can I use the Inbox on my phone?',
-      answer: 'Yes, over your tailnet: open the address from Settings → Devices on your phone.',
+      answer: 'Yes, over your tailnet: open the address from Settings → Remote devices on your phone.',
     },
     feature: 'Over your tailnet',
     match: {
@@ -373,7 +374,7 @@ export function knownAnswerFor(text: string, hidden: readonly string[] = []): Kn
 
 /**
  * The answers this Inbox can't follow, from its settings read: starting agents where it is not offered (Windows),
- * and a switch the Inbox does not report (an older Inbox, or a tailnet guest's read). Nothing until settings load.
+ * and a switch the Inbox does not report (an older Inbox). Nothing until settings load.
  */
 export function hiddenKnownAnswers(
   settings: { launch?: { unsupported?: boolean }; board?: unknown; steps?: unknown; bro?: unknown; float_drafts?: unknown; experimental?: unknown } | null,

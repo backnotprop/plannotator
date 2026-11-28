@@ -22,16 +22,19 @@
  * Enter opens the tray; Left and Right move along it; Enter picks; Escape closes the tray, the picker and the
  * fields, and gives focus back.
  */
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from 'react';
 import { Menu } from '@base-ui/react/menu';
 import { Popover } from '@base-ui/react/popover';
-import { INBOX_REACTION_LABEL_MAX, type InboxReaction } from '@plannotator/core/inbox-types';
+import type { InboxReaction } from '@plannotator/core/inbox-types';
 import { Icon } from '../icons';
 import { Tip } from './Tip';
 import { EmojiPicker, emojiRow } from './EmojiPicker';
 import type { EmojiRow } from './emojiData';
 import { atEnd } from '../seenOnSight';
-import { addSavedReaction, changeSavedReaction, freeSlots, nameSavedReaction, rememberEmoji, removeSavedReaction, savedReactions, useSavedReactions } from '../reactions';
+import { hasSkill, nameAndSkillText, skillPreview, skillSaid } from '../thread/messageReact';
+import { SkillNameInput } from './SkillNameInput';
+import { previewHandlers, SkillMark } from '../thread/ReactStrip';
+import { addSavedReaction, changeSavedReaction, freeSlots, nameAndSkillSavedReaction, namesNoSkill, rememberEmoji, removeSavedReaction, savedReactions, useSavedReactions } from '../reactions';
 
 const LOOKS_GOOD_LABEL = 'Looks good';
 const HOVER_OPEN_MS = 320;
@@ -243,6 +246,10 @@ export function flyReaction(from: Element | null, emoji: string, messageId: stri
 
 /** The message a reaction was last sent to, and when: only its line under the message fades in (Thread.tsx AckPill). */
 let lastReacted: { id: string; at: number } | null = null;
+/** A reaction from elsewhere (a message's face or menu): the line under the message pops as this tray's do. */
+export function reactedNow(messageId: string): void {
+  lastReacted = { id: messageId, at: Date.now() };
+}
 export function justReacted(messageId: string): boolean {
   return !!lastReacted && lastReacted.id === messageId && Date.now() - lastReacted.at < 2000;
 }
@@ -268,11 +275,18 @@ export interface ReactionTrayProps {
   onAck: (on: boolean, reaction: InboxReaction | null, was?: InboxReaction | null) => void;
   /** Opens the tray when it changes (a hold on Reply, on a phone); 0 or unchanged does nothing. */
   openRequest?: number;
+  /**
+   * The tray alone, opened by `openRequest` beside `anchor` (a message's face; approval
+   * "inbox-reactions-every-message"): no 👍 button and no keyboard trigger of its own.
+   */
+  anchor?: RefObject<HTMLElement | null>;
+  /** A saved emoji with a skill sends a reply with it instead of marking the message. */
+  onSkill?: (reaction: InboxReaction & { skill: string }, from: Element | null) => void;
 }
 
 type PickerFor = { kind: 'save' } | { kind: 'once' } | { kind: 'change'; index: number };
 
-export function ReactionTray({ messageId, agent, on, current, phone, onAck, openRequest = 0 }: ReactionTrayProps) {
+export function ReactionTray({ messageId, agent, on, current, phone, onAck, openRequest = 0, anchor, onSkill }: ReactionTrayProps) {
   const saved = useSavedReactions();
   const free = freeSlots(saved.length);
   const [open, setOpen] = useState(false);
@@ -284,9 +298,11 @@ export function ReactionTray({ messageId, agent, on, current, phone, onAck, open
   // Back after a name was kept: the tray is simply there again (no fade, no stagger), where the field's row was.
   const [instant, setInstant] = useState(false);
   const mainRef = useRef<HTMLButtonElement>(null);
+  const at = (anchor ?? mainRef) as RefObject<HTMLButtonElement | null>;
+  const popRef = useRef<HTMLDivElement>(null);
   // The tray, the picker and the fields are drawn inside the window's root, so its styles, theme and text size reach them.
   const [portal, setPortal] = useState<HTMLElement | null>(null);
-  useLayoutEffect(() => setPortal(mainRef.current?.closest<HTMLElement>('.pn-inbox') ?? null), []);
+  useLayoutEffect(() => setPortal((anchor ?? mainRef).current?.closest<HTMLElement>('.pn-inbox') ?? null), [openRequest]); // eslint-disable-line react-hooks/exhaustive-deps -- found again when asked to open
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const held = useRef(false);
   const heldAt = useRef(0);
@@ -353,6 +369,11 @@ export function ReactionTray({ messageId, agent, on, current, phone, onAck, open
     clear();
     setOpen(false);
     setPicker(null);
+    skillPreview.set(null);
+    if (onSkill && hasSkill(reaction)) {
+      onSkill(reaction, from);
+      return;
+    }
     if (on && sameReaction(current, reaction)) {
       onAck(false, current);
       return;
@@ -389,7 +410,8 @@ export function ReactionTray({ messageId, agent, on, current, phone, onAck, open
     if (!open) clear();
   };
   // A hold elsewhere (Reply, on a phone) opens the tray as a hold on the 👍 does: the release does not close it.
-  const seenRequest = useRef(openRequest);
+  // A message's face (`anchor`) mounts the tray with its first request: that one opens it too.
+  const seenRequest = useRef(anchor ? 0 : openRequest);
   useEffect(() => {
     if (openRequest === seenRequest.current) return;
     seenRequest.current = openRequest;
@@ -510,8 +532,8 @@ export function ReactionTray({ messageId, agent, on, current, phone, onAck, open
           modal={false}
           orientation="horizontal"
         >
-          {/* With a mouse, resting on the 👍 opens the tray; a tooltip racing it would cover it. */}
-          {!phone && !on ? (
+          {/* With a mouse, resting on the 👍 opens the tray; a tooltip racing it would cover it. A message's face (`anchor`) draws no button. */}
+          {anchor ? null : !phone && !on ? (
             main
           ) : (
             <Tip content={tip} when={() => !open && !busy()}>
@@ -520,12 +542,16 @@ export function ReactionTray({ messageId, agent, on, current, phone, onAck, open
           )}
           {/* The keyboard's and screen reader's way in: hidden until it has focus. Not a <button>, so the foot's row of
               buttons stays Reply and Looks good. */}
-          <Menu.Trigger className="ib-react-more" data-react-more="" nativeButton={false} render={<span />} aria-label={`More reactions for ${agent}'s message`}>
-            <Icon name="plus" size={12} />
-          </Menu.Trigger>
+          {!anchor && (
+            <Menu.Trigger className="ib-react-more" data-react-more="" nativeButton={false} render={<span />} aria-label={`More reactions for ${agent}'s message`}>
+              <Icon name="plus" size={12} />
+            </Menu.Trigger>
+          )}
           <Menu.Portal container={portal ?? undefined}>
-            <Menu.Positioner className="ib-react-pos" anchor={mainRef} side="top" align="start" sideOffset={10} alignOffset={-6} collisionPadding={12}>
+            {/* A message's face: the tray opens in the face's place, centered on the text's first line, over the text and never over the head row's time, Reply or ⋯. */}
+            <Menu.Positioner className="ib-react-pos" anchor={at} side={anchor ? 'bottom' : 'top'} align={anchor ? 'end' : 'start'} sideOffset={anchor ? ({ anchor: a, positioner: p }) => 6 - (a.height + p.height) / 2 : 10} alignOffset={-6} collisionPadding={12}>
               <Menu.Popup
+                ref={popRef}
                 className="ib-react-pop"
                 data-reaction-tray=""
                 data-instant={instant ? '' : undefined}
@@ -550,18 +576,25 @@ export function ReactionTray({ messageId, agent, on, current, phone, onAck, open
                     <span className="ib-react-e">👍</span>
                   </Menu.Item>
                   {saved.map((r, i) => {
-                    const name = r.label || capFirst(emojiName(r.emoji));
+                    const name = hasSkill(r) ? skillSaid(r) : r.label || capFirst(emojiName(r.emoji));
+                    const card = previewHandlers(r, agent, () => popRef.current, messageId);
                     return (
                       <Menu.Item
                         key={`saved-${r.emoji}`}
                         className="ib-react-cell"
                         data-reaction={`saved-${i}`}
                         data-current={on && sameReaction(current, r) ? '' : undefined}
-                        data-tip={r.label || undefined}
+                        data-tip={hasSkill(r) ? undefined : r.label || undefined}
+                        data-skill={hasSkill(r) ? r.skill : undefined}
+                        onPointerEnter={card.onPointerEnter}
+                        onBlur={card.onBlur}
+                        onFocus={(e) => {
+                          lastSaved.current = i;
+                          card.onFocus?.(e);
+                        }}
                         style={{ ['--i' as string]: 1 + i }}
                         label={name}
                         aria-label={`${r.emoji} ${name}`}
-                        onFocus={() => (lastSaved.current = i)}
                         onMouseEnter={() => (lastSaved.current = i)}
                         // Right-click (a mouse) or a hold (touch): edit this one.
                         onContextMenu={(e) => {
@@ -581,7 +614,10 @@ export function ReactionTray({ messageId, agent, on, current, phone, onAck, open
                         }}
                         onPointerUp={() => savedTimer.current && clearTimeout(savedTimer.current)}
                         onPointerCancel={() => savedTimer.current && clearTimeout(savedTimer.current)}
-                        onPointerLeave={() => savedTimer.current && clearTimeout(savedTimer.current)}
+                        onPointerLeave={() => {
+                          card.onPointerLeave?.();
+                          if (savedTimer.current) clearTimeout(savedTimer.current);
+                        }}
                         onClick={(e) => {
                           if (savedHeld.current) {
                             savedHeld.current = false;
@@ -591,6 +627,7 @@ export function ReactionTray({ messageId, agent, on, current, phone, onAck, open
                         }}
                       >
                         <span className="ib-react-e">{r.emoji}</span>
+                        {hasSkill(r) && <SkillMark />}
                       </Menu.Item>
                     );
                   })}
@@ -652,11 +689,11 @@ export function ReactionTray({ messageId, agent, on, current, phone, onAck, open
           handOff.current = false;
           if (was?.kind === 'change') after(140, () => setEditing(was.index));
         }}
-        anchor={mainRef}
+        anchor={at}
         container={portal}
         phone={phone}
         label={picker?.kind === 'once' ? `React to ${agent}'s message with any emoji` : 'Pick an emoji to save in your tray'}
-        returnTo={() => (toField.current ? false : mainRef.current)}
+        returnTo={() => (toField.current ? false : at.current)}
         idle={picker?.kind === 'once' ? 'Pick one to react with it' : 'Pick one to save'}
         says={(row) => (picker?.kind === 'once' ? `React with ${row[0]}` : `Save ${row[0]} to your tray`)}
         onPick={pick}
@@ -665,7 +702,7 @@ export function ReactionTray({ messageId, agent, on, current, phone, onAck, open
         container={portal}
         index={naming}
         fresh={fresh}
-        anchor={mainRef}
+        anchor={at}
         phone={phone}
         onClose={(how) => {
           setNaming(null);
@@ -689,7 +726,7 @@ export function ReactionTray({ messageId, agent, on, current, phone, onAck, open
       <SavedEditor
         container={portal}
         index={editing}
-        anchor={mainRef}
+        anchor={at}
         phone={phone}
         onSwitch={setEditing}
         onChangeEmoji={(index) => {
@@ -774,10 +811,12 @@ function TrayRow({ highlight, fresh, onPick, onPress }: { highlight: number | nu
             onClick={() => onPick(i)}
           >
             <span className="ib-react-e">{r.emoji}</span>
+            {hasSkill(r) && <SkillMark />}
           </button>
         ) : (
           <span key={`${i}-${r.emoji}`} className="ib-react-cell" data-fresh={i === fresh ? '' : undefined} data-highlighted={i === highlight ? '' : undefined}>
             <span className="ib-react-e">{r.emoji}</span>
+            {hasSkill(r) && <SkillMark />}
           </span>
         ),
       )}
@@ -815,13 +854,13 @@ function NameField({ container, index, fresh, anchor, phone, onClose, onReact }:
   const nameRef = useRef<HTMLInputElement>(null);
   const closing = useRef<'enter' | 'escape' | 'dismiss'>('dismiss');
   useEffect(() => {
-    if (index !== null) setText(saved[index]?.label ?? '');
+    if (index !== null) setText(nameAndSkillText(saved[index]));
   }, [index]); // eslint-disable-line react-hooks/exhaustive-deps -- a fresh field per saved emoji
   const close = (how: 'enter' | 'escape' | 'dismiss') => {
     if (index === null) return;
     closing.current = how;
     // Enter keeps the name (or takes it away); a click away keeps only words typed; Escape keeps nothing.
-    if (how === 'enter' || (how === 'dismiss' && text.trim())) nameSavedReaction(index, text);
+    if (how === 'enter' || (how === 'dismiss' && text.trim())) nameAndSkillSavedReaction(index, text);
     onClose(how);
   };
   return (
@@ -837,32 +876,14 @@ function NameField({ container, index, fresh, anchor, phone, onClose, onReact }:
           >
             {r && (
               <>
-                <input
-                  ref={nameRef}
-                  className="ib-namer-in"
-                  data-name-field=""
-                  type="text"
-                  value={text}
-                  placeholder="Name it (optional)"
-                  maxLength={INBOX_REACTION_LABEL_MAX}
-                  autoComplete="off"
-                  enterKeyHint="done"
-                  aria-label={`Name for ${r.emoji}, optional. Enter to keep it`}
-                  onChange={(e) => setText(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
-                      e.preventDefault();
-                      close('enter');
-                    }
-                  }}
-                />
+                <SkillNameInput inputRef={nameRef} roomOf={anchor} data="name-field" value={text} onChange={setText} onEnter={() => index !== null && !namesNoSkill(index, text) && close('enter')} own={r.skill} label={`Name for ${r.emoji}, optional, or / for a skill. Enter to keep it`} />
                 <TrayRow
                   highlight={null}
                   fresh={fresh}
                   onPress={(what, from) => {
                     if (index === null) return;
                     // The name typed so far goes with it; nothing typed leaves it unnamed.
-                    if (text.trim()) nameSavedReaction(index, text);
+                    if (text.trim()) nameAndSkillSavedReaction(index, text);
                     closing.current = 'dismiss';
                     onReact(what, from);
                   }}
@@ -904,20 +925,16 @@ function SavedEditor({
   const nameRef = useRef<HTMLInputElement>(null);
   // How it closed decides where focus goes: with keys back to the 👍; with the pointer, nowhere.
   const byKeys = useRef(false);
-  useEffect(() => setText(r?.label ?? ''), [index, r?.emoji]); // eslint-disable-line react-hooks/exhaustive-deps -- a fresh field per saved emoji
+  useEffect(() => setText(nameAndSkillText(r ?? undefined)), [index, r?.emoji]); // eslint-disable-line react-hooks/exhaustive-deps -- a fresh field per saved emoji
   const keep = () => {
-    if (index !== null) nameSavedReaction(index, text);
+    if (index !== null) nameAndSkillSavedReaction(index, text);
   };
   const done = (keys: boolean) => {
+    // A `/name` that names no skill: the editor stays open on it (the list has already shown nothing matches).
+    if (index !== null && namesNoSkill(index, text)) return;
     keep();
     byKeys.current = keys;
     onClose();
-  };
-  const onKey = (e: ReactKeyboardEvent) => {
-    if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
-      e.preventDefault();
-      done(true);
-    }
   };
   return (
     <Popover.Root
@@ -941,20 +958,7 @@ function SavedEditor({
             {r && index !== null && (
               <>
                 <div className="ib-react-form">
-                  <input
-                    ref={nameRef}
-                    className="ib-namer-in"
-                    data-edit-name=""
-                    type="text"
-                    value={text}
-                    placeholder="Name it (optional)"
-                    maxLength={INBOX_REACTION_LABEL_MAX}
-                    autoComplete="off"
-                    enterKeyHint="done"
-                    aria-label={`Name for ${r.emoji}`}
-                    onChange={(e) => setText(e.target.value)}
-                    onKeyDown={onKey}
-                  />
+                  <SkillNameInput inputRef={nameRef} roomOf={anchor} data="edit-name" value={text} onChange={setText} onEnter={() => done(true)} own={r.skill} label={`Name for ${r.emoji}, or / for a skill`} />
                   <div className="ib-react-acts">
                     <button
                       type="button"

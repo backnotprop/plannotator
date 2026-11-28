@@ -1,3 +1,5 @@
+@import "../../ui/components/agentFace/agentFace.css";
+
 /* The sidebar's Agents section (approval "inbox-agents-section", APPROVED STATE 2026-11-09; AgentsSection.tsx) and
    the animated agent marks (approval "inbox-agent-icon-motion"; motion.ts). Theme tokens only. */
 
@@ -7,15 +9,13 @@
 .pn-inbox .ib-side-sec > svg.ib-ic.ib-agents-mk,
 .pn-inbox .ib-sheet-now-n > svg.ib-ic.ib-agents-mk { fill: currentColor; stroke: none; overflow: visible; }
 /* Add machine, then Add agent: the heading's quiet icon buttons, the chevron's place kept, so Add agent is right under
-   Tags' New tag. Shown while the section is open; closed, on the heading's hover or focus (always where nothing
-   hovers), as New tag. */
-.pn-inbox .ib-agentsec:not([data-closed]) .ib-agents-add { opacity: 1; }
+   Tags' New tag. Shown when the chevron is, open or closed: on the heading's hover or keyboard focus (always where
+   nothing hovers), as New tag. */
 .pn-inbox .ib-agentsec .ib-agents-add[data-agents-add="machine"] { right: 50px; }
 /* The phone's sheet lays the heading's buttons out in a row: Add agent first there, and none on a closed heading. */
 .pn-inbox .ib-sb-sheet-in .ib-agentsec .ib-agents-add[data-agents-add="machine"] { order: 1; }
 .pn-inbox .ib-sb-sheet-in .ib-agentsec[data-closed] .ib-agents-add { display: none; }
-.pn-inbox .ib-agents-body { margin-top: 2px; }
-.pn-inbox .ib-agents-body[data-closed] { margin-top: 0; }
+/* Its rows sit right under the heading, as Tags' and Projects' do; its empty line is theirs too (.ib-side-empty). */
 .pn-inbox .ib-agents-group + .ib-agents-group { margin-top: 10px; }
 
 /* A machine: a small quiet grey caption, flush left, no icon. Still the machine's filter (its old Machines row). */
@@ -48,11 +48,7 @@
   .pn-inbox .ib-sbagent .ib-pmore { opacity: 1; }
   .pn-inbox .ib-sbagent:has(> .ib-pmore) .ib-proj { padding-right: 32px; }
 }
-/* The one spacing rule of the sidebar's sections, for a section that is one block: its heading 2 px under a closed
-   section with no row left, and the next heading 2 px under it while it is closed (closed, it draws no row at all). */
-.pn-inbox .ib-sidescroll > [data-closed]:empty + .ib-agentsec > .ib-secrow { margin-top: 2px; }
-.pn-inbox .ib-sidescroll > .ib-agentsec[data-closed] + :is(.ib-side-sec, .ib-secrow) { margin-top: 2px; }
-.pn-inbox .ib-agents-empty { padding: 2px 9px 4px; }
+/* The heading after a closed Agents: the sections' one spacing rule (inbox.css, by .ib-sidescroll). */
 
 /* The hover card: who, where and when, calm. */
 .ib-agtip { display: flex; flex-direction: column; gap: 2px; min-width: 200px; }
@@ -80,32 +76,9 @@
 
 /* ---------- the animated agent mark (motion.ts): 24 px, no tile, always alive ---------- */
 .pn-inbox .am { --am: var(--ib-mark-24); position: relative; display: inline-grid; place-items: center; flex: none; width: var(--am); height: var(--am); cursor: pointer; -webkit-tap-highlight-color: transparent; }
-/* The layer that leans toward the pointer, around the mark's feet. */
-.am-look { grid-area: 1 / 1; display: grid; place-items: center; width: var(--am); height: var(--am); transform-origin: 50% 90%; will-change: transform; }
-.am-card { grid-area: 1 / 1; position: relative; width: var(--am); height: var(--am); display: grid; place-items: center; transform-style: preserve-3d; }
-.am-face { grid-area: 1 / 1; position: absolute; inset: 0; display: grid; place-items: center; backface-visibility: hidden; }
-.am-face[hidden] { display: none; }
-/* OpenCode's currentColor mark takes the muted text colour. */
-.am-tile { position: relative; width: 100%; height: 100%; display: grid; place-items: center; color: var(--muted-foreground); }
-.am-tile > .ib-mk, .am-tile > .ib-mk > svg, .am-tile > .ib-mk > img { width: var(--ib-mark-20); height: var(--ib-mark-20); }
-.am-glyph { width: var(--am); height: var(--am); display: block; overflow: visible; }
-/* A rig: every part an HTML layer the size of the glyph, holding its own small svg. */
-.am-rig { position: relative; }
-.am-rig .am-p, .am-rig .am-x, .am-rig .am-spin, .am-rig .am-e { position: absolute; inset: 0; display: block; }
-.am-l { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
-/* The gesture layer and the eyes (the layer inside it that looks toward the pointer) are promoted up front, so a
-   gesture or a look never lays out or repaints the row. */
-.am-rig .am-x, .am-fb.am-x, .am-rig .am-e { will-change: transform; }
-/* Our faces (the favicon art) move as a whole. */
-.am-fb { display: block; width: 100%; height: 100%; transform-origin: 50% 97%; }
-/* A host with no rig: its plain mark, drawn in the same moving layer. */
-.am-fb.am-plain { display: grid; place-items: center; }
-.am-plain > .ib-mk, .am-plain > .ib-mk > svg, .am-plain > .ib-mk > img { width: var(--ib-mark-20); height: var(--ib-mark-20); }
-.am-art { display: block; width: 100%; height: 100%; }
-/* Transparent: the ink-frame mark on light, the yellow-frame pixel mark on dark. */
-.am-art-l { display: none; }
-:root.light .am-art-l { display: block; }
-:root.light .am-art-d { display: none; }
+/* The list's Agents view draws it at 44 (AgentMark's `size`): the same mark, its host's plain mark one step up. */
+.pn-inbox .am[data-size="44"] { --am: var(--ib-mark-44); }
+.pn-inbox .am[data-size="44"] :is(.am-plain, .am-tile) > :is(.ib-mk, .ib-mk > svg, .ib-mk > img) { width: var(--ib-mark-30); height: var(--ib-mark-30); }
 
 /* ---------- the face picker (FaceFan.tsx): a half-circle fan of faces round the mark, an overlay ---------- */
 /* The positioner sits at the mark's centre with no size; each choice is placed from there (fanLayout.ts). */
@@ -129,9 +102,10 @@
   --gl-hi: color-mix(in oklch, #fff 92%, transparent);
   --gl-rim: color-mix(in oklch, var(--foreground) 12%, transparent);
 }
-.am-fan-dial { --o: 18px; position: absolute; left: calc(var(--o) * -1); top: calc(var(--r) * -1); width: calc(var(--r) + var(--o)); height: calc(var(--r) * 2); transform-origin: var(--o) 50%; transform: rotate(var(--a)); transition: transform 180ms cubic-bezier(0.2, 0.9, 0.3, 1); }
+/* `--grow`: half of what the mark is past the sidebar's 28 px button (a 44 px mark), so the plate's hole clears it. */
+.am-fan-dial { --o: calc(18px + var(--grow, 0px)); position: absolute; left: calc(var(--o) * -1); top: calc(var(--r) * -1); width: calc(var(--r) + var(--o)); height: calc(var(--r) * 2); transform-origin: var(--o) 50%; transform: rotate(var(--a)); transition: transform 180ms cubic-bezier(0.2, 0.9, 0.3, 1); }
 .am-fan-shade, .am-fan-edge { position: absolute; inset: 0; }
-.am-fan-plate { --hole: 21px; display: block; width: 100%; height: 100%; border-radius: 14px var(--r) var(--r) 14px / 14px var(--r) var(--r) 14px; transition: opacity 120ms linear; }
+.am-fan-plate { --hole: calc(21px + var(--grow, 0px)); display: block; width: 100%; height: 100%; border-radius: 14px var(--r) var(--r) 14px / 14px var(--r) var(--r) 14px; transition: opacity 120ms linear; }
 /* Its shadow: outside the plate only (a box-shadow is never drawn under its box), so none shows through the glass. */
 .am-fan-plate[data-shade] { box-shadow: 0 10px 24px -8px color-mix(in oklch, #000 26%, transparent), 0 1px 3px color-mix(in oklch, #000 10%, transparent); }
 .am-fan-edge > .am-fan-plate {
@@ -180,8 +154,8 @@
 .am-fan[data-touch] .am-fan-i { left: -20px; top: -20px; width: 40px; height: 40px; border-radius: 12px; }
 .am-fan[data-touch] .am-fan-i[aria-checked="true"]::after { bottom: 0; }
 .am-fan[data-touch] .am-fan-f, .am-fan[data-touch] .am-fan-f > img { width: 30px; height: 30px; }
-.am-fan[data-touch] .am-fan-dial { --o: 24px; }
-.am-fan[data-touch] .am-fan-plate { --hole: 25px; }
+.am-fan[data-touch] .am-fan-dial { --o: calc(24px + var(--grow, 0px)); }
+.am-fan[data-touch] .am-fan-plate { --hole: calc(25px + var(--grow, 0px)); }
 /* Reduced motion: no travel, a plain fade. */
 .am-fan[data-still] .am-fan-i, .am-fan[data-still][data-starting-style] .am-fan-i, .am-fan[data-still][data-ending-style] .am-fan-i { transform: translate(var(--x), var(--y)); transition: opacity 120ms linear; }
 .am-fan[data-still] .am-fan-i:hover { transform: translate(var(--x), var(--y)); }
@@ -251,3 +225,39 @@
 .am-sets-art > img:not([src]) { visibility: hidden; }
 .am-sets-art[data-mono] { width: 28px; height: 28px; margin: 2px; }
 .am-sets-art[data-mono]:not([style*="--set-src"]) > .am-sets-mono { visibility: hidden; }
+
+/* ---------- From the project name (approval "inbox-generated-agent-icons"; projectFace.tsx) ----------
+   A solid tile in the mark's own box: the letter marks' solid look (letterMarks.tsx, `.ib-lm[data-solid]`: one of
+   eight hues turned from --primary, the letters in the page's lightest) filling it, the letters sized to the box. The
+   agent's own mark rides on the corner from 20 px up: a container query on the tile, so a 16 px mark is the tile
+   alone. The badge is a disc on the page colour with a thin ring of it, so it reads on any tile hue. */
+.ib-mk.ib-pf { position: relative; container-type: size; background: none; }
+/* Under 20 px one letter (the first), at the one-letter size: two would be 7 px on a 16 px tile. Two from 20 px up. */
+.ib-mk.ib-pf > .ib-pf-t { width: 100%; height: 100%; border-radius: 28%; font-size: 54cqw; letter-spacing: -0.03em; }
+.ib-mk.ib-pf > .ib-pf-t .ib-lm-2 { display: none; }
+.ib-mk.ib-pf > .ib-pf-t[data-kind="emoji"] { font-size: 60cqw; letter-spacing: 0; }
+@container (min-width: 19.5px) {
+  .ib-mk.ib-pf > .ib-pf-t[data-n="2"] { font-size: 44cqw; }
+  .ib-mk.ib-pf > .ib-pf-t .ib-lm-2 { display: inline; }
+}
+.ib-pf-b { display: none; position: absolute; right: -11cqw; bottom: -11cqw; width: 50cqw; height: 50cqw; border-radius: 50%; background: var(--background); box-shadow: 0 0 0 1.5px var(--background); align-items: center; justify-content: center; }
+.ib-pf-b > .ib-mk, .ib-pf-b > .ib-mk > :is(svg, img) { width: 78%; height: 78%; }
+.ib-pf-b > .ib-mk > :is(svg, img) { width: 100%; height: 100%; }
+@container (min-width: 19.5px) { .ib-pf-b { display: flex; } }
+@container (min-width: 29.5px) { .ib-pf-b { right: -9.25cqw; bottom: -9.25cqw; width: 42cqw; height: 42cqw; } }
+/* In a list row's grey tile (or another tile round the mark): the tile is the project's, the grey one shows no colour. */
+:root :is(.ib-atile, .ib-bc-who) > .ib-mk.ib-pf { width: 100%; height: 100%; }
+:root :is(.ib-atile, .ib-draft-mk, .ib-bc-who):has(> .ib-mk.ib-pf) { background: none; }
+/* The sidebar's Agents row: a still in the animated mark's 24 px place. */
+.pn-inbox .am.am-pf > .ib-mk.ib-pf { width: 100%; height: 100%; }
+/* Settings → Rows' Agent icons choice: what each draws, before its words. */
+.ib-seg-ic { display: inline-flex; flex: none; }
+/* The animated mark while the project's tile stands in its place: kept, not drawn. */
+.pn-inbox .am[hidden] { display: none; }
+/* Its three long choices with their pictures keep one line in the Rows page's control column (438 px at 1440). */
+.ib-rws-ctl [data-rows-control="agents"] .ib-seg-o { padding: 0 8px; gap: 5px; }
+/* A phone's column is too narrow for the three in a line: one under another, each the control's full width. */
+@media (max-width: 480px) {
+  .ib-rws-ctl [data-rows-control="agents"] .ib-seg { display: flex; flex-direction: column; align-items: stretch; flex-wrap: nowrap; width: 100%; }
+  .ib-rws-ctl [data-rows-control="agents"] .ib-seg-o { justify-content: flex-start; padding: 0 10px; gap: 8px; }
+}

@@ -141,7 +141,9 @@ describe("POST /api/inbox/messages/:id/ack", () => {
     expect((await windowMessage(server, threadId, messageId)).ack).toMatchObject({ label: "Looks good" });
   });
 
-  test("refusals: a question open or picked, an older agent message, a person's message, an archived thread, the guards", async () => {
+  test("any agent message takes one (an older message, a reply after it: on its own, no Mark read); refused while a question waits, on a person's message, an archived thread, the guards", async () => {
+    // Approval "inbox-reactions-every-message": no reply or newer-message gate; it stands on its own. A question that
+    // waits still refuses it, as before, so "Take it as a go" never reaches an agent whose question is open.
     const asking = await setup(QUESTION);
     const open = await ack(asking.server, asking.messageId);
     expect(open.status).toBe(409);
@@ -149,19 +151,19 @@ describe("POST /api/inbox/messages/:id/ack", () => {
 
     const { server, threadId, messageId, send } = await setup();
     const later = await send("One more update.", messageId);
-    const stale = await ack(server, messageId);
-    expect(stale.status).toBe(409);
-    expect(((await stale.json()) as { code: string }).code).toBe("ack_stale");
+    const older = await ack(server, messageId);
+    expect(older.status).toBe(200);
+    expect(((await older.json()) as { message: InboxMessageWire }).message.ack).toMatchObject({ standalone: true, made_read: false });
 
     const replied = await post(server, `/api/inbox/messages/${later.message_id}/reply`, { idempotency_key: "r1", words: "cool" });
     const replyId = ((await replied.json()) as { reply: { id: string } }).reply.id;
     const person = await ack(server, replyId);
     expect(person.status).toBe(422);
     expect(((await person.json()) as { code: string }).code).toBe("ack_not_allowed");
-    // The person already replied after the agent's latest message: the reply is the answer, and the row stays Sent.
+    // The person already replied after the agent's latest message: a reaction on its own, and the row stays Sent.
     const afterReply = await ack(server, later.message_id);
-    expect(afterReply.status).toBe(409);
-    expect(((await afterReply.json()) as { code: string }).code).toBe("ack_after_reply");
+    expect(afterReply.status).toBe(200);
+    expect(((await afterReply.json()) as { message: InboxMessageWire }).message.ack).toMatchObject({ standalone: true, made_read: false });
     expect((await rowOf(server, threadId)).section).toBe("sent");
 
     expect((await post(server, `/api/inbox/messages/${later.message_id}/ack`,{}, { Origin: "https://evil.example", "Sec-Fetch-Site": "cross-site" })).status).toBe(403);
@@ -236,9 +238,9 @@ describe("what the agent sees", () => {
     expect(commands).toHaveLength(1);
     const command = commands[0]!;
     expect(command).toMatchObject({ type: "reply", thread_id: threadId, reply_to: messageId, ack_of: messageId });
-    expect(command.body).toBe(`The person reacted 👍 Looks good to your message (${messageId}).`);
+    expect(command.body).toBe(`The person reacted 👍 Looks good to your message (${messageId}). Take it as a go.`);
     expect(inboxWakeText(command)).toBe(
-      `Plannotator Inbox: ${command.subject} (${command.id})\nThe person reacted 👍 Looks good to your message (${messageId}).\n\n[thread ${threadId}]`,
+      `Plannotator Inbox: ${command.subject} (${command.id})\nThe person reacted 👍 Looks good to your message (${messageId}). Take it as a go.\n\n[thread ${threadId}]`,
     );
     // Another session is never handed it.
     expect(await poll(server, "ses_other")).toEqual([]);

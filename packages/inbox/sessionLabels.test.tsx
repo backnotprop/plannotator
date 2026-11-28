@@ -78,6 +78,11 @@ describe('the @ picker', () => {
     expect(option!.label.startsWith('Investigate the')).toBe(true);
     expect(option!.label.endsWith('checkout test')).toBe(true);
     expect(option!.label).toContain('…');
+    // The row's hover carries the whole name the token cut; an unnamed row has none.
+    expect(option!.full).toBe(long);
+    const [twin] = tagOptions(model([live('a', 'claude-code', long), live('b', 'claude-code', long)]), null, 'prj_1', time);
+    expect(twin!.full).toBe(`${long} (Claude Code)`);
+    expect(tagOptions(model([live('a', 'claude-code')]), null, 'prj_1', time)[0]!.full).toBeNull();
     const [markup] = tagOptions(model([live('a', 'claude-code', '<img src=x onerror=alert(1)> [x](y)')]), null, 'prj_1', time);
     expect(markup!.label).toBe('<img src=x onerror=alert(1)> x (y)');
   });

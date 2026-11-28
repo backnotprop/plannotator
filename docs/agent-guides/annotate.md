@@ -47,6 +47,8 @@ Send Feedback → annotations sent to agent session
 Done / Approve (gate) → positive decision recorded (see the decision control below)
 ```
 
+**Opening view.** config.json `annotateView` (`"wide"` / `"focus"` / `"edit"`) opens an annotate session in that toolbar view, once, when the document first loads; a view the document cannot use (toolbar hidden, Edit on a read-only document, Edit while a draft is offered, folders and bundles) falls back to today's default, and a click in the session wins and is never written back (see `annotateView` in [`environment.md`](environment.md)).
+
 ### AsciiDoc files
 
 `.adoc`/`.asciidoc` take the diagram path through `packages/core/annotatable.ts`: they are annotatable plain text everywhere on the server (resolution, 2MB cap, folders, file browser, bundles, version history), and both servers set `renderAs: "asciidoc"` on `/api/plan` and `/api/doc` with the RAW file as the body (`annotateDocumentRenderKind` / `documentRenderKindForPath`). The editor's `blocksForRenderAs` (`packages/editor/feedbackDocuments.ts`) sends that text through `parseAsciidocToBlocks` (`packages/ui/utils/asciidocParser.ts`), which maps AsciiDoc onto the markdown `Block` model with each block's real source span, so annotations, export line labels, drafts and linked docs need no special case. A share payload carries `r: 'asciidoc'`. No asciidoctor.js: it would bloat the single-file page.

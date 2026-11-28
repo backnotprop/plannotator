@@ -88,6 +88,7 @@ export interface PlannotatorToolInput {
    * `--tailscale`). Only from a host that parses with `{ tailscale: true }`.
    */
   tailscale?: boolean
+  cloudflareAccess?: boolean
   /** close: a session id (`pn-` + 6 hex, as the results name it) or "all". */
   session?: string
 }
@@ -95,7 +96,7 @@ export interface PlannotatorToolInput {
 export const PLANNOTATOR_TOOL_DESCRIPTION = [
   'Open Plannotator, the browser review UI, for the user, and return at once. Also lists and closes the reviews opened in this conversation (by this tool or the user\'s /plannotator-* commands).',
   '- action "annotate": annotate a file (markdown, text, config, HTML), a folder, or a URL; `target` is required. Pass a list as `target` to review several files together, in the order you want them read. `gate: true` adds an Approve button for an explicit sign-off. `options.markdown: true` converts HTML or a URL to markdown first.',
-  '- action "review": review code changes; `target` is an optional repository directory or a GitHub/GitLab/Bitbucket pull request URL (default: the current repository). `options.base` sets the compare branch or ref (git only). `gate: true` when you wait for the sign-off: a bare Approve reaches you too.',
+  '- action "review": review code changes; `target` is an optional repository directory or a GitHub/GitLab/Bitbucket/Forgejo pull request URL (default: the current repository). `options.base` sets the compare branch or ref (git only). `gate: true` when you wait for the sign-off: a bare Approve reaches you too.',
   '- action "last": annotate your own last assistant message; no target.',
   '- action "list": the reviews opened in this conversation that are still open, one line each: session id, what it shows, url, age, state, and how many comments the reviewer has not sent yet.',
   '- action "close": close a review opened in this conversation that is no longer needed; `session` is its id (pn-...) or "all". Nothing is sent to you, and the reviewer\'s unsent comments stay saved as a draft. Plan reviews are not closed this way: they end with the reviewer\'s decision.',
@@ -161,6 +162,10 @@ export const PLANNOTATOR_TOOL_TAILSCALE_INPUT_SCHEMA = {
       type: 'boolean',
       description: 'annotate, review, last: serve the page over the user\'s tailnet (HTTPS, never public), to open on another device. "Ask this session" works there for the computer owner\'s Tailscale login.',
     },
+    cloudflareAccess: {
+      type: 'boolean',
+      description: 'annotate, review, last: open the page at the user\'s own Cloudflare Access address instead, to open on another device, for their e-mail only. Only when they ask for it and have run `plannotator inbox cloudflare-access setup`. Not together with tailscale.',
+    },
   },
 } as const
 
@@ -179,6 +184,9 @@ export interface PlannotatorToolParseOptions {
 export const PLANNOTATOR_TOOL_TAILSCALE_UNAVAILABLE_TEXT =
   'Plannotator did not open: the installed Plannotator is too old to open a review over the tailnet from this tool. Ask the user to update Plannotator (`plannotator update`), or open it without `tailscale` for now.'
 
+export const PLANNOTATOR_TOOL_CLOUDFLARE_ACCESS_UNAVAILABLE_TEXT =
+  'Plannotator did not open: the installed Plannotator is too old to open a review through Cloudflare Access from this tool. Ask the user to update Plannotator (`plannotator update`), or open it without `cloudflareAccess` for now.'
+
 /**
  * Whether a CLI's startup error for a `tailscale` call is an OLDER CLI's
  * refusal of the flag itself (it read `--tailscale` as a file, an unknown
@@ -189,9 +197,9 @@ export const PLANNOTATOR_TOOL_TAILSCALE_UNAVAILABLE_TEXT =
 export function isOlderCliTailscaleRefusal(errorText: string): boolean {
   if (errorText.includes('--tailscale:')) return false
   return (
-    /File not found: [^\n]*--tailscale/.test(errorText) ||
+    /File not found: [^\n]*--(?:tailscale|cloudflare-access)/.test(errorText) ||
     errorText.includes('--tailscale is only supported with') ||
-    /(?:unknown|unrecognized|unexpected) (?:option|flag|argument)[^\n]*--tailscale/i.test(errorText)
+    /(?:unknown|unrecognized|unexpected) (?:option|flag|argument)[^\n]*--(?:tailscale|cloudflare-access)/i.test(errorText)
   )
 }
 
@@ -277,7 +285,7 @@ export function parsePlannotatorToolInput(value: unknown, parseOptions: Plannota
   const fail = (error: string): PlannotatorToolParse => ({ ok: false, error: `Invalid plannotator call: ${error}.` })
   if (!isRecord(value)) return fail('the input must be an object')
   for (const key of Object.keys(value)) {
-    if (!TOOL_KEYS.includes(key) && !(key === 'tailscale' && parseOptions.tailscale === true)) return fail(`unknown field "${key}"`)
+    if (!TOOL_KEYS.includes(key) && !((key === 'tailscale' || key === 'cloudflareAccess') && parseOptions.tailscale === true)) return fail(`unknown field "${key}"`)
   }
   const action = value.action
   if (typeof action !== 'string' || !ACTIONS.includes(action as PlannotatorToolAction)) {
@@ -326,6 +334,13 @@ export function parsePlannotatorToolInput(value: unknown, parseOptions: Plannota
     if (typeof fields.tailscale !== 'boolean') return fail('tailscale must be true or false')
     if (fields.tailscale && !opens) return fail('tailscale is for actions "annotate", "review" and "last" only')
     if (fields.tailscale) input.tailscale = true
+  }
+
+  if (fields.cloudflareAccess !== undefined) {
+    if (typeof fields.cloudflareAccess !== 'boolean') return fail('cloudflareAccess must be true or false')
+    if (fields.cloudflareAccess && !opens) return fail('cloudflareAccess is for actions "annotate", "review" and "last" only')
+    if (fields.cloudflareAccess && input.tailscale) return fail('use tailscale or cloudflareAccess, not both')
+    if (fields.cloudflareAccess) input.cloudflareAccess = true
   }
 
   if (fields.options !== undefined) {
@@ -390,6 +405,7 @@ export function plannotatorToolArgs(input: PlannotatorToolInput): string[] {
         ...(input.gate ? ['--gate'] : []),
         ...(input.options?.markdown ? ['--markdown'] : []),
         ...(input.tailscale ? ['--tailscale'] : []),
+        ...(input.cloudflareAccess ? ['--cloudflare-access'] : []),
       ]
     case 'review':
       // A review's `gate` is the host's alone (deliver a bare approval as a
@@ -398,10 +414,11 @@ export function plannotatorToolArgs(input: PlannotatorToolInput): string[] {
       return [
         ...(input.options?.base ? ['--base', input.options.base] : []),
         ...(input.tailscale ? ['--tailscale'] : []),
+        ...(input.cloudflareAccess ? ['--cloudflare-access'] : []),
         ...plannotatorToolTargets(input),
       ]
     case 'last':
-      return input.tailscale ? ['--tailscale'] : []
+      return input.tailscale ? ['--tailscale'] : input.cloudflareAccess ? ['--cloudflare-access'] : []
     case 'list':
     case 'close':
       return []
@@ -479,7 +496,7 @@ export function plannotatorToolOpenedText(
 
 /**
  * The outcome a decision heading names for a code review the reviewer posted
- * straight to the PR platform (GitHub, GitLab, Bitbucket): the same words on
+ * straight to the PR platform (GitHub, GitLab, Bitbucket, Forgejo): the same words on
  * every host that delivers it as a message.
  */
 export const PLANNOTATOR_OUTCOME_REVIEW_POSTED = 'Review posted'
@@ -931,6 +948,7 @@ export function plannotatorCommandToToolInput(
     if (word === '--gate' && (action === 'annotate' || action === 'review')) call.gate = true
     else if (word === '--markdown' && action === 'annotate') options.markdown = true
     else if (word === '--tailscale' && parseOptions.tailscale === true) call.tailscale = true
+    else if (word === '--cloudflare-access' && parseOptions.tailscale === true) call.cloudflareAccess = true
     else if (word === '--base' && action === 'review') {
       const value = rest[index + 1]
       if (value === undefined || value.startsWith('-')) return null

@@ -90,6 +90,13 @@ describe("GET /api/inbox/search", () => {
     expect((await w.get("q=x&from=them")).status).toBe(422);
     expect((await w.get("q=x&limit=500")).status).toBe(422);
     expect((await w.get("q=x&project=bogus")).status).toBe(422);
+    expect((await w.get("q=x&tag=bogus")).status).toBe(422);
+    // At most 200 tags, each counted once: a repeated id is one.
+    const tagId = (i: number) => `ini_01ZZZZZZZZZZZZZZZZZZZZZZ${"0123456789ABCDEFGHJKMNPQRSTVWXYZ"[i >> 5]}${"0123456789ABCDEFGHJKMNPQRSTVWXYZ"[i & 31]}`;
+    expect((await w.get(`q=x&${Array.from({ length: 200 }, (_, i) => `tag=${tagId(i)}`).join("&")}`)).status).toBe(200);
+    expect((await w.get(`q=x&${Array.from({ length: 300 }, () => "tag=ini_01ZZZZZZZZZZZZZZZZZZZZZZZZ").join("&")}`)).status).toBe(200);
+    expect((await w.get(`q=x&${Array.from({ length: 201 }, (_, i) => `tag=${tagId(i)}`).join("&")}`)).status).toBe(422);
+    expect((await w.get("q=x&tag=ini_01ZZZZZZZZZZZZZZZZZZZZZZZZ")).status).toBe(200);
     expect((await w.get("q=x&project=prj_01M4V7JERHR0Y3XQERK1MR604E")).status).toBe(404);
     expect((await fetch(`${w.base}/api/inbox/search`, { method: "POST" })).status).toBe(405);
     // Filters: the project, and Status.

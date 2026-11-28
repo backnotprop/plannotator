@@ -33,12 +33,18 @@ import { createEditorAnnotationHandler } from "./annotations.ts";
 import { createExternalAnnotationHandler } from "./external-annotations.ts";
 import {
 	handleDraftRequest,
+	handleCustomThemesScript,
+	customThemesPage,
 	handleFavicon,
+	handleAnnotateMediaRequest,
 	handleImageRequest,
 	handleStarAskRequest,
+	handleLaunchSwitchRequest,
+	piLaunchSwitch,
 	handleReferenceSkillsRequest,
 	handleReferenceSkillContentRequest,
 	readDraftGenerationFromBody,
+	sendMissingDraft,
 	handleSaveNotesRequest,
 	handleUploadRequest,
 } from "./handlers.ts";
@@ -59,7 +65,7 @@ import {
 } from "./integrations.ts";
 import { buildAdvertisedUrl, isRemoteSession, listenOnPort } from "./network.ts";
 
-import { agentSwitchConfigToSave, agentToolSaveFailed, cookieHostConfigWrite, loadConfig, saveConfig, detectGitUser, getServerConfig, resolveAIEnabled, resolveFeedbackHistory, resolveSharingEnabled } from "../generated/config.ts";
+import { agentSwitchConfigToSave, agentToolSaveFailed, cookieHostConfigWrite, loadConfig, saveConfig, detectGitUser, getServerConfig, parseDisplayOptionsConfig, resolveAIEnabled, resolveFeedbackHistory, resolveSharingEnabled } from "../generated/config.ts";
 import { currentPiHost } from "../pi-host.ts";
 import { appendFeedbackRecord, type FeedbackDecision } from "../generated/feedback-archive.ts";
 import { isFaviconStyle, type FaviconStyle } from "../generated/favicon.ts";
@@ -305,6 +311,8 @@ export async function startPlanReviewServer(options: {
 
 	// Draft key for annotation persistence
 	const draftKey = options.mode !== "archive" ? contentHash(options.plan) : "";
+	// Linked documents this review served: their folders may play local videos.
+	const servedMediaDocuments = new Set<string>();
 	// Per-document draft copies of the plan's linked documents, plus the index
 	// that lets a reload offer them all: mirror of packages/server/index.ts
 	// (#1545, annotate-draft.ts). A document may be saved exactly when this
@@ -362,8 +370,10 @@ export async function startPlanReviewServer(options: {
 	// Lazy cache for in-session archive tab
 	let cachedArchivePlans: ArchivedPlan[] | null = null;
 
-	const app = openPackedApp(options.htmlContent);
+	const app = openPackedApp(options.htmlContent, { page: (html) => customThemesPage(html) });
 	const requestHostGuard = createRequestHostGuard();
+	// The launch switch's reader (generated/launch-switch.ts): in the background, never awaited.
+	piLaunchSwitch().start();
 	const server = createServer(async (req, res) => {
 		// Host allowlist first, before any route (request-host-guard.ts).
 		if (requestHostGuard.refuse(req, res)) return;
@@ -479,7 +489,7 @@ export async function startPlanReviewServer(options: {
 				return;
 			}
 			try {
-				const body = (await parseBody(req)) as { agentSwitch?: unknown; displayName?: string; diffOptions?: Record<string, unknown>; theme?: Record<string, unknown>; favicon?: FaviconStyle; autoUpdate?: unknown; updateCheck?: unknown; agentTool?: unknown; conventionalComments?: boolean; conventionalLabels?: unknown[] | null; pfmReminder?: boolean };
+				const body = (await parseBody(req)) as { agentSwitch?: unknown; displayName?: string; diffOptions?: Record<string, unknown>; displayOptions?: unknown; theme?: Record<string, unknown>; favicon?: FaviconStyle; autoUpdate?: unknown; updateCheck?: unknown; agentTool?: unknown; conventionalComments?: boolean; conventionalLabels?: unknown[] | null; pfmReminder?: boolean };
 				const toSave: Record<string, unknown> = {};
 				// OpenCode's agent switch (#1390): a known shape or nothing is saved.
 				const agentSwitch = agentSwitchConfigToSave(body);
@@ -487,6 +497,12 @@ export async function startPlanReviewServer(options: {
 				if (agentSwitch !== undefined) toSave.agentSwitch = agentSwitch;
 				if (body.displayName !== undefined) toSave.displayName = body.displayName;
 				if (body.diffOptions !== undefined) toSave.diffOptions = body.diffOptions;
+				// The plan / annotate Display settings and the markdown selection mode: a plain object or nothing is saved.
+				if (body.displayOptions !== undefined) {
+					const displayOptions = parseDisplayOptionsConfig(body.displayOptions);
+					if (!displayOptions) return json(res, { error: "Invalid displayOptions" }, 400);
+					toSave.displayOptions = displayOptions;
+				}
 				if (body.theme !== undefined) toSave.theme = body.theme;
 				if (isFaviconStyle(body.favicon)) toSave.favicon = body.favicon;
 				if (typeof body.autoUpdate === "boolean") toSave.autoUpdate = body.autoUpdate;
@@ -509,6 +525,9 @@ export async function startPlanReviewServer(options: {
 		} else if (url.pathname.startsWith("/api/star-ask/")) {
 			// The "Star the repo" ask on the done screen (generated/star-ask.ts).
 			if (!(await handleStarAskRequest(req, res, url, "plan", isRemoteSession()))) handleApiNotFound(res, url.pathname);
+		} else if (url.pathname.startsWith("/api/launch-switch/")) {
+			// The launch switch's one-time dialog (generated/launch-switch.ts).
+			if (!(await handleLaunchSwitchRequest(req, res, url))) handleApiNotFound(res, url.pathname);
 		} else if (url.pathname === "/api/image") {
 			handleImageRequest(res, url);
 		} else if (url.pathname === "/api/upload" && req.method === "POST") {
@@ -519,7 +538,7 @@ export async function startPlanReviewServer(options: {
 				// by path (`documents`) when the index lists any.
 				const loaded = loadSessionDraftWithDocuments({ patchKey: draftKey }, planDocumentDrafts);
 				if (loaded.found) json(res, loaded.draft);
-				else json(res, { found: false, ...(loaded.draftGeneration !== null ? { draftGeneration: loaded.draftGeneration } : {}) }, 404);
+				else sendMissingDraft(res, loaded.draftGeneration);
 			} else {
 				await handleDraftRequest(req, res, draftKey);
 			}
@@ -561,7 +580,10 @@ export async function startPlanReviewServer(options: {
 				json(res, crossOriginRefusalBody(), 403);
 				return;
 			}
-			await handleDocRequest(res, url, { anyPath: isThisMachineRequest(req) });
+			await handleDocRequest(res, url, { anyPath: isThisMachineRequest(req), onDocumentServed: (path) => servedMediaDocuments.add(path) });
+		} else if (url.pathname === "/api/annotate-media" && req.method === "GET") {
+			// A linked document's local <video> (HtmlBlock rewrites its src here).
+			handleAnnotateMediaRequest(req, res, url, servedMediaDocuments);
 		} else if (url.pathname === "/api/doc/exists" && req.method === "POST") {
 			await handleDocExistsRequest(res, req);
 		} else if (url.pathname === "/api/obsidian/vaults") {
@@ -626,6 +648,9 @@ export async function startPlanReviewServer(options: {
 			json(res, { agents: [] });
 		} else if (url.pathname === "/favicon.png" || url.pathname === "/favicon.ico") {
 			handleFavicon(res, url.pathname);
+		} else if (url.pathname === "/plannotator-themes.js" && req.method === "GET") {
+			// The person's own themes, for the page's first frame (packages/shared/theme-files.ts).
+			handleCustomThemesScript(res, url.searchParams);
 		} else if (url.pathname === "/api/save-notes" && req.method === "POST") {
 			await handleSaveNotesRequest(req, res, { serverSession, notion: notionAvailable });
 		} else if (url.pathname === "/api/approve" && req.method === "POST") {
@@ -811,7 +836,7 @@ export async function startPlanReviewServer(options: {
 	boundPort = port;
 	// Remote sessions serve the app page compressed (#1617); start gzip (what
 	// browsers ask for over plain http) now so the first load does not wait.
-	if (isRemoteSession()) prewarmAppHtml(app.html, likelyAppHtmlEncoding(false));
+	if (isRemoteSession()) prewarmAppHtml(app.page(), likelyAppHtmlEncoding(false));
 
 	// Mirror the Bun server: bind first, then warm through the async shared walk.
 	void warmFileListCache(process.cwd(), "code");

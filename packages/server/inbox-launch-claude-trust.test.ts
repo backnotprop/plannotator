@@ -4,8 +4,7 @@
  * or an empty one; Claude's lock is taken, waited for, and survives two writers at once in separate processes; the
  * file is the one Claude picks and the key the one it uses (physical, NFC, a worktree's main checkout), and
  * `claudeTrustsFolder` reads them; the warning counts what Claude's own prompt warns on and says what it could not
- * read; the owner's click goes through the real server, into a sandboxed config, and a guest gets neither the button
- * nor the route.
+ * read; the owner's click goes through the real server, into a sandboxed config.
  *
  * Every config here is under a temp folder through `refuseRealClaudeConfig`; a real `~/.claude.json` is never read.
  * The sandbox import comes first so a run with no bunfig preload (any folder but the repository's root) is sandboxed
@@ -571,16 +570,14 @@ describe("the Claude host's offer", () => {
 });
 
 describe("through a real server", () => {
-  const GUEST = "guest@example.com";
-
-  test("a guest on the allow list gets no offer and a refused route; the owner over the tailnet writes, into the sandbox, and starts it", async () => {
+  test("the owner over the tailnet writes, into the sandbox, and starts it", async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-trust-route-")));
     restore.push(() => rmSync(root, { recursive: true, force: true }));
     const dataDir = join(root, "data");
     const folder = join(root, "project");
     mkdirSync(dataDir);
     mkdirSync(folder);
-    writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTailscaleAllow: [GUEST], inboxLaunch: { enabled: true } }));
+    writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxLaunch: { enabled: true } }));
     // The marker and HOME are this test's own: the sandbox's agents home is what keeps a click from the real config.
     const names = ["PLANNOTATOR_DATA_DIR", "PLANNOTATOR_TEST_SANDBOX", "HOME", "PLANNOTATOR_INBOX_TAILSCALE"] as const;
     const previous = names.map((name) => [name, process.env[name]] as const);
@@ -610,14 +607,7 @@ describe("through a real server", () => {
     const click = (login: string) => fetch(`http://127.0.0.1:${listener}/api/inbox/launch/${launchId}/trust`, { method: "POST", headers: headers(login), body: JSON.stringify({ serverSession: server.serverSession }) });
     const sandboxConfig = join(dataDir, "agents-home", ".claude.json");
 
-    const guestRun = await read(GUEST);
-    expect(guestRun.untrusted).toBe(true);
-    expect(guestRun.trust).toBeUndefined();
-    const refused = await click(GUEST);
-    expect([refused.status, ((await refused.json()) as { code?: string }).code]).toEqual([403, "owner_only"]);
     expect(existsSync(sandboxConfig)).toBe(false);
-    expect(store.message(thread.id)!.launch!.error?.code).toBe("untrusted");
-
     expect((await read(OWNER)).trust).toEqual({ warning: null });
     const clicked = await click(OWNER);
     expect(clicked.status).toBe(200);

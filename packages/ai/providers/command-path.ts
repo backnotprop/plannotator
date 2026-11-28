@@ -117,7 +117,7 @@ export interface AgentJobSpawn {
 }
 
 /**
- * How to start an agent job's CLI (code review, Code Tour, Guided Review).
+ * How to start an agent job's CLI (code review, Guided Review).
  * #2372: on Windows a CLI installed as a `.cmd` shim (Pi's `pi.cmd`, npm's
  * shims) is not found by `spawn("pi")`, so the job failed with
  * `spawn pi ENOENT`. Ask AI resolves the shim (`resolveWindowsCommandShim`)

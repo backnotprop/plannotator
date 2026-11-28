@@ -30,6 +30,7 @@ test.skipIf(!hasDom)('a separate provider that reports its own abort does not sh
   await act(async () => { a = r.current.ask({ prompt: 'first' }); });
   await act(async () => { b = r.current.ask({ prompt: 'second' }); await Promise.all([a, b]); });
   expect(r.current.messages[0].response.error).toBeUndefined();
+  expect(r.current.messages[0].response.isStreaming).toBe(false);
   expect(r.current.messages[1].response.text).toBe('ok');
   await act(async () => root.unmount());
 });

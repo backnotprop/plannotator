@@ -29,6 +29,7 @@ import {
   type AgentCapabilities,
   isTerminalStatus,
   jobSource,
+  launchLabelOf,
   serializeAgentSSEEvent,
   AGENT_HEARTBEAT_COMMENT,
   AGENT_HEARTBEAT_INTERVAL_MS,
@@ -81,7 +82,6 @@ const CAPABILITIES = `${BASE}/capabilities`;
 const SERVER_BUILT_PROVIDERS: ReadonlySet<string> = new Set([
   "claude",
   "codex",
-  "tour",
   "guide",
   "cursor",
   "opencode",
@@ -255,7 +255,6 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
   const capabilities: AgentCapability[] = [
     { id: "claude", name: "Claude Code", available: onPath("claude") },
     { id: "codex", name: "Codex CLI", available: onPath("codex") },
-    { id: "tour", name: "Code Tour", available: onPath("claude") || onPath("codex") },
     {
       id: "guide",
       name: "Guided Review",
@@ -316,7 +315,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
     command: string[],
     label: string,
     outputPath?: string,
-    spawnOptions?: { captureStdout?: boolean; stdinPrompt?: string; cwd?: string; prompt?: string; engine?: string; model?: string; effort?: string; reasoningEffort?: string; fastMode?: boolean; thinking?: string; prUrl?: string; diffScope?: string; diffContext?: AgentJobInfo["diffContext"]; reviewProfileId?: string; reviewProfileLabel?: string; changedFilesSnapshot?: string[]; guideContext?: AgentJobInfo["guideContext"]; launchReview?: GuideLaunchReview },
+    spawnOptions?: { captureStdout?: boolean; stdinPrompt?: string; cwd?: string; prompt?: string; engine?: string; model?: string; effort?: string; reasoningEffort?: string; fastMode?: boolean; thinking?: string; prUrl?: string; diffScope?: string; diffContext?: AgentJobInfo["diffContext"]; reviewProfileId?: string; reviewProfileLabel?: string; launchLabel?: string; changedFilesSnapshot?: string[]; guideContext?: AgentJobInfo["guideContext"]; launchReview?: GuideLaunchReview },
   ): AgentJobInfo {
     const source = jobSource(id);
 
@@ -341,6 +340,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
       ...(spawnOptions?.guideContext && { guideContext: spawnOptions.guideContext }),
       ...(spawnOptions?.reviewProfileId && { reviewProfileId: spawnOptions.reviewProfileId }),
       ...(spawnOptions?.reviewProfileLabel && { reviewProfileLabel: spawnOptions.reviewProfileLabel }),
+      ...(spawnOptions?.launchLabel && { launchLabel: spawnOptions.launchLabel }),
     };
 
     let proc: ReturnType<typeof Bun.spawn> | null = null;
@@ -462,7 +462,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
             // events — those are handled in onJobComplete).
             const emitLogLine = (line: string) => {
               if (!line.trim()) return;
-              // Claude: format JSONL into readable text. Tour jobs with the
+              // Claude: format JSONL into readable text. Guide jobs with the
               // Claude engine also stream Claude JSONL, so key off engine too.
               if (provider === "claude" || spawnOptions?.engine === "claude") {
                 const formatted = formatClaudeLogEvent(line);
@@ -553,15 +553,14 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
             // fail-closed — their findings are prompt-enforced, so an unexpected
             // throw here must surface as a failed job rather than a green one.
             // (Their handlers normally fail by mutation and never throw; this
-            // guards future refactors.) Tour and guide widen that fail-closed
-            // rule too: both are single-shot, all-or-nothing outputs (a tour's
-            // stops/checklist, a guide's sections) with nothing meaningful
-            // partially ingested, so an unexpected throw here means the whole
+            // guards future refactors.) Guide widens that fail-closed
+            // rule too: it is a single-shot, all-or-nothing output (a guide's
+            // sections) with nothing meaningful partially ingested, so an unexpected throw here means the whole
             // result is unusable — it must not sit at "done" with no content.
             if (MARKER_ENGINES[provider as MarkerEngineId]) {
               entry.info.status = "failed";
               entry.info.error = err instanceof Error ? err.message : `${provider} result ingestion failed`;
-            } else if (provider === "tour" || provider === "guide") {
+            } else if (provider === "guide") {
               entry.info.status = "failed";
               entry.info.error = `Result ingestion failed: ${err instanceof Error ? err.message : String(err)}`;
             }
@@ -891,6 +890,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
             diffContext: jobDiffContext,
             reviewProfileId: jobReviewProfileId,
             reviewProfileLabel: jobReviewProfileLabel,
+            launchLabel: launchLabelOf(body.label, label),
             changedFilesSnapshot: jobChangedFilesSnapshot,
             guideContext: jobGuideContext,
             launchReview: jobLaunchReview,

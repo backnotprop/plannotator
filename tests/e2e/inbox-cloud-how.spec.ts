@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
@@ -8,7 +8,7 @@ import { NO_BROWSER } from '../helpers/no-browser';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
-const PANELS = ['elsewhere', 'pairing', 'relay', 'limits', 'replies'];
+const PANELS = ['elsewhere', 'pairing', 'relay', 'replies'];
 
 let url = '';
 let relay: Server | null = null;
@@ -64,7 +64,7 @@ async function stepThrough(page: Page) {
   await expect(dialog.locator('[data-cloud-how-end]')).toBeVisible();
   await expect(dialog.locator('[data-cloud-how-next]')).toHaveText('Done');
   await dialog.locator('[data-cloud-how-back]').click();
-  await expect(dialog.locator('[data-cloud-how-panel="limits"]')).toBeVisible();
+  await expect(dialog.locator('[data-cloud-how-panel="relay"]')).toBeVisible();
   return { open, dialog };
 }
 

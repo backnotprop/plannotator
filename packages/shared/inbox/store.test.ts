@@ -23,7 +23,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { questionKey, type QuestionAnswer } from "@plannotator/core/question-block";
 import { parseInboxQuestionBlocks } from "@plannotator/core/inbox-questions";
-import { INBOX_SECTIONS, inboxHasUnsent, inboxRowOffersMarkRead, inboxThreadNameKey, type InboxListRow, type InboxListSection, type InboxSectionId } from "@plannotator/core/inbox-types";
+import { INBOX_LOCAL_SECTIONS, inboxHasUnsent, inboxRowOffersMarkRead, inboxThreadNameKey, type InboxListRow, type InboxListSection, type InboxSectionId } from "@plannotator/core/inbox-types";
 // The sidebar's counts, from the code that computes them.
 import { waitingCount } from "../../inbox/held";
 import { inboxArchivedRows, inboxListSections, inboxRowArchived } from "./list";
@@ -1070,7 +1070,7 @@ interface ModelMessage {
   /** A thread the person started: addressed to a session, until that session's connection delivers it. */
   addressed?: { delivered: boolean };
   /** The person's 👍 on this agent message: the step of the Mark read it stands on, and whether the 👍 made it. */
-  ack?: { readTick: number | null; made: boolean } | null;
+  ack?: { readTick: number | null; made: boolean; standalone?: boolean } | null;
 }
 
 interface ModelThread {
@@ -1371,7 +1371,7 @@ class ThreadStateModel {
           const s = this.state(thread, message, q);
           return s === "open" || s === "picked";
         });
-        if (open.length === 0) return "refused:invalid_supersedes";
+        if (named.length === 0) return "refused:invalid_supersedes";
         this.addAgent(thread, tick, store);
         for (const q of open) q.superseded = true;
         return "ok";
@@ -1549,10 +1549,11 @@ class ThreadStateModel {
         }
         if (message.author !== "agent") return "refused:ack_not_allowed";
         if (thread.resolved) return "refused:thread_resolved";
+        // Any agent message takes one (approval "inbox-reactions-every-message"). It marks the thread read only on
+        // the latest agent message, with no person's message after it (the Inbox's own notes aside); anywhere else it
+        // stands on its own: no Mark read, and Move back leaves it. None while a question waits, as always.
         const latest = [...thread.messages].reverse().find((m) => m.author === "agent");
-        if (latest !== message) return "refused:ack_stale";
-        // The person already wrote back after it (the Inbox's own notes aside).
-        if (thread.messages.some((m) => m.tick > message.tick && m.author === "person" && m.note === null)) return "refused:ack_after_reply";
+        const repliedAfter = thread.messages.some((m) => m.tick > message.tick && m.author === "person" && m.note === null);
         const waiting = thread.messages
           .filter((m) => m.author === "agent")
           .flatMap((m) => m.questions)
@@ -1562,6 +1563,10 @@ class ThreadStateModel {
           });
         if (waiting) return "refused:question_open";
         if (message.ack) return "ok";
+        if (latest !== message || repliedAfter) {
+          message.ack = { readTick: null, made: false, standalone: true };
+          return "ok";
+        }
         const before = thread.read;
         this.event({ op: "read", target: op.target, read: true }, target, store, tick);
         message.ack = { readTick: thread.read, made: thread.read !== before };
@@ -1673,7 +1678,7 @@ function checkThreadState(world: StateWorld): void {
   const views = listViews(rows);
   const all = [...model.threads.keys()].sort();
   expect(rows.map((r) => r.thread_id).sort()).toEqual(all);
-  const order = INBOX_SECTIONS.map((s) => s.id);
+  const order = INBOX_LOCAL_SECTIONS.map((s) => s.id);
   for (const sections of [views.include, views.exclude]) {
     // Sections in the fixed order; each thread in exactly one; newest first, ties on the thread id.
     expect(sections.map((s) => s.id)).toEqual(order);
@@ -1729,7 +1734,7 @@ function checkThreadState(world: StateWorld): void {
       last_agent_at: lastAgent ? new Date(world.timeOf.get(lastAgent.tick)!).toISOString() : null,
       waiting_on_person: model.waitingOnPerson(t),
       messages: t.messages.length,
-      ack: model.readHolds(t) && (lastAgent?.ack ?? null) !== null,
+      ack: model.readHolds(t) && (lastAgent?.ack ?? null) !== null && !lastAgent?.ack?.standalone,
       unread: model.unread(t),
       draft: t.draft === true,
       picks: model.unsent(t) ? row.questions.picked : 0,
@@ -1903,7 +1908,8 @@ describe("the thread-state model", () => {
     );
     // The sections' tie-break on the thread id was exercised, not only defined.
     expect(ties.sections).toBeGreaterThan(0);
-  });
+    // 300 runs of up to 45 steps: about 3 s alone, past the default 5 s on a loaded runner (it timed out three times on 2026-11-15).
+  }, 30_000);
 
   test("a message's images captured on first read (one more line for it) change nothing the model sees, and replay the same", () => {
     fc.assert(
@@ -2510,7 +2516,7 @@ const HAND_TRACES: TraceDef[] = [
   },
   {
     name: "hand-10-supersede-chain",
-    description: "A picked question is replaced by a stopped one (the pick is never sent), that by a holding one, that withdrawn with nothing in its place; superseding a closed question is refused.",
+    description: "A picked question is replaced by a stopped one (the pick is never sent), that by a holding one, that withdrawn with nothing in its place; superseding a closed question sends the message and leaves it closed.",
     events: [
       ROOT(STATE_BODIES.ask),
       PICK("m1", KEY.ask, "Yes"),

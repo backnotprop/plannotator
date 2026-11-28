@@ -12,7 +12,7 @@
  * The PNGs land in .local/proof/list-resize/.
  */
 
-import { chromium, expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { chromium, expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';

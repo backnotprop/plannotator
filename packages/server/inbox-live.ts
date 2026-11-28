@@ -27,10 +27,9 @@
  *   refuses a response carrying the Plannotator server header, and the
  *   proxy refuses one on every response (#2190). A proxied Plannotator page
  *   would otherwise get same-origin writes on that server.
- * - Every route here is a window route. Through the tailnet it answers the
- *   machine's owner only (`403 owner_only` to a login the allowlist adds;
- *   the owner, 2026-11-09: "Should serve the prototype so it's viewable on
- *   the phone"), and the window frames the prototype relay
+ * - Every route here is a window route. Through the tailnet (only the
+ *   machine's owner gets that far; the owner, 2026-11-09: "Should serve the
+ *   prototype so it's viewable on the phone") the window frames the prototype relay
  *   (inbox-live-relay.ts) instead of the loopback proxy; the device door does
  *   not list them. The proxy itself binds 127.0.0.1.
  * - Reads and writes alike refuse another site's page
@@ -68,6 +67,7 @@ import { INBOX_LIVE_SITES_MAX, INBOX_LIVE_URL_MAX, type InboxLiveSiteRef } from 
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import type { PrototypeAppTarget } from "@plannotator/core/inbox-questions";
+import { checkWebPrototypeUrl, defaultWebFraming, isWebPrototype, webFramePage, type WebFraming } from "./inbox-web-prototypes";
 
 /** The live bridge's sources. The CLI passes them as it does for annotate, so the server never imports ui. */
 export interface InboxLiveBridgeSources {
@@ -171,9 +171,8 @@ export function checkInboxLiveUrl(raw: unknown, reservedPorts: Iterable<number>)
   } catch {
     refuse(`${raw.trim()} is not an address; give one like http://localhost:5173/.`);
   }
-  if (url.protocol === "https:") refuse("needs an http:// address (the local proxy does not reach https sites).");
   if (url.protocol !== "http:") refuse("only an http:// address on this computer opens live.");
-  if (!isLoopbackHostname(url.hostname)) refuse(`${url.host} is not this computer: only localhost, 127.x or [::1] open live.`);
+  if (!isLoopbackHostname(url.hostname)) refuse(`${url.host} is not this computer: give its https:// address, or a localhost one.`);
   if (url.username || url.password) refuse("no user name or password in the address.");
   const port = liveTargetPort(url);
   for (const reserved of reservedPorts) {
@@ -214,14 +213,13 @@ export interface InboxLiveSitesOptions {
   idleMs?: number;
   /** The probe's fetch (tests). */
   fetchImpl?: typeof fetch;
+  webFraming?: (url: URL) => Promise<WebFraming>;
   /** The clock (tests). */
   now?: () => number;
   /**
-   * Over your tailnet (inbox-tailscale.ts): who is the owner, the relay's origin (mapped on first use) and the window's
-   * tailnet origin. Absent: every live route answers the tailnet `403 local_only`.
+   * Over your tailnet (inbox-tailscale.ts): the relay's origin (mapped on first use) and the window's tailnet origin. Absent: every live route answers the tailnet `403 local_only`.
    */
   tailnet?: {
-    isOwner: (req: Request) => boolean;
     openRelay: (handlers: InboxTailnetRelayHandlers) => Promise<string>;
     windowOrigin: () => string | null;
   };
@@ -362,8 +360,27 @@ export function createInboxLiveSites(options: InboxLiveSitesOptions): InboxLiveS
       throw new InboxError("validation_error", `body: at most ${INBOX_LIVE_SITES_MAX} running-app prototypes in one message.`, { field: "body" });
     }
     const out: Omit<InboxLiveSiteRef, "opened_at">[] = [];
+    const framings: Promise<void>[] = [];
     for (const app of apps) {
       try {
+        if (isWebPrototype(app.target)) {
+          const url = checkWebPrototypeUrl(app.target);
+          const id = inboxLiveSiteId(url.href);
+          if (out.some((site) => site.id === id)) continue;
+          const site: Omit<InboxLiveSiteRef, "opened_at"> = { id, url: url.href, opened_by: "agent", web: true };
+          out.push(site);
+          if (probing) {
+            framings.push(
+              (options.webFraming ?? defaultWebFraming)(url).then(
+                (framing) => {
+                  if (framing === "not_framed") site.framed = false;
+                },
+                () => {},
+              ),
+            );
+          }
+          continue;
+        }
         const url = checkInboxLiveUrl(app.target, probing ? reservedPorts() : []);
         const id = inboxLiveSiteId(url.href);
         if (out.some((site) => site.id === id)) continue;
@@ -379,6 +396,7 @@ export function createInboxLiveSites(options: InboxLiveSitesOptions): InboxLiveS
         throw error;
       }
     }
+    await Promise.all(framings);
     return out;
   };
 
@@ -390,11 +408,7 @@ export function createInboxLiveSites(options: InboxLiveSitesOptions): InboxLiveS
 
   const route = async (req: Request, path: string, via: "local" | "tailnet"): Promise<Response | null> => {
     if (!isInboxLivePath(path)) return null;
-    // Through the tailnet: the machine's owner only (their phone), never a login the allowlist adds.
-    if (via === "tailnet") {
-      if (!options.tailnet) return options.localOnly();
-      if (!options.tailnet.isOwner(req)) return json({ error: "A prototype opens only for this computer's owner.", code: "owner_only" }, 403);
-    }
+    if (via === "tailnet" && !options.tailnet) return options.localOnly();
     // Another site's page (the proxied app is same-site with this window) never reads or writes here.
     if (!isSameOriginOrNoOrigin(req.headers.get("origin"), req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
       return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
@@ -418,6 +432,8 @@ export function createInboxLiveSites(options: InboxLiveSitesOptions): InboxLiveS
       if (action === "frame") {
         // The window's frame for the site: same origin only (the checks above), opening its proxy as GET .../live/:site does.
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+        const shown = siteOf(threadId, siteId);
+        if (shown.web) return webFramePage(shown);
         return liveFramePage(wire(threadId, siteOf(threadId, siteId), await relayOrigin(via)));
       }
       if (req.method !== "POST") return json({ error: "Use POST." }, 405);

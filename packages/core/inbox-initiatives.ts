@@ -22,6 +22,7 @@
  */
 
 import { isInboxId, type InboxAuthor } from "./inbox-types";
+import { inboxTagLookOf, type InboxTagLook } from "./inbox-tag-colours";
 import { codeFenceCloseIndex } from "./markdown-structure";
 
 export interface InboxInitiative {
@@ -71,7 +72,7 @@ export function inboxInitiativeNameKey(name: string): string {
  * it. `id` is this Inbox's own when it holds one, else the first machine's that does; `machines` is its id on each
  * machine that holds it.
  */
-export type InboxMachineTag = InboxInitiative & { machines: Record<string, string> };
+export type InboxMachineTag = InboxInitiative & { machines: Record<string, string>; look?: InboxTagLook };
 
 /**
  * The live tags of this Inbox (`self`) and of each linked machine that takes tags, merged by name, oldest first,
@@ -79,24 +80,35 @@ export type InboxMachineTag = InboxInitiative & { machines: Record<string, strin
  */
 export function inboxMachineTags(
   self: string,
-  own: readonly InboxInitiative[],
-  far: readonly { machine: string; tags: readonly InboxInitiative[] }[],
+  own: readonly (InboxInitiative & { look?: InboxTagLook })[],
+  far: readonly { machine: string; tags: readonly (InboxInitiative & { look?: InboxTagLook })[] }[],
 ): { tags: InboxMachineTag[]; idOn: (machine: string, id: string) => string | null } {
   const byKey = new Map<string, InboxMachineTag>();
   const ids = new Map<string, string>();
-  const add = (machine: string, tag: InboxInitiative) => {
+  const looks = new Map<string, { machine: string; created_at: string; look: InboxTagLook | undefined }[]>();
+  const add = (machine: string, tag: InboxInitiative & { look?: InboxTagLook }) => {
     const key = inboxInitiativeNameKey(tag.name);
     if (tag.deleted_at !== null || !key) return;
     let entry = byKey.get(key);
     if (!entry) {
       entry = { ...tag, machines: {} };
       byKey.set(key, entry);
+      looks.set(key, []);
     }
-    if (!(machine in entry.machines)) entry.machines[machine] = tag.id;
+    if (!(machine in entry.machines)) {
+      entry.machines[machine] = tag.id;
+      looks.get(key)!.push({ machine, created_at: tag.created_at, look: tag.look });
+    }
     ids.set(`${machine}\0${tag.id}`, entry.id);
   };
   for (const tag of own) add(self, tag);
   for (const list of far) if (list.machine !== self) for (const tag of list.tags) add(list.machine, tag);
+  // One colour per name, the same on every machine (inbox-tag-colours.ts `inboxTagLookOf`).
+  for (const [key, entry] of byKey) {
+    const look = inboxTagLookOf(looks.get(key)!);
+    if (look) entry.look = look;
+    else delete entry.look;
+  }
   // A stable sort: this Inbox's own order stands among tags made in the same instant.
   const tags = [...byKey.values()].sort((a, b) => (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : 0));
   return { tags, idOn: (machine, id) => ids.get(`${machine}\0${id}`) ?? null };

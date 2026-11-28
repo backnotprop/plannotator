@@ -1,6 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { InboxPullsAnswer, InboxReviewsAnswer } from '@plannotator/core/inbox-types';
 import { inboxApi } from '../api';
+import { rememberFarBranches } from './branchReviews';
+import { onHiddenWritten, pullsShown, reviewsShown, settleHidden, useHiddenChanges } from './hiddenPulls';
+import { REVIEWS_AFTER_STORE_MAX_MS, REVIEWS_AFTER_STORE_MS } from '../app/boot';
+import { useKeptState } from '../data/keptState';
+
+/** The list's PRs on a ref card: "Open in Reviews" (refCardReviews.ts). */
+export { useRefCardReviews } from './refCardReviews';
 
 /** The window got its focus back: the list is read again, at most this often. */
 export const PULLS_FOCUS_MS = 20_000;
@@ -37,7 +44,7 @@ export interface PullsState {
  */
 export function usePulls(enabled: boolean, counted = false, othersView = false): PullsState {
   const [model, setModel] = useState<InboxPullsAnswer | null>(null);
-  const [reviews, setReviews] = useState<InboxReviewsAnswer | null>(null);
+  const [reviews, keepReviews] = useKeptState<InboxReviewsAnswer | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const inFlight = useRef<AbortController | null>(null);
@@ -65,10 +72,15 @@ export function usePulls(enabled: boolean, counted = false, othersView = false):
         .then(([answer, rows]) => {
           if (controller.signal.aborted) return;
           setModel(answer);
-          setReviews(rows);
+          settleHidden(answer.hidden, Date.now(), answer.hidden_repos);
+          // A linked machine's reported branch: its thread opens there (Branch reviews).
+          rememberFarBranches(rows);
+          // The same rows keep the held answer (most reads are the server's cache): what reads them draws nothing new.
+          keepReviews(rows);
           setError(null);
-          // Others still on its way: its answer lands on the server's next answer (a cache read, no forge call).
-          if (answer.hosts.some((h) => h.others_pending)) pendingTimer.current = setTimeout(() => readRef.current(false), PULLS_PENDING_MS);
+          // Others still on its way: its answer lands on the server's next answer (a cache read, no forge call). The
+          // same for a linked machine's reported branches, read in the background too.
+          if (answer.hosts.some((h) => h.others_pending) || rows.branches_pending) pendingTimer.current = setTimeout(() => readRef.current(false), PULLS_PENDING_MS);
         })
         .catch((cause: unknown) => {
           if (controller.signal.aborted) return;
@@ -135,6 +147,9 @@ export function usePulls(enabled: boolean, counted = false, othersView = false):
     [],
   );
 
+  // A PR hidden or shown again here (hiddenPulls.ts): read again from the server's cache, the list and the count.
+  useEffect(() => onHiddenWritten(() => readRef.current(false)), []);
+
   const refresh = useCallback(() => read(true), [read]);
   const reload = useCallback(() => read(false), [read]);
   const reloadRows = useCallback(() => {
@@ -146,12 +161,37 @@ export function usePulls(enabled: boolean, counted = false, othersView = false):
     inboxApi.reviewsCached(controller.signal).then(
       (rows) => {
         // Nothing read since the Inbox started (`cold`): the next read of the list brings them.
-        if (!controller.signal.aborted && !('cold' in rows)) setReviews(rows);
+        if (controller.signal.aborted || 'cold' in rows) return;
+        rememberFarBranches(rows);
+        keepReviews(rows);
       },
       () => {
         // The next read of the list says what is wrong.
       },
     );
   }, [enabled, counted]);
-  return { model, reviews, error, loading, refresh, reload, reloadRows };
+  // What was hidden here leaves at once, before the server's next answer says so.
+  const changes = useHiddenChanges();
+  const shownModel = useMemo(() => pullsShown(model, changes), [model, changes]);
+  const shownReviews = useMemo(() => reviewsShown(reviews, changes), [reviews, changes]);
+  return { model: shownModel, reviews: shownReviews, error, loading, refresh, reload, reloadRows };
+}
+
+/**
+ * A review arrived, a verdict went: Reviews' rows and the sidebar's count follow the store, a moment after it changed
+ * (`moved`: what changes with it, the list and the open thread's messages), but a steady stream of messages never
+ * holds it off for long.
+ */
+export function useRowsAfterStore(on: boolean, reloadRows: () => void, ...moved: unknown[]): void {
+  const waitingSince = useRef<number | null>(null);
+  useEffect(() => {
+    if (!on) return;
+    const since = (waitingSince.current ??= Date.now());
+    const timer = setTimeout(() => {
+      waitingSince.current = null;
+      reloadRows();
+    }, Math.min(REVIEWS_AFTER_STORE_MS, Math.max(0, since + REVIEWS_AFTER_STORE_MAX_MS - Date.now())));
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [on, reloadRows, ...moved]);
 }

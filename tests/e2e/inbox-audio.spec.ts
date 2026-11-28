@@ -12,8 +12,9 @@
  * Play; it plays in the pane's player card from the `audio` route by HTTP
  * Range, with its waveform drawn from the decoded file; typing pauses it and
  * pins the moment; Comment lists the comment with its time and puts a dot on
- * the bar, which seeks back to it; Send carries "At 0:01 (1.2 s of 0:02)"
- * with no frame, read back by the agent; and on a phone the row sits in full
+ * the bar, which seeks back to it; Send carries the moment it was pinned at
+ * ("At 0:01 (1.2 s of 0:02)", to the tenth) with no frame, read back by the
+ * agent; and on a phone the row sits in full
  * screen's composer, where a tap in the field pins the moment.
  *
  * Build the binary first (see inbox.spec.ts), then
@@ -21,7 +22,7 @@
  * PNGs land in PLANNOTATOR_E2E_SHOTS_DIR (default .local/proof/audio).
  */
 
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -44,6 +45,8 @@ interface World {
   ranges: { range: string | null; status: number }[];
   threadId: string;
   noteId: string;
+  /** Where the recording was when typing paused it: the moment the comment is at (s). */
+  pinnedAt: number;
 }
 
 let world: World;
@@ -127,6 +130,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     ranges,
     threadId: '',
     noteId: '',
+    pinnedAt: 0,
   };
 });
 
@@ -182,6 +186,12 @@ test('it plays in the pane by HTTP Range, with its waveform; typing pauses it an
   const box = pane.getByRole('textbox', { name: /^Comment on voice-note\.wav at / });
   await box.fill('Breathe before "three steps"; the word is clipped.');
   expect(await isPaused(page)).toBe(true);
+  // Typing pins where the recording is. Still playing after the seek, it
+  // played on until the first key (1.2 s and a little); already at its end,
+  // the seek left it paused at 1.2 s. Either is the moment the comment is at.
+  world.pinnedAt = await currentTime(page);
+  expect(world.pinnedAt).toBeGreaterThanOrEqual(1.19);
+  expect(world.pinnedAt).toBeLessThan(2);
   await expect(play).toHaveAttribute('aria-label', 'Play');
   const chip = pane.locator('[data-video-composer] [data-video-time]');
   await expect(chip).toHaveAttribute('data-pinned', '');
@@ -205,14 +215,13 @@ test('the dot on the bar and the panel time pill seek back to the comment; a pre
   const pane = page.locator(`[data-attachment-pane="${world.noteId}"]`);
   await seekTo(page, 0.1);
   await pane.locator('[data-video-dot]').click();
-  await expect.poll(() => currentTime(page)).toBeGreaterThan(1.1);
-  expect(await currentTime(page)).toBeLessThan(1.3);
+  await expect.poll(() => currentTime(page)).toBeCloseTo(world.pinnedAt, 2);
   // A press near the end of the bar.
   const bar = (await pane.locator('[data-audio-scrub]').boundingBox())!;
   await page.mouse.click(bar.x + bar.width * 0.9, bar.y + bar.height / 2);
   await expect.poll(() => currentTime(page)).toBeGreaterThan(1.6);
   await pane.locator('.ib-apanel [data-video-card-time]').click();
-  await expect.poll(() => currentTime(page)).toBeLessThan(1.3);
+  await expect.poll(() => currentTime(page)).toBeCloseTo(world.pinnedAt, 2);
 });
 
 test("a narrow tile's line drops whole parts and never cuts one: the length and the comment count stay", async () => {
@@ -260,7 +269,10 @@ test('Send carries the moment; the agent reads it, with no frame', async () => {
   const reply = await world.claude.nextReply(world.threadId, 40);
   const body = reply.body as string;
   expect(body).toContain('## audio/voice-note.wav');
-  expect(body).toMatch(/Feedback on: "voice-note\.wav at 0:01"\nAt 0:01 \(1\.2 s of 0:02\)\n> Breathe before "three steps"; the word is clipped\./);
+  const at = body.match(/Feedback on: "voice-note\.wav at 0:01"\nAt 0:01 \((\d+(?:\.\d)?) s of 0:02\)\n> Breathe before "three steps"; the word is clipped\./);
+  expect(at, body).not.toBeNull();
+  // The moment pinned, to the tenth of a second the line gives.
+  expect(Math.abs(Number(at![1]) - world.pinnedAt), `"${at![1]} s" for a comment pinned at ${world.pinnedAt} s`).toBeLessThanOrEqual(0.0501);
   expect(body).not.toContain('voice-note at 0:01]');
   expect(world.errors).toEqual([]);
 });

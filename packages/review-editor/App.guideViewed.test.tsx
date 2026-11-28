@@ -81,7 +81,7 @@ const PR_METADATA = {
   url: "https://github.com/acme/parser/pull/7",
 };
 
-function diffPayload(pr: boolean) {
+function diffPayload(pr: boolean, githubViewed: string[]) {
   return {
     rawPatch: PATCH,
     gitRef: "HEAD",
@@ -90,7 +90,7 @@ function diffPayload(pr: boolean) {
     diffType: "uncommitted",
     hideWhitespace: false,
     ...(pr
-      ? { prMetadata: PR_METADATA }
+      ? { prMetadata: PR_METADATA, viewedFiles: githubViewed }
       : {
           gitContext: {
             vcsType: "git",
@@ -141,8 +141,9 @@ interface Calls {
 }
 
 let calls: Calls = { progress: [], prViewed: [], reviewedPuts: [] };
+let guidesWhere: string | undefined;
 
-function makeFetch(pr: boolean): typeof fetch {
+function makeFetch(pr: boolean, githubViewed: string[], progressViewed?: Promise<string[]>): typeof fetch {
   // SAFETY: the app only ever calls fetch(input, init).
   const impl = async (input: RequestInfo | URL, init?: RequestInit) => {
     const rawUrl = input instanceof Request ? input.url : String(input);
@@ -150,18 +151,19 @@ function makeFetch(pr: boolean): typeof fetch {
     const url = new URL(rawUrl, "http://localhost");
     const method = init?.method ?? "GET";
     const body = () => JSON.parse(String(init?.body));
-    if (url.pathname === "/api/diff") return Response.json(diffPayload(pr));
+    if (url.pathname === "/api/diff") return Response.json(diffPayload(pr, githubViewed));
     if (url.pathname === "/api/diff/fresh") return Response.json({ fresh: true });
     if (url.pathname === "/api/review-progress") {
       if (method === "POST") {
         calls.progress.push(body());
         return Response.json({ ok: true });
       }
+      if (githubViewed.length > 0 && !progressViewed) return new Response(null, { status: 404 });
       return Response.json({
         available: true,
         key: "scope-1",
         fingerprints: { "src/a.ts": "fa", "src/b.ts": "fb", "src/c.ts": "fc" },
-        viewedFiles: [],
+        viewedFiles: progressViewed ? await progressViewed : [],
         suppressedFiles: [],
       });
     }
@@ -172,7 +174,7 @@ function makeFetch(pr: boolean): typeof fetch {
     if (url.pathname === "/api/agents/capabilities") return Response.json({ available: true, providers: [] });
     if (url.pathname === "/api/guides") {
       return Response.json([
-        { id: "g1", label: "PR #7", title: "Parser rework", savedAt: 1, progress: { reviewed: 0, total: 2 }, moved: false },
+        { id: "g1", label: "PR #7", title: "Parser rework", savedAt: 1, progress: { reviewed: 0, total: 2 }, moved: false, ...(guidesWhere ? { where: guidesWhere } : {}) },
       ]);
     }
     if (url.pathname.endsWith("/reviewed") && method === "PUT") {
@@ -222,11 +224,11 @@ function seedAnnouncementsSeen(): void {
   memory.set("plannotator-review-dest-spotlight-seen", "1");
 }
 
-async function mount(pr: boolean): Promise<void> {
+async function mount(pr: boolean, githubViewed: string[] = [], progressViewed?: Promise<string[]>): Promise<void> {
   seedAnnouncementsSeen();
   setStorageBackend(memoryBackend);
   configStore.loadFromBackend();
-  globalThis.fetch = makeFetch(pr);
+  globalThis.fetch = makeFetch(pr, githubViewed, progressViewed);
   // SAFETY: the App only uses EventSource's constructor, handlers, and close.
   globalThis.EventSource = StubEventSource as unknown as typeof EventSource;
   host = document.createElement("div");
@@ -235,7 +237,7 @@ async function mount(pr: boolean): Promise<void> {
   await act(async () => {
     root?.render(<App />);
   });
-  await waitFor(() => !!document.body.textContent?.includes("a.ts"), "the diff");
+  await waitFor(() => !!document.querySelector("[data-changes-tree]")?.shadowRoot?.textContent?.includes("a.ts"), "the diff");
   await settle(10);
 }
 
@@ -257,7 +259,7 @@ async function openLiveGuide(): Promise<void> {
   await waitFor(() => tickButtons().length === 2, "the guide's sections");
 }
 
-/** Open the guide takeover, then the saved guide from "Previous guides". */
+/** The Guide button opens the launch panel while no guide is open; open the saved guide from its list. */
 async function openSavedGuide(): Promise<void> {
   const guideButton = Array.from(document.querySelectorAll<HTMLButtonElement>("button"))
     .find((b) => b.title === "Open guided review");
@@ -285,6 +287,18 @@ async function tick(index: number): Promise<void> {
   const button = tickButtons()[index];
   if (!button) throw new Error(`section ${index} has no Reviewed control`);
   await act(async () => button.click());
+  await settle(5);
+}
+
+function sectionTicks(): boolean[] {
+  return tickButtons().map((button) => (button.title || button.getAttribute("aria-label")) === "Un-mark as reviewed");
+}
+
+async function toggleFileViewed(path: string, section?: number): Promise<void> {
+  const scope = section === undefined ? "" : `[data-guide-section="${section}"] `;
+  const selector = `${scope}[data-file-header-path="${path}"] button[title^="Mark as "][title*="viewed"]`;
+  await waitFor(() => !!document.querySelector(selector), `the Viewed control for ${path}`);
+  await act(async () => document.querySelector<HTMLButtonElement>(selector)!.click());
   await settle(5);
 }
 
@@ -359,5 +373,88 @@ describe.if(hasDom)("Guided Review: ticking a section marks its files viewed", (
       { filePaths: ["src/c.ts"], viewed: true },
       { filePaths: ["src/a.ts", "src/b.ts"], viewed: true },
     ]);
+  });
+});
+
+describe.if(hasDom)("Guided Review: viewed files mark their sections reviewed", () => {
+  test("file marks from the workspace and guide complete both sections with a shared file", async () => {
+    await mount(false);
+    await toggleFileViewed("src/a.ts");
+    await openLiveGuide();
+    await toggleFileViewed("src/c.ts", 1);
+    expect(sectionTicks()).toEqual([false, false]);
+
+    await toggleFileViewed("src/b.ts", 0);
+    expect(sectionTicks()).toEqual([true, true]);
+
+    await tick(0);
+    expect(sectionTicks()).toEqual([false, true]);
+
+    const expand = document.querySelector<HTMLButtonElement>('[data-guide-section="1"] button[title="Expand"]');
+    if (expand) await act(async () => expand.click());
+    await toggleFileViewed("src/c.ts", 1);
+    expect(sectionTicks()).toEqual([false, true]);
+    expect(viewedWrites()).toEqual([
+      { path: "src/a.ts", viewed: true },
+      { path: "src/c.ts", viewed: true },
+      { path: "src/b.ts", viewed: true },
+      { path: "src/c.ts", viewed: false },
+    ]);
+  });
+
+  test("a saved PR guide persists restored GitHub marks without writing them back to GitHub", async () => {
+    await mount(true, ["src/b.ts", "src/c.ts"]);
+    await openSavedGuide();
+    expect(sectionTicks()).toEqual([false, true]);
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 600));
+    });
+    expect(calls.reviewedPuts).toEqual([{ url: "/api/guide/saved:g1/reviewed", reviewed: [false, true] }]);
+    expect(viewedWrites()).toEqual([]);
+    expect(calls.prViewed).toEqual([]);
+  });
+
+  test("waits for restored progress before ticking from GitHub's initial marks", async () => {
+    const progress = Promise.withResolvers<string[]>();
+    await mount(true, ["src/a.ts", "src/b.ts", "src/c.ts"], progress.promise);
+    await openSavedGuide();
+    expect(sectionTicks()).toEqual([false, false]);
+
+    await act(async () => progress.resolve(["src/b.ts", "src/c.ts"]));
+    expect(sectionTicks()).toEqual([false, true]);
+  });
+});
+
+describe.if(hasDom)("the Guide button with a guide written for this diff", () => {
+  test("with no guide for this diff, opens the launch panel over the centre, not the Agents tab", async () => {
+    await mount(false);
+    const guideButton = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((b) => b.title === "Open guided review");
+    if (!guideButton) throw new Error("Guide button did not render");
+    await act(async () => guideButton.click());
+    await waitFor(() => !!Array.from(document.querySelectorAll("h1")).find((h) => h.textContent === "Start a guided review?"), "the launch panel");
+    expect(document.querySelector("[data-launch-pad]")).toBeNull();
+  });
+
+  test("shows the launch panel with that guide listed, and the guide opens from the list", async () => {
+    guidesWhere = "diff";
+    try {
+      await mount(false);
+      const guideButton = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((b) => b.title === "Open guided review");
+      if (!guideButton) throw new Error("Guide button did not render");
+      await act(async () => guideButton.click());
+      await waitFor(() => !!Array.from(document.querySelectorAll("h1")).find((h) => h.textContent === "Start a guided review?"), "the launch panel");
+      let entry: HTMLButtonElement | undefined;
+      await waitFor(() => {
+        entry = Array.from(document.querySelectorAll<HTMLButtonElement>("button"))
+          .find((b) => b.textContent?.includes("PR #7") && b.textContent?.includes("Parser rework"));
+        return !!entry;
+      }, "the saved guide entry");
+      expect(tickButtons()).toHaveLength(0);
+      await act(async () => entry!.click());
+      await waitFor(() => tickButtons().length === 2, "the guide's sections");
+    } finally {
+      guidesWhere = undefined;
+    }
   });
 });

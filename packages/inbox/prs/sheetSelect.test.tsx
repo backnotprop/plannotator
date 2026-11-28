@@ -4,10 +4,11 @@
  *  - a box anywhere, in the grid or the table, before Select is pressed;
  *  - a tile's or a row's click outside select mode no longer opening the PR, or one inside it opening the PR instead
  *    of picking it;
- *  - the bar not taking the filter row's place while something is picked, or Clear / Done leaving boxes behind;
+ *  - while something is picked (approval "inbox-pr-board-close-safe"): the field leaving or no longer filtering, Open |
+ *    Merged and Grid | Table not giving way, Done moving (it is the same button, last in the bar), or Done leaving boxes behind;
  *  - a shift-click not picking the range from the last pick, in the order on screen (the table's sort included);
  *  - Select all in a repository picking another repository's PRs or a merged one, or not letting them go again;
- *  - a phone without its count at the bottom, or without Done in the filter row;
+ *  - a phone without its count at the bottom, without Done in the filter row, or with a Clear in the sheet's corner;
  *  - Escape not leaving select mode, or taking the key from an open menu, a field, a dialog or what used it first.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
@@ -137,6 +138,13 @@ const row = (k: string) => $(`[data-pr-row="${k}"]`)!;
 const pickedTiles = () => $$('[data-pr-tile][aria-checked="true"]').map((t) => t.dataset.prTile);
 const pickedRows = () => $$('[data-pr-row][data-picked]').map((r) => r.dataset.prRow);
 const noBoxes = () => $$('.ib-prs-box, [role="checkbox"], .ib-prtb-c').length === 0;
+/** Typing in a field as a person's keys change it. */
+function type(input: HTMLInputElement, value: string) {
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
 
 test('select mode off: no box anywhere, grid or table; a tile and a row open the PR as before', () => {
   if (!hasDom) return;
@@ -157,29 +165,42 @@ test('select mode off: no box anywhere, grid or table; a tile and a row open the
   expect(table.opened).toEqual([key(8)]);
 });
 
-test('Select: a box in every open tile and before each repository; a click picks, and the bar takes the filter row', () => {
+test('Select: a box in every open tile and before each repository; a click picks; the field stays and filters, Done stays put', () => {
   if (!hasDom) return;
   const { opened } = draw();
   press('[data-pr-select="select"]');
   expect($$('[data-pr-tile][role="checkbox"]')).toHaveLength(5);
   const ledger = $('[data-pr-select-all][aria-label="Select all in ledger"]')!;
   expect(ledger.getAttribute('title')).toBe('Select all in ledger');
-  expect($('[data-pr-select="done"]')!.textContent).toBe('Done');
+  const done = $('[data-pr-select="done"]')!;
+  expect(done.textContent).toBe('Done');
+  const field = $('[data-pr-filter]')!;
 
   mouse(tile(key(7)));
   expect(opened).toEqual([]);
   expect(pickedTiles()).toEqual([key(7)]);
-  expect($('[data-pr-filter]')).toBeNull();
-  expect($('[data-pr-select]')).toBeNull();
+  // The field is the same one, still there; Open | Merged, Grid | Table give way; Done is the same button, still last.
+  expect($('[data-pr-filter]')).toBe(field);
+  expect($('[data-pr-view]')).toBeNull();
+  expect($('[data-pr-layout]')).toBeNull();
+  expect($('[data-pr-select="done"]')).toBe(done);
+  expect($('.ib-prs-bar')!.lastElementChild).toBe(done);
+  expect($$('[data-pr-clear]')).toHaveLength(0);
   expect($('[data-pr-picked]')!.textContent).toBe('1 selected');
-  // A second click lets it go: nothing picked, the filter row is back, still in select mode.
+  // The field still filters while something is picked: what doesn't match dims, the pick stays.
+  type(field as HTMLInputElement, '#8');
+  expect(tile(key(7)).hasAttribute('data-dim')).toBe(true);
+  expect(tile(key(8)).hasAttribute('data-dim')).toBe(false);
+  expect(pickedTiles()).toEqual([key(7)]);
+  type(field as HTMLInputElement, '');
+  // A second click lets it go: nothing picked, Open | Merged is back, still in select mode.
   mouse(tile(key(7)));
   expect(pickedTiles()).toEqual([]);
-  expect($('[data-pr-filter]')).not.toBeNull();
-  expect($('[data-pr-select="done"]')).not.toBeNull();
+  expect($('[data-pr-view="open"]')).not.toBeNull();
+  expect($('[data-pr-select="done"]')).toBe(done);
 
   mouse(tile(key(8)));
-  press('[data-pr-clear]');
+  press('[data-pr-select="done"]');
   expect(noBoxes()).toBe(true);
   expect($('[data-pr-filter]')).not.toBeNull();
   expect($('[data-pr-select="select"]')).not.toBeNull();
@@ -239,7 +260,7 @@ test("Select all in a repository picks its open PRs only, shows half while some 
   expect(pickedRows().sort()).toEqual([...LEDGER].sort());
 });
 
-test('a phone: the filter row keeps Done, and the count and Clear sit in a sheet at the bottom', () => {
+test("a phone: the filter row keeps Done; the sheet at the bottom has the count and one row of actions, Close last, and no Clear", () => {
   if (!hasDom) return;
   draw({ phone: true, mode: 'page' });
   press('[data-pr-select="select"]');
@@ -248,7 +269,11 @@ test('a phone: the filter row keeps Done, and the count and Clear sit in a sheet
   expect($('[data-pr-select="done"]')).not.toBeNull();
   const sheet = $('.ib-prs-picksheet')!;
   expect(sheet.querySelector('[data-pr-picked]')!.textContent).toBe('1 selected');
-  act(() => (sheet.querySelector('[data-pr-clear]') as HTMLElement).click());
+  const names = ['data-pr-merge', 'data-pr-review', 'data-pr-hide', 'data-pr-close'];
+  const actions = [...sheet.querySelector('.ib-prs-pickrow')!.children].map((b) => names.find((n) => b.hasAttribute(n)));
+  expect(actions).toEqual(names);
+  expect(sheet.querySelector('[data-pr-select], [data-pr-clear]')).toBeNull();
+  press('[data-pr-select="done"]');
   expect($('.ib-prs-picksheet')).toBeNull();
   expect(noBoxes()).toBe(true);
 });
@@ -275,7 +300,7 @@ function escape(from?: HTMLElement | null): { usedBeforeWindow: boolean | null }
   return { usedBeforeWindow: windowSaw };
 }
 
-test('Escape leaves select mode, its picks and boxes gone, focus from Clear on Select; App\'s ladder on the window stands down', async () => {
+test('Escape leaves select mode, its picks and boxes gone, focus from Close on Select; App\'s ladder on the window stands down', async () => {
   if (!hasDom) return;
   const { opened } = draw();
   // Outside select mode Escape is not the board's: the window's ladder gets it unused.
@@ -283,8 +308,8 @@ test('Escape leaves select mode, its picks and boxes gone, focus from Clear on S
 
   press('[data-pr-select="select"]');
   mouse(tile(key(7)));
-  $('[data-pr-clear]')!.focus();
-  const sent = escape($('[data-pr-clear]'));
+  $('[data-pr-close]')!.focus();
+  const sent = escape($('[data-pr-close]'));
   expect(sent.usedBeforeWindow).toBe(true);
   expect(noBoxes()).toBe(true);
   expect($('[data-pr-select="select"]')).not.toBeNull();

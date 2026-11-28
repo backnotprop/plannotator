@@ -13,12 +13,13 @@ import type { MarkdownFileView } from '../utils/markdownPreview';
 
 const LABEL: Record<MarkdownFileView, string> = { source: 'Source', changes: 'Changes', read: 'Read' };
 
-function describe(view: MarkdownFileView, status: MarkdownViewMenuProps['status']): string {
+function describe(view: MarkdownFileView, status: MarkdownViewMenuProps['status'], selectToComment: boolean): string {
   if (view === 'source') return 'The line diff · comment on lines';
-  if (view === 'changes') return 'Rendered, changes marked · select to comment';
-  if (status === 'deleted') return 'The deleted version, rendered · select to comment';
-  if (status === 'added') return 'The new file, rendered · select to comment';
-  return 'The new version, rendered · select to comment';
+  const tail = selectToComment ? ' · select to comment' : '';
+  if (view === 'changes') return `Rendered, changes marked${tail}`;
+  if (status === 'deleted') return `The deleted version, rendered${tail}`;
+  if (status === 'added') return `The new file, rendered${tail}`;
+  return `The new version, rendered${tail}`;
 }
 
 function ViewIcon({ view, className }: { view: MarkdownFileView; className: string }) {
@@ -45,6 +46,11 @@ export interface MarkdownViewMenuProps {
   touch?: boolean;
   /** Set while the view cannot change (the file holds the edit session): the button is disabled and says why. */
   disabledReason?: string | null;
+  /**
+   * A host where selecting rendered text does not comment and P is not bound (the Plannotator Inbox): the menu,
+   * its tooltip and footer leave out "select to comment" and the P key. Absent: code review's words.
+   */
+  withoutCommentAndKeyHints?: boolean;
 }
 
 export const MarkdownViewMenu: React.FC<MarkdownViewMenuProps> = ({
@@ -56,15 +62,17 @@ export const MarkdownViewMenu: React.FC<MarkdownViewMenuProps> = ({
   iconOnly = false,
   touch = false,
   disabledReason = null,
+  withoutCommentAndKeyHints = false,
 }) => {
   const [open, setOpen] = useState(false);
   const rendered = view !== 'source';
   const name = filePath.slice(filePath.lastIndexOf('/') + 1);
+  const hints = !withoutCommentAndKeyHints;
   const title = disabledReason
     ? disabledReason
     : rendered
-    ? `Showing ${LABEL[view]}. Select text to comment. P: next view`
-    : 'Show this Markdown file as Source, Changes or Read. P: next view';
+    ? `Showing ${LABEL[view]}.${hints ? ' Select text to comment. P: next view' : ''}`
+    : `Show this Markdown file as Source, Changes or Read.${hints ? ' P: next view' : ''}`;
 
   const trigger = touch ? (
     // Drawn 36 px; the ::after box makes the hit area 44 px (4 px past each
@@ -79,7 +87,7 @@ export const MarkdownViewMenu: React.FC<MarkdownViewMenuProps> = ({
     <button
       type="button"
       className={`flex flex-none items-center gap-1 rounded-md border text-xs leading-none transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60 data-[popup-open]:bg-muted disabled:cursor-not-allowed disabled:opacity-50 ${
-        iconOnly ? 'px-1.5 py-[3px]' : 'px-2 py-[3px]'
+        iconOnly ? 'px-1.5 py-[3px]' : 'px-2 py-[3px] @max-[479px]/file-header:px-1.5'
       } ${
         rendered
           ? 'border-primary/40 bg-primary/10 text-primary data-[popup-open]:bg-primary/15'
@@ -101,7 +109,7 @@ export const MarkdownViewMenu: React.FC<MarkdownViewMenuProps> = ({
         onClick={(event) => event.stopPropagation()}
       >
         <ViewIcon view={view} className="h-3.5 w-3.5 flex-none" />
-        {!iconOnly && <span>{LABEL[view]}</span>}
+        {!iconOnly && <span className="@max-[479px]/file-header:hidden">{LABEL[view]}</span>}
         <svg className="h-3 w-3 flex-none opacity-70" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
           <path strokeLinecap="round" strokeLinejoin="round" d="m6 9 6 6 6-6" />
         </svg>
@@ -151,8 +159,8 @@ export const MarkdownViewMenu: React.FC<MarkdownViewMenuProps> = ({
                   <ViewIcon view={option} className={`flex-none text-muted-foreground ${touch ? 'mt-0.5 h-[18px] w-[18px]' : 'mt-px h-4 w-4'}`} />
                   <span className="min-w-0 flex-1">
                     <span className={`block font-medium text-foreground ${touch ? 'text-base' : 'text-xs'}`}>{LABEL[option]}</span>
-                    <span className={`mt-0.5 block text-muted-foreground ${touch ? 'text-sm' : 'text-[11px] leading-snug'}`}>
-                      {describe(option, status)}
+                    <span className={`mt-0.5 block text-muted-foreground ${touch ? 'text-sm' : 'text-xs leading-snug'}`}>
+                      {describe(option, status, hints)}
                     </span>
                   </span>
                   <Menu.RadioItemIndicator className="flex-none self-center text-primary">
@@ -164,9 +172,13 @@ export const MarkdownViewMenu: React.FC<MarkdownViewMenuProps> = ({
               ))}
             </Menu.RadioGroup>
             {!touch && (
-              <div aria-hidden="true" className="mt-1 border-t border-border/60 px-2.5 pb-1 pt-2 text-[11px] text-muted-foreground">
-                <kbd className="mr-1 rounded border border-border bg-muted px-1 font-mono text-[10px] text-foreground">P</kbd>
-                next view · files you have not set follow your choice
+              <div aria-hidden="true" className="mt-1 border-t border-border/60 px-2.5 pb-1 pt-2 text-xs text-muted-foreground">
+                {hints ? (
+                  <>
+                    <kbd className="mr-1 rounded border border-border bg-muted px-1 font-mono text-xs text-foreground">P</kbd>
+                    next view · files you have not set follow your choice
+                  </>
+                ) : 'Files you have not set follow your choice'}
               </div>
             )}
           </Menu.Popup>

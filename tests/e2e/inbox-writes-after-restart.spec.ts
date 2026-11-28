@@ -21,7 +21,7 @@
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-writes-after-restart.spec.ts`.
  */
 
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { cpSync, existsSync, renameSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';

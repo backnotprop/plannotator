@@ -1,4 +1,7 @@
-/** Kept apart from `session_labels`: only list rows show a generated title. */
+/**
+ * The titles each session's host generated (`session_titles`; Claude Code's own session title). A session with no
+ * label of its own is named by its title everywhere (sessionLabels.ts reads it under the labels).
+ */
 import { useSyncExternalStore } from 'react';
 import type { SessionLabels } from './sessionLabels';
 
@@ -17,12 +20,28 @@ export function setSessionTitles(next: unknown): void {
   for (const listener of listeners) listener();
 }
 
+/** The titles now, outside React. */
+export function sessionTitlesNow(): SessionLabels {
+  return current;
+}
+
+/** Hear each change (sessionLabels.ts). */
+export function onSessionTitles(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
 function subscribe(listener: () => void): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
 }
 
 const snapshot = () => current;
+
+/** How many draws watch the titles (a list watches once, not once per row: RowSlot.tsx). */
+export function sessionTitlesWatchersForTests(): number {
+  return listeners.size;
+}
 
 export function useSessionTitles(): SessionLabels {
   return useSyncExternalStore(subscribe, snapshot, snapshot);

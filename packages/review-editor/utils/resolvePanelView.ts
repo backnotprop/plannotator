@@ -1,4 +1,4 @@
-import type { ReviewPanelView } from '../components/ReviewPanelHeader';
+type ReviewPanelView = 'sections' | 'commits' | 'tree';
 
 /**
  * Resolve the SELECTED panel view (session ?? last-used ?? persisted) into

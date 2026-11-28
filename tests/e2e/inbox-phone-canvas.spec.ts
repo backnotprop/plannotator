@@ -17,7 +17,7 @@
  * the pictures, CANVAS_SHOT_PREFIX their prefix (default `after`).
  */
 
-import { chromium, devices, expect, test, webkit, type Browser, type Page } from '@playwright/test';
+import { chromium, devices, expect, test, webkit, type Browser, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';

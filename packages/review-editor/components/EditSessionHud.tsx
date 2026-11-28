@@ -46,7 +46,7 @@ export const EditSessionHud: React.FC<EditSessionHudProps> = ({
         Editing
       </span>
       <span
-        className="rounded border border-border/60 px-1 py-px text-[9px] font-medium uppercase tracking-wide text-muted-foreground/70"
+        className="rounded border border-border/60 px-1 py-px text-xs font-medium text-muted-foreground/70"
         title="Edit Code to Suggest is experimental"
       >
         Experimental

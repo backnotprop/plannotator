@@ -17,6 +17,7 @@
 
 import { forgePullRefText, forgePullUrl, forgeRefKey, forgeRefLabel, parseForgePullRef, type ForgeRef } from "./forge-ref-card";
 import { inboxPullStacks, type InboxPull } from "./inbox-pulls";
+import type { Problem } from "./problem";
 
 /** The most PRs a thread holds at once (removed ones do not count). */
 export const INBOX_THREAD_PULLS_MAX = 20;
@@ -70,6 +71,11 @@ export interface InboxThreadPullWire extends InboxThreadPull {
   ref: string;
   checks: InboxThreadPullChecks | null;
   review: InboxThreadPullReview | null;
+  /**
+   * Why its last read failed (newer servers; the card shows it under what is known): gh or glab missing, not signed
+   * in, timed out, refused, rate limited or failed, in the one table's words. Absent when its last read answered.
+   */
+  problem?: Problem;
 }
 
 /** The stack and related groups, in the order they show: each stack base first, then related PRs in the order they were added. */
@@ -91,6 +97,21 @@ export interface InboxThreadPullsAnswer {
 export interface InboxThreadPullsSummary {
   count: number;
   headline: { key: string; state: InboxThreadPullState };
+  /**
+   * Every PR of the thread, in the order they were put on (additive; absent from an older Inbox): when it was put on,
+   * when its state was last seen to change (a merged or closed PR's end), and its checks and review as last read.
+   * Grid (approval "inbox-agent-grid") draws a thread's bar from these, with no read of its own.
+   */
+  items?: InboxThreadPullsSummaryItem[];
+}
+
+export interface InboxThreadPullsSummaryItem {
+  key: string;
+  state: InboxThreadPullState;
+  added_at: string;
+  read_at: string | null;
+  checks: InboxThreadPullChecks | null;
+  review: InboxThreadPullReview | null;
 }
 
 /** A PR named for a thread, read into its parts; `key` is the store's. */
@@ -149,7 +170,7 @@ export function inboxThreadPullText(pull: Pick<InboxThreadPull, "pull" | "url">)
 /** A record as the window and the tools show it, with what the reader knows now. */
 export function inboxThreadPullWire(
   pull: InboxThreadPull,
-  live: { checks?: InboxThreadPullChecks | null; review?: InboxThreadPullReview | null } = {},
+  live: { checks?: InboxThreadPullChecks | null; review?: InboxThreadPullReview | null; problem?: Problem } = {},
 ): InboxThreadPullWire {
   const ref = inboxThreadPullRefOfKey(pull.pull, pull.url);
   return {
@@ -162,6 +183,7 @@ export function inboxThreadPullWire(
     ref: ref ? forgePullRefText(ref) : pull.url,
     checks: live.checks ?? null,
     review: live.review ?? null,
+    ...(live.problem ? { problem: live.problem } : {}),
   };
 }
 
@@ -236,9 +258,19 @@ export function inboxThreadPullHeadline<T extends Pick<InboxThreadPull, "pull" |
 }
 
 /** A row's summary of its thread's live PRs, or undefined when it has none. */
-export function inboxThreadPullsSummary(pulls: readonly InboxThreadPull[]): InboxThreadPullsSummary | undefined {
+export function inboxThreadPullsSummary(
+  pulls: readonly InboxThreadPull[],
+  live?: (key: string) => { checks?: InboxThreadPullChecks | null; review?: InboxThreadPullReview | null } | undefined,
+): InboxThreadPullsSummary | undefined {
   const headline = inboxThreadPullHeadline(pulls, inboxThreadPullGroups(pulls));
-  return headline ? { count: pulls.length, headline: { key: headline.pull, state: headline.state } } : undefined;
+  if (!headline) return undefined;
+  const summary: InboxThreadPullsSummary = { count: pulls.length, headline: { key: headline.pull, state: headline.state } };
+  if (!live) return summary;
+  const items = pulls.map((pull) => {
+    const now = live(pull.pull);
+    return { key: pull.pull, state: pull.state, added_at: pull.added_at, read_at: pull.read_at, checks: now?.checks ?? null, review: now?.review ?? null };
+  });
+  return { ...summary, items };
 }
 
 /** Whether a stored record reads as one (a line an older or broken writer left is skipped). */

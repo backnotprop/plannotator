@@ -1,5 +1,3 @@
-export type SemanticDiffStatus = "ok" | "unavailable" | "error";
-
 export interface SemanticDiffSummary {
   fileCount: number;
   added: number;
@@ -26,6 +24,10 @@ export interface SemanticDiffChange {
   oldStartLine: number | null;
   oldEndLine: number | null;
   structuralChange: boolean | null;
+  origin?: 'second-opinion';
+  band?: 'very-likely' | 'likely';
+  model?: string;
+  candidateId?: string;
 }
 
 export interface SemanticDiffBinaryChange {
@@ -35,42 +37,19 @@ export interface SemanticDiffBinaryChange {
   fileStatus: string | null;
 }
 
+export type SemanticDiffUnreadReason = "generated" | "too-large" | "unreadable" | "timed-out";
+
+export interface SemanticDiffUnreadFile {
+  path: string;
+  reason: SemanticDiffUnreadReason;
+}
+
 export interface SemanticDiffOkResponse {
   status: "ok";
   summary: SemanticDiffSummary;
   changes: SemanticDiffChange[];
   binaryChanges: SemanticDiffBinaryChange[];
-  semVersion: string;
-  semSource: string;
+  unreadFiles?: SemanticDiffUnreadFile[];
 }
 
-export interface SemanticDiffUnavailableResponse {
-  status: "unavailable";
-  reason: string;
-  message: string;
-}
-
-export interface SemanticDiffErrorResponse {
-  status: "error";
-  reason: string;
-  message: string;
-  exitCode?: number;
-  stderr?: string;
-  semVersion?: string;
-  semSource?: string;
-}
-
-export type SemanticDiffResponse =
-  | SemanticDiffOkResponse
-  | SemanticDiffUnavailableResponse
-  | SemanticDiffErrorResponse;
-
-export interface SemanticDiffAvailability {
-  available: boolean;
-  reason?: string;
-  message?: string;
-  semVersion?: string;
-  semSource?: string;
-}
-
-export type SemanticDiffAdvert = Pick<SemanticDiffAvailability, "available" | "semVersion" | "semSource">;
+export type SemanticDiffResponse = SemanticDiffOkResponse;

@@ -52,7 +52,7 @@ export function CloudAgentCard({
           <span className="ib-l">{agent.name}</span>
           <span className="ib-desc">
             {INBOX_CLOUD_PRESET_NAMES[agent.preset]}
-            {agent.project ? <> · in {agent.project.name}</> : null}
+            {agent.project ? <> · new threads go in {agent.project.name}</> : null}
           </span>
           {!fresh && <CloudStatus agent={agent} />}
         </span>

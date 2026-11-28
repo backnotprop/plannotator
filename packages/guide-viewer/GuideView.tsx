@@ -45,6 +45,8 @@ interface GuideViewProps {
    * `bare`, off otherwise (the fixed estimate the review app, guides.show and VS Code use).
    */
   fitFileHeights?: boolean;
+  /** Given the guide's root element, for a host's own listeners on it (the Inbox's link hover cards). */
+  rootRef?: React.RefObject<HTMLDivElement | null>;
 }
 
 export interface ResolvedGuideSections {
@@ -100,6 +102,7 @@ export const GuideView: React.FC<GuideViewProps> = ({
   bare = false,
   threadHeading = false,
   fitFileHeights,
+  rootRef,
 }) => {
   const fit = fitFileHeights ?? bare;
   const host = useGuideHost();
@@ -225,7 +228,7 @@ export const GuideView: React.FC<GuideViewProps> = ({
   const actionsOnTab = !!actions && !actionsHost && firstCardTab !== null && firstCardTab !== undefined && firstCardTab !== false;
 
   return (
-    <GuideViewportProvider className={threadHeading ? 'gv-guide' : bare ? 'w-full px-4 pt-3.5 pb-6' : 'w-full px-3 py-5 sm:px-6 sm:py-6 lg:px-10 lg:py-8'} eager={guideFileCount <= GUIDE_EAGER_MOUNT_MAX_FILES}>
+    <GuideViewportProvider className={threadHeading ? 'gv-guide' : bare ? 'w-full px-4 pt-3.5 pb-6' : 'w-full px-3 py-5 sm:px-6 sm:py-6 lg:px-10 lg:py-8'} eager={guideFileCount <= GUIDE_EAGER_MOUNT_MAX_FILES} rootRef={rootRef}>
       {/* Header actions sit in a row above the title on narrow screens and float beside it from md up (desktop unchanged). */}
       {/* The host's global comments add their button to the same row, ahead of the host's own controls. Bare (no title
           to float beside), the row stays above the content at every width. */}

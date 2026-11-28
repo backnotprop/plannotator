@@ -181,7 +181,8 @@ export function SendToAnotherSession({
                       <bdi>{session.label}</bdi>
                     </span>
                     <span className="ib-d">
-                      {hostLabel(session.host)} · {startedLine(session)} · {busyWord(session)}
+                      {hostLabel(session.host)} · {startedLine(session)}
+                      {busyWord(session) && ` · ${busyWord(session)}`}
                     </span>
                   </span>
                 ) : (
@@ -189,7 +190,7 @@ export function SendToAnotherSession({
                     <span className="ib-t">
                       {hostLabel(session.host)} · {startedLine(session)}
                     </span>
-                    <span className="ib-d">{busyWord(session)}</span>
+                    {busyWord(session) && <span className="ib-d">{busyWord(session)}</span>}
                   </span>
                 )}
               </label>

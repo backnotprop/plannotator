@@ -23,7 +23,7 @@
  *   PATH folders.
  * - `launchSettingsEnv`: what goes in the per-launch settings FILE's `env`
  *   (reaches only our session, survives respawn, never shows in `ps`): the
- *   login shell's `CLAUDE_*` values and PATH, never the rest of it.
+ *   login shell's `CLAUDE_*` values, PATH and LAUNCH_SHELL_SWITCHES, never the rest of it.
  *
  * Variable values are never logged; only names.
  */
@@ -44,6 +44,34 @@ import { envPathOf, foldEnvPath, joinPathFolders, pathFoldersOf } from "./env-pa
  * markers (an Inbox started from inside a Pi session has Pi's: its session, its file, its model).
  */
 const SPAWN_DROP = /^(PLANNOTATOR_.*|CODEX_THREAD_ID|PI_SESSION_ID|PI_SESSION_FILE|PI_PROVIDER|PI_MODEL|PI_REASONING_LEVEL)$/;
+
+/**
+ * The Plannotator switches a launch keeps from the person's LOGIN shell (approval "inbox-launched-agent-note"):
+ * plan review, and the off switches for what a session's Plannotator sends out or keeps a copy of. Only these
+ * names, only from the login shell read (never the Inbox's own env, which may be an agent's or a test's), and
+ * only into the launched session itself: Claude Code's per-launch settings file, Pi's process. Never a
+ * marker, data dir, port, URL, connect or test name, and never a switch a launch needs on (the mod, the Inbox
+ * tool). `environment.md` lists them.
+ */
+export const LAUNCH_SHELL_SWITCHES = [
+  "PLANNOTATOR_PLAN_REVIEW",
+  "PLANNOTATOR_AI",
+  "PLANNOTATOR_SHARE",
+  "PLANNOTATOR_JINA",
+  "PLANNOTATOR_ANNOTATE_HISTORY",
+  "PLANNOTATOR_FEEDBACK_HISTORY",
+  "PLANNOTATOR_GUIDE_HISTORY",
+] as const;
+
+/** The login shell's LAUNCH_SHELL_SWITCHES, as it set them. */
+export function launchShellSwitches(login: Readonly<LaunchEnv>): LaunchEnv {
+  const out: LaunchEnv = {};
+  for (const name of LAUNCH_SHELL_SWITCHES) {
+    const value = login[name];
+    if (typeof value === "string") out[name] = value;
+  }
+  return out;
+}
 
 /** Claude Code's own switch for bypass mode without the acceptance dialog. */
 export const CLAUDE_SKIP_PERMISSIONS_ENV = "CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS";
@@ -87,8 +115,21 @@ export function launchStartOf(input: {
  */
 export function launchSpawnEnv(env: Readonly<LaunchEnv>, platform: NodeJS.Platform = process.platform): LaunchEnv {
   // Windows: PATH under the one key `PATH`, whatever its spelling (`Path`), so a later copy that sets it is the one used.
-  return foldEnvPath(Object.fromEntries(Object.entries(env).filter(([name]) => !SPAWN_DROP.test(name) && !PER_SESSION_CLAUDE.test(name) && name !== CLAUDE_SKIP_PERMISSIONS_ENV)), platform);
+  return foldEnvPath(Object.fromEntries(Object.entries(withoutRexPane(env)).filter(([name]) => !SPAWN_DROP.test(name) && !PER_SESSION_CLAUDE.test(name) && name !== CLAUDE_SKIP_PERMISSIONS_ENV)), platform);
 }
+
+/**
+ * `env` without the names Rex's terminal gives what runs in one of its panes (`REX_SESSION`, `REX_BLOCK`,
+ * `REX_SERVER`, `REX_BIN_DIR`, and `TERM_PROGRAM`/`TERM_PROGRAM_VERSION` while they say `rex`). `REX_RUNTIME_DIR` stays:
+ * the person sets it, and it says where this computer's Rex server is (inbox-rex-where.ts). An Inbox started from a Claude Code
+ * in a Rex pane has them; an agent it starts in the background must not, or it reports that pane as its own place
+ * (its place line, marks and Show would be the person's pane). An agent started in a Rex tab gets them from Rex.
+ */
+export function withoutRexPane<T extends Readonly<Record<string, string | undefined>>>(env: T): T {
+  const rex = env.TERM_PROGRAM === "rex";
+  return Object.fromEntries(Object.entries(env).filter(([name]) => !REX_PANE_NAMES.test(name) && !(rex && (name === "TERM_PROGRAM" || name === "TERM_PROGRAM_VERSION")))) as T;
+}
+const REX_PANE_NAMES = /^REX_(SESSION|BLOCK|SERVER|BIN_DIR)$/;
 
 /** The Inbox's own env for the calls that are not a start: the same filter, `extraPath` after its PATH (`;`-joined on Windows). */
 export function launchPlainEnv(own: Readonly<Record<string, string | undefined>>, extraPath: readonly string[] = [], platform: NodeJS.Platform = process.platform): LaunchEnv {
@@ -112,6 +153,8 @@ export function launchSettingsEnv(
   // A session gets its supervisor's env, whoever started that: the file is the one way the login PATH reaches it.
   const loginPath = envPathOf(login);
   if (loginPath) out.PATH = loginPath;
+  // The person's own Plannotator switches (LAUNCH_SHELL_SWITCHES): here, never in the supervisor's env.
+  Object.assign(out, launchShellSwitches(login));
   if (input.dataDir) out.PLANNOTATOR_DATA_DIR = input.dataDir;
   out.PLANNOTATOR_LAUNCH = input.launchId;
   out.PLANNOTATOR_LAUNCH_KEY = input.key;
@@ -157,6 +200,9 @@ export function loginSeedEnv(own: Readonly<Record<string, string | undefined>>):
  * from `loginSeedEnv`. When the shell cannot be read in time, the Inbox's
  * plain env stands in, and the cause is logged.
  */
+/** The envs `createLoginEnv` gave when the login shell did not answer (its own env instead): never kept as the login one. */
+export const LOGIN_ENV_FALLBACKS = new WeakSet<object>();
+
 export function createLoginEnv(options: {
   run: LoginEnvRunner;
   env: () => Readonly<Record<string, string | undefined>>;
@@ -178,6 +224,9 @@ export function createLoginEnv(options: {
     }
     if (!env) options.log?.(`Inbox launch: could not read the login shell's env (${shell}); using the Inbox's own.`);
     else options.log?.(`Inbox launch: login env read, ${Object.keys(env).length} names: ${Object.keys(env).filter((n) => n.startsWith("CLAUDE")).join(" ") || "no CLAUDE_*"}`);
-    return env ?? launchPlainEnv(own);
+    if (env) return env;
+    const fallback = launchPlainEnv(own);
+    LOGIN_ENV_FALLBACKS.add(fallback);
+    return fallback;
   };
 }

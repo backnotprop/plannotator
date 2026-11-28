@@ -25,6 +25,10 @@ import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { InboxAnnotationRecord, InboxMessageWire } from '@plannotator/core/inbox-types';
+import { drawMermaidFencesWithMermaid } from '@plannotator/ui/test-setup/mermaidEngine';
+
+// A stand-in Mermaid runtime draws here; Pele is DiagramBlock.engine.test.tsx's.
+drawMermaidFencesWithMermaid();
 
 const hasDom = typeof document !== 'undefined';
 const { InboxApp } = (hasDom ? await import('./App') : {}) as typeof import('./App');
@@ -396,7 +400,10 @@ test.skipIf(!hasDom)("the person's own message and a question card's words open 
   const area = el.querySelector('.ib-rbox textarea') as HTMLTextAreaElement;
   await type(area, 'Holding this one for now.');
   act(() => button(el, 'Send').click());
-  await until(() => el.querySelectorAll('[data-author="person"] [data-message-id]').length === 1 || el.querySelectorAll('article[data-author="person"]').length === 1, 'my reply drawn');
+  // The reply itself, drawn from the Send's answer (not the words drawn while it was on its way, `[data-sending]`,
+  // which take no comments either), and only once.
+  await until(() => el.querySelectorAll('article[data-author="person"]:not([data-sending]) [data-message-id]').length === 1, 'my reply drawn');
+  expect(el.querySelectorAll('[data-sending]').length).toBe(0);
   const mine = el.querySelector<HTMLElement>('article[data-author="person"] [data-message-id]')!;
   expect(mine.hasAttribute('data-text-comments')).toBe(true);
   await select(mine, 'Holding this one');

@@ -13,7 +13,8 @@
  * browser's six connections to the Inbox until threads stopped opening), or a
  * card left on "Loading…" for ever when the read gets no answer. With Code
  * review on, "Open review thread" on a row it should not be on (merged, a PR
- * Reviews does not list, the thread's own review), missing where it should be,
+ * Reviews does not list), the thread's own review linking back to itself instead
+ * of "Open in Reviews", missing where it should be,
  * going to the wrong place, or taking over the row's own link to the forge.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
@@ -25,6 +26,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxPull, InboxPullLink, InboxPullsAnswer, InboxReviewRow, InboxThreadPullWire, InboxThreadPullsAnswer, InboxThreadPullsSummary, InboxThreadPullState } from '@plannotator/core/inbox-types';
 import { inboxPullStacks, inboxThreadPullGroups, inboxThreadPullWire, parseInboxThreadPullRef } from '@plannotator/core/inbox-types';
+import { toolProblem } from '@plannotator/core/problem-words';
 import { pullReviewLinks, pullsMarkWords, threadPullsBus, type PullReviewLink } from './model';
 
 const hasDom = typeof document !== 'undefined';
@@ -172,7 +174,13 @@ describe.skipIf(!hasDom)('the row mark', () => {
     expect(popover()).not.toBeNull();
     expect(reads).toHaveLength(1);
     expect(popover()!.querySelector('[aria-busy="true"]')!.textContent).toBe('Loading…');
-    await hover('pointerout');
+    // The list shifted the row from under the resting pointer (a banner drawn above it): the mark gets a pointerout
+    // the pointer never made. The card stays: nothing closes under the person.
+    await act(async () => mark.dispatchEvent(new PointerEvent('pointerout', { bubbles: true, pointerType: 'mouse', relatedTarget: host })));
+    await wait(300);
+    expect(popover()).not.toBeNull();
+    // The pointer moves off the mark and the card: the hover ended.
+    await act(async () => document.body.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerType: 'mouse' })));
     await wait(300);
     expect(popover()).toBeNull();
     // The card closed: its read is aborted, so it holds no connection.
@@ -305,6 +313,20 @@ describe.skipIf(!hasDom)("the thread's button and its card", () => {
     }
   });
 
+  test('a row of a pair with the same short text is removed by its own URL, never the other row', async () => {
+    // An older Inbox stored `acme/api!3` on gitlab.com; added again, it is on the project's own host.
+    const stale = pull('https://gitlab.com/acme/api/-/merge_requests/3', 'open', 'main', 'a');
+    const mine = pull('https://code.corp.example/acme/api/-/merge_requests/3', 'open', 'main', 'b');
+    expect([stale.ref, mine.ref]).toEqual(['acme/api!3', 'https://code.corp.example/acme/api/-/merge_requests/3']);
+    answer = answerOf([stale, mine]);
+    postAnswer = () => Response.json((answer = answerOf([mine])));
+    render(<ThreadPullsButton threadId={THREAD} summary={undefined} />);
+    await settle();
+    await click(host!.querySelector('[data-pr-button]'));
+    await click(popover()!.querySelector('[data-pr-remove="acme/api!3"]'));
+    expect(posts).toEqual([{ path: `/api/inbox/threads/${THREAD}/pulls`, body: { remove: ['https://gitlab.com/acme/api/-/merge_requests/3'] } }]);
+  });
+
   test('remove sends that ref, says so with Undo, and Undo adds it back', async () => {
     const a = pull('o/r#1', 'open', 'main', 'a');
     const b = pull('o/web#2', 'open', 'main', 'b');
@@ -318,12 +340,12 @@ describe.skipIf(!hasDom)("the thread's button and its card", () => {
     await settle();
     await click(host!.querySelector('[data-pr-button]'));
     await click(popover()!.querySelector('[data-pr-remove="o/web#2"]'));
-    expect(posts).toEqual([{ path: `/api/inbox/threads/${THREAD}/pulls`, body: { remove: ['o/web#2'] } }]);
+    expect(posts).toEqual([{ path: `/api/inbox/threads/${THREAD}/pulls`, body: { remove: ['https://github.com/o/web/pull/2'] } }]);
     expect(popover()!.querySelector('[data-pr-removed]')!.textContent).toContain('Removed o/web#2');
     // One PR left: the button's count goes.
     expect(host!.querySelector('[data-pr-button] .ib-cnt')).toBeNull();
     await click(popover()!.querySelector('[data-pr-undo]'));
-    expect(posts.at(-1)!.body).toEqual({ add: ['o/web#2'] });
+    expect(posts.at(-1)!.body).toEqual({ add: ['https://github.com/o/web/pull/2'] });
     expect(popover()!.querySelector('[data-pr-removed]')).toBeNull();
     expect(host!.querySelector('[data-pr-button] .ib-cnt')!.textContent).toBe('2');
   });
@@ -434,6 +456,36 @@ describe.skipIf(!hasDom)("the thread's button and its card", () => {
     expect(host!.querySelector('[data-pr-button] .ib-cnt')!.textContent).toBe('2');
   });
 
+  test('PRs added while the thread is open, with the read after the change failing: the button shows from the row and reads again', async () => {
+    render(<ThreadPullsButton threadId={THREAD} summary={undefined} />);
+    await settle();
+    expect(host!.querySelector('[data-pr-button]')).toBeNull();
+    readAnswer = async () => {
+      throw new TypeError('Failed to fetch');
+    };
+    await act(async () => threadPullsBus.emit(THREAD));
+    await settle();
+    expect(reads).toHaveLength(2);
+    const twenty = [
+      ...Array.from({ length: 10 }, (_, i) => pull(`acme/api#${i + 1}`, 'open', i === 0 ? 'main' : `a${i}`, `a${i + 1}`)),
+      ...Array.from({ length: 5 }, (_, i) => pull(`acme/web#${i + 1}`, 'open', i === 0 ? 'main' : `w${i}`, `w${i + 1}`)),
+      ...Array.from({ length: 5 }, (_, i) => pull(`slow/repo#${i + 1}`, 'unknown', '', '')),
+    ];
+    render(<ThreadPullsButton threadId={THREAD} summary={{ count: 20, headline: { key: twenty[0]!.pull, state: 'open' } }} />);
+    await settle();
+    const button = host!.querySelector('[data-pr-button]')!;
+    expect(button).not.toBeNull();
+    expect(button.getAttribute('data-pr-n')).toBe('20');
+    expect(button.querySelector('.ib-cnt')!.textContent).toBe('9+');
+    expect(reads).toHaveLength(3);
+    answer = answerOf(twenty);
+    readAnswer = async () => Response.json(answer);
+    await act(async () => threadPullsBus.emit(THREAD));
+    await settle();
+    await click(host!.querySelector('[data-pr-button]'));
+    expect(popover()!.querySelectorAll('[data-pr-row]')).toHaveLength(20);
+  });
+
   test("one PR with no forge answer shows what the Inbox knows, never a made-up card; the forge's answer shows the hover card", async () => {
     answer = answerOf([pull('o/r#7', 'open', 'main', 'a', { checks: 'running' })]);
     render(<ThreadPullsButton threadId={THREAD} summary={undefined} />);
@@ -455,6 +507,40 @@ describe.skipIf(!hasDom)("the thread's button and its card", () => {
       expect(popover()!.textContent).toContain('Seven from the forge');
     } finally {
       setRefCardTransport(null);
+    }
+  });
+
+  test("a PR the Inbox could not read: why shows under what is known, Copy copies the exact command, Try again asks again", async () => {
+    // The project's own GitLab (the server found it trusted): the command names it.
+    const problem = toolProblem('signed_out', { cli: 'glab', host: 'gitlab.example.dev', kind: 'pull', trusted: true });
+    answer = answerOf([pull('https://gitlab.example.dev/acme/api/-/merge_requests/45', 'open', 'main', 'a', { problem, title: null })]);
+    const copied: string[] = [];
+    const clipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (text: string) => void copied.push(text) } });
+    try {
+      render(<ThreadPullsButton threadId={THREAD} summary={undefined} />);
+      await settle();
+      await click(host!.querySelector('[data-pr-button]'));
+      const card = popover()!;
+      // What is known (the row) stays above why; a self-hosted MR with no title yet is named short, never by its URL.
+      expect(card.querySelector('[data-pr-row] .ib-prpop-title')!.textContent).toBe('gitlab.example.dev/acme/api!45');
+      expect(card.querySelector('.ib-prpop-rm1')!.textContent).toBe('Remove gitlab.example.dev/acme/api!45 from this thread');
+      expect(card.querySelector('[data-problem="tool.signed_out"] [data-problem-title]')!.textContent).toBe(problem.title);
+      await click(card.querySelector('[data-problem-copy]'));
+      expect(copied).toEqual(['glab auth login --hostname gitlab.example.dev']);
+      // Signed in since: Try again, under the command, reads with retry.
+      reads = [];
+      await click(card.querySelector('[data-problem="tool.signed_out"] [data-problem-retry]'));
+      expect(reads.some((path) => path.endsWith('/pulls?retry=1'))).toBe(true);
+      // A host the person never used (only an agent's link named it): no command, no claim about it, still Try again.
+      answer = answerOf([pull('https://gitlab-acme.com/acme/api/-/merge_requests/8', 'open', 'main', 'b', { problem: toolProblem('signed_out', { cli: 'glab', host: 'gitlab-acme.com', kind: 'pull' }) })]);
+      await act(async () => threadPullsBus.emit(THREAD));
+      await settle();
+      const untrusted = popover()!.querySelector('[data-problem="tool.unsupported"]')!;
+      expect([untrusted.querySelector('[data-problem-command]'), untrusted.textContent!.includes('auth login'), !!untrusted.querySelector('[data-problem-retry]')]).toEqual([null, false, true]);
+    } finally {
+      if (clipboard) Object.defineProperty(navigator, 'clipboard', clipboard);
+      else delete (navigator as { clipboard?: unknown }).clipboard;
     }
   });
 
@@ -611,13 +697,18 @@ describe.skipIf(!hasDom)('Open review thread (Code review on)', () => {
     expect(popover()).toBeNull();
   });
 
-  test('the row whose review thread is this thread has no line', async () => {
+  test('the row whose review thread is this thread: "Open in Reviews", its page there, never a link back to this thread', async () => {
     answer = answerOf([withThread, noThread]);
-    render(<ThreadPullsButton threadId={THREAD} summary={undefined} review={{ linkOf: reviewsList(THREAD).linkOf, onOpen: () => {} }} />);
+    const opened: PullReviewLink[] = [];
+    const { model, linkOf } = reviewsList(THREAD);
+    render(<ThreadPullsButton threadId={THREAD} summary={undefined} review={{ linkOf, onOpen: (l) => opened.push(l) }} />);
     await settle();
     await click(host!.querySelector('[data-pr-button]'));
-    expect(line(withThread.ref)).toBeNull();
-    expect(line(noThread.ref)).not.toBeNull();
+    expect(line(withThread.ref)!.textContent).toBe('Open in Reviews');
+    expect(line(noThread.ref)!.textContent).toBe('Open review thread');
+    await click(line(withThread.ref));
+    const stack = inboxPullStacks(model.pulls).find((s) => s.layers.some((l) => l.key === withThread.pull))!;
+    expect(opened).toEqual([{ kind: 'launchpad', stackId: stack.id, here: true }]);
   });
 
   test('Code review off (no review links given): no line on any row', async () => {

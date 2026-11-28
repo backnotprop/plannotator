@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { CLAIM_EXIT, claimArgv, cleanupArgv, DEBUG_LOG_MAX_BYTES, debugAppendArgv, pruneArgv, STOP_EXIT, stopArgv } from './launch'
+import { CLAIM_EXIT, claimArgv, cleanupArgv, DEBUG_LOG_MAX_BYTES, debugAppendArgv, pruneArgv, SCOPED_WORKER, STOP_EXIT, stopArgv } from './launch'
 
 // The TERM fallback for an older CLI runs this script for real. The failures
 // it guards: signalling a pid that no longer belongs to Plannotator (reused
@@ -124,7 +124,7 @@ describe('the scripts several Claude Code processes share', () => {
     expect(existsSync(join(kept, 'settled', 'by'))).toBe(true)
     expect((await run(claimArgv(kept, 'process-b'))).code).toBe(CLAIM_EXIT.lost)
 
-    const removed = launchDir(root, 'removed', { stdin: '', 'result.json': '{}' })
+    const removed = launchDir(root, 'removed', { stdin: '', 'result.json': '{}', 'scope-started': '' })
     expect((await run(claimArgv(removed, 'process-a'))).code).toBe(CLAIM_EXIT.won)
     writeFileSync(join(removed, 'settled', 'delivered'), '1')
     await run(cleanupArgv(removed))
@@ -195,5 +195,17 @@ describe('the scripts several Claude Code processes share', () => {
     const fresh = [...rotated.slice(old.length).split('\n'), ...readFileSync(log, 'utf8').split('\n')].filter(Boolean)
     expect(fresh.sort()).toEqual(['one', 'two'])
     expect(existsSync(`${log}.rotating`)).toBe(false)
+  })
+})
+
+// The scoped worker is a single-quoted word in LAUNCH_SCRIPT, and systemd-run
+// (254+) expands `${NAME}`, `$$` and a word that starts with `$` before running
+// it: any of these would break the launch on Linux, where no macOS test sees it.
+describe('the worker systemd-run starts on Linux', () => {
+  test('survives single quoting and systemd-run expansion unchanged', () => {
+    expect(SCOPED_WORKER).not.toContain("'")
+    expect(SCOPED_WORKER).not.toContain('${')
+    expect(SCOPED_WORKER).not.toContain('$$')
+    expect(SCOPED_WORKER.startsWith('$')).toBe(false)
   })
 })

@@ -1,7 +1,7 @@
 /**
  * The window's side of the sidebar's items (the registry is core `INBOX_SIDEBAR_ITEMS`): each item's icon in the
  * menu and the Customize panel, and which items this Inbox draws now. An item it does not draw (Board with the
- * Board off, Reviews with Code review off, Shape, Usage without `cswap`, Search, New message, Copy prompt and the
+ * Board off, Reviews with Code review off, Usage without `cswap`, Search, New message, Copy prompt and the
  * keyboard button on a phone) is left out of the menu and the panel, and keeps its place in the layout for when it comes back.
  * Agents and Tags have no icon here: the panel draws the sections' own marks (the goggles, the tag's `#`).
  */
@@ -15,8 +15,10 @@ export const SIDEBAR_ITEM_ICON: Record<Exclude<InboxSidebarItem, 'agents' | 'tag
   starred: 'star',
   projects: 'folder',
   inbox: 'inbox',
+  grid: 'grid',
+  plans: 'map',
   board: 'board',
-  shape: 'layers',
+  scheduled: 'scheduled',
   reviews: 'reviews',
   artifacts: 'artifacts',
   drafts: 'doc',
@@ -30,8 +32,13 @@ export const SIDEBAR_ITEM_ICON: Record<Exclude<InboxSidebarItem, 'agents' | 'tag
 
 export interface SidebarFeatures {
   board: boolean;
+  /** Plans (config.json `inboxPlans`): absent or false while off, so nothing of it shows, in the menu and Customize too. */
+  plans?: boolean;
+  /** Grid (Settings → Capabilities → Experimental, approval "inbox-agent-grid"): absent or false while off. */
+  grid?: boolean;
+  /** Routines (Settings → Capabilities): absent in a sidebar drawn without them. */
+  scheduled?: boolean;
   reviews: boolean;
-  shape: boolean;
   usage: boolean;
   /** Search and New message (absent in a sidebar drawn without them). */
   search?: boolean;
@@ -53,8 +60,10 @@ export interface SidebarFeatures {
 export function drawnSidebarItems(features: SidebarFeatures): ReadonlySet<InboxSidebarItem> {
   const off = new Set<InboxSidebarItem>();
   if (!features.board) off.add('board');
+  if (features.plans !== true) off.add('plans');
+  if (features.grid !== true) off.add('grid');
+  if (features.scheduled !== true) off.add('scheduled');
   if (!features.reviews) off.add('reviews');
-  if (!features.shape) off.add('shape');
   if (!features.usage) off.add('usage');
   // A phone's sheet holds neither (approval "inbox-phone-sidebar-sheet"): both are in the list's header there.
   if (features.phone || features.search === false) off.add('search');

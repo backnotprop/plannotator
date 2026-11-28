@@ -28,6 +28,18 @@ for path in socket "devices/$dev/items"; do
   case "$status" in 401 | 404) pass "wrong token on ${path%%/*}: $status" ;; *) fail "wrong token on ${path%%/*} answered $status" ;; esac
 done
 
+# Relay 1.1: its routes are known to the Worker, so a mailbox never made answers mailbox_not_found; 1.0 answers not_found.
+for check in "GET socket" "DELETE commands/probe" "PUT liveactivity"; do
+  method=${check%% *}
+  sub=${check#* }
+  body=$(curl -sS -w ' %{http_code}' -X "$method" -H 'Authorization: Bearer wrong-token' "$RELAY/v1/mailboxes/$mbx/devices/$dev/$sub")
+  case "$body" in
+    *'"code":"mailbox_not_found"} 404') pass "relay 1.1: $method devices/:dev/$sub is served" ;;
+    *'"code":"not_found"} 404') fail "relay 1.0 still deployed: $method devices/:dev/$sub is not served" ;;
+    *) fail "$method devices/:dev/$sub answered: $body" ;;
+  esac
+done
+
 statuses=""
 for _ in $(seq 1 25); do statuses="$statuses $(invalid_create)"; done
 echo "      25 invalid creates:$statuses"

@@ -31,13 +31,14 @@
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-voice.spec.ts`. PNGs land in
  * PLANNOTATOR_E2E_SHOTS_DIR, or .local/proof/inbox-voice.
  */
-import { chromium, devices, expect, test, webkit, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from '@playwright/test';
+import { chromium, devices, expect, test, webkit, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from './inbox-test';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { NO_BROWSER } from '../helpers/no-browser';
-import { E2E_LAUNCH_OFF, inboxScratch, removeInboxScratch } from './inbox-scratch';
+import { savedConfig } from '../helpers/saved-config';
+import { E2E_GROUP_TIP_SEEN, E2E_LAUNCH_OFF, inboxScratch, removeInboxScratch } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
 const shotsDir = resolve(process.env.PLANNOTATOR_E2E_SHOTS_DIR ?? join(repo, '.local/proof/inbox-voice'));
@@ -111,6 +112,8 @@ async function startWorld(options: { version?: string; config?: Record<string, u
       favicon: 'glass',
       // The "themes" dialog (after the tab icon dialog, ahead of the offers): settled, as for someone on another theme.
       inboxThemeChooser: { notNeededAt: '2026-10-01T10:00:00.000Z' },
+      // "Which view do you prefer?" (five threads, armed ahead of voice on a release build): settled.
+      inboxReveals: { ...E2E_GROUP_TIP_SEEN, view_choice: { shownAt: '2026-10-01T10:00:00.000Z' } },
       ...options.config,
     }),
   );
@@ -156,7 +159,7 @@ async function mainWorld(): Promise<World> {
   return main;
 }
 
-const saved = (w: World) => JSON.parse(readFileSync(join(w.dataDir, 'config.json'), 'utf8')) as { inboxVoice?: { on?: boolean; phonesOnly?: boolean }; inboxVoiceIntro?: { shownAt?: string } };
+const saved = (w: World) => savedConfig(w.dataDir) as { inboxVoice?: { on?: boolean; phonesOnly?: boolean }; inboxVoiceIntro?: { shownAt?: string } };
 
 let speech: Browser;
 let silence: Browser;

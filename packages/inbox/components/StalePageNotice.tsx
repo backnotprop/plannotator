@@ -15,7 +15,8 @@ export function StalePageNotice({ version, busy, onReload, onDismiss }: { versio
   const dismiss = () => {
     const notice = ref.current;
     const hadFocus = !!notice && notice.contains(document.activeElement);
-    const next = notice?.closest('.ib-pbody')?.querySelector<HTMLElement>('.ib-subject') ?? notice?.closest('.ib-lbody')?.querySelector<HTMLElement>('button[data-thread-id]') ?? null;
+    // The thread's title is its bar's h2, outside the body the notice sits in.
+    const next = notice?.closest('.ib-pbody')?.closest('.ib-pane')?.querySelector<HTMLElement>('h2.ib-subject') ?? notice?.closest('.ib-lbody')?.querySelector<HTMLElement>('button[data-thread-id]') ?? null;
     onDismiss();
     if (hadFocus) next?.focus({ preventScroll: true });
   };

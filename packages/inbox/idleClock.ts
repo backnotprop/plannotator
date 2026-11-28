@@ -28,8 +28,8 @@ export function pageAttentive(doc: Document = document): boolean {
 /**
  * What is open over the page: a dialog (modal or not), a menu, a list of choices, an open popover (its trigger declares
  * `aria-haspopup`: an open disclosure, such as a Smart group's band or a sidebar section, only says `aria-expanded`,
- * and is no overlay), the Ask AI window and Show me (`data-popover-layer`, `data-chat-window`), an image being marked
- * up, a Shape board over the thread, the annotation toolbar and its comment, picker and table floats.
+ * and is no overlay), the Ask AI window (`data-popover-layer`, `data-chat-window`), an image being marked up, the
+ * annotation toolbar and its comment, picker and table floats.
  */
 export const PAGE_OVERLAYS = [
   'dialog[open]',
@@ -42,7 +42,6 @@ export const PAGE_OVERLAYS = [
   '[data-popover-layer]',
   '[data-chat-window]',
   '[data-pn-image-annotator-stage]',
-  '[data-shape-open]',
   '.annotation-toolbar',
   '[data-comment-popover]',
   '[data-floating-picker]',

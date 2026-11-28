@@ -62,7 +62,6 @@ describe("Settings → Prompts", () => {
       defaults: { wake: INBOX_REMINDER_TEXT, no_wake: INBOX_REMINDER_TEXT_NO_WAKE },
       max: INBOX_REMINDER_MAX_CHARS,
       on: prompts.reminder.on,
-      editable: true,
       wakes: { "claude-code": true, pi: true, opencode: true },
       over: { shared: null, runtimes: { "claude-code": null, pi: null, opencode: null } },
     });

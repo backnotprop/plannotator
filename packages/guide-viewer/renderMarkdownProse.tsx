@@ -9,9 +9,8 @@ const HEADING = /^#{1,6} (.*)$/;
  * with inline markdown (bold/italic/code/links) handled per-line via
  * {@link renderInlineMarkdown}.
  *
- * Originally written for Code Tour stop details; shared with Guided Review
- * section overviews since both are short agent-authored prose blocks that
- * don't warrant pulling in a full markdown renderer.
+ * Used for Guided Review section overviews: short agent-authored prose
+ * blocks that don't warrant pulling in a full markdown renderer.
  */
 export function renderMarkdownProse(
   text: string,
@@ -81,7 +80,7 @@ export function renderMarkdownProse(
       };
       const calloutLabel = { important: 'Important', warning: 'Warning', note: 'Note' };
       nodes.push(
-        <div key={key++} className={`my-2 px-3 py-2 rounded text-[12px] ${calloutStyles[type]}`}>
+        <div key={key++} className={`my-2 px-3 py-2 rounded text-[12px] [overflow-wrap:anywhere] ${calloutStyles[type]}`}>
           <span className="font-semibold text-[10px] uppercase tracking-wider block mb-0.5 opacity-70">
             {calloutLabel[type]}
           </span>
@@ -99,7 +98,7 @@ export function renderMarkdownProse(
     const heading = HEADING.exec(line);
     if (heading) {
       nodes.push(
-        <h3 key={key++} className="text-[12px] font-semibold text-foreground mt-3 mb-1">
+        <h3 key={key++} className="text-[12px] font-semibold text-foreground mt-3 mb-1 [overflow-wrap:anywhere]">
           {inline(heading[1])}
         </h3>
       );
@@ -118,7 +117,7 @@ export function renderMarkdownProse(
       nodes.push(
         <ul key={key++} className="my-1.5 space-y-0.5 pl-4">
           {bullets.map((b, bi) => (
-            <li key={bi} className={`text-[13px] ${bodyText} list-disc leading-relaxed`}>
+            <li key={bi} className={`text-[13px] ${bodyText} list-disc leading-relaxed [overflow-wrap:anywhere]`}>
               {inline(b)}
             </li>
           ))}
@@ -143,7 +142,7 @@ export function renderMarkdownProse(
       j++;
     }
     nodes.push(
-      <p key={key++} className={`text-[13px] ${bodyText} leading-relaxed`}>
+      <p key={key++} className={`text-[13px] ${bodyText} leading-relaxed [overflow-wrap:anywhere]`}>
         {inline(paraLines.join(' '))}
       </p>
     );

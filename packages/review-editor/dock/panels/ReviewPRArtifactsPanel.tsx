@@ -198,7 +198,7 @@ function ImageArtifactStage({
                 onSelectNote(note.id);
               }}
             >
-              <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[9px] font-semibold text-primary-foreground shadow-md ring-2 ring-background/80">
+              <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground shadow-md ring-2 ring-background/80">
                 {index + 1}
               </span>
             </button>
@@ -285,7 +285,7 @@ function VideoArtifactStage({
                   onSelectNote(note.id);
                 }}
               >
-                <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1 text-[9px] font-semibold text-primary-foreground shadow-sm ring-2 ring-background">
+                <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1 text-xs font-semibold text-primary-foreground shadow-sm ring-2 ring-background">
                   {index + 1}
                 </span>
               </button>
@@ -803,21 +803,21 @@ export const ReviewPRArtifactsPanel: React.FC<IDockviewPanelProps> = () => {
     >
       <aside className="flex h-full w-[17rem] max-w-[36%] shrink-0 flex-col border-r border-border/50 bg-card/15 max-sm:w-auto max-sm:max-w-none">
         <div className="flex min-h-[var(--panel-header-h)] shrink-0 items-center justify-between border-b border-border/50 px-3">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <span className="text-xs font-semibold text-muted-foreground">
             <span className="max-sm:sr-only">Artifacts </span><span className="font-mono opacity-70">{visibleArtifacts.length}</span>
           </span>
           <div className="flex items-center gap-1">
             {hiddenCatalogCount > 0 && (
               <button
                 type="button"
-                className="inline-flex min-h-9 items-center gap-1 rounded-md px-2 text-[10px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="inline-flex min-h-9 items-center gap-1 rounded-md px-2 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 onClick={() => setHidden(() => new Set())}
               >
                 <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" /> Restore {hiddenCatalogCount}
               </button>
             )}
             {hasResolved && (
-              <label className="flex min-h-9 cursor-pointer items-center gap-1.5 rounded-md px-2 text-[10px] text-muted-foreground hover:bg-muted">
+              <label className="flex min-h-9 cursor-pointer items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground hover:bg-muted">
                 <input type="checkbox" checked={hideResolved} onChange={(event) => setHideResolved(event.target.checked)} className="h-3 w-3 accent-primary" />
                 Hide resolved
               </label>
@@ -835,13 +835,13 @@ export const ReviewPRArtifactsPanel: React.FC<IDockviewPanelProps> = () => {
               <LayoutGrid className="h-4 w-4" aria-hidden="true" />
             </span>
             <span className="min-w-0 flex-1 max-sm:sr-only">Gallery</span>
-            <span className="rounded bg-muted max-sm:hidden px-1.5 py-0.5 font-mono text-[9px] tabular-nums text-muted-foreground">
+            <span className="rounded bg-muted max-sm:hidden px-1.5 py-0.5 font-mono text-xs tabular-nums text-muted-foreground">
               {visibleArtifacts.length}
             </span>
           </button>
           {groups.map((group) => group.artifacts.length === 0 ? null : (
             <section key={group.key} className="mb-3 last:mb-0">
-              <div className="flex items-center justify-between px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/65 max-sm:sr-only">
+              <div className="flex items-center justify-between px-2 py-1 text-xs font-semibold tracking-[0.08em] text-muted-foreground/65 max-sm:sr-only">
                 <span>{group.label}</span>
                 <span className="font-mono">{group.artifacts.length}</span>
               </div>
@@ -866,9 +866,9 @@ export const ReviewPRArtifactsPanel: React.FC<IDockviewPanelProps> = () => {
                       <span className="min-w-0 flex-1 py-1.5 max-sm:sr-only">
                         <span className="flex items-center gap-1 truncate text-xs font-medium">
                           <span className="truncate">{artifact.name}</span>
-                          {resolved && <span className="text-[8px] uppercase tracking-wide text-muted-foreground">resolved</span>}
+                          {resolved && <span className="text-[8px] text-muted-foreground">resolved</span>}
                         </span>
-                        <span className="mt-0.5 flex min-w-0 items-center gap-1.5 truncate text-[9px] opacity-70">
+                        <span className="mt-0.5 flex min-w-0 items-center gap-1.5 truncate text-xs opacity-70">
                           <span className="truncate">@{artifact.provenance.authorLogin}</span>
                           {timestamp && <time dateTime={artifact.provenance.surface === 'description' ? undefined : artifact.provenance.createdAt}>{timestamp}</time>}
                           {noteCount > 0 && <span aria-label={`${noteCount} annotations`}>· {noteCount}</span>}
@@ -924,7 +924,7 @@ export const ReviewPRArtifactsPanel: React.FC<IDockviewPanelProps> = () => {
                 onSelectArtifact={setSelectedId}
               />
             </div>
-            <footer className="shrink-0 border-t border-border/50 px-3 py-2 text-[10px] text-muted-foreground">
+            <footer className="shrink-0 border-t border-border/50 px-3 py-2 text-xs text-muted-foreground">
               {visibleArtifacts.length} {visibleArtifacts.length === 1 ? 'artifact' : 'artifacts'} · select one to review
             </footer>
           </>
@@ -935,15 +935,15 @@ export const ReviewPRArtifactsPanel: React.FC<IDockviewPanelProps> = () => {
               <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">{selected.name}</span>
               <button
                 type="button"
-                className="inline-flex min-h-9 items-center gap-1.5 rounded-md bg-muted/55 px-2.5 text-[10px] font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="inline-flex min-h-9 items-center gap-1.5 rounded-md bg-muted/55 px-2.5 text-xs font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 onClick={(event) => setPendingComment({ artifactId: selected.id, anchorEl: event.currentTarget, anchor: { kind: 'page' } })}
               >
                 <MessageSquarePlus className="h-3.5 w-3.5" aria-hidden="true" /> <span className="max-sm:sr-only">Add note</span>
               </button>
-              <a href={selected.provenance.sourceUrl} title="Source" target="_blank" rel="noopener noreferrer" className="inline-flex min-h-9 items-center gap-1 rounded-md px-2 text-[10px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              <a href={selected.provenance.sourceUrl} title="Source" target="_blank" rel="noopener noreferrer" className="inline-flex min-h-9 items-center gap-1 rounded-md px-2 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                 <span className="max-sm:sr-only">Source</span> <ExternalLink className="h-3 w-3" aria-hidden="true" />
               </a>
-              <a href={selected.url} title="Open" target="_blank" rel="noopener noreferrer" className="inline-flex min-h-9 items-center gap-1 rounded-md px-2 text-[10px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              <a href={selected.url} title="Open" target="_blank" rel="noopener noreferrer" className="inline-flex min-h-9 items-center gap-1 rounded-md px-2 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                 <span className="max-sm:sr-only">Open</span> <ExternalLink className="h-3 w-3" aria-hidden="true" />
               </a>
             </header>
@@ -962,7 +962,7 @@ export const ReviewPRArtifactsPanel: React.FC<IDockviewPanelProps> = () => {
                 onAskAI={selectedIsDescription ? onAskAIForDescription : onAskAIForComment}
               />
             </div>
-            <footer className="shrink-0 border-t border-border/50 px-3 py-2 text-[10px] text-muted-foreground">
+            <footer className="shrink-0 border-t border-border/50 px-3 py-2 text-xs text-muted-foreground">
               From <span className="font-medium text-foreground/80">{artifactSourceLabel(selected)}</span>
               {' by '}@{selected.provenance.authorLogin}
               {selectedTimestamp ? ` · ${selectedTimestamp}` : ''}

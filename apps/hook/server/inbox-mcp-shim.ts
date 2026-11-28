@@ -29,7 +29,11 @@
  * the id the shim was started with. A T3 Code thread is its thread id
  * (`T3CODE_THREAD_ID`, which T3 sets for the Claude it runs through the Agent
  * SDK), sent as `agent_host: "t3"`, so the Inbox can put the person's reply
- * into that thread (packages/server/inbox-t3-wake.ts). Otherwise it is one
+ * into that thread (packages/server/inbox-t3-wake.ts). An Antigravity
+ * conversation names itself on every tool call
+ * (`_meta["antigravity.google/conversation_id"]`), sent as
+ * `agent_host: "antigravity"` (packages/server/inbox-antigravity-wake.ts).
+ * Otherwise it is one
  * `ses_` id per shim process, and an MCP client that wants its threads across
  * restarts passes `agent_session` itself.
  *
@@ -44,6 +48,10 @@
  */
 
 import {
+  INBOX_ANTIGRAVITY_HOST,
+  INBOX_ANTIGRAVITY_NAME,
+  antigravityConversationOfCall,
+  isAntigravityConversationId,
   INBOX_CODEX_HOST,
   INBOX_CODEX_NAME,
   INBOX_HOST_NAMES,
@@ -66,19 +74,24 @@ import {
   isT3ThreadId,
   qwenSessionOfCall,
 } from "@plannotator/core/inbox-types";
-import { inboxStatus, type InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
+import { inboxEnsureFailedWords, inboxStatus, type InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
+import { isInboxTurnedOn } from "@plannotator/shared/inbox/turned-on";
 import { qwenHome, qwenSessionOfProcess } from "@plannotator/shared/inbox/qwen-sessions";
-import { INBOX_MAX_REQUEST_BYTES, inboxRequestTooLargeMessage } from "@plannotator/shared/inbox/connection";
+import { INBOX_MAX_REQUEST_BYTES, INBOX_OFF_LINE, inboxRequestTooLargeMessage } from "@plannotator/shared/inbox/connection";
 import { statSync } from "node:fs";
 import { isAbsolute } from "node:path";
 
-const FILLED_TOOLS = new Set(["send_message", "read_thread", "submit_guide", "card", "steps", "thread_pulls"]);
-/** The filled tools that take no project: thread steps name their thread (the schema is strict, so no `project_path`). */
-const NO_PROJECT_TOOLS = new Set(["steps"]);
+const FILLED_TOOLS = new Set(["send_message", "read_thread", "submit_guide", "card", "steps", "thread_pulls", "routine", "resolve_message"]);
+/**
+ * The filled tools that take no project: thread steps name their thread, and resolve_message its message (their
+ * schemas are strict, so no `project_path`). resolve_message takes the session only with `moved_to` (a plain
+ * archive is sent untouched, as an older Inbox's strict schema takes it), never an author.
+ */
+const NO_PROJECT_TOOLS = new Set(["steps", "resolve_message"]);
 /** The tools that take the project but no session: search (its schema is strict, so no `agent_session`). */
 const PROJECT_ONLY_TOOLS = new Set(["search"]);
 /** The tools that record an author, and so take `agent_host` / `agent_name` (their schemas are strict). A card records who made and moved it; a thread's PRs, who added each. */
-const AUTHOR_TOOLS = new Set(["send_message", "submit_guide", "card", "steps", "thread_pulls"]);
+export const AUTHOR_TOOLS = new Set(["send_message", "submit_guide", "card", "steps", "thread_pulls", "routine"]);
 
 /**
  * The hosts whose sessions a reply wakes, with the name each one's
@@ -110,10 +123,17 @@ export interface InboxHostSession {
  * `plannotator inbox call`). Anything
  * malformed or naming another host is ignored, never guessed at (a Codex
  * session is a thread id, a UUID; a T3 one any id T3 gives a thread).
+ *
+ * In a T3 thread's own Claude and its MCP servers (`CLAUDE_CODE_ENTRYPOINT`
+ * `t3-code` beside a thread id, no `CLAUDE_CODE_CHILD_SESSION`), a tag of
+ * another host is the one T3 inherited from the shell it was started in, so
+ * the thread wins over it. Claude's Bash commands carry
+ * `CLAUDE_CODE_CHILD_SESSION`, and there the tag still comes first.
  */
 export function inboxHostSessionFromEnv(env: Record<string, string | undefined>): InboxHostSession | null {
   const tag = env.PLANNOTATOR_SESSION_TAG;
-  if (typeof tag === "string") {
+  const t3Own = env.CLAUDE_CODE_ENTRYPOINT === "t3-code" && isT3ThreadId(env[INBOX_T3_THREAD_ENV]) && !env.CLAUDE_CODE_CHILD_SESSION;
+  if (typeof tag === "string" && !(t3Own && !tag.startsWith(`${INBOX_T3_HOST}:`))) {
     const colon = tag.indexOf(":");
     const host = colon > 0 ? tag.slice(0, colon) : "";
     const session = tag.slice(colon + 1);
@@ -121,7 +141,8 @@ export function inboxHostSessionFromEnv(env: Record<string, string | undefined>)
       Object.hasOwn(INBOX_SESSION_HOST_NAMES, host) &&
       (host === INBOX_T3_HOST ? isT3ThreadId(session) : isInboxSessionId(session)) &&
       (host !== INBOX_CODEX_HOST || isCodexThreadId(session)) &&
-      (host !== INBOX_QWEN_HOST || isQwenSessionId(session))
+      (host !== INBOX_QWEN_HOST || isQwenSessionId(session)) &&
+      (host !== INBOX_ANTIGRAVITY_HOST || isAntigravityConversationId(session))
     ) {
       return { host, session, name: INBOX_SESSION_HOST_NAMES[host]! };
     }
@@ -362,6 +383,8 @@ function rpcError(id: string | number | null | undefined, message: string, code 
  * A call from Codex (`clientName` is `codex-mcp-client`, or the call carries
  * Codex's turn metadata) that names its thread (`params._meta.threadId`) is
  * that thread's: the host session is the thread, whatever the environment says.
+ * A call whose `_meta` names an Antigravity conversation is that conversation's
+ * (a subagent's call, whose conversation is not its root, is not).
  *
  * `project_path` is `cwd`, unless the call is filed as the session
  * `sessionProject` names (its host's `PLANNOTATOR_SESSION_PROJECT`): then
@@ -379,6 +402,8 @@ export function fillInboxToolArguments(
   if (message.method !== "tools/call" || !message.params) return message;
   const codexThread = codexThreadOfCall(message.params._meta, clientName);
   if (codexThread) hostSession = { host: INBOX_CODEX_HOST, session: codexThread, name: INBOX_CODEX_NAME };
+  const antigravity = codexThread ? null : antigravityConversationOfCall(message.params._meta);
+  if (antigravity) hostSession = { host: INBOX_ANTIGRAVITY_HOST, session: antigravity.conversation, name: INBOX_ANTIGRAVITY_NAME };
   const name = message.params.name;
   if (typeof name !== "string") return message;
   if (PROJECT_ONLY_TOOLS.has(name)) {
@@ -387,6 +412,8 @@ export function fillInboxToolArguments(
     return { ...message, params: { ...message.params, arguments: args } };
   }
   if (!FILLED_TOOLS.has(name)) return message;
+  // A plain archive goes as before: an older Inbox's strict resolve_message schema has no agent_session.
+  if (name === "resolve_message" && (message.params.arguments as Record<string, unknown> | undefined)?.moved_to === undefined) return message;
   const args = { ...((message.params.arguments as Record<string, unknown> | undefined) ?? {}) };
   if (!NO_PROJECT_TOOLS.has(name) && args.project_path === undefined && args.reply_to === undefined) {
     // The session the call is filed as: the agent's own, else the host session it adopts below.
@@ -499,8 +526,10 @@ export async function runInboxMcpShim(options: InboxMcpShimOptions): Promise<voi
       write(rpcError(null, "Parse error", -32700));
       return;
     }
-    if (options.askAiChild || options.t3EntryIdle) {
-      const reply = toolessReply(message, options.askAiChild ? INBOX_ASK_AI_CHILD_REFUSAL : INBOX_T3_ENTRY_REFUSAL);
+    // Until the person turns the Inbox on here (turned-on.ts): no tools, and a call gets the one line.
+    const off = !options.askAiChild && !options.t3EntryIdle && !isInboxTurnedOn(options.dataDir);
+    if (options.askAiChild || options.t3EntryIdle || off) {
+      const reply = toolessReply(message, off ? INBOX_OFF_LINE : options.askAiChild ? INBOX_ASK_AI_CHILD_REFUSAL : INBOX_T3_ENTRY_REFUSAL);
       if (reply) write(reply);
       return;
     }
@@ -517,7 +546,7 @@ export async function runInboxMcpShim(options: InboxMcpShimOptions): Promise<voi
     try {
       target = await entry();
     } catch (error) {
-      if (isRequest) write(rpcError(message.id, `Plannotator Inbox is not running: ${error instanceof Error ? error.message : String(error)}`));
+      if (isRequest) write(rpcError(message.id, inboxEnsureFailedWords(error)));
       return;
     }
     // Refused before anything is sent: the Inbox would answer 413 to it anyway.

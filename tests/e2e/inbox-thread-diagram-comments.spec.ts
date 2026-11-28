@@ -22,7 +22,7 @@
  * PNGs land in <PLANNOTATOR_E2E_PROOF_DIR or .local/proof>/thread-diagram-comments/.
  */
 
-import { expect, test, type Browser, type BrowserContext, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Locator, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -81,8 +81,8 @@ let world: World;
 const message = (page: Page, id: string) => page.locator(`[data-message-id="${id}"]`);
 const composer = (page: Page) => page.locator('[data-diagram-composer]');
 const badges = (scope: Page | Locator) => scope.locator('[data-diagram-badge]');
-/** A rendered part by its words: Mermaid's `g.node`, Graphviz's `g.node`. */
-const part = (scope: Locator, words: string) => scope.locator('[data-diagram-canvas] g.node', { hasText: words }).first();
+/** A rendered part by its words: Pele's `g.pele-node` (Mermaid's `g.node` for a fence that falls back), Graphviz's `g.node`. */
+const part = (scope: Locator, words: string) => scope.locator('[data-diagram-canvas] :is(g.node, g.pele-node)', { hasText: words }).first();
 
 async function shot(page: Page, name: string): Promise<void> {
   await page.screenshot({ path: join(proofDir, `${name}.png`) });
@@ -467,7 +467,8 @@ test('on a phone, full screen: a pinch zooms about the fingers, one or two finge
       await page.waitForTimeout(80);
       await page.touchscreen.tap(at.x, at.y);
     };
-    /** The spot of the canvas nearest `near` with no part of the diagram and no control under it (double tap zooms from empty space; a part opens its composer). */
+    /** The spot of the canvas nearest `near` with no part of the diagram and no control under it (double tap zooms from empty space; a part opens its composer).
+     * A gap inside the drawing counts: zoomed in, Pele's wide layout of this diagram covers the whole canvas. */
     const emptyNear = async (near: Point): Promise<Point> => {
       const found = await page.evaluate(
         ({ near, box }) => {
@@ -478,7 +479,7 @@ test('on a phone, full screen: a pinch zooms about the fingers, one or two finge
           for (let x = box.x + 30; x < box.x + box.width - 30; x += 10) {
             for (let y = box.y + 30; y < box.y + box.height - 80; y += 10) {
               const stack = document.elementsFromPoint(x, y);
-              if (stack.some((el) => (layer.contains(el) && el !== root) || el.closest('button, [data-diagram-control]'))) continue;
+              if (stack.some((el) => (layer.contains(el) && el !== root && el !== layer) || el.closest('button, [data-diagram-control]'))) continue;
               const distance = Math.hypot(x - near.x, y - near.y);
               if (distance < bestDistance) {
                 bestDistance = distance;

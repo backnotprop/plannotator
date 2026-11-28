@@ -186,6 +186,30 @@ test.skipIf(!hasDom)('a typed name that is no tag offers New tag “…”, and 
   expect(field.value).toBe('R');
 });
 
+test.skipIf(!hasDom)('the field keeps focus when typing moves the row under a resting mouse off it, so Enter still makes the tag', async () => {
+  const rows = [row('a')];
+  const calls: string[] = [];
+  draw(<RowMenuWith rows={rows} calls={calls} />);
+  await rightClick(document.querySelector('[data-thread-id="a"]')!);
+  await until(() => !!menu(), 'the menu');
+  await press(menu()!.querySelector('[data-add-tag-item]'));
+  await until(() => document.activeElement === menu()?.querySelector('[data-tag-find]'), 'focus in the field');
+  const field = menu()!.querySelector<HTMLInputElement>('[data-tag-find]')!;
+  // The mouse rests on the New tag row (where Add tag was clicked). The first letter adds a line above that row and
+  // pushes it down, so the browser reports the pointer leaving it for the line; the menu then focuses its popup.
+  await type(field, 'B');
+  const item = menu()!.querySelector('[data-tag-new]')!;
+  const line = item.previousElementSibling!;
+  await act(async () => {
+    item.dispatchEvent(new PointerEvent('pointerout', { bubbles: true, pointerType: 'mouse', relatedTarget: line }));
+    line.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse', relatedTarget: item }));
+  });
+  expect(document.activeElement?.getAttribute('role') ?? document.activeElement?.tagName).toBe('INPUT');
+  await type(field, 'Billing');
+  await key(document.activeElement!, 'Enter');
+  expect(calls).toEqual(['create Billing a']);
+});
+
 test.skipIf(!hasDom)('with Add to Priority and Add tag above it, Snooze by keyboard: Down from the first time is the second time', async () => {
   // A Wednesday morning: Back, four times and Pick a date, so Snooze's index (6) is past the times' end.
   setSystemTime(new Date('2026-11-04T10:00:00Z'));
@@ -400,7 +424,7 @@ test('one tag across machines: found by any machine’s id, written by this Inbo
 });
 
 test('Tags is in the sidebar’s menu and Customize only while the section is drawn, just above Agents', () => {
-  const base = { board: false, reviews: false, shape: false, usage: false, phone: false, agents: true };
+  const base = { board: false, reviews: false, usage: false, phone: false, agents: true };
   expect(drawnSidebarItems(base).has('tags')).toBe(false);
   const drawn = drawnSidebarItems({ ...base, tags: true });
   const items = sidebarMenuItems(INBOX_SIDEBAR_DEFAULT, drawn);

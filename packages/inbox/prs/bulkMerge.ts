@@ -66,6 +66,17 @@ export function confirmWords(count: number, phone: boolean): string {
     : `Click again to merge ${count} ${count === 1 ? 'pull request' : 'pull requests'}. A merge can’t be undone.`;
 }
 
+/**
+ * The confirm's one line for picks a linked machine merges (its gh / glab, its own sign-in there): which machine, per
+ * machine. Null when this machine merges them all.
+ */
+export function farMergeLine(pulls: readonly InboxPull[], machines: Readonly<Record<string, { name?: string }>> | undefined): string | null {
+  const byMachine = new Map<string, InboxPull[]>();
+  for (const pull of pulls) if (pull.machine) byMachine.set(pull.machine, [...(byMachine.get(pull.machine) ?? []), pull]);
+  if (byMachine.size === 0) return null;
+  return [...byMachine].map(([id, list]) => `${machines?.[id]?.name ?? 'Another machine'} merges ${list.map(inboxPullLabel).join(', ')} with its own sign-in.`).join(' ');
+}
+
 /** A refusal in the forge's (or the Inbox's) own words, after the PR's number. */
 export function refusedLine(pull: InboxPull, message: string): string {
   return `${inboxPullLabel(pull)} ${message}`;

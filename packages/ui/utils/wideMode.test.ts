@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import {
   canUseAnnotateWideMode,
+  parseAnnotateOpenView,
+  resolveAnnotateOpenView,
   resolveFocusShortcutAction,
   resolveWideModeExitLayout,
   type WideModeLayoutSnapshot,
@@ -125,5 +127,33 @@ describe('resolveWideModeExitLayout', () => {
       sidebarTab: null,
       panelOpen: false,
     });
+  });
+});
+
+describe('resolveAnnotateOpenView (config.json annotateView)', () => {
+  const all = { toolbarShown: true, canUseWideMode: true, canEditMarkdown: true };
+
+  test('opens in the configured view when the toolbar offers it', () => {
+    expect(resolveAnnotateOpenView('wide', all)).toBe('wide');
+    expect(resolveAnnotateOpenView('focus', all)).toBe('focus');
+    expect(resolveAnnotateOpenView('edit', all)).toBe('edit');
+  });
+
+  test('unset or a value the toolbar does not offer is today\'s default', () => {
+    expect(resolveAnnotateOpenView(null, all)).toBeNull();
+    for (const raw of [undefined, null, 'Focus', 'zen', '', 2, {}]) {
+      expect(resolveAnnotateOpenView(parseAnnotateOpenView(raw), all)).toBeNull();
+    }
+  });
+
+  test('falls back silently where the view is not available', () => {
+    // Toolbar hidden: HTML, a compact touch layout, no document on screen.
+    for (const view of ['wide', 'focus', 'edit'] as const) {
+      expect(resolveAnnotateOpenView(view, { ...all, toolbarShown: false })).toBeNull();
+    }
+    // A diagram: Wide and Focus, no Edit.
+    const diagram = { ...all, canEditMarkdown: false };
+    expect(resolveAnnotateOpenView('edit', diagram)).toBeNull();
+    expect(resolveAnnotateOpenView('focus', diagram)).toBe('focus');
   });
 });

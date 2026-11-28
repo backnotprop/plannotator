@@ -269,12 +269,12 @@ export function claudeJobIsolationArgs(opts?: ClaudeJobCommandOptions): string[]
 }
 
 /**
- * The Bash commands every Claude agent job (code review, Code Tour, Guided
+ * The Bash commands every Claude agent job (code review, Guided
  * Review and guide repair) may run without a prompt: exactly the read-only
  * commands the job prompts instruct (`packages/core/review-prompt.ts`, the
- * PR-mode messages in `agent-review-message.ts`, and the review/tour/guide
+ * PR-mode messages in `agent-review-message.ts`, and the review/guide
  * system prompts), plus a few read-only lookups those prompts imply (history,
- * blame, file listings). One list for all three builders so they cannot drift.
+ * blame, file listings). One list for every builder so they cannot drift.
  *
  * Deliberately absent: `git -C` (it prefixes ANY git subcommand; workspace
  * reviews inline the combined diff instead), `git grep` / `git ls-remote`

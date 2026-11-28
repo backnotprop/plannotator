@@ -6,7 +6,7 @@
  *
  * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
  */
-import { expect, test } from '@playwright/test';
+import { expect, test } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -37,7 +37,9 @@ test('six blank lines in the person\'s message leave six lines of space; the age
     if (!(await page.locator('.ib-rbox textarea').first().isVisible().catch(() => false))) await page.getByRole('button', { name: /^Reply/ }).last().click();
     await page.locator('.ib-rbox textarea').first().fill(OWNER);
     await page.getByRole('button', { name: /^Send/ }).last().click();
-    await expect(page.locator('[data-author="person"]')).toHaveCount(1);
+    // The reply landed (not the words drawn while the Send is on its way, `data-sending`, one pre-wrapped paragraph).
+    await expect(page.locator('[data-author="person"]:not([data-sending])')).toHaveCount(1);
+    await expect(page.locator('[data-author="person"][data-sending]')).toHaveCount(0);
 
     const gap = (scope: string) =>
       page.evaluate((selector) => {

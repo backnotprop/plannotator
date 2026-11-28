@@ -3,8 +3,7 @@
  * (inbox-agent-icon-still.ts), through the Inbox's real door (temp data dir and HOME, loopback; nothing real is asked).
  *
  * What this catches: a picture past the cap or of another type kept (or refused with words that are not Set
- * picture…'s); a picture kept twice under two names; an SVG served without its sandbox headers; a tailnet guest
- * reading or adding one; another site or another session's tab adding one; a removal that leaves agents pointing at a
+ * picture…'s); a picture kept twice under two names; an SVG served without its sandbox headers; another site or another session's tab adding one; a removal that leaves agents pointing at a
  * picture that is gone, or that no window hears; the cap taking a picture an agent still shows; a moving picture
  * with no still (a GIF, an APNG, an animated WebP, an SVG's CSS or SMIL animation), a still that still moves, or a
  * still made for a picture that never moved; the faces file's version bumped (an older Plannotator would then
@@ -189,24 +188,20 @@ describe("GET /api/inbox/agent-icons/:hash", () => {
     expect((await w.get("..%2Fagent-faces.json")).status).toBe(404);
   });
 
-  test("over the tailnet: the owner's window reads and adds pictures, a guest's does neither", async () => {
+  test("over the tailnet: the owner's window reads and adds pictures", async () => {
     const MAGIC = "macbook-pro.tail0000.ts.net";
     const OWNER = "ramos@example.com";
-    const GUEST = "guest@example.com";
-    const w = await world({ inboxTailscale: true, inboxTailscaleAllow: [GUEST] }, { magic: MAGIC, owner: OWNER });
+    const w = await world({ inboxTailscale: true }, { magic: MAGIC, owner: OWNER });
     const listener = w.server.tailscale.listenerPort();
     expect(listener).not.toBeNull();
     const headers = (login: string) => ({ Host: `${MAGIC}:${w.server.port}`, "Tailscale-User-Login": login, Origin: `https://${MAGIC}:${w.server.port}`, "Content-Type": "application/json" });
     const at = (path: string) => `http://127.0.0.1:${listener}${path}`;
     const body = JSON.stringify({ picture: dataUrl(PNG, "image/png") });
 
-    const guestAdd = await fetch(at("/api/inbox/agent-icons"), { method: "POST", headers: headers(GUEST), body });
-    expect(guestAdd.status).toBe(403);
     const ownerAdd = await fetch(at("/api/inbox/agent-icons"), { method: "POST", headers: headers(OWNER), body });
     expect(ownerAdd.status).toBe(200);
     const { icon } = await iconOf(ownerAdd);
     const read = (login: string) => fetch(at(`/api/inbox/agent-icons/${icon.id}`), { headers: { ...headers(login), "Sec-Fetch-Site": "same-origin" } });
-    expect((await read(GUEST)).status).toBe(403);
     expect((await read(OWNER)).status).toBe(200);
   });
 });

@@ -63,7 +63,7 @@ export const AskAIInput: React.FC<AskAIInputProps> = ({
         value={question}
         onChange={(e) => setQuestion(e.target.value)}
         placeholder="Ask about this code..."
-        className="w-full px-3 py-2 bg-muted rounded-lg text-xs resize-none focus:outline-none focus:ring-1 focus:ring-primary/50"
+        className="w-full px-3 py-2 bg-background border border-border rounded-lg text-xs placeholder:text-muted-foreground resize-none focus:outline-none focus:ring-1 focus:ring-primary/50"
         rows={2}
         autoFocus
         disabled={isLoading}
@@ -120,9 +120,9 @@ export const AskAIInput: React.FC<AskAIInputProps> = ({
               onClick={() => onViewResponse?.(q.id)}
               className="w-full text-left p-1.5 rounded border border-border/50 hover:border-primary/30 hover:bg-primary/5 transition-colors"
             >
-              <p className="text-[10px] text-muted-foreground truncate">{q.prompt}</p>
+              <p className="text-xs text-muted-foreground truncate">{q.prompt}</p>
               {r.text && (
-                <p className="text-[10px] text-foreground/60 truncate mt-0.5">
+                <p className="text-xs text-foreground/60 truncate mt-0.5">
                   {r.text.slice(0, 80)}
                 </p>
               )}

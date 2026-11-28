@@ -21,10 +21,9 @@ import {
   inboxSnoozeWhen,
 } from "./inbox-snooze";
 
-const before = process.env.TZ;
+const before = process.env.TZ ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
 afterEach(() => {
-  if (before === undefined) delete process.env.TZ;
-  else process.env.TZ = before;
+  process.env.TZ = before;
 });
 const zone = (tz: string) => {
   process.env.TZ = tz;

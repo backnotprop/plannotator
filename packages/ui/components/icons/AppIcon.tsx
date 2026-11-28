@@ -33,6 +33,49 @@ export const APP_ICON_DATA: Record<string, string> = {
   "zed": 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHZpZXdCb3g9IjAgMCA0MCA0MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGcgY2xpcC1wYXRoPSJ1cmwoI2NsaXAwXzU0MzdfNzkxMDkpIj4KPG1hc2sgaWQ9Im1hc2swXzU0MzdfNzkxMDkiIHN0eWxlPSJtYXNrLXR5cGU6bHVtaW5hbmNlIiBtYXNrVW5pdHM9InVzZXJTcGFjZU9uVXNlIiB4PSI1IiB5PSI1IiB3aWR0aD0iMzAiIGhlaWdodD0iMzAiPgo8cGF0aCBkPSJNNS42MDAxIDUuNTk5NjFIMzQuNDAwMVYzNC4zOTk2SDUuNjAwMVY1LjU5OTYxWiIgZmlsbD0id2hpdGUiLz4KPC9tYXNrPgo8ZyBtYXNrPSJ1cmwoI21hc2swXzU0MzdfNzkxMDkpIj4KPHBhdGggZmlsbC1ydWxlPSJldmVub2RkIiBjbGlwLXJ1bGU9ImV2ZW5vZGQiIGQ9Ik04LjMwMDEgNy4zOTk2MUM4LjA2MTQgNy4zOTk2MSA3LjgzMjQ4IDcuNDk0NDMgNy42NjM3IDcuNjYzMjFDNy40OTQ5MiA3LjgzMiA3LjQwMDEgOC4wNjA5MSA3LjQwMDEgOC4yOTk2MVYyOC4wOTk2SDUuNjAwMVY4LjI5OTYxQzUuNjAwMSA3LjU4MzUyIDUuODg0NTYgNi44OTY3NyA2LjM5MDkxIDYuMzkwNDJDNi44OTcyNiA1Ljg4NDA3IDcuNTg0MDEgNS41OTk2MSA4LjMwMDEgNS41OTk2MUgzMi40MTM4QzMzLjYxNjUgNS41OTk2MSAzNC4yMTg2IDcuMDUzNzEgMzMuMzY4NCA3LjkwNDIxTDE4LjUxNjYgMjIuNzU1N0gyMi43MDAxVjIwLjg5OTZIMjQuNTAwMVYyMy4yMDZDMjQuNTAwMSAyMy41NjQxIDI0LjM1NzkgMjMuOTA3NCAyNC4xMDQ3IDI0LjE2MDZDMjMuODUxNSAyNC40MTM4IDIzLjUwODEgMjQuNTU2IDIzLjE1MDEgMjQuNTU2SDE2LjcxNjZMMTMuNjIzIDI3LjY0OTZIMjcuNjUwMVYxNi4zOTk2SDI5LjQ1MDFWMjcuNjQ5NkMyOS40NTAxIDI4LjEyNyAyOS4yNjA1IDI4LjU4NDggMjguOTIyOSAyOC45MjI0QzI4LjU4NTMgMjkuMjYgMjguMTI3NSAyOS40NDk2IDI3LjY1MDEgMjkuNDQ5NkgxMS44MjNMOC42NzMgMzIuNTk5NkgzMS43MDAxQzMxLjkzODggMzIuNTk5NiAzMi4xNjc3IDMyLjUwNDggMzIuMzM2NSAzMi4zMzZDMzIuNTA1MyAzMi4xNjcyIDMyLjYwMDEgMzEuOTM4MyAzMi42MDAxIDMxLjY5OTZWMTEuODk5NkgzNC40MDAxVjMxLjY5OTZDMzQuNDAwMSAzMi40MTU3IDM0LjExNTYgMzMuMTAyNCAzMy42MDkzIDMzLjYwODhDMzMuMTAyOSAzNC4xMTUxIDMyLjQxNjIgMzQuMzk5NiAzMS43MDAxIDM0LjM5OTZINy41ODY0QzYuMzgzNyAzNC4zOTk2IDUuNzgxNiAzMi45NDU1IDYuNjMxOCAzMi4wOTVMMjEuNDI3MiAxNy4yOTk2SDE3LjMwMDFWMTkuMDk5NkgxNS41MDAxVjE2Ljg0OTZDMTUuNTAwMSAxNi40OTE2IDE1LjY0MjMgMTYuMTQ4MiAxNS44OTU1IDE1Ljg5NUMxNi4xNDg3IDE1LjY0MTggMTYuNDkyMSAxNS40OTk2IDE2Ljg1MDEgMTUuNDk5NkgyMy4yMjcyTDI2LjM3NzIgMTIuMzQ5NkgxMi4zNTAxVjIzLjU5OTZIMTAuNTUwMVYxMi4zNDk2QzEwLjU1MDEgMTEuODcyMiAxMC43Mzk3IDExLjQxNDQgMTEuMDc3MyAxMS4wNzY4QzExLjQxNDkgMTAuNzM5MyAxMS44NzI3IDEwLjU0OTYgMTIuMzUwMSAxMC41NDk2SDI4LjE3NzJMMzEuMzI3MiA3LjM5OTYxSDguMzAwMVoiIGZpbGw9ImJsYWNrIi8+CjwvZz4KPC9nPgo8ZGVmcz4KPGNsaXBQYXRoIGlkPSJjbGlwMF81NDM3Xzc5MTA5Ij4KPHJlY3Qgd2lkdGg9IjI4LjgiIGhlaWdodD0iMjguOCIgZmlsbD0id2hpdGUiIHRyYW5zZm9ybT0idHJhbnNsYXRlKDUuNjAwMSA1LjU5OTYxKSIvPgo8L2NsaXBQYXRoPgo8L2RlZnM+Cjwvc3ZnPgo=',
 };
 
+/**
+ * JetBrains IDEs get a neutral mark of their own (the product's two-letter code
+ * in a rounded square drawn with the theme's tokens), not JetBrains' logos: the
+ * logo terms (github.com/JetBrains/logos LICENSE.txt and the brand guidelines)
+ * allow the logos only to point to JetBrains, unaltered, and ask for written
+ * permission for commercial products, which an "open in" menu entry is not
+ * clearly covered by. The codes are JetBrains' own short product names.
+ */
+export const APP_ICON_MARKS: Record<string, string> = {
+  "jetbrains-ij": 'IJ',
+  "jetbrains-ws": 'WS',
+  "jetbrains-pc": 'PC',
+  "jetbrains-go": 'GO',
+  "jetbrains-rd": 'RD',
+  "jetbrains-ps": 'PS',
+  "jetbrains-rm": 'RM',
+  "jetbrains-cl": 'CL',
+  "jetbrains-rr": 'RR',
+};
+
+const MarkIcon: React.FC<{ code: string; className?: string }> = ({ code, className }) => (
+  <svg
+    viewBox="0 0 16 16"
+    className={className ?? 'w-4 h-4'}
+    aria-hidden="true"
+    focusable="false"
+    data-app-mark={code}
+  >
+    <rect x="0.5" y="0.5" width="15" height="15" rx="3.4" style={{ fill: 'var(--foreground, #1f1f1f)' }} />
+    <text
+      x="8"
+      y="11.1"
+      textAnchor="middle"
+      fontSize="8.2"
+      fontWeight="700"
+      letterSpacing="-0.5"
+      style={{ fill: 'var(--background, #ffffff)', fontFamily: 'ui-sans-serif, system-ui, -apple-system, sans-serif' }}
+    >
+      {code}
+    </text>
+  </svg>
+);
+
 interface AppIconProps {
   /** Icon id from the OPEN_IN_APPS catalog (e.g. 'vscode', 'finder'). */
   id: string;
@@ -40,9 +83,12 @@ interface AppIconProps {
 }
 
 /**
- * Renders a full-color app brand icon. Unknown ids render nothing.
+ * Renders a full-color app brand icon, or an app's neutral mark (APP_ICON_MARKS).
+ * Unknown ids render nothing.
  */
 export const AppIcon: React.FC<AppIconProps> = ({ id, className }) => {
+  const mark = APP_ICON_MARKS[id];
+  if (mark) return <MarkIcon code={mark} className={className} />;
   const src = APP_ICON_DATA[id];
   if (!src) return null;
   return (

@@ -76,6 +76,33 @@ function deriveStatus(lines: string[], oldPath: string, newPath: string): DiffFi
   return oldPath !== newPath ? "renamed" : "modified";
 }
 
+/**
+ * A patch's added and removed lines, counted only inside its hunks: before a
+ * file's first `@@` the `---`/`+++` lines are its headers, and inside a hunk
+ * a line such as `----` (a removed `---` rule) or `--- x` (a removed SQL
+ * comment) is content, as git's numstat counts it. A combined diff
+ * (`diff --cc`, hunks headed `@@@`) is counted by its first column.
+ */
+export function countPatchChanges(patch: string): { additions: number; deletions: number } {
+  return countPatchLines(patch.split("\n"));
+}
+
+function countPatchLines(lines: readonly string[]): { additions: number; deletions: number } {
+  let additions = 0;
+  let deletions = 0;
+  let inHunk = false;
+  for (const line of lines) {
+    // A new file's headers follow its `diff` line; no hunk line starts with `diff`.
+    if (line.startsWith("diff ")) inHunk = false;
+    // `@@ ` heads a hunk, `@@@ ` a combined diff's; no hunk line starts with `@`.
+    else if (line.startsWith("@@")) inHunk = true;
+    else if (!inHunk) continue;
+    else if (line.startsWith("+")) additions += 1;
+    else if (line.startsWith("-")) deletions += 1;
+  }
+  return { additions, deletions };
+}
+
 export function parseDiffToFiles(rawPatch: string): DiffFile[] {
   const files: DiffFile[] = [];
 
@@ -91,13 +118,7 @@ export function parseDiffToFiles(rawPatch: string): DiffFile[] {
     const newPath = fromFileLines.newPath ?? fromFileLines.oldPath ?? fromMetadata.newPath ?? fromHeader.newPath;
     if (!oldPath || !newPath) continue;
 
-    let additions = 0;
-    let deletions = 0;
-
-    for (const line of lines) {
-      if (line.startsWith("+") && !line.startsWith("+++")) additions += 1;
-      if (line.startsWith("-") && !line.startsWith("---")) deletions += 1;
-    }
+    const { additions, deletions } = countPatchLines(lines);
 
     files.push({
       path: newPath,
@@ -203,7 +224,10 @@ function readHunk(header: RegExpExecArray, rows: readonly string[], from: number
     if (row === undefined) return null;
     const text = row.slice(1);
     if (row.startsWith("\\")) continue;
-    if (row.startsWith(" ") && oldLeft > 0 && newLeft > 0) {
+    // Git's diff.suppressBlankEmpty omits the space on an empty context
+    // row. The final split sentinel is not a row in the patch.
+    const contextRow = row.startsWith(" ") || (row === "" && i < rows.length - 1);
+    if (contextRow && oldLeft > 0 && newLeft > 0) {
       hunk.lines.push({ kind: "context", oldLine: oldLine++, newLine: newLine++, text });
       oldLeft -= 1;
       newLeft -= 1;

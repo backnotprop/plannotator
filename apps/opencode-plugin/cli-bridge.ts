@@ -49,10 +49,10 @@ import {
 } from "./prompt-delivery-error";
 import {
   readLastUserAgent,
-  readMessageAgent,
   resolveAddressableAgent,
   resolveAnnotatedMessageAgent,
 } from "./message-agent";
+import { pickRecentAssistantMessages, type RecentAssistantMessage } from "./recent-messages";
 
 type LogLevel = "info" | "error";
 
@@ -234,16 +234,7 @@ export function cliTargetOf(value: unknown): string | string[] | undefined {
   return undefined;
 }
 
-export interface RecentAssistantMessage {
-  messageId: string;
-  text: string;
-  timestamp?: string;
-  /**
-   * The agent that wrote the message (#1612). Plugin-side only: it decides who
-   * answers the feedback and is never sent to the CLI.
-   */
-  agent?: string;
-}
+export type { RecentAssistantMessage };
 
 function log(client: OpenCodeClient, level: LogLevel, message: string): void {
   try {
@@ -851,28 +842,7 @@ export async function getRecentAssistantMessages(
   const messagesResponse = await client.session?.messages?.({
     path: { id: sessionId },
   });
-  const messages = messagesResponse?.data;
-  if (!messages) return [];
-
-  const recentMessages: RecentAssistantMessage[] = [];
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (recentMessages.length >= limit) break;
-    const msg = messages[i];
-    if (msg.info?.role !== "assistant") continue;
-    const textParts = (msg.parts ?? [])
-      .filter((part: any) => part.type === "text" && part.text?.trim())
-      .map((part: any) => part.text);
-    if (textParts.length === 0) continue;
-    const agent = readMessageAgent(msg.info);
-    recentMessages.push({
-      messageId: msg.info?.id ?? `opencode-${i}`,
-      text: textParts.join("\n"),
-      timestamp: msg.info?.time?.created ? new Date(msg.info.time.created).toISOString() : undefined,
-      ...(agent && { agent }),
-    });
-  }
-
-  return recentMessages;
+  return pickRecentAssistantMessages(messagesResponse?.data, limit);
 }
 
 /** The agent of the session's latest user message, or undefined on any failure. */
@@ -1175,6 +1145,7 @@ export async function handleCliCommand(input: {
           // render — nothing a new binary does can make an old plugin drop a
           // reviewer's note.
           supportsApprovalNotes: true,
+          ...(input.sessionId ? { inboxSession: input.sessionId } : {}),
           ...buildBridgePayload(input.bridge),
         }),
         readyLabel: "code review",

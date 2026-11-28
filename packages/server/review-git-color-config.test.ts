@@ -168,7 +168,7 @@ describe("code review with color forced on in the user's git config (#1661)", ()
   });
 
   test("agent jobs' environment keeps the git they run themselves color-free", () => {
-    // Review, tour and guide jobs spawn an agent that runs `git diff` through
+    // Review and guide jobs spawn an agent that runs `git diff` through
     // its own pipe; the job environment carries the color-off settings.
     sandboxConfig();
     const repo = initGitRepo();

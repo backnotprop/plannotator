@@ -17,12 +17,14 @@ import { Viewer } from '@plannotator/ui/components/Viewer';
 import { ImageResolverContext, type ImageResolution } from '@plannotator/ui/components/ImageResolverContext';
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
 import type { InboxHealth } from '@plannotator/core/inbox-types';
-import { whatsNewImageUrl, type UpdateCheckFailing, type UpdateDetails, type UpdateSwitches, type WhatsNewModel, type WhatsNewReleasesModel } from '../api';
+import type { UpdateCheckFailing, UpdateDetails, UpdateSwitches, WhatsNewModel, WhatsNewReleasesModel } from '../api';
+import { whatsNewImageUrl } from '../data/whatsNewImage';
 import { clockTime, dayWords, formatCount, tildePath, whenTime } from '../format';
 import { Icon } from '../icons';
 import { CopyButton } from './ConnectPicker';
 import { SidebarTrigger } from '../shell/sidebar';
 import { releasesBetween } from '../whatsNew';
+import { useBackdropClose } from '../parts/backdropClose';
 import { KnownLine, NotesMissing, ReleasesPanel, ReleasesSheet, TldrLedger, centerRow } from './WhatsNewReleases';
 
 type Update = NonNullable<InboxHealth['update']>;
@@ -154,6 +156,7 @@ export interface ModalProps {
 /** A native modal dialog: focus stays inside, Escape closes, focus returns to what opened it. */
 export function Modal({ label, labelledBy, describedBy, onClose, children, testId, ownKeys, initialFocus, fallbackFocus, className }: ModalProps) {
   const ref = useRef<HTMLDialogElement>(null);
+  const backdrop = useBackdropClose(ref, onClose);
   const opener = useRef<Element | null>(null);
   const fallback = useRef(fallbackFocus);
   fallback.current = fallbackFocus;
@@ -217,9 +220,7 @@ export function Modal({ label, labelledBy, describedBy, onClose, children, testI
         event.preventDefault();
         onClose();
       }}
-      onClick={(event) => {
-        if (event.target === ref.current) onClose();
-      }}
+      {...backdrop}
     >
       <div className="ib-dlg-in">{children}</div>
     </dialog>
@@ -942,7 +943,7 @@ export function checksOffWords(details: UpdateDetails | null): ReactNode {
  * button to also show up in the general part of settings"): the version this
  * Inbox runs and the same action the sidebar's Update button offers, plus
  * Check now; the failing-check line with the install command when checking
- * fails. The page never renders it for a tailnet guest.
+ * fails.
  */
 export function GeneralUpdateRow({
   version,
@@ -1074,9 +1075,8 @@ export function AboutBlock({
   whatsNewRunning = false,
 }: {
   /**
-   * False on a tailnet guest's page, where every /api/inbox/update* route
-   * answers 403 local_only: the block shows the version and What's new in it,
-   * and no Update, Check now or update switch.
+   * False until the settings are read: the block shows the version and
+   * What's new in it, and no Update, Check now or update switch.
    */
   updates?: boolean;
   /**

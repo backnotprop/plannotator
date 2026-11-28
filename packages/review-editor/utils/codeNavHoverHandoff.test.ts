@@ -5,8 +5,9 @@
  * mount with a stubbed diff, worker pool, and SSE transport).
  *
  * The invariant: `handleCodeNavRequest` is the ONE funnel every route into the
- * References panel passes through — Cmd+click and Ctrl+click, the Alt+click
- * alias, and the card's own location links — so closing the hover surface
+ * References panel passes through — Cmd+click and Ctrl+click and the Alt+click
+ * alias (through `definitionOrReferences`, which jumps instead when there is
+ * one clear definition), and the card's own location links — so closing the hover surface
  * there covers all of them at once. The regression this catches is the line
  * being dropped in a refactor, which reads as harmless and silently restores
  * the #1461 double-surface: a card standing over the panel, or a dwell that
@@ -43,7 +44,17 @@ describe('References panel closes the hover surface', () => {
     // dismissal, so the funnel is part of the invariant.
     const direct = source.match(/codeNav\.resolve\(/g) ?? [];
     expect(direct).toHaveLength(1);
-    expect(source).toContain('onCodeNavRequest: canUseLiveWorkspaceActions ? handleCodeNavRequest : undefined');
+    // A token click (Cmd/Ctrl/Alt) first looks for one clear definition, as F12 does: that step closes the hover
+    // before anything else too, and its References path is openReferences, which goes through the one handler.
+    expect(source).toContain('onCodeNavRequest: canUseLiveWorkspaceActions ? handleTokenNavClick : undefined');
+    const start = source.indexOf('const definitionOrReferences = useCallback(');
+    expect(start).toBeGreaterThan(0);
+    const body = source.slice(start, source.indexOf('\n  }, [', start));
+    expect(body.indexOf('closeTokenHover();')).toBeGreaterThan(0);
+    expect(body.indexOf('closeTokenHover();')).toBeLessThan(body.indexOf('if (!gitContext'));
+    expect(body).toContain('openReferences(request);');
+    const open = source.slice(source.indexOf('const openReferences = useCallback('));
+    expect(open.slice(0, open.indexOf('\n  }, ['))).toContain('handleCodeNavRequest(request);');
   });
 
   test('the Alt+click alias shares the meta/ctrl branch in both diff views', () => {

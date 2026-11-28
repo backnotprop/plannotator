@@ -4,21 +4,11 @@ Plannotator for [OpenClaw](https://github.com/openclaw/openclaw). It connects yo
 
 ## Install
 
-The package is not published yet, so `openclaw plugins install @plannotator/openclaw` fails today. Install it from a checkout of this repository instead: pack the plugin, unpack it, and install that folder (the way it was tested). OpenClaw asks you to confirm a folder install; `--force` confirms it without asking.
-
 ```bash
-git clone https://github.com/backnotprop/plannotator.git
-cd plannotator && bun install && bun run build:openclaw
-cd apps/openclaw-plugin && npm pack
-mkdir -p ~/plannotator-openclaw && tar xzf plannotator-openclaw-*.tgz -C ~/plannotator-openclaw
-openclaw plugins install ~/plannotator-openclaw/package
+openclaw plugins install npm:@plannotator/openclaw
 ```
 
-Once it is published, this is the install:
-
-```bash
-openclaw plugins install @plannotator/openclaw
-```
+The `npm:` prefix installs it from npm. OpenClaw asks you to confirm.
 
 No restart: the running Gateway loads it. It needs OpenClaw 2026.11.5-beta.1 or newer: until 2026.11.5 is out that means OpenClaw's beta (tested on 2026.11.5-beta.2), and older OpenClaw such as 2026.11.3 refuses to install it. It also needs to run on the same computer as the Inbox, with the `plannotator` CLI:
 

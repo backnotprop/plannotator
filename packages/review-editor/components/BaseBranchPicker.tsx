@@ -197,7 +197,7 @@ export const BaseBranchPicker: React.FC<BaseBranchPickerProps> = ({
             />
           }
         >
-            <span className="text-[10px] uppercase tracking-wide opacity-60 flex-shrink-0">
+            <span className="text-xs opacity-60 flex-shrink-0">
               {copy.triggerLabel}
             </span>
             <span className="truncate flex-1 text-left">{chipLabel(selectedBase)}</span>
@@ -246,7 +246,7 @@ export const BaseBranchPicker: React.FC<BaseBranchPickerProps> = ({
                 <span className="flex-1 truncate">
                   Use <span className="font-mono">{trimmedQuery}</span> as base
                 </span>
-                <span className="text-[10px] uppercase tracking-wide text-muted-foreground px-1 py-0.5 rounded bg-muted">
+                <span className="text-xs text-muted-foreground px-1 py-0.5 rounded bg-muted">
                   commit
                 </span>
               </button>
@@ -319,7 +319,7 @@ const BranchGroup: React.FC<BranchGroupProps> = ({
   onSelect,
 }) => (
   <div className="py-1">
-    <div className="px-3 pb-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+    <div className="px-3 pb-1 text-xs text-muted-foreground">
       {title}
     </div>
     {branches.map((branch) => {
@@ -343,7 +343,7 @@ const BranchGroup: React.FC<BranchGroupProps> = ({
           </span>
           <span className="truncate flex-1">{branch}</span>
           {isDetected && (
-            <span className="text-[10px] uppercase tracking-wide text-muted-foreground px-1 py-0.5 rounded bg-muted">
+            <span className="text-xs text-muted-foreground px-1 py-0.5 rounded bg-muted">
               detected
             </span>
           )}
@@ -382,7 +382,7 @@ const CommitList: React.FC<CommitListProps> = ({ commits, selectedBase, onSelect
           </span>
           <span className="font-mono text-muted-foreground flex-shrink-0">{c.shortSha}</span>
           <span className="truncate flex-1">{c.subject}</span>
-          <span className="text-[10px] text-muted-foreground flex-shrink-0">{c.relativeDate}</span>
+          <span className="text-xs text-muted-foreground flex-shrink-0">{c.relativeDate}</span>
         </button>
       );
     })}

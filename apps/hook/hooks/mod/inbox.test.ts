@@ -198,7 +198,7 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     const w = world('01-registry-and-tool-list')
     const silent = await open(w, 'session-silent')
     // Before this computer ever ran the Inbox: the list bundled with the mod (pinned to a real Inbox by inbox-default-tools.test.ts).
-    expect(silent.inboxTools?.map((tool) => tool.name)).toEqual(INBOX_TOOL_ACTIONS.filter((name) => name !== 'card' && name !== 'steps'))
+    expect(silent.inboxTools?.map((tool) => tool.name)).toEqual(INBOX_TOOL_ACTIONS.filter((name) => name !== 'card' && name !== 'steps' && name !== 'routine'))
     expect(silent.mod.inbox).not.toBeNull()
     await Bun.sleep(2_500)
     expect(silent.host.fetches).toEqual([])
@@ -264,20 +264,23 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     const session = await open(w, 'session-long')
     const first = await send(session, w, `Round 1: the queue drains in order.\n\n${QUESTION}`)
     let last = first.message_id
+    const own = [first.message_id]
     for (let round = 2; round <= 20; round++) {
       const reply = await personSends(w, last, `Round ${round - 1}: go ahead.`)
       const answer = await session.callInbox({ action: 'send_message', reply_to: reply, body: `Round ${round}: the queue drains in order.${round === 13 ? ' The flamingo budget is set.' : ''}` }, w.project)
       if ('deny' in answer) throw new Error(answer.deny)
       last = JSON.parse(answer.text.slice(answer.text.indexOf('{'))).message_id
+      own.push(last)
     }
     const read = await session.callInbox({ action: 'read_thread', thread_id: first.thread_id }, w.project)
     if ('deny' in read) throw new Error(read.deny)
     expect(read.text.split('\n')[0]).toStartWith(`Thread ${first.thread_id} (What should the worker do on a Stripe 409?): 39 messages, 19 from the person.`)
     // The transcript is complete: the connection hands it over without the JSON.
     expect(read.text).not.toContain('{"thread"')
-    // The session reads its own messages marked as its own (core's read_thread "you").
-    expect(read.text).toContain(`- ${first.message_id} · Claude Code (you) · `)
-    expect(read.text).toContain(`Q1 `)
+    // The session reads its own messages marked as its own (core's read_thread "you"), here one of its one-line messages.
+    expect(read.text).toContain(`- ${own[9]} · Claude Code (you) · `)
+    expect(read.text).toContain(`- ${first.message_id}/`)
+    expect(read.text).toContain(`(Q1) open: What should the worker do on a Stripe 409?`)
     expect(read.text).toMatch(/\nCursor \d+: read_thread after: \d+ returns only what is new since this read\.$/)
     expect(Buffer.byteLength(read.text)).toBeLessThan(12_000)
     const found = await session.callInbox({ action: 'search', query: 'flamingo' }, w.project)
@@ -358,7 +361,7 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     const noteId = /\((msg_[0-9A-Z]+)\)$/.exec(lines[0]!)![1]!
     const subject = (await thread(w, sent.thread_id)).subject
     expect(lines[0]).toBe(`Plannotator Inbox: ${subject} (${noteId})`)
-    expect(lines[1]).toBe(`The person reacted 👍 Looks good to your message (${sent.message_id}).`)
+    expect(lines[1]).toBe(`The person reacted 👍 Looks good to your message (${sent.message_id}). Take it as a go.`)
     expect(text).toBe(inboxWakeText({ id: noteId, thread_id: sent.thread_id, subject, body: lines[1]!, ack_of: sent.message_id }))
     w.proof(`turn.start ${turn.id}:\n${turn.text}\n`)
 

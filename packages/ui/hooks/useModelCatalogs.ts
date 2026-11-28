@@ -11,7 +11,7 @@ import type { AgentCapabilities } from '../types';
 export { effortSelectOptions, modelSelectOptions } from '@plannotator/core/model-catalog';
 
 /**
- * Claude / Codex model catalogs for the agent launchers (review, Code Tour,
+ * Claude / Codex model catalogs for the agent launchers (review,
  * Guided Review) — the SAME lists Ask AI shows. Each is the Ask AI provider's
  * discovered list, fetched through `/api/ai/capabilities?activate=<id>` (which
  * runs the provider's server-cached discovery). When a session bridge makes

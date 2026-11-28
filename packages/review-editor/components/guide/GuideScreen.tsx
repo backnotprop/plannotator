@@ -18,7 +18,8 @@ import { GuideGlobalCommentPopover } from './GuideGlobalCommentPopover';
 import type { GuideGlobalComments } from '@plannotator/guide-viewer/host';
 import { GuideExportButton } from './GuideExportButton';
 import { GuideDiffControls, nextGuideCollapseAll, type GuideCollapseAll } from './GuideDiffControls';
-import { filesViewedByTickingSection } from '../../utils/guideReviewedViewed';
+import { filesViewedByTickingSection, sectionsWithAllFilesViewed } from '../../utils/guideReviewedViewed';
+import { resumeFile } from '../../utils/guidesListModel';
 
 interface GuideScreenProps {
   /** Latest completed guide job id (or the demo guide id in standalone mode).
@@ -41,6 +42,8 @@ interface GuideScreenProps {
   /** Mark files viewed, as the per-file Viewed checkbox does (#1786). Called
    *  when ticking a section "Reviewed" completes every chapter of a file. */
   onMarkFilesViewed?: (paths: string[]) => void;
+  /** The current diff's restored Viewed state is ready to use. */
+  viewedReady: boolean;
   /** Commit a global comment (the review's `scope: 'general'` comment, the
    *  sidebar's "+ Global comment" handler). Absent: the guide shows its global
    *  comments without the button (a decision is in flight or went). */
@@ -76,6 +79,7 @@ export const GuideScreen: React.FC<GuideScreenProps> = ({
   onOpenSavedGuide,
   launchOff = false,
   onMarkFilesViewed,
+  viewedReady,
   onAddGlobalComment,
   onShowGlobalComment,
   barSlot,
@@ -188,6 +192,7 @@ export const GuideScreen: React.FC<GuideScreenProps> = ({
         onOpenFixedGuide={onOpenFixedGuide}
         onOpenSavedGuide={onOpenSavedGuide}
         onMarkFilesViewed={onMarkFilesViewed}
+        viewedReady={viewedReady}
         onAddGlobalComment={onAddGlobalComment}
         onShowGlobalComment={onShowGlobalComment}
         barSlot={barSlot}
@@ -237,6 +242,7 @@ function ActiveGuide({
   onOpenFixedGuide,
   onOpenSavedGuide,
   onMarkFilesViewed,
+  viewedReady,
   onAddGlobalComment,
   onShowGlobalComment,
   barSlot,
@@ -252,11 +258,12 @@ function ActiveGuide({
   onOpenFixedGuide?: (jobId: string) => void;
   onOpenSavedGuide?: (jobId: string) => void;
   onMarkFilesViewed?: (paths: string[]) => void;
+  viewedReady: boolean;
   onAddGlobalComment?: (text: string) => boolean | void;
   onShowGlobalComment?: (id: string) => void;
   barSlot?: HTMLElement | null;
 }) {
-  const { guide, loading, error, reviewed, toggleReviewed, retry } = useGuideData(jobId);
+  const { guide, loading, error, reviewed, toggleReviewed, markReviewed, retry } = useGuideData(jobId);
   const [focusedFile, setFocusedFile] = useState<string | null>(null);
   // The top bar's Collapse all: every file card of this guide, not remembered.
   const [collapseAll, setCollapseAll] = useState<GuideCollapseAll | null>(null);
@@ -288,6 +295,22 @@ function ActiveGuide({
     },
     [guide, reviewed, filesInDiff, onMarkFilesViewed, toggleReviewed],
   );
+  const fullyViewed = useMemo(
+    () => guide && viewedReady ? sectionsWithAllFilesViewed(guide.sections, filesInDiff, state.viewedFiles) : null,
+    [guide, viewedReady, filesInDiff, state.viewedFiles],
+  );
+  // Only a new completion can re-tick a manually un-ticked section.
+  const previouslyFullyViewed = useRef<ReadonlySet<number>>(new Set());
+  useEffect(() => {
+    if (!fullyViewed) return;
+    const newlyComplete = new Set<number>();
+    for (const index of fullyViewed) {
+      if (!reviewed[index] && !previouslyFullyViewed.current.has(index)) newlyComplete.add(index);
+    }
+    previouslyFullyViewed.current = fullyViewed;
+    // Don't go through the click handler: this never changes file marks.
+    if (newlyComplete.size > 0) markReviewed(newlyComplete);
+  }, [fullyViewed, markReviewed, reviewed]);
   // Shared guide-launch defaults, for the outdated-saved-guide "Regenerate"
   // hint (#1112) — same params GuideEmptyState's Generate button would send.
   // Only an outdated guide offers Regenerate, so only then load the model
@@ -332,13 +355,22 @@ function ActiveGuide({
   // Guide refs can go stale when the diff changes after generation.
   useEffect(() => {
     if (focusedFile !== null || !guide) return;
-    const filePathsInDiff = new Set(state.files.map((f) => f.path));
     const allRefs = guide.sections
       .flatMap((s) => s.diffs)
       .concat((guide.unplacedFiles ?? []).map((file) => ({ file })));
-    const firstResolvable = allRefs.find((ref) => filePathsInDiff.has(ref.file));
+    const firstResolvable = allRefs.find((ref) => filesInDiff.has(ref.file));
     if (firstResolvable) setFocusedFile(firstResolvable.file);
-  }, [guide, focusedFile, state.files]);
+  }, [guide, focusedFile, filesInDiff]);
+
+  const resumedRef = useRef(false);
+  useEffect(() => {
+    if (resumedRef.current || !guide || reviewed.length === 0) return;
+    resumedRef.current = true;
+    const file = resumeFile(guide.sections, reviewed, filesInDiff);
+    if (!file) return;
+    setFocusedFile(file);
+    state.onGuideRevealFile?.(file);
+  }, [guide, reviewed, filesInDiff, state.onGuideRevealFile]);
 
   const handleFixOutput = async () => {
     if (!failedJob || repairing) return;

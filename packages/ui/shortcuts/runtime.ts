@@ -47,7 +47,8 @@ interface ShortcutSequenceState {
   readonly expiresAt: number;
 }
 
-const SHORTCUT_SEQUENCE_WINDOW_MS = 500;
+/** How long a sequence (`G P`) waits for its next key. */
+export const SHORTCUT_SEQUENCE_WINDOW_MS = 500;
 
 function normalizeShortcutHandler(handler: ShortcutHandler): ShortcutHandlerConfig {
   if (typeof handler === 'function') {
@@ -187,9 +188,8 @@ export function useShortcutScope<TScope extends ShortcutScopeDefinition<any>>({
       for (const [actionId, shortcut] of getShortcutEntries(scope)) {
         const handler = handlersRef.current[actionId];
         if (!handler) continue;
-        const { when } = normalizeShortcutHandler(handler);
-        if (when && !when(keyboardEvent)) continue;
-
+        // The sequences this key starts, before the guard: a guard can read the whole page, and most keys start none.
+        const starts: string[][] = [];
         for (const binding of resolveShortcutBindings(shortcut)) {
           const groups = binding.trim().split(/\s+/).filter(Boolean);
           const doubleTapKey = parseDoubleTapBinding(binding);
@@ -201,8 +201,12 @@ export function useShortcutScope<TScope extends ShortcutScopeDefinition<any>>({
           ) {
             continue;
           }
-          started.push({ actionId, groups, nextIndex: 1 });
+          starts.push(groups);
         }
+        if (starts.length === 0) continue;
+        const { when } = normalizeShortcutHandler(handler);
+        if (when && !when(keyboardEvent)) continue;
+        for (const groups of starts) started.push({ actionId, groups, nextIndex: 1 });
       }
 
       sequenceRef.current = started.length > 0

@@ -10,18 +10,25 @@
  * closes it, focus goes back to what opened it. On the phone layout there is
  * no button: `?` opens it (a narrow desktop window, a phone's hardware keyboard).
  */
+import { useState } from 'react';
 import { Icon } from '../icons';
-import { mapColumns, present, type MapRow } from '../shortcuts/map';
+import { mapColumns, MAP_COLUMNS, present, withReviewKeys, type MapRow } from '../shortcuts/map';
+import { openReviewKeys, useOpenReviewKeys } from '../shortcuts/review';
 import { isEditableTarget } from '../shortcuts/guards';
 import { keyLive, MapKeys } from '../shortcuts/hint';
 import { useTouchPhone } from '../phone';
 import { setKeyHints, shortcutPrefs, useShortcutPrefs } from '../shortcuts/prefs';
 import { Modal } from './Updates';
 
-/** A row's keys; on a touch phone only the ones that act there (`?` and the chords, Esc, Enter, the arrows). */
-function rowBindings(row: MapRow, touchPhone: boolean): string[] {
+const NONE: ReadonlySet<string> = new Set();
+
+/**
+ * A row's keys; on a touch phone only the ones that act there (`?` and the chords, Esc, Enter, the arrows). `hidden`:
+ * the keys an open review takes, left out of the Inbox's rows.
+ */
+function rowBindings(row: MapRow, touchPhone: boolean, hidden: ReadonlySet<string> = NONE): string[] {
   return row.keys.filter(present).flatMap((ref) => {
-    const all = ref.scope.shortcuts[ref.action]!.bindings;
+    const all = ref.scope.shortcuts[ref.action]!.bindings.filter((binding) => !hidden.has(binding));
     const bindings = ref.only === undefined ? all : all.slice(ref.only, ref.only + 1);
     return touchPhone ? bindings.filter((binding) => keyLive(binding, { singleKeys: true }, ref)) : bindings;
   });
@@ -41,8 +48,17 @@ export function ShortcutMap({ onClose, onSettings }: { onClose: () => void; onSe
   // A touch phone (a hardware keyboard opened it with `?`): only the keys that act there, and no way to the
   // Keyboard settings, which a touch phone does not show.
   const touchPhone = useTouchPhone();
-  const columns = mapColumns()
-    .map((groups) => groups.map((group) => ({ ...group, rows: group.rows.filter((row) => rowBindings(row, touchPhone).length > 0) })).filter((group) => group.rows.length > 0))
+  // A review on screen: its keys lead, and the Inbox's meanings of them are away (shortcuts/review.ts). Not while its
+  // keys stood down when the map opened (focus in Details, a menu, a repository file over the diff): the keys are the
+  // Inbox's then. Asked as the map first draws, before its own dialog is open (which would stand them down too).
+  const open = useOpenReviewKeys();
+  const [standingDown] = useState(() => {
+    const keys = openReviewKeys();
+    return keys && !keys.live() ? keys : null;
+  });
+  const { columns: drawn, hidden } = withReviewKeys(MAP_COLUMNS, open === standingDown ? null : open);
+  const columns = mapColumns(drawn)
+    .map((groups) => groups.map((group) => ({ ...group, rows: group.rows.filter((row) => rowBindings(row, touchPhone, group.review ? NONE : hidden).length > 0) })).filter((group) => group.rows.length > 0))
     .filter((groups) => groups.length > 0);
   return (
     <Modal labelledBy="ib-map-title" describedBy="ib-map-sub" onClose={onClose} testId="shortcut-map" ownKeys className="ib-map" fallbackFocus={mapFallback}>
@@ -78,7 +94,7 @@ export function ShortcutMap({ onClose, onSettings }: { onClose: () => void; onSe
                   <dl>
                     {group.rows.map((row) => {
                       const first = row.keys.find(present)!;
-                      const bindings = rowBindings(row, touchPhone);
+                      const bindings = rowBindings(row, touchPhone, group.review ? NONE : hidden);
                       const joined = row.keys.length === 1 && bindings.length > 1;
                       return (
                         <div key={`${first.scope.id}.${first.action}`} className="ib-map-row" data-map-row={`${first.scope.id}.${first.action}`}>

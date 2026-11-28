@@ -1,0 +1,6 @@
+.ib-cf-on { align-items: center; }
+.ib-qr-wrap.ib-cf-qr { width: 112px; height: 112px; }
+.ib-cf-need { margin-top: 6px; }
+.ib-sgroup > p a, .ib-flow-body .ib-lead a { color: var(--primary); text-decoration: none; }
+.ib-sgroup > p a:hover, .ib-flow-body .ib-lead a:hover, .ib-sgroup > p a:focus-visible, .ib-flow-body .ib-lead a:focus-visible { text-decoration: underline; }
+.ib-cfmark { display: block; flex: none; }

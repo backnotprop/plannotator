@@ -9,7 +9,11 @@
  *   page on the Inbox;
  * - over the tailnet, a page's own request (cross-site, carrying the owner's
  *   tailnet identity) reaches an embed or any other route;
- * - the store grows without bound.
+ * - the store grows without bound;
+ * - an html block's annotatable document (`/api/inbox/embed-pages`, the pen
+ *   under a block) is not wired into the running Inbox, is served under a
+ *   policy other than the embed's, or can be stored by another site or by
+ *   the sandboxed page itself.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -88,6 +92,31 @@ describe("the Inbox's embed documents", () => {
     expect((await keep(server, CHART, { Origin: "null" })).status).toBe(403);
     expect((await keep(server, CHART, { "Sec-Fetch-Site": "cross-site" })).status).toBe(403);
     expect((await fetch(at(server, `/api/inbox/embeds/${embedIdOf(CHART)}`))).status).toBe(404);
+  });
+
+  test("an annotatable document: the window keeps it and frames it under the embed's own policy; no other site can store one", async () => {
+    const server = await start();
+    const keepPage = (html: unknown, headers: Record<string, string> = {}) =>
+      fetch(at(server, "/api/inbox/embed-pages"), { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify({ html }) });
+    const document = `<!doctype html><html><head><script>/* bridge */</script></head>${CHART}`;
+    const kept = await keepPage(document);
+    expect(kept.status).toBe(200);
+    const { id, url } = (await kept.json()) as Json;
+    expect(url).toBe(`/api/inbox/embed-pages/${id}`);
+    const page = await fetch(at(server, url));
+    expect(page.status).toBe(200);
+    expect(await page.text()).toBe(document);
+    // Exactly the embed's policy: sandboxed, and no source is the Inbox itself.
+    expect(page.headers.get("content-security-policy")).toBe(EMBED_RESPONSE_CSP);
+    expect(page.headers.get("cache-control")).toBe("no-store");
+    expect(page.headers.get("referrer-policy")).toBe("no-referrer");
+    // The same guards as every window write.
+    expect((await keepPage(document, { Origin: "https://evil.example" })).status).toBe(403);
+    expect((await keepPage(document, { Origin: "null" })).status).toBe(403);
+    expect((await keepPage(document, { "Sec-Fetch-Site": "cross-site" })).status).toBe(403);
+    // An id of the embeds' store is not one of this store's, and the other way round.
+    expect((await fetch(at(server, `/api/inbox/embeds/${id}`))).status).toBe(404);
+    expect((await fetch(at(server, `/api/inbox/embed-pages/${embedIdOf(CHART)}`))).status).toBe(404);
   });
 
   test("refusals: an empty or oversized page, an unknown or malformed id, other methods", async () => {

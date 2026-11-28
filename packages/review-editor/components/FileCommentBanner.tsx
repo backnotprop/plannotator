@@ -1,6 +1,8 @@
 import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CodeAnnotation } from '@plannotator/ui/types';
 import { sanitizeBlockHtml } from '@plannotator/ui/utils/sanitizeHtml';
+import { paintAuthorColors } from '@plannotator/ui/utils/authorColorContrast';
+import { ImageThumbnail } from '@plannotator/ui/components/ImageThumbnail';
 import { CommentMeta } from './CommentMeta';
 import { CommentActions } from './CommentActions';
 import { FileNameChip } from './FileNameChip';
@@ -74,6 +76,9 @@ export const FileCommentCard: React.FC<{
     () => (comment.text ? sanitizeBlockHtml(comment.text) : ''),
     [comment.text],
   );
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const bodyShown = !!comment.text && !collapsed && !isEditing;
+  useLayoutEffect(() => (bodyShown && bodyRef.current ? paintAuthorColors(bodyRef.current) : undefined), [html, bodyShown]);
 
   const saveEdit = () => {
     const trimmed = draft.trim();
@@ -116,7 +121,7 @@ export const FileCommentCard: React.FC<{
       {comment.markdownPreview && !collapsed && (
         <div
           data-file-comment-markdown-quote=""
-          className="mt-1 mb-1 border-l-2 border-border/40 pl-1.5 text-[11px] italic text-muted-foreground/80 line-clamp-2"
+          className="mt-1 mb-1 border-l-2 border-border/40 pl-1.5 text-xs italic text-muted-foreground/80 line-clamp-2"
           title="Commented in the rendered Markdown preview"
         >
           {comment.markdownPreview.originalText}
@@ -149,9 +154,22 @@ export const FileCommentCard: React.FC<{
         collapsed ? (
           <div className="review-comment-body truncate text-muted-foreground/80">{firstLine(comment.text)}</div>
         ) : (
-          <div className="review-comment-body ai-markdown max-h-[220px] overflow-y-auto" dangerouslySetInnerHTML={{ __html: html }} />
+          <div ref={bodyRef} className="review-comment-body ai-markdown max-h-[220px] overflow-y-auto" dangerouslySetInnerHTML={{ __html: html }} />
         )
       ) : null}
+      {/* What the comment box attached (pictures, files), drawn as a whole-file line comment draws them. */}
+      {!collapsed && comment.images && comment.images.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1.5" data-file-comment-attachments="">
+          {comment.images.map((img) => (
+            <div key={img.path} className="text-center">
+              <ImageThumbnail path={img.path} size="sm" showRemove={false} file={img.kind === 'file'} />
+              <div className="max-w-[3rem] truncate text-[9px] text-muted-foreground" title={img.name}>
+                {img.name}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
       {!isEditing && (
         <CommentActions
           onEdit={() => { setDraft(comment.text ?? ''); setIsEditing(true); setCollapsed(false); }}

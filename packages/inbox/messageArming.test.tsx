@@ -204,7 +204,7 @@ test.skipIf(!hasDom)("a press on a far message's ⋯ opens its menu at once", as
   await press(more(id));
   await until(() => !!document.querySelector(`[data-message-menu="${id}"]`), 'the message menu');
   const items = [...document.querySelectorAll(`[data-message-menu="${id}"] [role="menuitem"]`)].map((el) => el.textContent?.trim());
-  expect(items).toEqual(['Copy message', 'Copy link to message', 'Copy thread']);
+  expect(items).toEqual(['Reply', 'New thread from this message', 'Copy message', 'Copy link to message', 'Copy thread']);
 });
 
 // The window's styles are scoped to its root (`.pn-inbox svg.ib-ic` draws the icons as outlines): a menu drawn on
@@ -240,6 +240,20 @@ test.skipIf(!hasDom)('a message that goes far from the view is disarmed, but nev
   expect(armed(left)).toBe(false);
   expect(armed(kept)).toBe(true);
   expect(document.activeElement?.closest('[data-message-article]')?.getAttribute('data-message-article')).toBe(kept);
+});
+
+test.skipIf(!hasDom)('a thread hidden behind a full view keeps its controls: the same elements when it shows again', async () => {
+  await render();
+  const id = IDS[0]!;
+  expect(armed(id)).toBe(true);
+  const before = more(id);
+  const shown = Element.prototype.getBoundingClientRect;
+  Element.prototype.getBoundingClientRect = () => ({ top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+  await report(id, false, false);
+  Element.prototype.getBoundingClientRect = shown;
+  await report(id, true, true);
+  expect(armed(id)).toBe(true);
+  expect(more(id) === before).toBe(true);
 });
 
 test.skipIf(!hasDom)('focus that lands in a far message stays on the same control once its controls are armed', async () => {

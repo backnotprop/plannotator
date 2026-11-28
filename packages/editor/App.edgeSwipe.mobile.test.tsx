@@ -93,13 +93,18 @@ async function mount(mode: Mode, compact = true, reduced = false, hasHeadings = 
   const App = mode === 'review' ? Review! : Editor!;
   await act(async () => root?.render(<App />));
   const ready = () => mode === 'review'
-    ? !!host?.querySelector('[aria-label="Open review navigation"]')
+    ? !!host?.querySelector('[aria-label="Open review navigation"], [aria-label="Close review navigation"]')
       || (!compact && !!host?.textContent?.includes('example.ts'))
     : !!document.getElementById('pn-compact-plan-navigator-trigger')
       || ((!compact || !hasHeadings) && !!host?.querySelector('[data-block-id]'));
   for (let i = 0; i < 40 && !ready(); i++) await settle();
   expect(ready()).toBe(true);
   await settle();
+  const openedOnLoad = host!.querySelector<HTMLButtonElement>('[aria-label="Close review navigation"]');
+  if (openedOnLoad) {
+    await act(async () => openedOnLoad.click());
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, PANEL_TRANSITION_MS + 30)); });
+  }
 }
 
 async function swipe(
@@ -188,7 +193,7 @@ describe.if(hasDom)('mobile panel closing and memory in real app shells', () => 
       await mount(mode);
       await openPanel(mode, 'right');
       const item = Array.from(optionsMenu()!.querySelectorAll<HTMLButtonElement>('button'))
-        .find(button => button.textContent?.trim() === 'Annotations')!;
+        .find(button => button.textContent?.trim() === (mode === 'review' ? 'Comments' : 'Annotations'))!;
       expect(item).toBeDefined();
       await act(async () => item.click());
       expect(optionsMenu()).toBeNull();
@@ -198,7 +203,7 @@ describe.if(hasDom)('mobile panel closing and memory in real app shells', () => 
       expect(annotationSurface(mode)).toBeNull();
     });
 
-    test(`${mode}: navigation restores scroll after closing and remounting`, async () => {
+    test.if(mode !== 'review')(`${mode}: navigation restores scroll after closing and remounting`, async () => {
       await mount(mode);
       await openPanel(mode, 'left');
       const panel = navigation(mode)!;

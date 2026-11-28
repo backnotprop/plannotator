@@ -16,7 +16,7 @@
  * PNGs land in PLANNOTATOR_E2E_SHOTS_DIR (default .local/proof/thread-links).
  */
 
-import { devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';

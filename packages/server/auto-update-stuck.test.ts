@@ -23,6 +23,7 @@ import {
   reapDeadUpdateLock,
   removeJudgedLock,
   runAutoUpdateCheck,
+  setBootTimeForTests,
   thisLockMachine,
   UPDATE_LOCK_HANDOFF_MS,
   type AutoUpdateDeps,
@@ -344,16 +345,38 @@ describe("a killed or failed-to-start install shows Failed with Try again", () =
 // the first wrapper's final `rm -f` then deleted the second install's lock.
 describe.skipIf(!posix)("never two installers at once", () => {
   test("a lock past its hour whose installer still runs is still held, up to a day", () => {
-    const paths = autoUpdatePaths(dataDir);
-    const group = liveGroup();
-    writeFileSync(paths.lock, holderLine(group, group));
-    backdate(paths.lock, 61 * 60_000);
-    expect(isUpdateLockHeld(dataDir)).toBe(true);
-    expect(reapDeadUpdateLock(dataDir)).toBe(false);
-    expect(acquireUpdateLock(paths.lock)).toBe(false);
-    // A hung install never holds for good.
-    backdate(paths.lock, AUTO_UPDATE_LOCK_LIVE_MAX_MS + 60_000);
-    expect(isUpdateLockHeld(dataDir)).toBe(false);
+    // Booted long ago: on macOS a lock older than the machine's uptime is from before the boot.
+    setBootTimeForTests(0);
+    try {
+      const paths = autoUpdatePaths(dataDir);
+      const group = liveGroup();
+      writeFileSync(paths.lock, holderLine(group, group));
+      backdate(paths.lock, 61 * 60_000);
+      expect(isUpdateLockHeld(dataDir)).toBe(true);
+      expect(reapDeadUpdateLock(dataDir)).toBe(false);
+      expect(acquireUpdateLock(paths.lock)).toBe(false);
+      // A hung install never holds for good.
+      backdate(paths.lock, AUTO_UPDATE_LOCK_LIVE_MAX_MS + 60_000);
+      expect(isUpdateLockHeld(dataDir)).toBe(false);
+    } finally {
+      setBootTimeForTests(undefined);
+    }
+  });
+
+  // macOS has no boot id: a lock past its hour must be from this boot, since its group id may be reused since.
+  test.skipIf(!!thisLockMachine().boot)("with no boot id, a lock past its hour written before this boot is not held, even if its group id is alive", () => {
+    try {
+      const paths = autoUpdatePaths(dataDir);
+      const group = liveGroup();
+      writeFileSync(paths.lock, holderLine(group, group));
+      backdate(paths.lock, 61 * 60_000);
+      setBootTimeForTests(Date.now() - 30 * 60_000);
+      expect(isUpdateLockHeld(dataDir)).toBe(false);
+      setBootTimeForTests(Date.now() - 2 * 60 * 60_000);
+      expect(isUpdateLockHeld(dataDir)).toBe(true);
+    } finally {
+      setBootTimeForTests(undefined);
+    }
   });
 });
 

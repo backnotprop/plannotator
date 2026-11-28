@@ -33,8 +33,8 @@ export const GUIDE_SNAPSHOT_OVERVIEW_VERSION = 2 as const;
 
 /**
  * Format version 3 adds a drawn overview picture: `guide.overview.diagram`
- * may carry `css`, `width`, `height` and `tall` (an HTML picture drawn by
- * Shape's renderer in the Inbox's code review). A snapshot carries version 3
+ * may carry `css`, `width`, `height` and `tall` (an HTML picture, checked by
+ * the drawing rules in ./shape). A snapshot carries version 3
  * exactly when its diagram has one of them, so a version-2 reader (strict)
  * never meets them; a source-only diagram stays version 2 byte for byte.
  */

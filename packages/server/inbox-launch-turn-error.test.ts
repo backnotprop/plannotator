@@ -16,7 +16,7 @@ import { InboxStore } from "@plannotator/shared/inbox/store";
 import type { InboxMessage } from "@plannotator/core/inbox-types";
 import { FAKE, fakeLaunchHost } from "../../tests/helpers/fake-launch-host";
 import { createInboxLaunch } from "./inbox-launch";
-import { CLAUDE_TRANSCRIPT_TAIL_BYTES, claudeTranscriptPath, claudeTranscriptTurnError, claudeTurnErrorOf } from "./inbox-launch-claude";
+import { CLAUDE_FOLDER_REAL_KEEP_MS, CLAUDE_TRANSCRIPT_TAIL_BYTES, claudeFolderReals, claudeTranscriptPath, claudeTranscriptTurnError, claudeTurnErrorOf } from "./inbox-launch-claude";
 import { launchTurnErrorNote, type LaunchTurnError } from "./inbox-launch-host";
 
 const restore: (() => void)[] = [];
@@ -184,6 +184,198 @@ describe("a launched session's turn that ended in an error", () => {
     w.launch().sweep(false);
     expect(w.notes(root).map((m) => m.body).filter((b) => b.includes("turn ended"))).toHaveLength(2);
     expect((await w.launch().runOf(root.id))?.turn_error).toBe(true);
+  });
+});
+
+// #2788: the sweep runs every second, window or not, and Claude Code's read of a turn error is file calls in the
+// person's folder and Claude's (a slow disk holds the whole Inbox on each). `asked` counts the host's reads.
+describe("the sweep reads an idle session's turn error only when there is a reason", () => {
+  test("an idle session with nothing new is read once, then at growing gaps of at most 10 s", async () => {
+    const w = world();
+    const { session } = await w.started();
+    w.asked.length = 0;
+    for (let i = 0; i < 50; i++) w.launch().sweep(false);
+    expect(w.asked).toHaveLength(1);
+
+    // A minute idle, a sweep a second: about one read in seven, never more than 10 s apart.
+    const at: number[] = [];
+    const start = w.clock.now;
+    for (let i = 0; i < 60; i++) {
+      w.clock.now += 1_000;
+      const before = w.asked.length;
+      w.launch().sweep(false);
+      if (w.asked.length > before) at.push(w.clock.now - start);
+    }
+    expect(at.length).toBeLessThanOrEqual(10);
+    expect(Math.max(...at.map((t, i) => t - (at[i - 1] ?? 0)))).toBeLessThanOrEqual(10_000);
+    expect(new Set(w.asked)).toEqual(new Set([session]));
+  });
+
+  // The Claude Code mod looks at its own state once a second and says only a change: a turn shorter than that (a
+  // credit or sign-in error returns at once) is never said busy, and its idle spell never moves.
+  test("a turn too short to be said busy: noted by the next sweep after the session takes the message, as before", async () => {
+    const w = world();
+    const { root, session } = await w.started();
+    // A while idle first: the reads are 10 s apart by now.
+    for (let i = 0; i < 30; i++) {
+      w.clock.now += 1_000;
+      w.launch().sweep(false);
+    }
+    // A reply goes in and fails at once, between two sweeps.
+    const reply = w.store.sendReply(root.id, { words: "Go on.", idempotency_key: "r-1" }).reply;
+    w.store.recordDelivery(reply.id, { host: FAKE, session });
+    w.errors.set(session, { key: "e-1", text: "Credit balance too low.", at: w.clock.now });
+    w.clock.now += 1_000;
+    w.launch().sweep(false);
+    expect(w.notes(root)).toHaveLength(1);
+
+    // A tag in another thread goes in (nothing in this thread moves) and fails just after the sweep that saw it.
+    for (let i = 0; i < 30; i++) {
+      w.clock.now += 1_000;
+      w.launch().sweep(false);
+    }
+    w.fake.took(session);
+    w.clock.now += 1_000;
+    w.launch().sweep(false);
+    w.errors.set(session, { key: "e-2", text: "Overloaded.", at: w.clock.now + 500 });
+    let waited = 0;
+    while (w.notes(root).length < 2 && waited < 30) {
+      w.clock.now += 1_000;
+      waited += 1;
+      w.launch().sweep(false);
+    }
+    expect(waited).toBeLessThanOrEqual(1);
+  });
+
+  test("a turn too short to be said busy that ends well clears the line by the next sweep", async () => {
+    const w = world();
+    const { root, session } = await w.started();
+    w.errors.set(session, { key: "e-1", text: "Rate limited.", at: w.clock.now });
+    w.launch().sweep(false);
+    expect((await w.launch().runOf(root.id))?.turn_error).toBe(true);
+    for (let i = 0; i < 30; i++) {
+      w.clock.now += 1_000;
+      w.launch().sweep(false);
+    }
+    // The person replies; it goes in, answers and ends well at once, never said busy.
+    const reply = w.store.sendReply(w.notes(root)[0]!.id, { words: "Try now.", idempotency_key: "r-1" }).reply;
+    w.store.recordDelivery(reply.id, { host: FAKE, session });
+    w.fake.took(session);
+    w.store.sendMessage({ project_id: w.project.id, author: { kind: "agent", host: FAKE, session, name: "Fake Agent" }, body: "Done.", reply_to: reply.id, idempotency_key: "done" });
+    w.errors.set(session, null);
+    w.clock.now += 1_000;
+    w.launch().sweep(false);
+    expect((await w.launch().runOf(root.id))?.turn_error).toBeUndefined();
+  });
+
+  test("Try again, read long after the error, fails again at once: noted by the next sweep", async () => {
+    const w = world();
+    const { root, session, launchId } = await w.started();
+    w.errors.set(session, { key: "e-1", text: "Credit balance too low.", at: w.clock.now });
+    w.launch().sweep(false);
+    for (let i = 0; i < 30; i++) {
+      w.clock.now += 1_000;
+      w.launch().sweep(false);
+    }
+    expect((await w.post(launchId, "retry"))!.status).toBe(200);
+    w.launch().sweep(false);
+    expect((await w.launch().runOf(root.id))?.turn_error).toBeUndefined();
+    // It goes in (the mod's `delivered`) and fails again at once.
+    const again = w.store.pendingReplies(session).map((m) => m.id);
+    expect(again).toHaveLength(1);
+    w.store.recordDelivery(again[0]!, { host: FAKE, session });
+    w.fake.took(session);
+    w.errors.set(session, { key: "e-2", text: "Credit balance too low.", at: w.clock.now });
+    w.clock.now += 1_000;
+    w.launch().sweep(false);
+    expect((await w.launch().runOf(root.id))?.turn_error).toBe(true);
+  });
+
+  test("Try again on a turn said busy, then idle: the new error is a new note", async () => {
+    const w = world();
+    const { root, session, launchId } = await w.started();
+    w.errors.set(session, { key: "e-1", text: "Overloaded.", at: w.clock.now });
+    w.launch().sweep(false);
+    await w.post(launchId, "retry");
+    w.launch().sweep(false);
+    w.clock.now += 1_000;
+    w.fake.poll(session, true, w.clock.now);
+    w.errors.set(session, { key: "e-2", text: "Overloaded again.", at: w.clock.now });
+    w.clock.now += 1_000;
+    w.fake.poll(session, false, w.clock.now);
+    w.launch().sweep(false);
+    expect(w.notes(root).map((m) => m.body).filter((b) => b.includes("turn ended"))).toHaveLength(2);
+  });
+
+  test("a turn that ends is read on that sweep; an error written with no turn seen, within 10 s", async () => {
+    const w = world();
+    const { root, session } = await w.started();
+    for (let i = 0; i < 30; i++) {
+      w.clock.now += 1_000;
+      w.launch().sweep(false);
+    }
+    // A whole turn between two sweeps (the session said busy, then idle): the next sweep reads it.
+    w.clock.now += 300;
+    w.fake.poll(session, true, w.clock.now);
+    w.errors.set(session, { key: "e-1", text: "Rate limited.", at: w.clock.now });
+    w.clock.now += 300;
+    w.fake.poll(session, false, w.clock.now);
+    w.launch().sweep(false);
+    expect(w.notes(root)).toHaveLength(1);
+
+    // The transcript changes while the Inbox saw no turn at all (a connection that never says busy).
+    for (let i = 0; i < 30; i++) {
+      w.clock.now += 1_000;
+      w.launch().sweep(false);
+    }
+    w.errors.set(session, { key: "e-2", text: "Overloaded.", at: w.clock.now });
+    let waited = 0;
+    while (w.notes(root).length < 2 && waited < 60) {
+      w.clock.now += 1_000;
+      waited += 1;
+      w.launch().sweep(false);
+    }
+    expect(w.notes(root)).toHaveLength(2);
+    expect(waited).toBeLessThanOrEqual(10);
+  });
+
+  test("a session that went away and came back is read at once", async () => {
+    const w = world();
+    const { root, session } = await w.started();
+    w.launch().sweep(false);
+    w.fake.ended(session);
+    w.launch().sweep(false);
+    // Back (a respawn), idle, the same instant: no wait from before applies.
+    w.errors.set(session, { key: "e-1", text: "Credit balance too low.", at: w.clock.now });
+    w.fake.poll(session, false, w.clock.now);
+    w.launch().sweep(false);
+    expect(w.notes(root)).toHaveLength(1);
+  });
+});
+
+describe("a launch folder's real path (the turn-error read)", () => {
+  test("looked up once a minute, a folder not on disk too; one that appears is seen after that", () => {
+    const calls: string[] = [];
+    let clock = 0;
+    const onDisk = new Set(["/work/here"]);
+    const real = claudeFolderReals({
+      realpath: (path) => {
+        calls.push(path);
+        if (!onDisk.has(path)) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+        return `/real${path}`;
+      },
+      now: () => clock,
+    });
+    for (let i = 0; i < 20; i++) {
+      expect(real("/work/here")).toBe("/real/work/here");
+      expect(real("/home/dev/elsewhere")).toBe("/home/dev/elsewhere");
+      clock += 2_000;
+    }
+    expect(calls).toEqual(["/work/here", "/home/dev/elsewhere"]);
+    onDisk.add("/home/dev/elsewhere");
+    clock = CLAUDE_FOLDER_REAL_KEEP_MS;
+    expect(real("/home/dev/elsewhere")).toBe("/real/home/dev/elsewhere");
+    expect(calls).toHaveLength(3);
   });
 });
 

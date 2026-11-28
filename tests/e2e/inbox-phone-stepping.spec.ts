@@ -18,7 +18,7 @@
  * PNGs (light and dark) land in PLANNOTATOR_PHONE_STEPPING_SHOTS (default .local/proof/phone-stepping).
  */
 
-import { chromium, devices, expect, test, webkit, type Browser, type Page } from '@playwright/test';
+import { chromium, devices, expect, test, webkit, type Browser, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';

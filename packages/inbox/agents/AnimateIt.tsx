@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { isInboxMarkFace } from '@plannotator/core/inbox-types';
 import { inboxApi } from '../api';
 import { openComposer } from '../compose/openComposer';
 import { keepAgentFace, type AgentFaceRef } from './agentFaces';
@@ -53,7 +54,7 @@ function useAnimatedOriginals(): ReadonlyMap<string, AgentFace> {
 
 /**
  * The picture an agent is handed for a face, and the id the request names it by (an uploaded picture's hash, else the
- * face). Null for the agent's own mark (the brand's, already a moving rig) and Transparent (a picture per theme).
+ * face). Null for the agent's own mark or another host's (the brand's, already a moving rig) and Transparent (a picture per theme).
  */
 export function animateSource(face: AgentFace, ours: FaceSources | null): { icon: string; src: string } | null {
   if (isOwnFace(face)) return { icon: face.slice(4), src: ownIconSrc(face, false) };
@@ -61,7 +62,7 @@ export function animateSource(face: AgentFace, ours: FaceSources | null): { icon
     const { set, icon } = setFaceParts(face);
     return { icon: face, src: setIconSrc(set, icon) };
   }
-  if (face === 'agent' || face === 'transparent') return null;
+  if (face === 'agent' || face === 'transparent' || face === 'mark' || face === 'project' || isInboxMarkFace(face)) return null;
   const src = ours?.[face];
   return typeof src === 'string' ? { icon: face, src } : null;
 }
@@ -73,7 +74,7 @@ function originalStill(face: AgentFace, ours: FaceSources | null): string | null
   return animateSource(face, ours)?.src ?? null;
 }
 
-const isOurs = (face: AgentFace) => !isOwnFace(face) && !isSetFace(face) && face !== 'agent';
+const isOurs = (face: AgentFace) => !isOwnFace(face) && !isSetFace(face) && !isInboxMarkFace(face) && face !== 'agent';
 
 /**
  * "Animate it", on an icon's page in the agent icon dialog (SelectedIcon.tsx): an uploaded picture or a set's icon.

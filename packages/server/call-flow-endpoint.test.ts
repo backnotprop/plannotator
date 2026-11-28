@@ -102,7 +102,7 @@ describe('Call flow endpoint capability guards', () => {
         const response = await fetch(`${server.url}/api/review-analysis`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ semanticDiff: false, callFlow: false }),
+          body: JSON.stringify({ callFlow: false }),
         });
         const settings = await response.json() as {
           callFlow?: {
@@ -121,6 +121,12 @@ describe('Call flow endpoint capability guards', () => {
             installSizeBytes: 6 * 1024 * 1024,
           },
         });
+
+        // The panel shows this line; it names where the switch is now, the same in both runtimes.
+        const { snapshotId } = await fetch(`${server.url}/api/diff`).then((r) => r.json()) as { snapshotId: string };
+        const direct = await fetch(`${server.url}/api/call-flow?snapshot=${encodeURIComponent(snapshotId)}`)
+          .then((r) => r.json()) as { status: string; message?: string };
+        expect(direct).toMatchObject({ status: 'disabled', message: 'Call flow is disabled in Settings → Reviews.' });
       } finally {
         server.stop();
       }
@@ -144,7 +150,7 @@ describe('Call flow endpoint capability guards', () => {
         const disabled = await fetch(`${server.url}/api/review-analysis`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ semanticDiff: false, callFlow: false }),
+          body: JSON.stringify({ callFlow: false }),
         }).then((response) => response.json()) as {
           callFlow?: { state: string; reason?: string; consentPlan?: unknown };
         };
@@ -154,7 +160,7 @@ describe('Call flow endpoint capability guards', () => {
         const settings = await fetch(`${server.url}/api/review-analysis`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ semanticDiff: false, callFlow: true }),
+          body: JSON.stringify({ callFlow: true }),
         }).then((response) => response.json()) as { callFlow?: { state: string } };
         expect(settings.callFlow?.state).toBe('unsupported');
 
@@ -198,13 +204,13 @@ describe('Call flow endpoint capability guards', () => {
         const older = fetch(`${server.url}/api/review-analysis`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ semanticDiff: false, callFlow: true }),
+          body: JSON.stringify({ callFlow: true }),
         });
         await waitForFile(startedPath);
         const current = await fetch(`${server.url}/api/review-analysis`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ semanticDiff: false, callFlow: false }),
+          body: JSON.stringify({ callFlow: false }),
         }).then((response) => response.json()) as { callFlow?: { state: string } };
         expect(current.callFlow?.state).toBe('disabled');
 
@@ -247,7 +253,7 @@ describe('Call flow endpoint capability guards', () => {
         const mutation = fetch(`${server.url}/api/review-analysis`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ semanticDiff: false, callFlow: true }),
+          body: JSON.stringify({ callFlow: true }),
         });
         await waitForFile(startedPath);
         const refresh = fetch(`${server.url}/api/review-analysis`);
@@ -303,7 +309,7 @@ describe('Call flow endpoint capability guards', () => {
         const mutation = fetch(`${server.url}/api/review-analysis`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ semanticDiff: false, callFlow: true }),
+          body: JSON.stringify({ callFlow: true }),
         });
         // Let the server accept the mutation and advance its epoch while the
         // older GET remains blocked in the shared runtime probe.

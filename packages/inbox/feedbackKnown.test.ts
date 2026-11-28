@@ -134,7 +134,7 @@ describe('known answers', () => {
     }
   });
 
-  test('features held until 0.29 (heldSwitch: Code review, Shape, System) are never offered', () => {
+  test('Code review (no answer yet), Shape and System (held) are never offered', () => {
     for (const answer of KNOWN_ANSWERS) expect(`${answer.answer} ${answer.faq?.answer ?? ''}`).not.toMatch(/code review|\bshape\b|\bsystem\b/i);
     for (const text of ['can I review code in the inbox', 'I want the shape boards', 'show me the system drawing']) expect(found(text)).toBeNull();
   });

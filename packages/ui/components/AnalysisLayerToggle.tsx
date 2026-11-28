@@ -25,7 +25,7 @@ export function AnalysisLayerToggle({
       aria-checked={checked}
       disabled={disabled}
       onClick={() => onChange(!checked)}
-      className={`flex min-h-11 w-full items-center justify-between gap-4 bg-transparent text-left disabled:cursor-not-allowed disabled:opacity-50 ${className}`}
+      className={`flex min-h-11 w-full items-center justify-between gap-4 bg-transparent text-left disabled:cursor-not-allowed ${className}`}
     >
       <span className="min-w-0">
         <span className="block text-sm font-medium text-foreground">{label}</span>
@@ -35,7 +35,7 @@ export function AnalysisLayerToggle({
         aria-hidden="true"
         className={`relative h-6 w-11 shrink-0 rounded-full transition-colors duration-150 ease-out motion-reduce:transition-none ${
           checked ? 'bg-primary' : 'bg-muted'
-        }`}
+        } ${disabled ? 'opacity-50' : ''}`}
       >
         <span
           className={`absolute left-1 top-1 h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-150 ease-out motion-reduce:transition-none ${

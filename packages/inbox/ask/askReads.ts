@@ -1,9 +1,9 @@
 /**
  * One read of a thread's Ask (`GET /api/inbox/threads/:id/ask`) for everything on the page that wants it now.
  *
- * Three parts of a window read the same thread's Ask on each `onAskChange` (askEvents.ts): the Ask window
- * (useInboxAsk), Show me (useShowMe) and a Change it that waits for a busy session (inboxShapeHost's
- * `wakeWhenFree`). Each asked on its own, so one event made three GETs of the same answer. Here, every call
+ * Two parts of a window read the same thread's Ask on each `onAskChange` (askEvents.ts): the Ask window
+ * (useInboxAsk) and the review's Ask on selected lines (useCanAsk). Each asked on its own, so one event made a
+ * GET each of the same answer. Here, every call
  * made before the read leaves (the same task: one event's listeners, one commit's effects) shares it.
  *
  * A read never waits for another: a call after the read left (a later event, while it is on its way or not)

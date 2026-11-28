@@ -67,10 +67,11 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-function route(options: { codeReview?: boolean; owner?: boolean; threadPulls?: string[]; pullFile?: (pull: string, path: string) => Promise<InboxPullFile | null> } = {}) {
+function route(options: { codeReview?: boolean; threadPulls?: string[]; pullFile?: (pull: string, path: string) => Promise<InboxPullFile | null> } = {}) {
   const message = { id: "msg_1", thread_id: "msg_1", project_id: "prj_1", base_path: project };
   const store = {
-    dir,
+    // The real layout, `<data>/inbox`: the data folder is Plannotator's own state, which a hover never shows.
+    dir: join(dir, "data", "inbox"),
     message: (id: string) => (id === "msg_1" ? message : null),
     project: () => ({ root: project }),
     thread: () => ({ project: { root: project } }),
@@ -88,7 +89,6 @@ function route(options: { codeReview?: boolean; owner?: boolean; threadPulls?: s
     repoRoots: () => [project],
     threadPulls: () => options.threadPulls ?? [],
     pullFile: options.pullFile ?? (async () => null),
-    ownerOrLocal: (_req, via) => via === "local" || options.owner === true,
     home: join(dir, "home"),
   });
   return async (query: Record<string, string>, via: "local" | "tailnet" = "local") => {
@@ -207,11 +207,8 @@ describe("who may read", () => {
     expect(body.code).toBe("code_review_off");
   });
 
-  test("the owner's phone through the tailnet reads; a guest is refused", async () => {
-    expect((await route({ owner: true })({ thread: "msg_1", path: "src/a.ts" }, "tailnet")).body.found).toBe(true);
-    const guest = await route({ owner: false })({ thread: "msg_1", path: "src/a.ts" }, "tailnet");
-    expect(guest.status).toBe(403);
-    expect(guest.body.code).toBe("local_only");
+  test("the owner's phone through the tailnet reads", async () => {
+    expect((await route()({ thread: "msg_1", path: "src/a.ts" }, "tailnet")).body.found).toBe(true);
   });
 
   test("another site's page is refused", async () => {
@@ -228,7 +225,6 @@ describe("who may read", () => {
       repoRoots: () => [],
       threadPulls: () => [],
       pullFile: async () => null,
-      ownerOrLocal: () => true,
     })(new Request(url, { headers: { origin: "https://evil.example", "sec-fetch-site": "cross-site" } }), INBOX_OPEN_IN_CODE_PATH, "local");
     expect(refused!.status).toBe(403);
   });
@@ -317,6 +313,26 @@ describe("InboxPulls.file: the PR's head commit, from the forge", () => {
     expect(f.contentReads()[0]).toContain("--hostname");
     await pulls.file(KEY, "src/a b.ts");
     expect(f.contentReads()).toHaveLength(1);
+  });
+
+  // The send's `links_not_found` reads this: it must never wait on the forge.
+  test("cachedFile answers from memory alone: undefined until a read, then that read's answer, with no forge call", async () => {
+    const f = forge({ "src/a.ts": "in the PR\n" });
+    const pulls = createInboxPulls({ run: f.run });
+    expect(pulls.cachedFile(KEY, "src/a.ts")).toBeUndefined();
+    expect(f.calls).toHaveLength(0);
+    await pulls.list(repos);
+    const listed = f.calls.length;
+    expect(pulls.cachedFile(KEY, "src/a.ts")).toBeUndefined();
+    expect(f.calls).toHaveLength(listed);
+    const read = await pulls.file(KEY, "src/a.ts");
+    expect(read?.contents).toBe("in the PR\n");
+    expect(await pulls.file(KEY, "no/such.ts")).toBeNull();
+    const after = f.calls.length;
+    expect(pulls.cachedFile(KEY, "src/a.ts")).toEqual(read);
+    expect(pulls.cachedFile(KEY, "no/such.ts")).toBeNull();
+    expect(pulls.cachedFile(KEY, "never/read.ts")).toBeUndefined();
+    expect(f.calls).toHaveLength(after);
   });
 
   test("no such file, what is not text, and a PR the list does not name: null, and the miss is kept", async () => {

@@ -7,7 +7,11 @@ const lastChoiceFile = (dataDir: string) => join(dataDir, "inbox", "launch", "la
 /** Only plain tokens survive a read: the file may have been edited by hand. */
 function cleanChoice(value: unknown): InboxLaunchChoice {
   const raw = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
-  return { ...(inboxLaunchTokenOk(raw.model) ? { model: raw.model } : {}), ...(inboxLaunchTokenOk(raw.effort) ? { effort: raw.effort } : {}) };
+  return {
+    ...(inboxLaunchTokenOk(raw.model) ? { model: raw.model } : {}),
+    ...(inboxLaunchTokenOk(raw.effort) ? { effort: raw.effort } : {}),
+    ...(inboxLaunchTokenOk(raw.primary_agent) ? { primary_agent: raw.primary_agent } : {}),
+  };
 }
 
 function readAll(dataDir: string): Record<string, InboxLaunchChoice> {
@@ -42,36 +46,81 @@ export const LAUNCH_CHOICES_RUN_MS = 5_000;
 /** Compose reads every few seconds; a CLI that can't list them is not asked again for this long. */
 const FAILED_AGAIN_MS = 5 * 60_000;
 
-export function withinLaunchWait<T>(answer: Promise<T | null>, ms = LAUNCH_CHOICES_WAIT_MS): Promise<T | null> {
+/** `whileLate`: the answer when `answer` has not settled within `ms` (OpenCode's "being read" lists); null by default. */
+export function withinLaunchWait<T>(answer: Promise<T | null>, ms = LAUNCH_CHOICES_WAIT_MS, whileLate: T | null = null): Promise<T | null> {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const late = new Promise<null>((resolve) => {
-    timer = setTimeout(() => resolve(null), ms);
+  const late = new Promise<T | null>((resolve) => {
+    timer = setTimeout(() => resolve(whileLate), ms);
   });
   return Promise.race([answer.catch(() => null), late]).finally(() => clearTimeout(timer));
 }
 
-/** `key` is the CLI's path and version: a help read costs a process, and compose asks every few seconds. */
-export function launchChoiceCache(load: () => Promise<LaunchChoiceLists | null>, now: () => number = Date.now) {
-  let kept: { key: string; value: LaunchChoiceLists } | null = null;
-  let failed: { key: string; at: number } | null = null;
-  let reading: { key: string; answer: Promise<LaunchChoiceLists | null> } | null = null;
+/** How many keys the cache remembers (lists and failures): a few config edits, never a growing map. */
+const CHOICE_KEYS_KEPT = 16;
+
+/** `map.set` that keeps `key` newest and drops the oldest past `CHOICE_KEYS_KEPT`. */
+function setNewest<V>(map: Map<string, V>, key: string, value: V): void {
+  map.delete(key);
+  map.set(key, value);
+  while (map.size > CHOICE_KEYS_KEPT) map.delete(map.keys().next().value!);
+}
+
+/**
+ * `key` is the CLI's path and version (OpenCode adds its config and sign-in files' modification times): a help read
+ * costs a process, and compose asks every few seconds. Per key: its lists once read, its failures, and at most one
+ * read in flight, so keys that alternate keep each one's lists and wait.
+ *
+ * A key whose read failed is not read again for `failedAgainMs`, doubled after each failure in a row up to
+ * `failedAgainMaxMs` (default: no doubling); a success starts over. A read fails with null, or with lists that say why
+ * (`unread`, OpenCode): those are answered for that key until it is read again, so the menu says why meanwhile.
+ *
+ * `binaryOf` (opt-in, OpenCode): the part of a key that names the binary (path and version). With it, a new key of
+ * the SAME binary answers the last good lists at once while it reads (in the background) and after its read failed,
+ * so a config change never hides the menu or drops a pick. A new binary never gets an old binary's lists: it waits for
+ * its own read, and a read that fails leaves no lists but its failure (Default only), as without `binaryOf`. With a
+ * stale good list answered, its failure is not: the list shows as it was.
+ */
+export function launchChoiceCache(
+  load: () => Promise<LaunchChoiceLists | null>,
+  now: () => number = Date.now,
+  options: { failedAgainMs?: number; failedAgainMaxMs?: number; binaryOf?: (key: string) => string } = {},
+) {
+  const failedAgainMs = options.failedAgainMs ?? FAILED_AGAIN_MS;
+  const failedAgainMaxMs = Math.max(failedAgainMs, options.failedAgainMaxMs ?? failedAgainMs);
+  const kept = new Map<string, LaunchChoiceLists>();
+  const failed = new Map<string, { at: number; times: number; why: LaunchChoiceLists | null }>();
+  const reading = new Map<string, Promise<LaunchChoiceLists | null>>();
+  /** The key of the last read that succeeded, for `binaryOf`'s stale lists. */
+  let lastGood: string | null = null;
+  const staleFor = (key: string): Promise<LaunchChoiceLists | null> | null => {
+    if (!options.binaryOf || lastGood === null || options.binaryOf(lastGood) !== options.binaryOf(key)) return null;
+    const value = kept.get(lastGood);
+    return value ? Promise.resolve(value) : null;
+  };
   const read = (key: string | null): Promise<LaunchChoiceLists | null> => {
     if (key === null) return Promise.resolve(null);
-    if (kept?.key === key) return Promise.resolve(kept.value);
-    if (failed?.key === key && now() - failed.at < FAILED_AGAIN_MS) return Promise.resolve(null);
-    if (reading?.key === key) return reading.answer;
+    const value = kept.get(key);
+    if (value) return Promise.resolve(value);
+    const stale = staleFor(key);
+    const failure = failed.get(key);
+    if (failure && now() - failure.at < Math.min(failedAgainMaxMs, failedAgainMs * 2 ** (failure.times - 1))) return stale ?? Promise.resolve(failure.why);
+    const under = reading.get(key);
+    if (under) return stale ?? under;
     const answer = load()
       .catch(() => null)
-      .then((value) => {
-        if (value) kept = { key, value };
-        else failed = { key, at: now() };
-        return value;
+      .then((lists) => {
+        if (lists && !lists.unread) {
+          setNewest(kept, key, lists);
+          failed.delete(key);
+          lastGood = key;
+        } else {
+          setNewest(failed, key, { at: now(), times: (failed.get(key)?.times ?? 0) + 1, why: lists });
+        }
+        return lists;
       })
-      .finally(() => {
-        if (reading?.answer === answer) reading = null;
-      });
-    reading = { key, answer };
-    return answer;
+      .finally(() => reading.delete(key));
+    reading.set(key, answer);
+    return stale ?? answer;
   };
   return read;
 }

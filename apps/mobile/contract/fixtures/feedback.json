@@ -1,0 +1,1050 @@
+{
+  "about": "Invented comments on invented files, for the feedback text a Send carries. scripts/mobile/vectors-feedback.ts runs the window's own export over these (packages/inbox/attachments.ts attachmentFeedback) and its own makers of a code comment and a picture comment (codeCommentAnnotation, imageCommentAnnotation, codeHash; packages/inbox/markup.ts markupWords), and scripts/mobile/vectors.ts writes vectors/feedback.json. A case's `texts` are each file version's text, keyed `<attachment id>|<version>`; a record is the attachment, the version and the annotation, in the order the comments were made. None is a comment on a message's words, a guided review, a running app, a video's moment, a diagram's part or a quick label: the phone leaves those to the window.",
+  "cases": [
+    {
+      "name": "one of each",
+      "note": "A document, code, a log drawn as code, a picture, a page and a text file outside the project, each with comments; one on a sent version.",
+      "project_root": "/work/api/",
+      "attachments": [
+        {
+          "id": "att_PLAN",
+          "path": "/work/api/docs/retry-plan.md",
+          "name": "retry-plan.md",
+          "kind": "markdown"
+        },
+        {
+          "id": "att_CODE",
+          "path": "/work/api/src/client.ts",
+          "name": "client.ts",
+          "kind": "code"
+        },
+        {
+          "id": "att_LOG",
+          "path": "/work/api/logs/relay-run.log",
+          "name": "relay-run.log",
+          "kind": "text"
+        },
+        {
+          "id": "att_PIC",
+          "path": "/work/api/shots/flame graph.png",
+          "name": "flame graph.png",
+          "kind": "image"
+        },
+        {
+          "id": "att_PAGE",
+          "path": "/work/api/canary.html",
+          "name": "canary.html",
+          "kind": "html"
+        },
+        {
+          "id": "att_NOTES",
+          "path": "/tmp/outside/notes.txt",
+          "name": "notes.txt",
+          "kind": "text",
+          "sent_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      ],
+      "texts": {
+        "att_PLAN|current": "# Retry plan for the relay client\n\nStatus: **draft** · Owner: `relay` · Target: next release\n\n## Problem\n\nThe client drops its socket when the laptop sleeps and never comes back.\nIt retries at once, three times, then gives up.\n\n## Proposal\n\n1. Retry with a growing wait, capped at 60 seconds.\n2. Add jitter so a fleet does not retry in step.\n3. Stop after ten minutes and say so.\n\n- [x] Reproduce on a sleeping laptop\n- [ ] Ship behind a flag\n\n| Attempt | Wait |\n|---|---:|\n| 1 | 1 s |\n| 2 | 2 s |\n\n```ts\nconst wait = Math.min(60_000, 1000 * 2 ** tries)\nawait sleep(wait + jitter(250))\n```\n\n> Ten minutes is a guess.\n> Measure before the release.\n",
+        "att_CODE|current": "import { jitter, sleep } from \"./time\"\n\nconst CAP_MS = 60_000\nconst GIVE_UP_MS = 10 * 60_000\n\nexport async function keepOpen(socket) {\n  let tries = 0\n  for (;;) {\n    await socket.open()\n    tries += 1\n    await sleep(Math.min(CAP_MS, 1000 * 2 ** tries) + jitter(250))\n  }\n}\n",
+        "att_LOG|current": "09:14:01 DEBUG relay ping ok rtt=21 ms\n09:14:02 DEBUG relay ping ok rtt=22 ms\n# 09:14:03 INFO  relay opening again wait=8 s try=4\n09:14:04 WARN  relay socket closed code=1006\n",
+        "att_NOTES|bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": "---\ntitle: not front matter here\n---\nBody of the notes.\n\nA second paragraph.\n",
+        "att_NOTES|current": "---\ntitle: not front matter here\n---\nBody of the notes.\n\nA second paragraph.\n"
+      },
+      "records": [
+        {
+          "id": "p1",
+          "attachment_id": "att_PLAN",
+          "version": "current",
+          "annotation": {
+            "id": "p1",
+            "blockId": "block-3",
+            "startOffset": 4,
+            "endOffset": 27,
+            "type": "COMMENT",
+            "text": "Say which client: the phone's or the desktop's.",
+            "originalText": "client drops its socket",
+            "createdA": 1
+          }
+        },
+        {
+          "id": "p2",
+          "attachment_id": "att_PLAN",
+          "version": "current",
+          "annotation": {
+            "id": "p2",
+            "blockId": "block-6",
+            "startOffset": 0,
+            "endOffset": 45,
+            "type": "DELETION",
+            "text": "",
+            "originalText": "Add jitter so a fleet does not retry in step.",
+            "createdA": 1
+          }
+        },
+        {
+          "id": "c1",
+          "attachment_id": "att_CODE",
+          "version": "current",
+          "annotation": {
+            "id": "c1",
+            "blockId": "code-L3-3",
+            "startOffset": 0,
+            "endOffset": 0,
+            "type": "COMMENT",
+            "text": "Lower on a metered connection?",
+            "originalText": "const CAP_MS = 60_000",
+            "createdA": 1,
+            "inboxCode": {
+              "lineStart": 3,
+              "lineEnd": 3,
+              "code": "const CAP_MS = 60_000"
+            }
+          }
+        },
+        {
+          "id": "c2",
+          "attachment_id": "att_CODE",
+          "version": "current",
+          "annotation": {
+            "id": "c2",
+            "blockId": "code-L8-11",
+            "startOffset": 0,
+            "endOffset": 0,
+            "type": "COMMENT",
+            "text": "This never gives up.\nAdd the ten minute stop.",
+            "originalText": "for (;;) { …",
+            "createdA": 1,
+            "inboxCode": {
+              "lineStart": 8,
+              "lineEnd": 11,
+              "code": "  for (;;) {\n    await socket.open()\n    tries += 1\n    await sleep(Math.min(CAP_MS, 1000 * 2 ** tries) + jitter(250))"
+            }
+          }
+        },
+        {
+          "id": "l1",
+          "attachment_id": "att_LOG",
+          "version": "current",
+          "annotation": {
+            "id": "l1",
+            "blockId": "code-L3-4",
+            "startOffset": 0,
+            "endOffset": 0,
+            "type": "COMMENT",
+            "text": "Why does it close again a second later?",
+            "originalText": "# 09:14:03 INFO  relay opening again wait=8 s try=4 …",
+            "createdA": 1,
+            "inboxCode": {
+              "lineStart": 3,
+              "lineEnd": 4,
+              "code": "# 09:14:03 INFO  relay opening again wait=8 s try=4\n09:14:04 WARN  relay socket closed code=1006"
+            }
+          }
+        },
+        {
+          "id": "i1",
+          "attachment_id": "att_PIC",
+          "version": "current",
+          "annotation": {
+            "id": "i1",
+            "blockId": "image",
+            "startOffset": 0,
+            "endOffset": 0,
+            "type": "COMMENT",
+            "text": "The wide bar at the left is the retry loop.",
+            "originalText": "flame graph.png",
+            "createdA": 1
+          }
+        },
+        {
+          "id": "i2",
+          "attachment_id": "att_PIC",
+          "version": "current",
+          "annotation": {
+            "id": "i2",
+            "blockId": "image",
+            "startOffset": 0,
+            "endOffset": 0,
+            "type": "COMMENT",
+            "text": "See the marked-up image.",
+            "originalText": "flame graph.png",
+            "createdA": 1,
+            "images": [
+              {
+                "path": "/home/person/.plannotator/inbox/markups/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.png",
+                "name": "flame graph markup"
+              }
+            ]
+          }
+        },
+        {
+          "id": "i3",
+          "attachment_id": "att_PIC",
+          "version": "current",
+          "annotation": {
+            "id": "i3",
+            "blockId": "image",
+            "startOffset": 0,
+            "endOffset": 0,
+            "type": "COMMENT",
+            "text": "Cut this part.",
+            "originalText": "flame graph.png",
+            "createdA": 1,
+            "images": [
+              {
+                "path": "/home/person/.plannotator/inbox/markups/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd.png",
+                "name": "flame graph markup"
+              }
+            ]
+          }
+        },
+        {
+          "id": "h1",
+          "attachment_id": "att_PAGE",
+          "version": "current",
+          "annotation": {
+            "id": "h1",
+            "blockId": "",
+            "startOffset": 0,
+            "endOffset": 0,
+            "type": "COMMENT",
+            "text": "Show the baseline beside it.",
+            "originalText": "99.6%",
+            "createdA": 1,
+            "elementContext": {
+              "tag": "div",
+              "classes": [
+                "n",
+                "ok"
+              ],
+              "path": "body > section > div.n.ok",
+              "text": "99.6%",
+              "rect": {
+                "x": 36,
+                "y": 300,
+                "w": 320,
+                "h": 49,
+                "vw": 393,
+                "vh": 700
+              },
+              "heading": "h1 \"Canary rollout · relay client\""
+            },
+            "htmlAnchor": {
+              "selector": "body > section:nth-of-type(2) > div.n.ok",
+              "tagName": "DIV"
+            }
+          }
+        },
+        {
+          "id": "h2",
+          "attachment_id": "att_PAGE",
+          "version": "current",
+          "annotation": {
+            "id": "h2",
+            "blockId": "",
+            "startOffset": 1,
+            "endOffset": 1,
+            "type": "COMMENT",
+            "text": "This button does nothing on a phone.",
+            "originalText": "[element: Refresh]",
+            "createdA": 1,
+            "elementContext": {
+              "tag": "button",
+              "id": "b",
+              "path": "body > section > button#b",
+              "role": "button",
+              "name": "Refresh",
+              "attrs": [
+                [
+                  "id",
+                  "b"
+                ]
+              ],
+              "outline": "<button id=\"b\">",
+              "children": 0,
+              "rect": {
+                "x": 36,
+                "y": 900,
+                "w": 96,
+                "h": 44,
+                "vw": 393,
+                "vh": 700
+              }
+            },
+            "htmlAnchor": {
+              "selector": "#b",
+              "tagName": "BUTTON"
+            }
+          }
+        },
+        {
+          "id": "n1",
+          "attachment_id": "att_NOTES",
+          "version": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "annotation": {
+            "id": "n1",
+            "blockId": "block-2",
+            "startOffset": 0,
+            "endOffset": 18,
+            "type": "COMMENT",
+            "text": "Which notes?",
+            "originalText": "Body of the notes.",
+            "createdA": 1
+          }
+        }
+      ]
+    },
+    {
+      "name": "one comment",
+      "note": "One piece of feedback, on one file.",
+      "project_root": "/work/api",
+      "attachments": [
+        {
+          "id": "att_PLAN",
+          "path": "/work/api/docs/retry-plan.md",
+          "name": "retry-plan.md",
+          "kind": "markdown"
+        }
+      ],
+      "texts": {
+        "att_PLAN|current": "# Retry plan for the relay client\n\nStatus: **draft** · Owner: `relay` · Target: next release\n\n## Problem\n\nThe client drops its socket when the laptop sleeps and never comes back.\nIt retries at once, three times, then gives up.\n\n## Proposal\n\n1. Retry with a growing wait, capped at 60 seconds.\n2. Add jitter so a fleet does not retry in step.\n3. Stop after ten minutes and say so.\n\n- [x] Reproduce on a sleeping laptop\n- [ ] Ship behind a flag\n\n| Attempt | Wait |\n|---|---:|\n| 1 | 1 s |\n| 2 | 2 s |\n\n```ts\nconst wait = Math.min(60_000, 1000 * 2 ** tries)\nawait sleep(wait + jitter(250))\n```\n\n> Ten minutes is a guess.\n> Measure before the release.\n"
+      },
+      "records": [
+        {
+          "id": "p1",
+          "attachment_id": "att_PLAN",
+          "version": "current",
+          "annotation": {
+            "id": "p1",
+            "blockId": "block-0",
+            "startOffset": 0,
+            "endOffset": 31,
+            "type": "COMMENT",
+            "text": "Name the release.",
+            "originalText": "Retry plan for the relay client",
+            "createdA": 1
+          }
+        }
+      ]
+    },
+    {
+      "name": "front matter and order",
+      "note": "Lines count from the file's first line whether or not its front matter is read; comments made out of order come out in the document's order, a code file's in the order made.",
+      "project_root": "/work/api",
+      "attachments": [
+        {
+          "id": "att_FRONT",
+          "path": "/work/api/docs/front.md",
+          "name": "front.md",
+          "kind": "markdown"
+        },
+        {
+          "id": "att_NOTES",
+          "path": "/work/api/notes.txt",
+          "name": "notes.txt",
+          "kind": "text"
+        },
+        {
+          "id": "att_CODE",
+          "path": "/work/api/src/client.ts",
+          "name": "client.ts",
+          "kind": "code"
+        }
+      ],
+      "texts": {
+        "att_FRONT|current": "---\ntitle: Rollout\ntags: [a, b]\n---\n\n\n# Rollout\n\nFirst paragraph.\n\nSecond paragraph,\non two lines.\n",
+        "att_NOTES|current": "---\ntitle: not front matter here\n---\nBody of the notes.\n\nA second paragraph.\n",
+        "att_CODE|current": "import { jitter, sleep } from \"./time\"\n\nconst CAP_MS = 60_000\nconst GIVE_UP_MS = 10 * 60_000\n\nexport async function keepOpen(socket) {\n  let tries = 0\n  for (;;) {\n    await socket.open()\n    tries += 1\n    await sleep(Math.min(CAP_MS, 1000 * 2 ** tries) + jitter(250))\n  }\n}\n"
+      },
+      "records": [
+        {
+          "id": "f3",
+          "attachment_id": "att_FRONT",
+          "version": "current",
+          "annotation": {
+            "id": "f3",
+            "blockId": "block-2",
+            "startOffset": 17,
+            "endOffset": 29,
+            "type": "COMMENT",
+            "text": "Third in the file, made first.",
+            "originalText": "on two lines",
+            "createdA": 1
+          }
+        },
+        {
+          "id": "f1",
+          "attachment_id": "att_FRONT",
+          "version": "current",
+          "annotation": {
+            "id": "f1",
+            "blockId": "block-0",
+            "startOffset": 0,
+            "endOffset": 7,
+            "type": "COMMENT",
+            "text": "First in the file.",
+            "originalText": "Rollout",
+            "createdA": 1
+          }
+        },
+        {
+          "id": "f2b",
+          "attachment_id": "att_FRONT",
+          "version": "current",
+          "annotation": {
+            "id": "f2b",
+            "blockId": "block-1",
+            "startOffset": 6,
+            "endOffset": 15,
+            "type": "COMMENT",
+            "text": "Second, later in its block.",
+            "originalText": "paragraph",
+            "createdA": 1
+          }
+        },
+        {
+          "id": "f2a",
+          "attachment_id": "att_FRONT",
+          "version": "current",
+          "annotation": {
+            "id": "f2a",
+            "blockId": "block-1",
+            "startOffset": 0,
+            "endOffset": 5,
+            "type": "COMMENT",
+            "text": "Second, earlier in its block.",
+            "originalText": "First",
+            "createdA": 1
+          }
+        },
+        {
+          "id": "n2",
+          "attachment_id": "att_NOTES",
+          "version": "current",
+          "annotation": {
+            "id": "n2",
+            "blockId": "block-3",
+            "startOffset": 2,
+            "endOffset": 18,
+            "type": "COMMENT",
+            "text": "A text file keeps its first lines.",
+            "originalText": "second paragraph",
+            "createdA": 1
+          }
+        },
+        {
+          "id": "n1",
+          "attachment_id": "att_NOTES",
+          "version": "current",
+          "annotation": {
+            "id": "n1",
+            "blockId": "block-1",
+            "startOffset": 0,
+            "endOffset": 28,
+            "type": "COMMENT",
+            "text": "So this is a line of the file.",
+            "originalText": "title: not front matter here",
+            "createdA": 1
+          }
+        },
+        {
+          "id": "c9",
+          "attachment_id": "att_CODE",
+          "version": "current",
+          "annotation": {
+            "id": "c9",
+            "blockId": "code-L9-9",
+            "startOffset": 0,
+            "endOffset": 0,
+            "type": "COMMENT",
+            "text": "Made first, on line 9.",
+            "originalText": "await socket.open()",
+            "createdA": 1,
+            "inboxCode": {
+              "lineStart": 9,
+              "lineEnd": 9,
+              "code": "    await socket.open()"
+            }
+          }
+        },
+        {
+          "id": "c1",
+          "attachment_id": "att_CODE",
+          "version": "current",
+          "annotation": {
+            "id": "c1",
+            "blockId": "code-L1-1",
+            "startOffset": 0,
+            "endOffset": 0,
+            "type": "COMMENT",
+            "text": "Made second, on line 1.",
+            "originalText": "import { jitter, sleep } from \"./time\"",
+            "createdA": 1,
+            "inboxCode": {
+              "lineStart": 1,
+              "lineEnd": 1,
+              "code": "import { jitter, sleep } from \"./time\""
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "no place and hard words",
+      "note": "A comment with no block (a file whose blocks the phone does not share with the window) has no line; words with quotes, backticks, line breaks and Markdown marks go through as written; a page's own words are made safe.",
+      "project_root": "/work/api",
+      "attachments": [
+        {
+          "id": "att_MATH",
+          "path": "/work/api/docs/math.md",
+          "name": "math.md",
+          "kind": "markdown"
+        },
+        {
+          "id": "att_PAGE",
+          "path": "/work/api/canary.html",
+          "name": "canary.html",
+          "kind": "html"
+        },
+        {
+          "id": "att_CODE",
+          "path": "/work/api/src/client.ts",
+          "name": "client.ts",
+          "kind": "code"
+        }
+      ],
+      "texts": {
+        "att_MATH|current": "Words before.\n\n$$\nx^2\n$$\n\nWords after the math.\n",
+        "att_CODE|current": "import { jitter, sleep } from \"./time\"\n\nconst CAP_MS = 60_000\nconst GIVE_UP_MS = 10 * 60_000\n\nexport async function keepOpen(socket) {\n  let tries = 0\n  for (;;) {\n    await socket.open()\n    tries += 1\n    await sleep(Math.min(CAP_MS, 1000 * 2 ** tries) + jitter(250))\n  }\n}\n"
+      },
+      "records": [
+        {
+          "id": "m2",
+          "attachment_id": "att_MATH",
+          "version": "current",
+          "annotation": {
+            "id": "m2",
+            "blockId": "",
+            "startOffset": 2000004,
+            "endOffset": 2000018,
+            "type": "COMMENT",
+            "text": "Second by where it is.",
+            "originalText": "after the math",
+            "createdA": 1
+          }
+        },
+        {
+          "id": "m1",
+          "attachment_id": "att_MATH",
+          "version": "current",
+          "annotation": {
+            "id": "m1",
+            "blockId": "",
+            "startOffset": 6,
+            "endOffset": 12,
+            "type": "COMMENT",
+            "text": "First by where it is.\n\n# Not a heading\n```\nnot a fence",
+            "originalText": "before",
+            "createdA": 1
+          }
+        },
+        {
+          "id": "m3",
+          "attachment_id": "att_MATH",
+          "version": "current",
+          "annotation": {
+            "id": "m3",
+            "blockId": "",
+            "startOffset": 0,
+            "endOffset": 29,
+            "type": "COMMENT",
+            "text": "A quote on two lines, with \"quotes\" and `ticks`.",
+            "originalText": "Words \"before\".\nWords `after`",
+            "createdA": 1
+          }
+        },
+        {
+          "id": "h1",
+          "attachment_id": "att_PAGE",
+          "version": "current",
+          "annotation": {
+            "id": "h1",
+            "blockId": "",
+            "startOffset": 0,
+            "endOffset": 0,
+            "type": "COMMENT",
+            "text": "Is this right?",
+            "originalText": "Stage ```2``` of 4\n\n# Ship it",
+            "createdA": 1,
+            "elementContext": {
+              "tag": "p",
+              "path": "body > header > p",
+              "text": "Stage ```2``` of 4\n# Ship it",
+              "name": "A \"name\" with `ticks`",
+              "role": "paragraph",
+              "component": "data-component=`Stage`",
+              "landmark": "header \"Top\"",
+              "attrs": [
+                [
+                  "title",
+                  "one `two`"
+                ],
+                [
+                  "data-x",
+                  "y"
+                ]
+              ],
+              "outline": "<p title=\"one\">\n  ```\n</p>",
+              "rect": {
+                "x": 20.5,
+                "y": 44,
+                "w": 353,
+                "h": 20,
+                "vw": 393,
+                "vh": 700
+              }
+            },
+            "htmlAnchor": {
+              "selector": "body > header > p",
+              "tagName": "P"
+            }
+          }
+        },
+        {
+          "id": "h0",
+          "attachment_id": "att_PAGE",
+          "version": "current",
+          "annotation": {
+            "id": "h0",
+            "blockId": "",
+            "startOffset": 0,
+            "endOffset": 0,
+            "type": "COMMENT",
+            "text": "Swap this picture.",
+            "originalText": "[element: picture]",
+            "createdA": 1,
+            "elementContext": {
+              "tag": "img",
+              "attrs": [
+                [
+                  "src",
+                  "https://cdn.example.test/img/team.jpg?…"
+                ],
+                [
+                  "alt",
+                  ""
+                ]
+              ],
+              "path": "body > img"
+            }
+          }
+        },
+        {
+          "id": "h3",
+          "attachment_id": "att_PAGE",
+          "version": "current",
+          "annotation": {
+            "id": "h3",
+            "blockId": "",
+            "startOffset": 2,
+            "endOffset": 2,
+            "type": "COMMENT",
+            "text": "And this one.",
+            "originalText": "[element: named]",
+            "createdA": 1,
+            "elementContext": {
+              "tag": "img",
+              "name": "Team",
+              "sourceName": "team.jpg",
+              "path": "body > img"
+            },
+            "htmlAnchor": {
+              "selector": "img",
+              "tagName": "IMG"
+            }
+          }
+        },
+        {
+          "id": "c5",
+          "attachment_id": "att_CODE",
+          "version": "current",
+          "annotation": {
+            "id": "c5",
+            "blockId": "code-L5-5",
+            "startOffset": 0,
+            "endOffset": 0,
+            "type": "COMMENT",
+            "text": "An empty line.",
+            "originalText": "",
+            "createdA": 1,
+            "inboxCode": {
+              "lineStart": 5,
+              "lineEnd": 5,
+              "code": ""
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "alerts, CRLF, a drawing, hard marks and a prototype",
+      "note": "A DELETION on an alert, a comment on a directive, a document whose lines end in CRLF, a picture comment that carries its drawing, a page element whose words hold a backtick followed by a combining mark, a whole-file comment on a document and on a page, and a page an option shows as its prototype.",
+      "project_root": "/work/api",
+      "attachments": [
+        {
+          "id": "att_NOTES",
+          "path": "/work/api/docs/release.md",
+          "name": "release.md",
+          "kind": "markdown"
+        },
+        {
+          "id": "att_CRLF",
+          "path": "/work/api/docs/windows.md",
+          "name": "windows.md",
+          "kind": "markdown"
+        },
+        {
+          "id": "att_SHOT",
+          "path": "/work/api/shots/before.png",
+          "name": "before.png",
+          "kind": "image"
+        },
+        {
+          "id": "att_HARD",
+          "path": "/work/api/pages/hard.html",
+          "name": "hard.html",
+          "kind": "html"
+        },
+        {
+          "id": "att_PROTO",
+          "path": "/work/api/proto/b.html",
+          "name": "b.html",
+          "kind": "html",
+          "message_id": "msg_ASK"
+        }
+      ],
+      "texts": {
+        "att_NOTES|current": "# Release notes\n\n> [!WARNING]\n> The relay drops idle sockets.\n> Reconnect on wake.\n\n:::note\nThe canary runs for two days.\n:::\n\nShip it on Monday.\n",
+        "att_CRLF|current": "Plan\r\n\r\nFirst line of the notes.\r\nSecond line runs on.\r\n\r\nLast paragraph.\r\n"
+      },
+      "messages": [
+        {
+          "base_path": "/work/api",
+          "attachments": [
+            {
+              "id": "att_PROTO",
+              "path": "/work/api/proto/b.html",
+              "name": "b.html",
+              "kind": "html"
+            }
+          ],
+          "questions": [
+            {
+              "kind": "single",
+              "prompt": "Which checkout?",
+              "choices": [
+                {
+                  "label": "A · Cart first"
+                },
+                {
+                  "label": "B · Total first",
+                  "prototype": {
+                    "target": "proto/b.html"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "records": [
+        {
+          "id": "d1",
+          "attachment_id": "att_NOTES",
+          "version": "current",
+          "annotation": {
+            "id": "d1",
+            "blockId": "block-1",
+            "startOffset": 0,
+            "endOffset": 30,
+            "type": "DELETION",
+            "text": "",
+            "originalText": "The relay drops idle sockets.",
+            "createdA": 1
+          }
+        },
+        {
+          "id": "d2",
+          "attachment_id": "att_NOTES",
+          "version": "current",
+          "annotation": {
+            "id": "d2",
+            "blockId": "block-2",
+            "startOffset": 4,
+            "endOffset": 10,
+            "type": "COMMENT",
+            "text": "Say which canary.",
+            "originalText": "canary",
+            "createdA": 1
+          }
+        },
+        {
+          "id": "d3",
+          "attachment_id": "att_NOTES",
+          "version": "current",
+          "annotation": {
+            "id": "d3",
+            "blockId": "",
+            "startOffset": 0,
+            "endOffset": 0,
+            "type": "GLOBAL_COMMENT",
+            "text": "Shorter, please.",
+            "originalText": "",
+            "createdA": 1
+          }
+        },
+        {
+          "id": "w1",
+          "attachment_id": "att_CRLF",
+          "version": "current",
+          "annotation": {
+            "id": "w1",
+            "blockId": "block-1",
+            "startOffset": 0,
+            "endOffset": 24,
+            "type": "COMMENT",
+            "text": "Which notes?",
+            "originalText": "First line of the notes.",
+            "createdA": 1
+          }
+        },
+        {
+          "id": "w2",
+          "attachment_id": "att_CRLF",
+          "version": "current",
+          "annotation": {
+            "id": "w2",
+            "blockId": "block-2",
+            "startOffset": 0,
+            "endOffset": 15,
+            "type": "COMMENT",
+            "text": "Keep this.",
+            "originalText": "Last paragraph.",
+            "createdA": 1
+          }
+        },
+        {
+          "id": "s1",
+          "attachment_id": "att_SHOT",
+          "version": "current",
+          "annotation": {
+            "id": "s1",
+            "blockId": "image",
+            "startOffset": 0,
+            "endOffset": 0,
+            "type": "COMMENT",
+            "text": "Crop the top.",
+            "originalText": "before.png",
+            "createdA": 1,
+            "images": [
+              {
+                "path": "/home/person/.plannotator/inbox/markups/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee.png",
+                "name": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee.png"
+              }
+            ]
+          }
+        },
+        {
+          "id": "k1",
+          "attachment_id": "att_HARD",
+          "version": "current",
+          "annotation": {
+            "id": "k1",
+            "blockId": "",
+            "startOffset": 0,
+            "endOffset": 0,
+            "type": "COMMENT",
+            "text": "Odd mark here.",
+            "originalText": "a`́b",
+            "createdA": 1,
+            "elementContext": {
+              "tag": "span",
+              "path": "body > p > span.a`́b",
+              "text": "a`́b",
+              "name": "na`́b",
+              "attrs": [
+                [
+                  "title",
+                  "ta`́b"
+                ],
+                [
+                  "src",
+                  "/img/xa`́b.png"
+                ]
+              ],
+              "outline": "<span>```́</span>"
+            },
+            "htmlAnchor": {
+              "selector": "span[title=a`́b]",
+              "tagName": "SPAN"
+            }
+          }
+        },
+        {
+          "id": "k2",
+          "attachment_id": "att_HARD",
+          "version": "current",
+          "annotation": {
+            "id": "k2",
+            "blockId": "",
+            "startOffset": 0,
+            "endOffset": 0,
+            "type": "COMMENT",
+            "text": "Name it.",
+            "originalText": "[element: a]́]",
+            "createdA": 1,
+            "elementContext": {
+              "tag": "img",
+              "name": "Logo",
+              "attrs": [
+                [
+                  "src",
+                  "data:image/svg+xml;base64,AAAA"
+                ]
+              ]
+            },
+            "htmlAnchor": {
+              "selector": "img",
+              "tagName": "IMG"
+            }
+          }
+        },
+        {
+          "id": "k3",
+          "attachment_id": "att_HARD",
+          "version": "current",
+          "annotation": {
+            "id": "k3",
+            "blockId": "",
+            "startOffset": 0,
+            "endOffset": 0,
+            "type": "GLOBAL_COMMENT",
+            "text": "The whole page is too dense.",
+            "originalText": "",
+            "createdA": 1
+          }
+        },
+        {
+          "id": "r1",
+          "attachment_id": "att_PROTO",
+          "version": "current",
+          "annotation": {
+            "id": "r1",
+            "blockId": "",
+            "startOffset": 0,
+            "endOffset": 0,
+            "type": "COMMENT",
+            "text": "Total is clearer.",
+            "originalText": "Total",
+            "createdA": 1,
+            "elementContext": {
+              "tag": "h2",
+              "text": "Total"
+            },
+            "htmlAnchor": {
+              "selector": "h2",
+              "tagName": "H2"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "code_comments": [
+    {
+      "line_start": 3,
+      "line_end": 3,
+      "code": "const CAP_MS = 60_000",
+      "text": "Lower on a metered connection?"
+    },
+    {
+      "line_start": 8,
+      "line_end": 11,
+      "code": "  for (;;) {\n    await socket.open()\n    tries += 1\n    await sleep(1)",
+      "text": "Two\nlines."
+    },
+    {
+      "line_start": 2,
+      "line_end": 4,
+      "code": "\n\n   \t",
+      "text": "Only blank lines."
+    },
+    {
+      "line_start": 7,
+      "line_end": 7,
+      "code": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "text": "A line longer than the quote holds."
+    },
+    {
+      "line_start": 1,
+      "line_end": 2,
+      "code": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀\nnext",
+      "text": "Cut between characters, never inside one."
+    }
+  ],
+  "long_code_comments": [
+    {
+      "line_start": 1,
+      "line_end": 1,
+      "repeat": "ab😀",
+      "times": 1400,
+      "text": "A minified line: kept as an excerpt, with the whole's length and hash."
+    },
+    {
+      "line_start": 1,
+      "line_end": 1,
+      "repeat": "a",
+      "times": 4096,
+      "text": "Exactly the most kept whole."
+    },
+    {
+      "line_start": 1,
+      "line_end": 1,
+      "repeat": "a",
+      "times": 4097,
+      "text": "One more than that."
+    }
+  ],
+  "image_comments": [
+    {
+      "name": "flame graph.png",
+      "words": "  The wide bar.  ",
+      "markup": null
+    },
+    {
+      "name": "flame graph.png",
+      "words": "",
+      "markup": {
+        "path": "/home/person/.plannotator/inbox/markups/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.png",
+        "name": "flame graph markup"
+      }
+    },
+    {
+      "name": "flame graph.png",
+      "words": "Cut this.",
+      "markup": {
+        "path": "/home/person/.plannotator/inbox/markups/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.png",
+        "name": "flame graph markup"
+      }
+    }
+  ],
+  "hashes": [
+    "",
+    "a",
+    "const CAP_MS = 60_000",
+    "😀 two",
+    "line one\nline two\n",
+    "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+  ]
+}

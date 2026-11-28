@@ -94,7 +94,7 @@ export function PRSelector({ mrNumberLabel, numberPrefix, prTitle, currentNumber
       onOpenChange={handleOpen}
       headerContent={mergedCount > 0 ? (
         <div className="flex items-center justify-between px-3 py-1.5 border-b border-border/50">
-          <span className="text-[10px] text-muted-foreground/60">
+          <span className="text-xs text-muted-foreground/60">
             {hideMerged ? `${openCount} open · ${mergedCount} hidden` : `${openCount} open, ${prs.length} total`}
           </span>
           <button
@@ -138,7 +138,7 @@ export function PRSelector({ mrNumberLabel, numberPrefix, prTitle, currentNumber
             <span className={`font-mono ${isSelected ? 'text-foreground font-medium' : 'text-foreground/80'}`}>
               {numberPrefix}{item.number}
             </span>
-            <span className={`text-[10px] ${stateColors[item.state]}`}>
+            <span className={`text-xs ${stateColors[item.state]}`}>
               {stateLabels[item.state]}
             </span>
           </div>

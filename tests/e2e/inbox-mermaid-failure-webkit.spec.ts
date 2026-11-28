@@ -8,7 +8,7 @@
  *    app, and one more piles up on every re-render (a theme change);
  *  - a diagram type whose chunk does not arrive (a dropped request, or a tab
  *    older than the Inbox's build, whose chunk names are gone) shows as a red
- *    "Mermaid Error" that blames the source, where it should show the source
+ *    "Diagram error" that blames the source, where it should show the source
  *    under the quiet Reload line; and leaves the same graphic on the body.
  *
  * The other diagram and the fences around it still render. Made-up diagrams.
@@ -17,7 +17,7 @@
  * PNGs land in <PLANNOTATOR_E2E_PROOF_DIR or .local/proof>/mermaid-failure/.
  */
 
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -74,9 +74,36 @@ const outside = (page: Page) =>
     overflows: document.documentElement.scrollHeight > window.innerHeight + 1,
   }));
 
+/**
+ * Pele's core chunk answers 404, as from a tab older than the Inbox's build.
+ * Pele draws a sequence diagram itself, so without this the Mermaid chunk the
+ * next tests break is never asked for; with it the fence falls back to
+ * Mermaid, as a fence Pele cannot draw does. Pele's core is the one chunk
+ * that names its error class.
+ */
+const withoutPele = (page: Page) =>
+  page.route(/\/assets\/[^/]+\.js$/, async (route) => {
+    const response = await route.fetch();
+    const body = await response.text();
+    if (body.includes('PeleError')) return route.fulfill({ status: 404, contentType: 'text/plain', body: 'Not found' });
+    return route.fulfill({ response, body });
+  });
+
 const openOnIpad = async (browser: import('@playwright/test').Browser) => {
   const context = await browser.newContext({ viewport: { width: 820, height: 1180 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 });
   return { context, page: await context.newPage() };
+};
+
+/**
+ * The page can still be asking for chunks after the last check passes.
+ * `withoutPele` reads each one with
+ * `route.fetch()`; closing the context while one is read disposes the response
+ * under it and fails a test whose checks all passed. Let those reads finish
+ * first: they are local assets, so the wait is short.
+ */
+const closeIpad = async ({ context, page }: { context: import('@playwright/test').BrowserContext; page: Page }) => {
+  await page.unrouteAll({ behavior: 'wait' });
+  await context.close();
 };
 
 test('a diagram that does not parse shows its source in the message, and nothing lands outside it, through re-renders', async ({ browser }) => {
@@ -88,7 +115,7 @@ test('a diagram that does not parse shows its source in the message, and nothing
     const blocks = message.locator('[data-diagram-block="mermaid"]');
     await expect(blocks).toHaveCount(2);
     await expect(blocks.nth(1).locator('[data-diagram-svg] svg')).toBeVisible();
-    await expect(blocks.nth(0)).toContainText('Mermaid Error');
+    await expect(blocks.nth(0)).toContainText('Diagram error');
     await expect(blocks.nth(0)).toContainText('B{{"Check<br/>it"}');
     expect(await outside(page)).toEqual({ stray: [], overflows: false });
 
@@ -119,6 +146,7 @@ test('a diagram chunk whose download breaks off once draws on the automatic re-a
   const { context, page } = await openOnIpad(browser);
   try {
     let tries = 0;
+    await withoutPele(page);
     await page.route(/\/assets\/sequenceDiagram-[^/]+\.js$/, (route) => (++tries === 1 ? route.abort('connectionreset') : route.continue()));
     await page.goto(`${url}#thread=${sent.thread_id}`);
     const block = page.locator(`[data-message-id="${sent.message_id}"] [data-diagram-block="mermaid"]`);
@@ -126,7 +154,7 @@ test('a diagram chunk whose download breaks off once draws on the automatic re-a
     expect(tries).toBe(2);
     expect(await outside(page)).toEqual({ stray: [], overflows: false });
   } finally {
-    await context.close();
+    await closeIpad({ context, page });
   }
 });
 
@@ -135,16 +163,17 @@ test('a diagram type whose chunk does not arrive shows the source under Reload, 
   const { context, page } = await openOnIpad(browser);
   try {
     // As a tab older than the Inbox's build asks for a chunk name that is gone.
+    await withoutPele(page);
     await page.route(/\/assets\/sequenceDiagram-[^/]+\.js$/, (route) => route.fulfill({ status: 404, contentType: 'text/plain', body: 'Not found' }));
     await page.goto(`${url}#thread=${sent.thread_id}`);
     const block = page.locator(`[data-message-id="${sent.message_id}"] [data-diagram-block="mermaid"]`);
     await expect(block.locator('[data-lazy-load-failed]')).toBeVisible();
     await expect(block.getByRole('button', { name: 'Reload' })).toBeVisible();
     await expect(block).toContainText('participant P as Person');
-    await expect(block).not.toContainText('Mermaid Error');
+    await expect(block).not.toContainText('Diagram error');
     expect(await outside(page)).toEqual({ stray: [], overflows: false });
     await page.screenshot({ path: join(proofDir, '02-ipad-chunk-missing.png') });
   } finally {
-    await context.close();
+    await closeIpad({ context, page });
   }
 });

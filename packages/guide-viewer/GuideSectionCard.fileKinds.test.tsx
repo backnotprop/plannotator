@@ -42,7 +42,7 @@ afterEach(async () => {
   mounts = [];
 });
 
-async function renderChapter(paths: string[], generatedFiles?: ReadonlySet<string>, collapseAll?: GuideHostValue<Record<string, unknown>>['collapseAll']) {
+async function renderChapter(paths: string[], generatedFiles?: ReadonlySet<string>, collapseAll?: GuideHostValue<Record<string, unknown>>['collapseAll'], keepsFileOrder?: boolean, eager = true) {
   const files = paths.map(makeFile);
   const section: GuideSection = { title: 'Chapter', overview: '', diffs: paths.map((file) => ({ file })) };
   const value: GuideHostValue<Record<string, unknown>> = {
@@ -51,6 +51,7 @@ async function renderChapter(paths: string[], generatedFiles?: ReadonlySet<strin
     getDiffRendererProps: () => ({}),
     generatedFiles,
     collapseAll,
+    keepsFileOrder,
   };
   if (!host) {
     host = document.createElement('div');
@@ -60,7 +61,7 @@ async function renderChapter(paths: string[], generatedFiles?: ReadonlySet<strin
     root ??= createRoot(host!);
     root.render(
       <GuideHostProvider value={value}>
-        <GuideViewportProvider eager>
+        <GuideViewportProvider eager={eager}>
           <GuideSectionCard
             section={section}
             files={files}
@@ -110,6 +111,12 @@ describe('GuideSectionCard file kinds', () => {
     expect(cardOrder(el)).toEqual(expected);
   });
 
+  test.skipIf(!hasDom)('a host that keeps the file order (the PR page, whose rail lists them) draws the cards in the order given', async () => {
+    const paths = ['docs/rtl.md', 'src/Layout.tsx', 'src/Profile.test.tsx', 'src/Profile.tsx'];
+    const el = await renderChapter(paths, undefined, undefined, true);
+    expect(cardOrder(el)).toEqual(paths);
+  });
+
   test.skipIf(!hasDom)('test cards open, generated cards start folded', async () => {
     const el = await renderChapter(['src/a.ts', 'src/a.test.ts', 'bun.lock']);
     const collapsedFor = (path: string) => mountedProps.find((p) => (p.files as DiffFile[])[0].path === path)?.mountCollapsed;
@@ -117,6 +124,36 @@ describe('GuideSectionCard file kinds', () => {
     expect(collapsedFor('src/a.test.ts')).toBe(false);
     expect(collapsedFor('bun.lock')).toBe(true);
     expect(el.querySelectorAll('[data-guide-kind-subhead] [data-file-kind-icon]').length).toBe(2);
+  });
+
+  test.skipIf(!hasDom)('a file box says whether it is folded before its viewer is drawn, and after Collapse all', async () => {
+    // The first two files draw at once (the first paint); the rest wait for the view.
+    const paths = ['src/a.ts', 'src/b.ts', 'src/c.ts', 'bun.lock'];
+    const folded = (el: HTMLElement) =>
+      Object.fromEntries([...el.querySelectorAll<HTMLElement>('[data-guide-file-shell]')].map((shell) => [shell.dataset.guideFileShell, shell.dataset.guideFileFolded]));
+    // An observer that never reports a file near the view: no viewer is drawn.
+    const realObserver = globalThis.IntersectionObserver;
+    globalThis.IntersectionObserver = class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+      takeRecords() {
+        return [];
+      }
+    } as unknown as typeof IntersectionObserver;
+    try {
+      const el = await renderChapter(paths, undefined, undefined, undefined, false);
+      // c and the lockfile not drawn yet: no viewer, so no folding arrow; the box says it.
+      expect(mounts.sort()).toEqual(['src/a.ts', 'src/b.ts']);
+      expect(folded(el)).toEqual({ 'src/a.ts': 'false', 'src/b.ts': 'false', 'src/c.ts': 'false', 'bun.lock': 'true' });
+      await renderChapter(paths, undefined, { collapsed: true, token: 1 }, undefined, false);
+      expect(folded(el)).toEqual({ 'src/a.ts': 'true', 'src/b.ts': 'true', 'src/c.ts': 'true', 'bun.lock': 'true' });
+      await renderChapter(paths, undefined, { collapsed: false, token: 2 }, undefined, false);
+      expect(folded(el)).toEqual({ 'src/a.ts': 'false', 'src/b.ts': 'false', 'src/c.ts': 'false', 'bun.lock': 'false' });
+      expect(mounts.filter((path) => path === 'src/c.ts' || path === 'bun.lock')).toEqual([]);
+    } finally {
+      globalThis.IntersectionObserver = realObserver;
+    }
   });
 
   test.skipIf(!hasDom)("the host's generated set decides what is generated", async () => {

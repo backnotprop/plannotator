@@ -434,8 +434,8 @@ export function MachineUpdateDialog({ machine, snooze, onClose, onStartAgent }: 
   }
   if (notice?.kind === 'by_hand') {
     return (
-      <Modal label={`Update ${name} by hand`} onClose={onClose} testId="machine-update-by-hand">
-        <h2>Update {name} by hand</h2>
+      <Modal label={`Update ${name} yourself`} onClose={onClose} testId="machine-update-by-hand">
+        <h2>Update {name} yourself</h2>
         <p className="ib-sub">Its copy of Plannotator was not installed by the install script, so it can&apos;t update itself. It runs {from}.</p>
         {snooze && <SnoozeLine name={name} />}
         {details?.command && (

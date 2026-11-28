@@ -2,6 +2,7 @@
  * The textarea as a dictation session sees it. Text goes in as if typed: the browser's own undo takes it back and the
  * host's `onChange` runs, so nothing here knows about drafts.
  */
+import { endTypingRun } from '@plannotator/ui/utils/pasteInsert';
 import type { VoiceField } from './voiceSession';
 
 /** The words, with the spaces this spot needs. */
@@ -35,7 +36,11 @@ export function textareaField(textarea: HTMLTextAreaElement, touch: () => boolea
         const elsewhere = document.activeElement;
         textarea.focus({ preventScroll: true });
         // A field that cannot take focus (hidden under a sheet): the browser would type into whatever has it.
-        if (document.activeElement === textarea) done = document.execCommand('insertText', false, out);
+        if (document.activeElement === textarea) {
+          endTypingRun(textarea);
+          done = document.execCommand('insertText', false, out);
+          endTypingRun(textarea);
+        }
         if (elsewhere instanceof HTMLElement && elsewhere !== textarea && elsewhere !== document.body) elsewhere.focus({ preventScroll: true });
       }
       if (!done) {

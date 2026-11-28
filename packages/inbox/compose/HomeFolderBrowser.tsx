@@ -220,6 +220,7 @@ export function HomeFolderBrowser({
   const { parent, tail } = splitFolderPath(shown);
   const asleep = machine.asleep === true;
   const drives = machine.drives ?? [];
+  const shortcuts = drives.filter((drive) => drive.shortcut !== false);
   // Which place the path is in: a drive, else home (a full path elsewhere: none of them).
   const here = placeOf(shown, drives);
   const atHome = shown.startsWith('~');
@@ -270,7 +271,7 @@ export function HomeFolderBrowser({
     observer.observe(row);
     return () => observer.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [drives.length]);
+  }, [shortcuts.length]);
   const tryAgain = () => {
     if (here) quietDrives.delete(quietKey(machine.id, here.path));
     setRetry((n) => n + 1);
@@ -391,15 +392,15 @@ export function HomeFolderBrowser({
       () => setFinding(false),
     );
   };
-  const placesRow = (drives.length > 0 || machine.finder === true) && !clone && (
+  const placesRow = (shortcuts.length > 0 || machine.finder === true) && !clone && (
     <div className="ib-hfb-places" data-home-folders-places="" ref={placesRef} onScroll={measurePlaces} data-more-before={more.before ? '' : undefined} data-more-after={more.after ? '' : undefined}>
-      {drives.length > 0 && (
+      {shortcuts.length > 0 && (
         <div className="ib-seg ib-seg-sm" role="radiogroup" aria-label="Places">
           <button type="button" className="ib-seg-o" role="radio" aria-checked={atHome} data-on={atHome ? '' : undefined} onClick={() => goTo(HOME_FOLDER_START)} data-home-folders-place="home">
             <Icon name="folder" size={14} />
             Home
           </button>
-          {drives.map((drive) => {
+          {shortcuts.map((drive) => {
             const on = here?.path === drive.path;
             const quiet = quietDrives.has(quietKey(machine.id, drive.path));
             return (

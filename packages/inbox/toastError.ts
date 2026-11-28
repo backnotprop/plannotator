@@ -7,6 +7,7 @@
  */
 import { InboxApiError, InboxHeldError } from './api';
 import type { InboxToastModel } from './components/Toast';
+import { linkedMachineFacts, machineOf } from './inboxUrl';
 
 /** A fetch that never reached the Inbox (Chrome, Safari, Firefox each word it their own way). */
 export const INBOX_UNREACHABLE = 'The Inbox did not answer. Try again in a moment.';
@@ -30,4 +31,22 @@ export function errorToast(cause: unknown, fallback: string): Omit<InboxToastMod
   // What the toast does not say stays findable: the console has the cause itself.
   if (!(cause instanceof InboxApiError)) console.warn('[inbox] a write failed:', cause);
   return { icon: 'warn', lead, wrap: true };
+}
+
+/** What only an Inbox older than reactions on every message answers to one: an earlier message, or one replied after. */
+const OLDER_ACK_REFUSALS = new Set(['ack_stale', 'ack_after_reply']);
+
+/**
+ * A reaction's error toast. A linked machine's Inbox older than reactions on every message (approval
+ * "inbox-reactions-every-message") still refuses one with `409 ack_stale` / `ack_after_reply`, which no Inbox of this
+ * version says: the toast names that machine and that it needs an update, as a Delete such a machine refuses does
+ * ("<name> needs an update to delete words"), never that store's own words.
+ */
+export function ackErrorToast(cause: unknown, messageId: string): Omit<InboxToastModel, 'id'> {
+  if (cause instanceof InboxApiError && cause.status === 409 && OLDER_ACK_REFUSALS.has(cause.code)) {
+    const home = machineOf(messageId);
+    const name = (home ? linkedMachineFacts(home)?.name : null) ?? 'That machine';
+    return { icon: 'warn', lead: `${name} needs an update to react to this message`, wrap: true };
+  }
+  return errorToast(cause, 'The thread did not change.');
 }

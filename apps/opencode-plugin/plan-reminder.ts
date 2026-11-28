@@ -63,6 +63,11 @@ function wrapped(text: string): boolean {
   return trimmed.startsWith(WRAPPER_START) && trimmed.endsWith(WRAPPER_END);
 }
 
+/** OpenCode 2's Plan mode exit reminder ("You are NO LONGER in Plan mode…"). */
+export function isOpenCode2PlanExitReminder(text: string): boolean {
+  return wrapped(text) && /\bno longer in plan mode\b/i.test(text);
+}
+
 /** OpenCode 2's Plan mode entry reminder (any of its wordings), never its exit reminder. */
 export function isOpenCode2PlanReminder(text: string): boolean {
   if (!wrapped(text)) return false;

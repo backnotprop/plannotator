@@ -47,6 +47,58 @@ describe("agentByShort", () => {
   });
 });
 
+describe("claude agents --json --all past 64 KiB", () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  /** A listing like one seen in use (274 sessions, 72 KB): over the 64 Ki every other call keeps. */
+  const listing = (count: number) =>
+    JSON.stringify(
+      Array.from({ length: count }, (_, i) => {
+        const hex = i.toString(16).padStart(8, "0");
+        return { id: hex, cwd: "/home/someone/projects/a-repository-with-a-long-name", kind: "bg", startedAt: 1764075600000 + i, sessionId: `${hex}-0000-4000-8000-000000000000`, name: `Inbox session number ${i}`, state: "stopped" };
+      }).concat([{ id: "f08bbdb5", cwd: "/p", kind: "bg", startedAt: 1, sessionId: "f08bbdb5-0000-4000-8000-000000000000", name: "waits", state: "blocked", status: "waiting", waitingFor: "permission prompt" } as never]),
+    );
+
+  test.skipIf(process.platform === "win32")("the real spawn keeps all of it: every entry parses and the last one's permission prompt reads", async () => {
+    const root = mkdtempSync(join(tmpdir(), "claude-agents-big-"));
+    dirs.push(root);
+    const bin = join(root, "bin");
+    mkdirSync(bin);
+    const out = join(root, "agents.json");
+    const text = listing(400);
+    expect(Buffer.byteLength(text)).toBeGreaterThan(64 * 1024);
+    writeFileSync(out, text);
+    writeFileSync(join(bin, "claude"), ["#!/bin/sh", `[ "$1" = agents ] && cat ${JSON.stringify(out)}`].join("\n"), { mode: 0o755 });
+    const env = () => createAgentEnvironmentFor({ platform: process.platform, homeDir: root, env: { HOME: root, PATH: `${bin}:/usr/bin:/bin` } });
+    const logged: string[] = [];
+    const host = createClaudeHost({ environment: async () => env(), files: env, log: (line) => logged.push(line) });
+    const agents = await host.agents();
+    expect(agents?.length).toBe(401);
+    expect(agentByShort(agents!, "f08bbdb5")).toMatchObject({ status: "waiting", waitingFor: "permission prompt" });
+    expect(logged).toEqual([]);
+  });
+
+  test("output that does not parse is logged with its byte count, never read silently as no host", async () => {
+    const cut = listing(400).slice(0, 64 * 1024);
+    const env: AgentEnvironment = { platform: "darwin", homeDir: "/home", env: {}, which: () => "/bin/claude", run: async () => ({ exitCode: 0, timedOut: false, stdout: cut, stderr: "" }) };
+    const logged: string[] = [];
+    const host = createClaudeHost({ environment: async () => env, files: () => env, log: (line) => logged.push(line) });
+    expect(await host.agents()).toBeNull();
+    expect(logged).toEqual([`claude agents --json --all: ${64 * 1024} bytes of stdout that are not a JSON list; no host read`]);
+  });
+
+  test("a failed read is logged too", async () => {
+    const env: AgentEnvironment = { platform: "darwin", homeDir: "/home", env: {}, which: () => "/bin/claude", run: async () => ({ exitCode: 1, timedOut: false, stdout: "", stderr: "boom\nmore" }) };
+    const logged: string[] = [];
+    const host = createClaudeHost({ environment: async () => env, files: () => env, log: (line) => logged.push(line) });
+    expect(await host.agents("/p")).toBeNull();
+    expect(logged).toEqual(["claude agents --json --all --cwd /p: exit 1, 0 bytes of stdout; no host read (boom)"]);
+  });
+});
+
 describe("startFailureOf", () => {
   test("Claude's untrusted-folder error becomes the run line's untrusted cause with the folder", () => {
     const failure = startFailureOf({ exitCode: 1, timedOut: false, stdout: "", stderr: "Error: Workspace not trusted. Run claude in /x first." }, "~/oss/side");
@@ -426,6 +478,37 @@ describe("Claude Code as a launch host", () => {
     const result = await w.host.resume(w.launch);
     expect(result).toMatchObject({ exitCode: 0, failure: null });
     expect(w.calls().find((call) => call.startsWith("respawn"))).toContain("FROM_LOGIN=yes");
+  });
+
+  test("Start in Rex: interactive claude in the folder as a session id picked now, with the launch's settings file and flags; nothing runs, and no message on the line", async () => {
+    const w = world();
+    const made = await w.host.rexCommand!({ ...w.launch, session_ref: null, own_mode: true }, { name: "Tidy the changelog", login: w.login, resume: false });
+    if (!made.ok) throw new Error(made.text);
+    expect(made.session).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    expect(made.ref).toBe(made.session);
+    const settings = join(w.dataDir, "inbox", "launch", "lch_1", "settings.json");
+    // Named for its thread, as a background start is (`--bg --name`): the list's row and Claude's own title read it.
+    expect(made.command).toBe(`cd '${w.root}' && exec claude '--session-id' '${made.session}' '--name' 'Tidy the changelog' '--settings' '${settings}'`);
+    // A name that would read as a flag, or none: never a flag, never empty.
+    const dashed = await w.host.rexCommand!({ ...w.launch, session_ref: null, own_mode: true }, { name: "--print it's", login: w.login, resume: false });
+    expect(dashed.ok && dashed.command).toContain(String.raw`'--name' 'print it'\''s' '--settings'`);
+    const unnamed = await w.host.rexCommand!({ ...w.launch, session_ref: null, own_mode: true }, { name: "  ", login: w.login, resume: false });
+    expect(unnamed.ok && unnamed.command).toContain("'--name' 'Inbox'");
+    // The same settings file as a background start (its permission hook brings prompts to the Inbox too).
+    expect(JSON.parse(readFileSync(settings, "utf8")).env.PATH).toBe(w.login.PATH);
+    // Nothing was run: Rex runs it.
+    expect(existsSync(join(w.root, "calls.log")) ? w.calls().filter((call) => call.startsWith("--")) : []).toEqual([]);
+    // A reply to it once it ended: the same session again.
+    const again = await w.host.rexCommand!({ ...w.launch, session: made.session, session_ref: made.session }, { name: "Tidy", login: w.login, resume: true });
+    expect(again.ok && again.command).toContain(`'--resume' '${made.session}'`);
+    // Started again, it keeps the name it has (the person may have renamed it).
+    expect(again.ok && again.command).not.toContain("--name");
+    expect(again.ok && again.command).toContain("'--permission-mode' 'auto'");
+    // One that never took a turn (stopped at a prompt in its tab): nothing to resume, so a first start on its own id, named.
+    const fresh = await w.host.rexCommand!({ ...w.launch, session: made.session, session_ref: made.session }, { name: "Tidy", login: w.login, resume: true, fresh: true });
+    expect(fresh.ok && fresh.session).toBe(made.session);
+    expect(fresh.ok && fresh.command).toContain(`'--session-id' '${made.session}' '--name' 'Tidy'`);
+    expect(fresh.ok && fresh.command).not.toContain("--resume");
   });
 
   test("a login env that can't reach `claude` (a shell read that failed) still starts it, from Claude's install folders", async () => {

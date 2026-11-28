@@ -154,6 +154,14 @@ export const EMBED_BOOTSTRAP = `(function () {
   }
   addEventListener("load", send);
   setTimeout(send, 0);
+  // A link to this page with a query (\`?view=2\`) loads it again with that
+  // query, in place: its scripts read it in location.search, as in a tab.
+  // The theme's fragment (as the page was first given it) stays unless the
+  // link names its own.
+  var themeHash = /(?:^#|&)pn=/.test(location.hash) ? location.hash : "";
+  var reload = function (query, hash) {
+    try { location.replace(location.pathname + query + (hash || themeHash)); } catch (e) {}
+  };
   document.addEventListener("click", function (e) {
     var a = e.target && e.target.closest ? e.target.closest("a[href]") : null;
     if (!a || e.defaultPrevented) return;
@@ -161,6 +169,23 @@ export const EMBED_BOOTSTRAP = `(function () {
     if (href.charAt(0) === "#") return;
     e.preventDefault();
     if (/^https?:\\/\\//i.test(href)) post({ kind: "link", url: href });
+    else if (href.charAt(0) === "?" && e.isTrusted) { var at = href.indexOf("#"); reload(at < 0 ? href : href.slice(0, at), at < 0 ? "" : href.slice(at)); }
+  });
+  // A GET form with no address of its own (or only a query) loads this page
+  // again with its fields as the query; the page's own submit handlers run
+  // first, and one that cancels wins. On the window, after them.
+  addEventListener("submit", function (e) {
+    var f = e.target;
+    if (e.defaultPrevented || !f || f.tagName !== "FORM") return;
+    var s = e.submitter || null;
+    var method = ((s && s.getAttribute("formmethod")) || f.getAttribute("method") || "get").toLowerCase();
+    var action = ((s && s.getAttribute("formaction")) || f.getAttribute("action") || "").trim();
+    if (method !== "get" || (action !== "" && action.charAt(0) !== "?")) return;
+    e.preventDefault();
+    var q = new URLSearchParams();
+    try { new FormData(f, s).forEach(function (v, k) { if (typeof v === "string") q.append(k, v); }); }
+    catch (x) { new FormData(f).forEach(function (v, k) { if (typeof v === "string") q.append(k, v); }); }
+    reload("?" + q.toString(), "");
   });
   document.addEventListener("keydown", function (e) {
     if (e.key === "Escape" && !e.defaultPrevented) post({ kind: "escape" });
@@ -177,15 +202,35 @@ const LEADING_DOCTYPE = /^\s*(?:<!--[\s\S]*?-->\s*)*<!doctype[^>]*>/i;
  * into ours (the HTML parser folds a second `<html>` and `<head>` in), so the
  * bootstrap always runs before any of the page's own code.
  */
-export function buildEmbedDocument(html: string): string {
+export function buildEmbedDocument(html: string, options: EmbedDocumentOptions = {}): string {
   const page = html.replace(LEADING_DOCTYPE, "");
   return (
     '<!doctype html><html><head><meta charset="utf-8">' +
     '<meta name="viewport" content="width=device-width, initial-scale=1">' +
     `<style>${BASE_CSS}</style><script>${EMBED_BOOTSTRAP}</script>` +
+    (options.closeHead ? "</head>" : "") +
     page
   );
 }
+
+export interface EmbedDocumentOptions {
+  /**
+   * End our `<head>` before the agent's HTML, for a host that adds its own
+   * script to the document afterwards (ui's HtmlViewer puts its annotation
+   * bridge before the first `</head>`): ours is then the first, whatever the
+   * page writes, and the document keeps its doctype. The page parses to the
+   * same tree: its own `<head>` content still lands in the head, a fragment
+   * in the body. Absent: the document as it always was.
+   */
+  closeHead?: boolean;
+}
+
+/**
+ * The most an annotatable embed's document may weigh: the fence
+ * (`EMBED_MAX_BYTES`) and what the viewer adds to it (its annotation bridge,
+ * about 300 KB, and the theme).
+ */
+export const EMBED_ANNOTATABLE_MAX_BYTES = EMBED_MAX_BYTES + 1536 * 1024;
 
 /** The fragment that hands the embed its theme and mode before it paints (`#pn=…`). */
 export function embedFragment(theme: EmbedTheme, mode: EmbedMode = "inline"): string {
@@ -221,6 +266,13 @@ export function readEmbedMessage(data: unknown): EmbedMessage | null {
 
 /** The id the Inbox gives an embed: the first 32 hex digits of the SHA-256 of its HTML. */
 export const EMBED_ID = /^[a-f0-9]{32}$/;
+
+/** The embed's id, read from the URL of its document (`…/embeds/<id>`); null when the URL does not end in one. */
+export function embedIdFromUrl(url: string): string | null {
+  const path = url.split(/[?#]/, 1)[0] ?? "";
+  const id = path.slice(path.lastIndexOf("/") + 1);
+  return EMBED_ID.test(id) ? id : null;
+}
 
 /**
  * What a frame document a host serves says to the window that framed it when

@@ -8,7 +8,7 @@
  * computer; another site's page cannot send.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FEEDBACK_TIMEOUT_MS, FEEDBACK_UNAVAILABLE } from "@plannotator/core/product-feedback";
@@ -149,10 +149,9 @@ describe("POST /api/inbox/feedback", () => {
     expect(took).toBeLessThan(10_000);
   }, 20_000);
 
-  test("over the tailnet only the owner sends: a guest is 403 owner_only and nothing leaves", async () => {
+  test("over the tailnet the owner sends", async () => {
     const MAGIC = "macbook-pro.tail0000.ts.net";
     const OWNER = "owner@example.com";
-    const GUEST = "guest@example.com";
     const serve = new Map<number, string>();
     const fakeTailscale: TailscaleRunner = (args) => {
       const ok = (stdout = "") => ({ status: 0, stdout, stderr: "" });
@@ -175,8 +174,6 @@ describe("POST /api/inbox/feedback", () => {
     roots.push(root);
     const dataDir = join(root, "data");
     mkdirSync(dataDir, { recursive: true });
-    // The tailnet's allowed logins come from config.json in the data dir (loadConfig reads the env's).
-    writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTailscaleAllow: [GUEST] }));
     const previous = { data: process.env.PLANNOTATOR_DATA_DIR, ts: process.env.PLANNOTATOR_INBOX_TAILSCALE };
     process.env.PLANNOTATOR_DATA_DIR = dataDir;
     delete process.env.PLANNOTATOR_INBOX_TAILSCALE;
@@ -192,9 +189,6 @@ describe("POST /api/inbox/feedback", () => {
           headers: { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": login, Origin: origin, "Sec-Fetch-Site": "same-origin", "Content-Type": "application/json" },
           body: JSON.stringify({ serverSession: server.serverSession, message: "from the tailnet" }),
         });
-      const guest = await through(GUEST);
-      expect([guest.status, ((await guest.json()) as { code?: string }).code]).toEqual([403, "owner_only"]);
-      expect(endpoint.received).toHaveLength(0);
       const owner = await through(OWNER);
       expect(owner.status).toBe(200);
       expect(endpoint.received).toHaveLength(1);

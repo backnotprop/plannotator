@@ -36,7 +36,11 @@
  * (AttachmentStepper.tsx `FilePeek`'s `onStep`).
  */
 
+import { useEffect, useRef } from 'react';
 import type { InboxAttachmentKind } from '@plannotator/core/inbox-types';
+import { usePhone } from './phone';
+import { startsAtEdge } from './rowSwipe';
+import { useTouchTablet } from './touchStepBar';
 import { sidewaysOwner as uiSidewaysOwner, useSwipeStep, type SwipeDir, type SwipeStep, type SwipeStepOptions } from '@plannotator/ui/hooks/useSwipeStep';
 
 export {
@@ -105,7 +109,30 @@ export function sidewaysOwner(path: readonly EventTarget[], dir: SwipeDir): 'own
   return uiSidewaysOwner(path, dir, FILE_TOUCH_OWNERS);
 }
 
-/** The pane's swipe on its `.ib-docarea` (ui's `useSwipeStep`, the diagram canvas keeping its touches). */
+/**
+ * The pane's swipe on its `.ib-docarea` (ui's `useSwipeStep`, the diagram canvas keeping its touches). On a touch
+ * tablet (touchStepBar.ts) a touch that starts at the window's left or right side (rowSwipe.ts `startsAtEdge`, 24 px)
+ * is Safari's Back or Forward (the owner's condition, approval "inbox-touch-file-stepping"): the swipe never moves or
+ * cancels it. A phone's swipe has no edge (approval "mobile-file-stepping").
+ */
 export function useFileSwipe(area: Parameters<typeof useSwipeStep>[0], options: FileSwipeOptions): FileSwipe {
-  return useSwipeStep(area, { ...options, owners: FILE_TOUCH_OWNERS });
+  const backEdge = useTouchTablet(usePhone());
+  const fromEdge = useRef(false);
+  useEffect(() => {
+    const el = area.current;
+    if (!el || !backEdge || !options.enabled) return;
+    const onStart = (event: TouchEvent) => {
+      const touch = event.touches[0];
+      fromEdge.current = event.touches.length === 1 && !!touch && startsAtEdge(touch.clientX, window.innerWidth);
+    };
+    el.addEventListener('touchstart', onStart, { passive: true, capture: true });
+    return () => {
+      el.removeEventListener('touchstart', onStart, { capture: true });
+      fromEdge.current = false;
+    };
+  }, [area, backEdge, options.enabled]);
+  const { keeps } = options;
+  // Read when the swipe is decided (the touch's first moves), so an edge touch is never taken or cancelled.
+  const edgeKeeps = backEdge ? (dir: SwipeDir) => fromEdge.current || (keeps?.(dir) ?? false) : keeps;
+  return useSwipeStep(area, { ...options, keeps: edgeKeeps, owners: FILE_TOUCH_OWNERS });
 }

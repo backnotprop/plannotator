@@ -46,7 +46,6 @@ export const placeShown = (layout: PlaceLayout): boolean => layout.file !== 'cov
 
 /** What may hold a place: message parts in reading order (a message's own box is a last resort, it is long). */
 const PLACE_CANDIDATES = [
-  '.ib-subject',
   '[data-fold-head]',
   '[data-open-head]',
   '[data-message-article] :is(p, li, h1, h2, h3, h4, h5, h6, pre, blockquote, table, img, [data-attachment-id])',

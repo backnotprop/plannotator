@@ -10,6 +10,8 @@ import { VoiceFootRow } from './VoiceMic';
 import { usePhone } from '../phone';
 import { useVoiceSession } from '../voice';
 import { newUuid } from '../uuid';
+import { useKeptState } from '../data/keptState';
+import { pollWhileShown } from '../data/shownPoll';
 
 /**
  * New message (record 5.x, PLAN step 8; owner Q4: "just another button next
@@ -57,13 +59,15 @@ export type NewMessageMode = { kind: 'pick' } | { kind: 'none' } | { kind: 'comp
  * The project's live sessions, read when the thread opens, every few seconds
  * while it stays open, and on demand. With `asker` (the session that asked,
  * for a host whose sessions poll), also whether that session is still there.
+ * Not while the tab is hidden or the pane `parked` (data/shownPoll.ts): read once
+ * the moment it shows again. An answer the same as the held one draws nothing.
  */
-export function useLiveSessions(threadId: string, asker: string | null = null, enabled = true, refreshMs = REFRESH_MS) {
-  const [model, setModel] = useState<LiveSessionsModel | null>(null);
+export function useLiveSessions(threadId: string, asker: string | null = null, enabled = true, refreshMs = REFRESH_MS, parked = false) {
+  const [model, keepModel, setModel] = useKeptState<LiveSessionsModel | null>(null);
   const load = useCallback(async (): Promise<LiveSessionsModel | null> => {
     try {
       const next = await inboxApi.sessions(threadId, asker);
-      setModel(next);
+      keepModel(next);
       return next;
     } catch {
       return null;
@@ -71,12 +75,12 @@ export function useLiveSessions(threadId: string, asker: string | null = null, e
   }, [threadId, asker]);
   useEffect(() => {
     setModel(null);
-    // `enabled` false: nothing to watch (compose's "Not delivered" asks only while a message waits).
-    if (!enabled) return;
-    void load();
-    const timer = setInterval(() => void load(), refreshMs);
-    return () => clearInterval(timer);
   }, [load, enabled, refreshMs]);
+  useEffect(() => {
+    // `enabled` false: nothing to watch (compose's "Not delivered" asks only while a message waits).
+    if (!enabled || parked) return;
+    return pollWhileShown(() => void load(), refreshMs);
+  }, [load, enabled, refreshMs, parked]);
   // A session the person named (Rename… in the sidebar) reads by that name; only its id is ever sent.
   const names = useAgentNames();
   const named = useMemo(() => {
@@ -315,7 +319,8 @@ export function NewMessageComposer({
     <>
       <div className="ib-reply-l" data-new-message-to={target.session}>
         New message to {name} in {thread.project.name}{' '}
-        <span className="ib-mut">(live session, {target.busy ? 'working' : 'idle'})</span>
+        {/* A host that reports nothing about its turns (busy null) is never called idle. */}
+        <span className="ib-mut">(live session{target.busy === true ? ', working' : target.busy === false ? ', idle' : ''})</span>
       </div>
       <div className="ib-rbox">
         <InboxComposerField

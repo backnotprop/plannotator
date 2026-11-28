@@ -11,7 +11,7 @@
  * forever.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startInboxServer, type InboxServer } from "./inbox";
@@ -20,6 +20,7 @@ import type { CardFaviconOptions } from "./inbox-card-favicons";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import type { InboxProjectRepo } from "@plannotator/core/inbox-types";
 import { InboxStore } from "@plannotator/shared/inbox/store";
+import { savedConfig } from "../../tests/helpers/saved-config";
 
 const roots: string[] = [];
 const servers: InboxServer[] = [];
@@ -261,10 +262,9 @@ describe("the Board page's routes", () => {
     expect(fetched.map((call) => call.url)).toEqual(["https://www.notion.so/favicon.ico", "https://linear.app/favicon.ico"]);
   });
 
-  test("a favicon is never fetched for a tailnet guest or with the Board off; the owner over the tailnet gets it (review of #2540, P3-2)", async () => {
+  test("a favicon is never fetched with the Board off; the owner over the tailnet gets it (review of #2540, P3-2)", async () => {
     const MAGIC = "macbook-pro.tail0000.ts.net";
     const OWNER = "ramos@example.com";
-    const GUEST = "guest@example.com";
     const savedTailscale = process.env.PLANNOTATOR_INBOX_TAILSCALE;
     delete process.env.PLANNOTATOR_INBOX_TAILSCALE;
     try {
@@ -281,7 +281,7 @@ describe("the Board page's routes", () => {
         const dataDir = join(root, "data");
         mkdirSync(dataDir, { recursive: true });
         process.env.PLANNOTATOR_DATA_DIR = dataDir;
-        writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTailscale: true, inboxBoard: board, inboxTailscaleAllow: [GUEST] }));
+        writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTailscale: true, inboxBoard: board }));
         const server = await startInboxServer({ dataDir, binaryPath: null, phones: false, board, cardFavicons, tailscale: scriptedTailscale(MAGIC, OWNER) });
         servers.push(server);
         const project = server.store.ensureProject({ name: "web", root: join(root, "web") });
@@ -295,10 +295,6 @@ describe("the Board page's routes", () => {
       expect(listener).not.toBeNull();
       const through = (login: string) =>
         fetch(`http://127.0.0.1:${listener}${on.path}`, { headers: { Host: `${MAGIC}:${on.server.port}`, "Tailscale-User-Login": login, Origin: `https://${MAGIC}:${on.server.port}` } });
-      const guest = await through(GUEST);
-      expect(guest.status).toBe(403);
-      expect(((await guest.json()) as { code: string }).code).toBe("local_only");
-      expect(fetched).toEqual([]);
       expect((await through(OWNER)).status).toBe(200);
       expect(fetched).toEqual(["https://linear.app/favicon.ico"]);
 
@@ -342,7 +338,7 @@ describe("the Board page's routes", () => {
     const { dataDir, base, post } = await world();
     expect(await (await post("/api/inbox/board/intro")).json()).toEqual({ show: true });
     expect(await (await post("/api/inbox/board/intro")).json()).toEqual({ show: false });
-    expect(JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")).inboxBoardIntro.shownAt).toMatch(/^\d{4}-/);
+    expect(savedConfig(dataDir).inboxBoardIntro.shownAt).toMatch(/^\d{4}-/);
     expect((await post("/api/inbox/board/intro", { serverSession: "another" })).status).toBe(409);
     expect((await fetch(`${base}/api/inbox/board/intro`)).status).toBe(405);
   });

@@ -27,6 +27,7 @@ export interface MentionPerson {
    * means the muted surface). Absent → no avatar column, the 0.43.1 row.
    */
   readonly avatar?: { readonly url?: string; readonly initials?: string; readonly tint?: string };
+  readonly mark?: ReactNode;
   /**
    * Whether this person can open the document. Host data: rows render
    * identically either way, and a `false` row is only special when the host

@@ -15,13 +15,14 @@
  *  - initials that read as "PR" or "MR" on this page;
  *  - a rail of files that share their name and last folder, each row the same text;
  *  - a PR in two views or none, a stack split by a view, the menu's counts not following the view and the project,
- *    the on-you count following the view, an assigned PR not on the person.
+ *    the on-you count following the view, an assigned PR not on the person;
+ *  - a verdict asking for only what changed from an agent that did not send the thread's review, or one that ended.
  */
 import { describe, expect, test } from 'bun:test';
 import { inboxPullStacks, type InboxPull, type InboxPullLink, type InboxPullsAnswer } from '@plannotator/core/inbox-types';
 import { inboxPullItems } from '@plannotator/core/inbox-types';
 import { initials, repoLabels } from './labels';
-import { layerPill, ladderHeading, pullCount, pullFilterOf, pullGroups, pullRows, pullViewOf, rowLine, rowMeta, stackTitle, type PullFilter } from './model';
+import { layerPill, ladderHeading, pullCount, pullFilterOf, pullGroups, pullRows, pullVerdictReply, pullVerdictToReviewer, pullViewOf, rowLine, rowMeta, stackTitle, type PullFilter } from './model';
 import { pullsEmptyWords, pullsNotices } from './notices';
 import { chainMarks, landsNextLayer, layerBaseWords, layerPosition, layerVerdictLink, nextLayer, stackLink, stackVerdictLink } from './topology';
 
@@ -366,5 +367,30 @@ describe('the views and the project (approval "pr-list-filters")', () => {
     expect(pullFilterOf(null)).toBe('all');
     expect(pullFilterOf('everything')).toBe('all');
     expect(pullFilterOf('')).toBe('all');
+  });
+});
+
+describe('a verdict on the PR page and the next round', () => {
+  const review = { message_id: 'msg_g', title: 'Retries', steps: 3, review: true, session: 'ses_t1' };
+  test('only the live session that sent the thread\'s review is asked for just what changed since', () => {
+    expect(pullVerdictToReviewer(link('t1', { guide: review }))).toBe(true);
+    // Another agent wrote last (the verdict goes to it), the reviewer ended, or the latest guide is no review.
+    expect(pullVerdictToReviewer(link('t1', { guide: { ...review, session: 'ses_other' } }))).toBe(false);
+    expect(pullVerdictToReviewer(link('t1', { guide: review, agent: { host: 'claude-code', session: 'ses_t1', name: null, ended: true } }))).toBe(false);
+    expect(pullVerdictToReviewer(link('t1', { guide: { ...review, review: false } }))).toBe(false);
+    // An older Inbox's link names no session: nothing is assumed.
+    const { session: _, ...older } = review;
+    expect(pullVerdictToReviewer(link('t1', { guide: older }))).toBe(false);
+    expect(pullVerdictToReviewer(link('t1'))).toBe(false);
+    expect(pullVerdictToReviewer(null)).toBe(false);
+  });
+
+  test('the block goes last in the feedback, and is the feedback when there are no comments', () => {
+    const target = { pull: pr({ number: 7, head: 'retries' }), scope: 'layer' as const, base: 'main' };
+    const block = '**Skills referenced** (stand-in)';
+    const withComments = pullVerdictReply('changes_requested', target, 1, '## src/a.ts\n\nLine 3: tighten.', undefined, block);
+    expect(withComments.feedback!.endsWith(`Line 3: tighten.\n\n${block}`)).toBe(true);
+    expect(pullVerdictReply('changes_requested', target, 0, '', 'Tighten it.', block).feedback).toBe(block);
+    expect(pullVerdictReply('changes_requested', target, 0, '', 'Tighten it.').feedback).toBeUndefined();
   });
 });

@@ -34,7 +34,8 @@
 .pn-inbox .ib-pw-bar .ib-seg { flex: none; flex-wrap: nowrap; }
 .pn-inbox .ib-pw-stage { position: relative; min-height: 0; display: flex; }
 .pn-inbox .ib-pw-stage > * { flex: 1; min-width: 0; }
-.pn-inbox .ib-pw-line { flex: none; margin: auto; max-width: 520px; padding: 24px; text-align: center; font-size: 14px; color: var(--muted-foreground); }
+.pn-inbox .ib-pw-line { flex: 0 1 auto; margin: auto; max-width: 520px; padding: 24px; text-align: center; font-size: 14px; color: var(--muted-foreground); }
+.pn-inbox .ib-pw-web { display: block; width: 100%; height: 100%; border: 0; }
 .pn-inbox .ib-pw-again { padding: 0; border: 0; background: none; font: inherit; color: var(--primary); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 .pn-inbox .ib-pw-foot { display: flex; justify-content: center; padding: 10px 16px; background: var(--card); box-shadow: 0 -1px 0 color-mix(in oklch, var(--border) 70%, transparent); }
 .pn-inbox .ib-pw-cap {

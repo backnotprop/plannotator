@@ -8,6 +8,7 @@
  * State lives in the folder the wrapper names (`FAKE_CLAUDE_STATE`):
  *  - config.json  what the test asks for: { version, fault, workMs, hold, waiting, answer, startDelayMs, bgDelayMs, busyDelayMs, apiError }
  *  - delivered.log  one line per command a session took (after `delivered` was posted)
+ *  - wakes.jsonl  the same commands: session, id and the command's `launched`
  *  - calls.jsonl  one line per call: argv, cwd, env names, and for --bg the
  *                 settings file (content, mode) and whether the thread existed
  *  - agents/<sessionId>.json  each session, as `claude agents --json` lists it
@@ -522,6 +523,7 @@ async function session(sessionId) {
   const work = async (command) => {
     await post("/api/inbox/bridge/event", { type: "delivered", id: command.id }).catch(() => {});
     fs.appendFileSync(path.join(STATE, "delivered.log"), `${command.id}\n`);
+    fs.appendFileSync(path.join(STATE, "wakes.jsonl"), `${JSON.stringify({ sessionId, id: command.id, launched: command.launched || null })}\n`);
     await sleep(config().busyDelayMs || 0);
     busy = true;
     updateAgent(sessionId, { status: "busy" });

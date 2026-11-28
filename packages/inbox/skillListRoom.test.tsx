@@ -50,6 +50,8 @@ const layout = {
   field: { top: 300, bottom: 360 } as Box,
   /** Something drawn over the field (full view, a sheet), as hit-testing finds it; null: the field is on top. */
   cover: null as Element | null,
+  /** The reply box's scroll region around the field (`.ib-rscroll`, overflow auto); null: none. */
+  scroll: null as Box | null,
 };
 
 const rect = (box: Box, left = 16, width = 360): DOMRect =>
@@ -73,6 +75,7 @@ function stubRects() {
     }
     // The field and every box of its own (the token textarea's wrapper clips like a scroll box).
     if (this.closest('.ib-cfield')) return rect(layout.field);
+    if (this.matches('.ib-rscroll') && layout.scroll) return rect(layout.scroll, 0, 400);
     if (this.matches('.ib-phead')) return rect(layout.header, 0, 400);
     if (this.matches('.ib-pfoot')) return rect(layout.foot, 0, 400);
     if (this.matches('.ib-pane, .pn-inbox')) return rect({ top: 0, bottom: layout.innerHeight }, 0, 400);
@@ -102,9 +105,18 @@ function setViewport(innerHeight: number, seen: Box) {
   viewport.height = seen.bottom - seen.top;
 }
 
+const AGENT = { group: 'Claude Code', agent: 'Claude Code', host: 'claude-code', owner: false, wakes: true, taggable: true, project: 'ledger' };
+const TAGS = {
+  options: [
+    { ...AGENT, id: 'ses_a', label: 'Claude Code', detail: 'ledger · idle', owner: true },
+    { ...AGENT, id: 'ses_b', label: 'Claude Code 2', detail: 'ledger · working' },
+  ],
+  onChange: () => {},
+};
+
 function Reply() {
   const [value, setValue] = useState('');
-  return <InboxComposerField value={value} onChange={setValue} placeholder="Write a reply" ariaLabel="Reply" destination="your reply" />;
+  return <InboxComposerField value={value} onChange={setValue} placeholder="Write a reply" ariaLabel="Reply" destination="your reply" tags={TAGS} />;
 }
 
 /** The Inbox's shape around the reply box: the root, a thread pane with its header, body, and the reply foot that scrolls in its own box (iOS, keyboard up). */
@@ -121,8 +133,14 @@ async function drawThread() {
   foot.style.overflowY = 'auto';
   pane.appendChild(foot);
   mount.appendChild(pane);
+  // The reply box's scroll region, when the layout has one: the words scroll in it, not in the field.
+  const scroll = layout.scroll ? foot.appendChild(document.createElement('div')) : foot;
+  if (layout.scroll) {
+    scroll.className = 'ib-rscroll';
+    scroll.style.overflowY = 'auto';
+  }
   await act(async () => {
-    root = createRoot(foot);
+    root = createRoot(scroll);
     root.render(<Reply />);
   });
   await act(async () => {}); // the catalog's fetch
@@ -190,6 +208,7 @@ beforeEach(() => {
   layout.foot = { top: 260, bottom: 800 };
   layout.field = { top: 300, bottom: 360 };
   layout.cover = null;
+  layout.scroll = null;
   setViewport(800, { top: 0, bottom: 800 });
   stubRects();
 });
@@ -356,5 +375,82 @@ describe.skipIf(!hasDom)('a pick by press', () => {
     typeAtCaret(field, 'b');
     expect(field.value.endsWith('/b')).toBe(true);
     expect(field.value.endsWith('b/')).toBe(false);
+  });
+});
+
+const tagPicker = () => document.querySelector<HTMLElement>('[data-tag-picker]');
+
+/** Where the `@` list is on screen, from what it committed: its side and its room (`--ib-tg-room`), 6 px from its box. */
+function tagBox(natural: number): Box & { side: string } {
+  const el = tagPicker()!;
+  const side = el.style.top === '100%' ? 'below' : 'above';
+  const height = Math.min(natural, parseFloat(el.style.getPropertyValue('--ib-tg-room')));
+  const anchor = (el.parentElement as HTMLElement).getBoundingClientRect();
+  const top = side === 'above' ? anchor.top - GAP - height : anchor.bottom + GAP;
+  return { side, top, bottom: top + height };
+}
+
+describe.skipIf(!hasDom)('the @ list in the reply box (#3427)', () => {
+  test('a long reply scrolled to its end: the list hangs off what shows of the field, above it and on screen', async () => {
+    // 1280x800, about 30 lines: the field runs from far above the window to the box's scroll region's bottom, and
+    // only its last lines show. Hung off the field's own rect it opened below the field, one row at the window's foot.
+    layout.foot = { top: 480, bottom: 800 };
+    layout.scroll = { top: 520, bottom: 740 };
+    layout.field = { top: -200, bottom: 740 };
+    const field = await drawThread();
+    await type(field, `${'A long line of the reply.\n'.repeat(30)}@`);
+    expect(tagPicker() !== null).toBe(true);
+    expect(tagPicker()!.closest('.ib-rscroll, .ib-pfoot') === null).toBe(true);
+    Object.defineProperty(tagPicker()!, 'scrollHeight', { configurable: true, get: () => 160 });
+    await settle();
+    const anchor = (tagPicker()!.parentElement as HTMLElement).getBoundingClientRect();
+    // The box is the visible part of the field (its 2 px above kept), not the field's top 200 px above the window.
+    expect(anchor.top).toBeGreaterThanOrEqual(layout.scroll.top - 2);
+    const box = tagBox(162);
+    expect(box.side).toBe('above');
+    expect(box.top).toBeGreaterThanOrEqual(layout.header.bottom);
+    expect(box.bottom).toBeLessThanOrEqual(layout.scroll.top);
+    expect(box.bottom - box.top).toBe(162);
+  });
+
+  test('no room above under the header: it opens below the field, capped to the room left there', async () => {
+    layout.field = { top: 70, bottom: 130 };
+    layout.foot = { top: 60, bottom: 800 };
+    const field = await drawThread();
+    await type(field, 'Hi @');
+    Object.defineProperty(tagPicker()!, 'scrollHeight', { configurable: true, get: () => 900 });
+    await settle();
+    const box = tagBox(902);
+    expect(box.side).toBe('below');
+    expect(box.top).toBeGreaterThanOrEqual(layout.field.bottom);
+    expect(box.bottom).toBeLessThanOrEqual(800);
+  });
+
+  test('full view opening over the reply box takes the list away, its rows and keys with it', async () => {
+    const field = await drawThread();
+    await type(field, 'Hi @');
+    expect(tagPicker() !== null).toBe(true);
+    expect(field.getAttribute('aria-controls')).toBe(tagPicker()!.id);
+    const full = document.createElement('div');
+    full.className = 'ib-view ib-full';
+    await act(async () => {
+      layout.cover = full;
+      mount!.querySelector('.ib-pane')!.appendChild(full);
+    });
+    await settle();
+    expect(tagPicker() === null).toBe(true);
+    expect(document.querySelector('[data-tag-option]') === null).toBe(true);
+    // The arrows are the field's again: none moves through a list nobody sees.
+    expect(field.hasAttribute('aria-controls')).toBe(false);
+    await act(async () => {
+      field.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+    });
+    expect(field.hasAttribute('aria-activedescendant')).toBe(false);
+    await act(async () => {
+      layout.cover = null;
+      full.remove();
+    });
+    await settle();
+    expect(tagPicker() !== null).toBe(true);
   });
 });

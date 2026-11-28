@@ -5,6 +5,7 @@
  * thread never opens as an empty one here.
  */
 import { describe, expect, test } from 'bun:test';
+import { routeOf } from './app/route';
 import { inboxLinkHash, type InboxHere } from './links';
 
 const LOCAL = 'http://localhost:19432';
@@ -77,6 +78,25 @@ describe('the route', () => {
     expect(inboxLinkHash(`${LOCAL}/#project=prj_A`, onThisComputer)).toBe('#project=prj_A');
     expect(inboxLinkHash(`${LOCAL}/#settings`, onThisComputer)).toBe('#settings');
     expect(inboxLinkHash(`${LOCAL}/#settings/agents`, onThisComputer)).toBe('#settings/agents');
+  });
+
+  test("a routine's editor opens in place, and the window reads it as that routine", () => {
+    expect(inboxLinkHash(`${LOCAL}/#routine=sch_A`, onThisComputer)).toBe('#routine=sch_A');
+    expect(routeOf('#routine=sch_A')).toMatchObject({ page: 'scheduled', scheduled: 'sch_A' });
+  });
+
+  test('an old link to a Shape board opens just its thread, or the list', () => {
+    const thread = routeOf('#thread=msg_T2&shape=shp_01ABC');
+    expect(thread).toMatchObject({ page: 'inbox', thread: 'msg_T2', guide: null });
+    expect(thread).not.toHaveProperty('shape');
+    const review = routeOf('#thread=msg_T2&guide=msg_R1&shape=shp_01ABC');
+    expect(review).toMatchObject({ page: 'inbox', thread: 'msg_T2', guide: 'msg_R1', guideAt: null });
+    expect(review).not.toHaveProperty('shape');
+    for (const hash of ['#shapes', '#shapes&shape=shp_01ABC']) {
+      const list = routeOf(hash);
+      expect(list).toMatchObject({ page: 'inbox', thread: null, guide: null, file: null });
+      expect(list).not.toHaveProperty('shape');
+    }
   });
 
   test('no route in the hash leaves the link alone', () => {

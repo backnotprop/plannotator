@@ -30,8 +30,10 @@ repositories together. The target selects the review workspace, not a file filte
 Feedback returns to the invoking session and names the directory active at submission,
 including after switching worktrees.
 
-Supply one directory or PR URL. A sole word is a directory target: a file, or a
-missing path-shaped word (containing `/`, or starting with `.` or `~`), is an error.
+Supply one directory or PR URL. A sole word is a directory target: if no such
+folder exists, or it is a file, the command stops and opens nothing. The error
+names the folder it looked in, suggests a close folder name when there is one
+("Did you mean src/components?"), and shows the command to run instead.
 Inside a sentence, a path-shaped word that names an existing directory is the target;
 one that names nothing or a file is prose. Two directories, or a directory combined
 with `--patch-file`, is an error. Other words are ignored as prose with a notice, so
@@ -51,6 +53,8 @@ PR review uses the `gh` CLI for authentication, so private repos work automatica
 GitLab merge request URLs are also supported when the `glab` CLI is installed and authenticated.
 
 Bitbucket Cloud pull request URLs (`https://bitbucket.org/<workspace>/<repo>/pull-requests/<id>`) work with an Atlassian API token instead of a CLI. See [Bitbucket Cloud PR review](/docs/guides/bitbucket/).
+
+Forgejo and Gitea pull request URLs (`https://<host>/<owner>/<repo>/pulls/<id>`, on any host) work with an access token instead of a CLI. See [Forgejo and Gitea PR review](/docs/guides/forgejo/).
 
 **Review a patch file, with no repository:**
 
@@ -269,9 +273,9 @@ the file list. The first time it fires, a toast points at both.
 
 ### Optional analysis layers
 
-Open **Settings → Analysis** to control Semantic Changes and Call Flow independently. A one-time review welcome presents the same two switches side by side. Disabling either layer avoids its analysis work and leaves the ordinary patch unchanged.
+**Semantic Changes** (the **Semantic diff** row in the left panel, and the **sem** count on each file) summarizes added, modified, moved, and deleted named entities in TypeScript, JavaScript, Python, Go, and Rust files, read by Plannotator's built-in engine in the browser. Files in other languages show the ordinary diff.
 
-**Semantic Changes** summarizes added, modified, moved, and deleted named entities. **Call Flow** compares CallDiff's inferred call trees across the exact before/after Git snapshots behind the current review. Call Flow is off by default and requires Node.js 22.18 or newer. Its toggle names the current review's languages and estimated footprint; enabling it consents to one background install of the roughly 5 MB pruned core plus only the needed grammar packs. A later missing language does not block installed ones: affected files are listed as skipped while support installs automatically, and analysis refreshes in the same session. Each target gets one automatic attempt per review session; failed targets expose a quiet Retry in the panel. When enabled, Call Flow appears in two places:
+Open **Settings → Analysis** to turn Call Flow on or off. Disabling it avoids its analysis work and leaves the ordinary patch unchanged. **Call Flow** compares CallDiff's inferred call trees across the exact before/after Git snapshots behind the current review. Call Flow is off by default and requires Node.js 22.18 or newer. Its toggle names the current review's languages and estimated footprint; enabling it consents to one background install of the roughly 5 MB pruned core plus only the needed grammar packs. A later missing language does not block installed ones: affected files are listed as skipped while support installs automatically, and analysis refreshes in the same session. Each target gets one automatic attempt per review session; failed targets expose a quiet Retry in the panel. When enabled, Call Flow appears in two places:
 
 - **Dock** — switch between expandable entry-path trees with source navigation and CallDiff's exact, copyable raw output. Each entry path is a card. A row leads with the called function's name, and a green or red dot marks a new or removed call. Its `file:line` chip is strong when the call moves into another file and faint when it stays in the same file.
 - **Lens** — a compact `flow N` badge in each impacted file header, opening the complete inferred entry trees that contain a changed call in that file, plus a link to the full Dock.
@@ -308,7 +312,7 @@ When an AI provider is available, the diff viewer includes inline AI chat. Selec
 
 ### Ask this session
 
-When the review was opened from Claude Code (with the [Plannotator mod](/docs/guides/claude-code/#the-plannotator-mod)), Pi, or OpenCode 2, Ask AI is answered by that agent session. It is the only option: there is no provider picker. Your question shows in the agent's chat. If the agent is busy, choose **Ask when it finishes** or **Interrupt and ask now**. In remote mode, from another Tailscale login than the computer owner's on a `--tailscale` session, from OpenCode 1, or with the Claude Code mod off, you pick a provider as described below. Review agents, Code Tour and Guided Review still run their own Claude or Codex models. See [Ask this session](/docs/guides/ai-features/#ask-this-session).
+When the review was opened from Claude Code (with the [Plannotator mod](/docs/guides/claude-code/#the-plannotator-mod)), Pi, or OpenCode 2, Ask AI is answered by that agent session. It is the only option: there is no provider picker. Your question shows in the agent's chat. If the agent is busy, choose **Ask when it finishes** or **Interrupt and ask now**. In remote mode, from OpenCode 1, or with the Claude Code mod off, you pick a provider as described below. Review agents, Code Tour and Guided Review still run their own Claude or Codex models. See [Ask this session](/docs/guides/ai-features/#ask-this-session).
 
 ### Supported providers
 
@@ -343,7 +347,7 @@ The same export is available from the command line — `plannotator guide list` 
 
 ## How review agents prompt the CLI
 
-The review agents (Claude, Codex, Code Tour, Guided Review) shell out to external CLIs — Claude and Codex natively, plus Cursor, OpenCode, Pi, and GitHub Copilot CLI as additional engines for review and guide jobs. Plannotator controls the user message and output schema; the CLI's own harness owns the system prompt. See the [Prompts reference](/docs/reference/prompts/) for the full breakdown of what each provider sends, how the pieces join, and which knobs you can tune per job.
+The review agents (Claude, Codex, Guided Review) shell out to external CLIs — Claude and Codex natively, plus Cursor, OpenCode, Pi, and GitHub Copilot CLI as additional engines for review and guide jobs. Plannotator controls the user message and output schema; the CLI's own harness owns the system prompt. See the [Prompts reference](/docs/reference/prompts/) for the full breakdown of what each provider sends, how the pieces join, and which knobs you can tune per job.
 
 ## Submitting feedback
 
@@ -415,7 +419,6 @@ restore a draft.
 | `/api/diff/fresh` | GET | Cheap staleness probe backing the "Diff out of date" notice |
 | `/api/commits` | GET | One page of the branch's linear history for the Commits panel |
 | `/api/fetch-base` | POST | Fetch the base branch's remote tracking ref ("Baseline is behind" banner) |
-| `/api/semantic-diff` | GET | Semantic diff for the active patch, when available |
 | `/api/file-content` | GET | Full file content for expandable diff context |
 | `/api/git-add` | POST | Stage or unstage a file |
 | `/api/feedback` | POST | Submit review feedback |
@@ -429,7 +432,7 @@ restore a draft.
 | `/api/ai/abort` | POST | Abort current AI query |
 | `/api/ai/permission` | POST | Respond to tool approval request |
 | `/api/agents/capabilities` | GET | Check available agent providers |
-| `/api/agents/jobs` | GET/POST/DELETE | Manage agent jobs (review, Code Tour, Guided Review) |
+| `/api/agents/jobs` | GET/POST/DELETE | Manage agent jobs (review, Guided Review) |
 | `/api/guide/:jobId` | GET | Fetch a completed Guided Review (sections, summaries, file refs) |
 | `/api/guide/:jobId/export` | GET | Download a guide (live id or `saved:{id}`) as one portable HTML file; `/export-info` returns its size and languages |
 | `/api/guide/:jobId/share` | POST/DELETE | Create a share link for a guide on the guide host (`{ public?, ttlSeconds? }`; encrypted unless `public`) or remove the recorded one; `/share-info` reports whether sharing is enabled, the host, and an existing link |

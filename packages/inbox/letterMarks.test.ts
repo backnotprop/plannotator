@@ -2,13 +2,14 @@
  * Letter marks (approval "inbox-letter-marks", 2026-11-07): the letter rule, the colour, and how the marks live in the
  * Rows look (config.json `inboxRows`).
  * What this catches: a mark that splits a grapheme (an accent or an emoji cut in half), counts an emoji or a
- * punctuation mark as a letter, crushes two wide or joining glyphs into a 20 px tile; a colour that changes between
+ * punctuation mark as a letter, crushes two wide or joining glyphs into a 20 px tile, or draws other capitals on a
+ * machine whose locale uppercases differently (Turkish "i"); a colour that changes between
  * renders or with the name, or that gives ids differing only at the end one hue; marks that are on by default; a
  * picture switch or a style that does nothing when marks are off; a look whose marks a save or a read loses.
  */
 import { describe, expect, test } from 'bun:test';
 import { INBOX_ROWS_DEFAULT, inboxRowsCanonical, inboxRowsList, inboxRowsRead } from '@plannotator/core/inbox-types';
-import { HUES, hueOf, markLetters } from './letterMarks';
+import { HUES, hueOf, markLetters, projectLetters } from './letterMarks';
 import { PICTURE_MAX_BYTES, pictureFromFile, projectPictureUrl } from './projectPictures';
 import { LIST_LOOK_DEFAULT, LIST_LOOK_OFF, lookFromRows, lookMarks, lookWithChange, markStyleLook, marksWhatLook, rowsFromLook } from './listLook';
 
@@ -18,6 +19,31 @@ describe('the letters: first and last letter of the title, by grapheme', () => {
     expect(markLetters('🚀 Launch checklist')).toMatchObject({ text: 'LT', count: 2 });
     expect(markLetters('2fa rollout')).toMatchObject({ text: '2T', count: 2 });
     expect(markLetters('"Ship it!" (v2)')).toMatchObject({ text: 'S2', count: 2 });
+  });
+
+  test('the same capitals on every machine: a Turkish-locale browser draws "I" for "i", never "İ"', () => {
+    // A browser whose own locale is Turkish uppercases "i" to "İ" when no locale is named; the marks name one.
+    const real = String.prototype.toLocaleUpperCase;
+    String.prototype.toLocaleUpperCase = function (this: string, locales?: Intl.LocalesArgument) {
+      return real.call(this, locales ?? 'tr-TR');
+    };
+    try {
+      expect('i'.toLocaleUpperCase()).toBe('İ');
+      expect(markLetters('index rebuild').text).toBe('ID');
+      expect(markLetters('ignite').text).toBe('IE');
+      expect(projectLetters('infra-kit').text).toBe('IK');
+      expect(projectLetters('i').text).toBe('I');
+    } finally {
+      String.prototype.toLocaleUpperCase = real;
+    }
+  });
+
+  test('a letter whose capital is two ("ß" is "SS", "ﬁ" is "FI") stays one: a mark never draws more letters than it took', () => {
+    expect(markLetters('fuß')).toMatchObject({ text: 'Fß', count: 2 });
+    expect(markLetters('ﬁle')).toMatchObject({ text: 'ﬁE', count: 2 });
+    expect(markLetters('ß')).toMatchObject({ text: 'ß', count: 1 });
+    expect(projectLetters('maß')).toMatchObject({ text: 'Mß', count: 2 });
+    expect(projectLetters('ﬁle-tools')).toMatchObject({ text: 'ﬁT', count: 2 });
   });
 
   test('a letter with a combining accent stays one grapheme, written either way', () => {
