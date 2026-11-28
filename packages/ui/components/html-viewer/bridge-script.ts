@@ -5195,7 +5195,7 @@ ${SANDBOX_SHIM_SCRIPT}
     }, 0);
   }
   document.addEventListener('keydown', function(e) {
-    if (e.key !== 'Escape' || vimEnabled) return;
+    if (e.key !== 'Escape' || vimEnabled || e.isComposing || e.keyCode === 229) return;
     if (!annotateModeActive) {
       // Interact mode: Esc belongs to the page — except an open drag-comment
       // draft (drag-selection stays live in Interact) still closes first.

@@ -12,6 +12,7 @@ import { ProjectTipText, Tip } from './Tip';
 import { ProjectMark, showsProjects, useRowMarks } from '../letterMarks';
 import { hasSetPicture, useKnownProjects } from '../projectPictures';
 import { useProjectTagSwap } from './ProjectTagMenu';
+import { holdsImeEscape, isImeCompositionKey } from '@plannotator/ui/utils/commentSubmitKey';
 
 export interface ProjectRowProps {
   project: ProjectFolder;
@@ -420,7 +421,7 @@ export function ProjectNameField(props: {
         close(false);
       }}
       onKeyDown={(event) => {
-        if (event.key !== 'Escape') return;
+        if (holdsImeEscape(event) || event.key !== 'Escape') return;
         // The field's own Escape: nothing above it (the phone's sheet, the list) takes this press.
         event.preventDefault();
         event.stopPropagation();
@@ -447,7 +448,7 @@ export function ProjectNameField(props: {
           setValue(event.target.value);
         }}
         onKeyDown={(event) => {
-          if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+          if (event.key === 'Enter' && !isImeCompositionKey(event)) {
             event.preventDefault();
             if (!busy) void save();
           }

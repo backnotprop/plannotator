@@ -9,6 +9,7 @@ import { FolderPath } from './ToPicker';
 import { filterLaunchProjects, otherFolderMatches, scratchMatches, SCRATCH_PICK, type LaunchProject } from './model';
 import { HomeFolderBrowser } from './HomeFolderBrowser';
 import { cleanPastedPath, drivePathOf, homeRelative, looksLikePath, placeOf, unpluggedDrive, type FolderDrive } from './homeFolders';
+import { holdsImeEscape, isImeCompositionKey } from '@plannotator/ui/utils/commentSubmitKey';
 
 /**
  * The folder menu (launch, UX screen 03): where a new session starts, picked
@@ -452,7 +453,7 @@ export function FolderMenu({
 
   const onKey = (event: ReactKeyboardEvent) => {
     // The folder browser takes its own keys.
-    if (event.nativeEvent.isComposing || other) return;
+    if (holdsImeEscape(event) || isImeCompositionKey(event) || other) return;
     if (event.key === 'Escape') {
       event.preventDefault();
       event.stopPropagation();

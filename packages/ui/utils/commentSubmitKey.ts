@@ -46,3 +46,9 @@ export function isCommentSubmitKey(event: CommentSubmitKeyEvent, enterSaves: boo
   if (event.metaKey || event.ctrlKey) return true;
   return enterSaves && !event.shiftKey && !event.altKey;
 }
+
+export function holdsImeEscape(event: CommentSubmitKeyEvent & { stopPropagation(): void }): boolean {
+  if (event.key !== 'Escape' || !isImeCompositionKey(event)) return false;
+  event.stopPropagation();
+  return true;
+}

@@ -4,7 +4,7 @@ import { annotationOf, recordQuote, recordTag } from '../attachments';
 import { plural } from '../format';
 import { Icon } from '../icons';
 import { useConfigValue } from '@plannotator/ui/config';
-import { isCommentSubmitKey } from '@plannotator/ui/utils/commentSubmitKey';
+import { isCommentSubmitKey, isImeCompositionKey } from '@plannotator/ui/utils/commentSubmitKey';
 
 /** The list is open, at this comment (null: from the top). The thread holds it: a highlight opens the list too. */
 export interface CommentsListAt {
@@ -116,7 +116,7 @@ export function AnnotationsList({
       focusHere.current = !!popRef.current?.contains(event.target as Node);
     };
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
+      if (event.key !== 'Escape' || isImeCompositionKey(event)) return;
       event.stopPropagation();
       if (editingRef.current) {
         editingRef.current = null;

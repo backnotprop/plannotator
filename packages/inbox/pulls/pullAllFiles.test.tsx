@@ -322,6 +322,20 @@ test.skipIf(!hasDom)('a dialog open while All files mounts keeps the focus it ha
   }
 });
 
+test.skipIf(!hasDom)('picking the scope already on starts no watcher: focus lost later stays where the page puts it', async () => {
+  mount(pr);
+  await settle();
+  await act(async () => {
+    el('[data-tree-scope="changes"]').focus();
+    el('[data-tree-scope="changes"]').click();
+  });
+  await settle();
+  act(() => (document.activeElement as HTMLElement).blur());
+  el('nav.ib-rrail').appendChild(document.createElement('span'));
+  await later(0);
+  expect(document.activeElement === document.body).toBe(true);
+});
+
 test.skipIf(!hasDom)('no head commit known: no switch, the file count as before', async () => {
   diffHead = null;
   const { head_sha: _gone, ...noHead } = pr;

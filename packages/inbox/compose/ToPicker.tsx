@@ -7,6 +7,7 @@ import type { InboxComposeLaunch } from '@plannotator/core/inbox-types';
 import { busyWord, hostLabel, splitProjectName, type ComposeGroup, type ComposeStart, type ComposeTarget } from './model';
 import { MachineSwitch } from './MachineSwitch';
 import { asleepSince, HERE, inParts, pickable, toItemOn, toItems, type ToItem, type ToMachine } from './toMachines';
+import { holdsImeEscape, isImeCompositionKey } from '@plannotator/ui/utils/commentSubmitKey';
 
 /**
  * The To picker (compose; approval "inbox-compose-to-picker"): a filter field
@@ -123,7 +124,7 @@ export function ToPicker({
   }, [onClose]);
 
   const onKey = (event: ReactKeyboardEvent) => {
-    if (event.nativeEvent.isComposing) return;
+    if (holdsImeEscape(event) || isImeCompositionKey(event)) return;
     if (event.key === 'Escape') {
       // The picker only: the dialog's own Escape never sees this one.
       event.preventDefault();

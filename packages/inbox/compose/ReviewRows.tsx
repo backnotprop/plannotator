@@ -4,6 +4,7 @@ import { Icon } from '../icons';
 import { RefMarkIcon } from '../board/RefMark';
 import { plural } from '@plannotator/core/inbox-format';
 import { reviewLinkWords, type ReviewBoxPull, type ReviewKind, type ReviewPullsRead, type ReviewSummary } from './reviewBox';
+import { holdsImeEscape, isImeCompositionKey } from '@plannotator/ui/utils/commentSubmitKey';
 
 
 function Choices<T extends string>({ label, value, options, onChange, name }: { label: string; value: T; options: readonly (readonly [T, string])[]; onChange: (next: T) => void; name: string }) {
@@ -69,6 +70,7 @@ function PullMenu({ pulls, read, link, linkRead, linkInReview, onLink, onUseLink
   const input = useRef<HTMLInputElement>(null);
   useLayoutEffect(() => input.current?.focus({ preventScroll: true }), []);
   const onKey = (event: ReactKeyboardEvent) => {
+    if (holdsImeEscape(event) || isImeCompositionKey(event)) return;
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
       setHl((at + (event.key === 'ArrowDown' ? 1 : -1) + options.length) % Math.max(options.length, 1));

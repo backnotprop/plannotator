@@ -24,6 +24,7 @@ import { initiativePeekModel, type InitiativePeekModel, type PeekItem } from '..
 import { initiativeHref, useInitiativeTags } from '../hashtags';
 import { tagById, tagHref, useThreadTags } from '../threadTags';
 import { tagPeekModel, type TagPeekModel } from '../tagPeek';
+import { isImeCompositionKey } from '@plannotator/ui/utils/commentSubmitKey';
 
 const TAG = 'a[href^="#board&initiative="], a[href^="#tag="]';
 /** RefHoverCard's width. */
@@ -181,7 +182,7 @@ export function useInitiativePeek(rootRef: React.RefObject<HTMLElement | null>):
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
+      if (e.key !== 'Escape' || isImeCompositionKey(e)) return;
       e.preventDefault();
       e.stopPropagation();
       close(true);

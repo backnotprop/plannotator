@@ -5,6 +5,7 @@ import { ImageAnnotator } from './ImageAnnotator';
 import type { ImageAttachment } from '../types';
 import { modKey } from '../utils/platform';
 import { CommentUploadContext, getUploadTransport } from '../utils/upload';
+import { isImeCompositionKey } from '../utils/commentSubmitKey';
 
 export function pictureFileName(name: string, file: File): string {
   const types: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp', 'image/avif': 'avif', 'image/svg+xml': 'svg' };
@@ -114,7 +115,7 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
   // Close on escape
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isOpen) {
+      if (e.key === 'Escape' && isOpen && !isImeCompositionKey(e)) {
         setIsOpen(false);
       }
     };
@@ -452,7 +453,7 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
                   type="text"
                   value={manualPath}
                   onChange={(e) => setManualPath(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && !e.nativeEvent.isComposing && handleManualAdd()}
+                  onKeyDown={(e) => e.key === 'Enter' && !isImeCompositionKey(e) && handleManualAdd()}
                   placeholder="Paste path or URL..."
                   className="flex-1 px-2 py-1.5 text-xs bg-background border border-border rounded-md focus:outline-none focus:ring-1 focus:ring-primary"
                 />

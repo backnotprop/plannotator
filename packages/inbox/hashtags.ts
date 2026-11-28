@@ -28,6 +28,7 @@ import {
 } from '@plannotator/core/inbox-types';
 import type { SkillCatalogEntry, SkillReferenceToken } from '@plannotator/ui/utils/skillReferences';
 import { replaceUndoably } from '@plannotator/ui/utils/undoableEdit';
+import { isImeCompositionKey } from '@plannotator/ui/utils/commentSubmitKey';
 import type { TaggedThreads } from './initiativePeek';
 
 export interface InitiativeTags {
@@ -208,7 +209,7 @@ export function useHashtagPicker(options: {
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent<Field>): boolean => {
       if (!open || !trigger) return false;
-      if (e.nativeEvent.isComposing || e.metaKey || e.ctrlKey || e.altKey) return false;
+      if (isImeCompositionKey(e) || e.metaKey || e.ctrlKey || e.altKey) return false;
       switch (e.key) {
         case 'ArrowDown':
         case 'ArrowUp':

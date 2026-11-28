@@ -371,6 +371,8 @@ packages/inbox/videoAttachment.test.tsx
 packages/inbox/audioAttachment.test.tsx
 packages/inbox/markupAddsToReply.test.tsx
 packages/inbox/commentSubmitKey.test.tsx
+packages/inbox/imeEscape.test.tsx
+packages/inbox/imeDialogCancel.test.tsx
 packages/inbox/commentRowSkills.test.tsx
 packages/inbox/skillReferences.test.tsx
 packages/inbox/skillListRoom.test.tsx
@@ -425,6 +427,7 @@ packages/ui/components/Viewer.diagramLazyRestore.test.tsx
 packages/ui/components/Viewer.diagramAnchorHostile.test.tsx
 packages/ui/components/CommentPopover.skillReferences.test.tsx
 packages/ui/components/commentSubmitKey.composers.test.tsx
+packages/ui/components/imeEscape.composers.test.tsx
 packages/ui/components/CommentPopover.mentionChips.test.tsx
 packages/ui/components/SkillReferenceMenu.placement.test.tsx
 packages/ui/components/sidebar/FileBrowser.test.ts
@@ -564,6 +567,7 @@ packages/editor/App.agentTool.test.tsx
 packages/ui/hooks/useFirstRunAnnouncementWindow.test.tsx
 packages/review-editor/components/ReviewSidebar.generalComment.test.tsx
 packages/review-editor/components/commentSubmitKey.review.test.tsx
+packages/review-editor/components/imeEscape.review.test.tsx
 packages/review-editor/components/ReviewSidebar.outdated.test.tsx
 packages/ui/components/HtmlSurfaceControls.test.tsx
 packages/ui/components/AnnotationPanel.unanchored.test.tsx

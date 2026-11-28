@@ -14,6 +14,7 @@ import { Icon } from '../icons';
 import { hashOf, writeRoute } from '../app/writeRoute';
 import { artifactKind, artifactName, byName, noFileMatches, PLAN_FILES_WORDS, type PlanArtifactKind, type PlanDecisionTone } from './words';
 import { DecisionMark } from './parts';
+import { holdsImeEscape, isImeCompositionKey } from '@plannotator/ui/utils/commentSubmitKey';
 
 /** The file on screen: a document (the main page when it is the plan's own) or an artifact. */
 export type PlanFileRef = { kind: 'doc'; id: string } | { kind: 'artifact'; path: string };
@@ -155,6 +156,7 @@ export function PlanFiles({ plan, primary, documents, artifacts, onScreen, onPic
     onPicked?.();
   };
   const onFieldKey = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (holdsImeEscape(e) || isImeCompositionKey(e)) return;
     if (e.key === 'Escape') {
       e.preventDefault();
       e.stopPropagation();

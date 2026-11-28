@@ -9,6 +9,7 @@ import {
   savedAgo,
 } from '../../utils/guidesListModel';
 import { GuideRowMenu } from './GuideRowMenu';
+import { isImeCompositionKey } from '@plannotator/ui/utils/commentSubmitKey';
 
 function RenameField({ initial, onDone }: { initial: string; onDone: (title: string | null) => void }) {
   const [value, setValue] = useState(initial);
@@ -23,6 +24,7 @@ function RenameField({ initial, onDone }: { initial: string; onDone: (title: str
       onClick={(e) => e.stopPropagation()}
       onKeyDown={(e) => {
         e.stopPropagation();
+        if (isImeCompositionKey(e)) return;
         if (e.key === 'Enter') onDone(value);
         if (e.key === 'Escape') onDone(null);
       }}
