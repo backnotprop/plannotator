@@ -13,7 +13,9 @@
  *   from the moment the Send holds the words). Files still come in meanwhile: the host's Send keeps them.
  * - The controller's own draft restore, file save and thread change do not run: the host's do. The line under the box
  *   is the controller's (the host sets its own lines on it, `handle.wired.setError`, and draws it), and so is when
- *   "Not saved" shows (`slots.draftStamp`).
+ *   "Not saved" shows (`slots.draftStamp`). It is one line for the pane, whatever thread it shows: the host's arrival
+ *   on another thread sets it. Discard does not clear it for this host: Discard is the host's (`view().discard`,
+ *   Thread's discardReply), which leaves the line. For a plain host the controller's Discard clears it.
  *
  * `view()` is read as the box is drawn (and when a key or a press needs it): what the box shows and the host's
  * handlers, as they are in that render.

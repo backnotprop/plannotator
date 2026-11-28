@@ -4,7 +4,8 @@
  *
  * - The line under the box (a Send that did not go, a Send pressed while a file uploads) goes when files come in: a
  *   paste, a drop on the pane, the paperclip (a computer's and a phone's). Another thread and back, it does not come
- *   back.
+ *   back. It is one line for the pane, as the Inbox always drew it: the first frame on another thread shows the line
+ *   as it was, never that thread's line from an earlier visit.
  * - "Not saved" over a computer's row: shown while a save did not land and the box holds words; never beside a
  *   conflict, whose own line says it.
  *
@@ -12,7 +13,7 @@
  * strings and booleans, never elements. DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { act } from 'react';
+import { act, useLayoutEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxAuthor, InboxMessageWire, InboxProject, InboxReplyDraft, InboxThread } from '@plannotator/core/inbox-types';
 import { UPLOADING_LINE } from './sendFailure';
@@ -136,11 +137,24 @@ async function until(check: () => boolean, what: string, ms = 3000) {
   }
 }
 
+/**
+ * The line under the box at each commit of `draw`, read in a layout effect: after React wrote the page and before
+ * the pane's own effects ran (its arrival on another thread sets the line in an effect, which may run after a paint).
+ */
+let committed: (string | null)[] = [];
+function Commits() {
+  useLayoutEffect(() => {
+    committed.push(host ? line(host) : null);
+  });
+  return null;
+}
+
 let phoneNow = false;
 function draw(id: string) {
   root!.render(
     <div className="pn-inbox">
       <ThreadPane thread={threadOf(id)} sent={null} onQuestions={() => {}} onChanged={async () => {}} onClose={() => {}} file={null} onOpenFile={() => {}} onOpenGuide={() => {}} phone={phoneNow} />
+      <Commits />
     </div>,
   );
 }
@@ -271,6 +285,38 @@ test.skipIf(!hasDom)('a refused Send: its line stays until files come in; anothe
   await paste(el, notes('b.txt'));
   expect(line(el)).toBe(null);
   expect(field(el)!.value).toBe('Refused the first time.');
+});
+
+test.skipIf(!hasDom)('one line for the pane: the first frame on another thread shows the line as it was, never that thread\'s line from an earlier visit', async () => {
+  refuseReplies = true;
+  const el = await open();
+  typeOn(el, 'Refused the first time.');
+  await pressSend(el);
+  await until(() => line(el) !== null, 'the refused Send\'s line');
+  const refused = line(el)!;
+  // To the other thread: its first frame still shows the line there was, then the arrival sets the thread's own.
+  committed = [];
+  act(() => draw(TWO));
+  expect(committed.length).toBe(1);
+  expect(committed[0]).toBe(refused);
+  await settle();
+  expect(line(el)).toBe(null);
+  // On the other thread, a Send while a file uploads: a line of its own.
+  if (!field(el)) {
+    await act(async () => el.querySelector<HTMLButtonElement>('[data-reply-button]')!.click());
+    await settle(2);
+  }
+  typeOn(el, 'For the export.');
+  await paperclip(el, notes('a.txt'));
+  await pressSend(el);
+  expect(line(el)).toBe(UPLOADING_LINE);
+  // Back: the first frame shows that line still, not the refused one left on this thread at the last visit.
+  committed = [];
+  act(() => draw(ONE));
+  expect(committed.length).toBe(1);
+  expect(committed[0]).toBe(UPLOADING_LINE);
+  await settle();
+  expect(line(el)).toBe(null);
 });
 
 test.skipIf(!hasDom)('a computer: "Not saved" over the row while a save did not land, never beside a conflict', async () => {

@@ -102,24 +102,28 @@ export function useReplyComposer(host: ReplyComposerHost | ReplyComposerWiredHos
   const [page] = useState(() => wiring?.page ?? createReplyDraftPage({ keepInBrowser: plain().browserStorage, mentions }));
   const replyText = useReplyTextStore();
   const hasWords = useReplyHasWords(replyText);
-  const draft =page.useReplyDraft(threadId, wiring ? wiring.draft : { store: seams!.store });
+  const draft = page.useReplyDraft(threadId, wiring ? wiring.draft : { store: seams!.store });
   const draftRef = useRef(draft);
   draftRef.current = draft;
   const [open, setOpen] = useState(true);
   const focusNext = useRef(false);
   /**
-   * Per thread: the line under the box (a Send that failed while another thread showed says so when it is back). A
-   * wired host's own lines live here too (`handle.wired.setError`), so files coming in clear it the same way for both.
+   * The line under the box. A plain host's is per thread (a Send that failed while another thread showed says so when
+   * it is back). A wired host's own lines live here too (`handle.wired.setError`), so files coming in clear it the same
+   * way for both; it has one line for the pane, whatever thread it shows (as the Inbox's own state was): its arrival on
+   * another thread sets that thread's line, and until then the line stays as it was.
    */
   const [errors, setErrors] = useState<ReadonlyMap<string, string>>(() => new Map());
+  const lineKey = (target: string) => ('wiring' in hostRef.current ? '' : target);
   const setErrorFor = (target: string, line: SetStateAction<string | null>) =>
     setErrors((now) => {
-      const was = now.get(target) ?? null;
+      const key = lineKey(target);
+      const was = now.get(key) ?? null;
       const value = typeof line === 'function' ? line(was) : line;
       if (was === value) return now;
       const next = new Map(now);
-      if (value === null) next.delete(target);
-      else next.set(target, value);
+      if (value === null) next.delete(key);
+      else next.set(key, value);
       return next;
     });
   /** The shown thread's line, as a host sets it: one function for the box's life, as a state setter is. */
@@ -470,7 +474,7 @@ export function useReplyComposer(host: ReplyComposerHost | ReplyComposerWiredHos
     setErrorFor(threadRef.current, null);
   };
 
-  const error = errors.get(threadId) ?? null;
+  const error = errors.get(lineKey(threadId)) ?? null;
   /** The box's props, built as they are read (a wired host's view is read then, never as the hook is called). */
   const buildProps = (): ReplyBoxProps => {
     const view = wiredView();
