@@ -141,6 +141,13 @@ const cli = (m: Machine, ...args: string[]) => {
 const base = (m: Machine) => `http://127.0.0.1:${(JSON.parse(readFileSync(join(m.dataDir, 'inbox', 'inbox.json'), 'utf8')) as { port: number }).port}`;
 const read = async <T,>(m: Machine, path: string): Promise<T> => (await (await fetch(`${base(m)}${path}`)).json()) as T;
 const stateOf = async (m: Machine, other: Machine) => (await read<{ machines: { id: string; state: string }[] }>(m, '/api/inbox/machines')).machines.find((x) => x.id === other.id)?.state;
+/** Decision mode as that Inbox keeps it: on or off, and whether it holds a flip of it (config.json `inboxCapabilityFlips`). */
+async function switchOn(m: Machine): Promise<{ on: boolean | null; flipped: boolean }> {
+  const on = (await read<{ decision_mode?: { on: boolean } }>(m, '/api/inbox/settings')).decision_mode?.on ?? null;
+  const file = join(m.dataDir, 'config.json');
+  const flips = existsSync(file) ? (JSON.parse(readFileSync(file, 'utf8')) as { inboxCapabilityFlips?: { decision_mode?: { at?: unknown } } }).inboxCapabilityFlips : undefined;
+  return { on, flipped: typeof flips?.decision_mode?.at === 'number' };
+}
 
 async function start(m: Machine): Promise<void> {
   const run = cli(m, '--background');
@@ -339,14 +346,22 @@ test("5. Decision mode is one switch for both: off in Studio's Settings is off i
   for (const w of windows) await w.on.goto(`${w.m.url}#settings/capabilities`);
   const row = (on: Page) => on.locator('[data-settings-decision-mode]');
   for (const w of windows) await expect(row(w.on).getByRole('switch')).toHaveAttribute('aria-checked', 'true', { timeout: 20_000 });
+  // Laptop came back in step 4: its own line to Studio, which a flip there travels on, is up again first.
+  await expect.poll(() => stateOf(laptop, studio), { timeout: 30_000, message: "Laptop's line to Studio after its restart" }).toBe('online');
+  // Each hop on its own, so a failure names the side that broke: the window that was pressed, that computer's save and
+  // the flip it stamps, the other computer's take of it, and the other computer's open window.
   await row(page).getByRole('switch').click();
+  await expect(row(page).getByRole('switch')).toHaveAttribute('aria-checked', 'false');
+  await expect.poll(() => switchOn(studio), { message: "Studio saved Decision mode off, and stamped the flip" }).toEqual({ on: false, flipped: true });
+  await expect.poll(() => switchOn(laptop), { timeout: 20_000, message: "Laptop took Studio's flip" }).toEqual({ on: false, flipped: true });
   await expect(row(there).getByRole('switch')).toHaveAttribute('aria-checked', 'false', { timeout: 20_000 });
-  await expect.poll(async () => (await read<{ decision_mode?: { on: boolean } }>(laptop, '/api/inbox/settings')).decision_mode?.on).toBe(false);
   await row(there).scrollIntoViewIfNeeded();
   await shot('06-laptop-settings-decision-mode-off-from-studio', there);
   await row(there).getByRole('switch').click();
+  await expect(row(there).getByRole('switch')).toHaveAttribute('aria-checked', 'true');
+  await expect.poll(() => switchOn(laptop), { message: 'Laptop saved Decision mode on' }).toEqual({ on: true, flipped: true });
+  await expect.poll(() => switchOn(studio), { timeout: 20_000, message: "Studio took Laptop's flip" }).toEqual({ on: true, flipped: true });
   await expect(row(page).getByRole('switch')).toHaveAttribute('aria-checked', 'true', { timeout: 20_000 });
-  await expect.poll(async () => (await read<{ decision_mode?: { on: boolean } }>(studio, '/api/inbox/settings')).decision_mode?.on).toBe(true);
   await row(page).scrollIntoViewIfNeeded();
   await shot('07-studio-settings-decision-mode-on-from-laptop');
   await there.close();
