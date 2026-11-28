@@ -98,6 +98,55 @@ describe("computePlanDiff — a quote holding a code fence diffs as one unit", (
   });
 });
 
+describe("computePlanDiff — a fence diffs as the parser draws it", () => {
+  // Each diff chunk parses on its own, so a chunk holding half a fence is
+  // drawn as a code block that runs on (or as prose inside one). The fence
+  // pre-pass must therefore see every fence the parser sees: an indented one
+  // (under a list item) and one whose closer is longer than its opener.
+  const blockTypes = (block: { content: string; oldContent?: string }) => [
+    parseMarkdownToBlocks(block.content).map((b) => b.type),
+    ...(block.oldContent === undefined ? [] : [parseMarkdownToBlocks(block.oldContent).map((b) => b.type)]),
+  ];
+  const fenceLines = (text: string) => text.split("\n").filter((line) => /^[ \t]*`{3,}/.test(line)).length;
+
+  test("an indented fence under a list item is one modified block, both sides whole", () => {
+    const oldText = "# Plan\n\n- Install:\n  ```sh\n  brew install x\n  ```\n\n- Run it.\n";
+    const newText = oldText.replace("brew install x", "brew install y");
+    const { blocks } = computePlanDiff(oldText, newText);
+
+    const changed = blocks.filter((b) => b.type !== "unchanged");
+    expect(changed).toHaveLength(1);
+    expect(changed[0].type).toBe("modified");
+    // Both sides are the whole fence, so each parses to the plan's own code block.
+    expect(blockTypes(changed[0])).toEqual([["code"], ["code"]]);
+    expect(changed[0].content).toContain("brew install y");
+    expect(changed[0].oldContent).toContain("brew install x");
+
+    // No chunk holds half a fence.
+    for (const block of blocks) {
+      expect(fenceLines(block.content) % 2).toBe(0);
+      if (block.oldContent) expect(fenceLines(block.oldContent) % 2).toBe(0);
+    }
+  });
+
+  test("a closer longer than its opener closes the fence, as the parser reads it", () => {
+    const oldText = "Intro.\n\n```js\nconst a = 1;\nconst b = 2;\n````\n\nOutro.\n";
+    const newText = oldText.replace("const a = 1", "const a = 9");
+    const { blocks } = computePlanDiff(oldText, newText);
+
+    // The plan is a paragraph, one code block, a paragraph: the diff must not
+    // read the closer as ordinary text and split the code.
+    expect(parseMarkdownToBlocks(oldText).map((b) => b.type)).toEqual(["paragraph", "code", "paragraph"]);
+    const changed = blocks.filter((b) => b.type !== "unchanged");
+    expect(changed).toHaveLength(1);
+    expect(blockTypes(changed[0])).toEqual([["code"], ["code"]]);
+    for (const block of blocks) {
+      expect(fenceLines(block.content) % 2).toBe(0);
+      if (block.oldContent) expect(fenceLines(block.oldContent) % 2).toBe(0);
+    }
+  });
+});
+
 describe("computeInlineDiff — qualification gate", () => {
   test("paragraph → paragraph with word edit qualifies", () => {
     const result = computeInlineDiff(
