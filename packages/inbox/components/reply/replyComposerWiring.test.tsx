@@ -2,8 +2,8 @@
  * The reply box's controller under a wired host (replyComposerWiring.ts: the Inbox's thread pane hands in its own
  * draft page, mentions, hook options and Send). Failures this catches: the host's Send called twice for one press,
  * or not inside the press (what the host set for the press lost); a second press reaching the host while its Send is
- * out; Discard, attach, a pasted file, a tile's remove or typing getting through while the host's Send (pressed here
- * or started by the host) is out; the chord or Escape not reaching the host's own keys; the controller restoring or
+ * out; Discard or typing getting through while the host's Send is out, or a file refused then (the host's Send keeps
+ * a file added meanwhile); the chord or Escape not reaching the host's own keys; the controller restoring or
  * saving a draft the host restores and saves itself; the host's draft and files options not reaching the hooks.
  *
  * Assertions compare strings and numbers, never elements (a failed `expect(element)` can take bun down).
@@ -197,7 +197,7 @@ test.skipIf(!hasDom)('the chord the host takes sends nothing; Escape is the host
   expect(seen.calls.join('|')).toBe('change words|chord|escape');
 });
 
-test.skipIf(!hasDom)('while the host’s Send holds the words, Discard, attach, a tile’s remove and typing do nothing', async () => {
+test.skipIf(!hasDom)('while the host’s Send holds the words, Discard and typing do nothing; files still come in, as the host’s Send keeps them', async () => {
   const { el, seen, finish, handle } = mount();
   typeIn(el, 'keep these words');
   attach(el, notes('a.txt'));
@@ -211,10 +211,9 @@ test.skipIf(!hasDom)('while the host’s Send holds the words, Discard, attach, 
   typeIn(el, 'typed meanwhile');
   pressDiscard(el);
   attach(el, notes('c.txt'));
-  act(() => el.querySelector<HTMLButtonElement>('[aria-label="Remove a.txt"]')?.click());
-  expect(seen.calls.join('|')).toBe('change keep these words|attach 1');
+  expect(seen.calls.join('|')).toBe('change keep these words|attach 1|attach 1');
   expect(handle.current.replyText.get()).toBe('keep these words');
-  expect(tiles(el)).toBe(1);
+  expect(tiles(el)).toBe(2);
   await act(async () => seen.ends[0]!());
   act(() => setHostSending(false));
   expect(field(el).readOnly).toBe(false);

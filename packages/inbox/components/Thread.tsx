@@ -2625,8 +2625,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const paneDrop = useFileDrop(
     (list) => {
       if (!boxRef.current.open) openBox();
-      replyFiles.add(list);
-      setError(null);
+      replyComposer.handle.addFiles(list);
     },
     // The same conditions that hide the box (the guard shows only while a replaced question waits).
     !resolved && !artifactsOn && !(guard && staleQuestions.length > 0) && newMessage?.kind !== 'compose',

@@ -114,6 +114,8 @@ export function useReplyComposer(host: ReplyComposerHost | ReplyComposerWiredHos
    * running before it starts (the words typed meanwhile count), and only then holds the box.
    */
   const busy = () => wiredView()?.sending ?? out.current.has(threadRef.current);
+  /** Files may not change: a Send is out. A wired host's Send keeps a file added meanwhile in the box: never for it. */
+  const filesBusy = () => !('wiring' in hostRef.current) && busy();
   /** The thread whose good Send's discard was rejected. */
   const [clearFailed, setClearFailed] = useState<string | null>(null);
   const textRef = useRef<HTMLTextAreaElement | null>(null);
@@ -148,7 +150,7 @@ export function useReplyComposer(host: ReplyComposerHost | ReplyComposerWiredHos
         },
   );
   const addFiles = (list: Iterable<File>) => {
-    if (busy()) return;
+    if (filesBusy()) return;
     files.add(list);
     const view = wiredView();
     if (view) view.added();
@@ -500,19 +502,19 @@ export function useReplyComposer(host: ReplyComposerHost | ReplyComposerWiredHos
       onFieldKeyDown,
       files: files.files,
       onRemoveFile: (key) => {
-        if (!busy()) files.remove(key);
+        if (!filesBusy()) files.remove(key);
       },
       onPutBackFile: (key, field) => {
-        if (!busy()) files.putBack(key, field);
+        if (!filesBusy()) files.putBack(key, field);
       },
       onAttachFiles: (list) => {
-        if (busy()) return;
+        if (filesBusy()) return;
         const now = wiredView();
         if (now) now.attach(list);
         else addFiles(list);
       },
       onPaste: (event) => {
-        if (busy()) return;
+        if (filesBusy()) return;
         if (!files.paste(event)) return;
         const now = wiredView();
         if (now) now.added();

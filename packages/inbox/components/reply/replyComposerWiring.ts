@@ -9,8 +9,8 @@
  *   unmount does with uploads). The host reads both back on the handle (`handle.wired`).
  * - `host.send` is the host's own Send, called once per press, synchronously inside the press: it claims the draft,
  *   clears it (`clear_draft`), empties the box and says what happened itself. The controller keeps a second press
- *   out while it runs, and keeps the box read-only (no typing, Discard, attach, paste, drop, a tile's remove or Put
- *   back) while the host says its Send is out (`view().sending`, from the moment the Send holds the words).
+ *   out while it runs, and takes no typing and no Discard while the host says its Send is out (`view().sending`,
+ *   from the moment the Send holds the words). Files still come in meanwhile: the host's Send keeps them.
  * - The controller's own draft restore, file save, thread change and error line do not run: the host's do.
  *
  * `view()` is read as the box is drawn (and when a key or a press needs it): what the box shows and the host's
@@ -50,7 +50,7 @@ export interface ReplyComposerWiringView {
   close: () => void;
   /** Discard (the bin): never called while a Send is out. */
   discard: () => void;
-  /** The paperclip's files (never while a Send is out). */
+  /** The paperclip's files (also while a Send is out: the host's Send keeps them in the box). */
   attach: (list: FileList) => void;
   /** Files went into the box (a drop, a paste): the host's line under the box clears. */
   added: () => void;
