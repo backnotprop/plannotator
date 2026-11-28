@@ -6883,6 +6883,9 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-dm-hold-l .ib-dm-lnk { min-height: 24px; padding: 0 6px; font-weight: 600; color: var(--primary); }
 .ib-dm-bad { color: var(--destructive); }
 .ib-dm-error { margin: 0 22px 8px; }
+/* What waits for a linked computer: the thread's held-write line, as a status. */
+.ib-dm-held:empty { display: none; }
+.ib-dm-held { margin: 0 22px 8px; }
 /* The stage: the deck (the card, the peek behind it), the overview, or the end screen. */
 .ib-dm-stage { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; padding: 4px 22px 22px; }
 .ib-dm-deck { position: relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }

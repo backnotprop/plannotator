@@ -20,6 +20,7 @@
       "GET cards/:id",
       "GET cards/:id/refs",
       "GET combine",
+      "GET decisions",
       "GET events",
       "GET health",
       "GET html-assets/:id/:path",

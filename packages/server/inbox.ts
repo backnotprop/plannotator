@@ -299,6 +299,7 @@ import { createLoginEnv, launchPlainEnv } from "./inbox-launch-env";
 import { createInboxRunSetup } from "./inbox-run-setup";
 import { createInboxReplyDrafts } from "./inbox-reply-drafts";
 import { createInboxCommentDrafts } from "./inbox-comment-drafts";
+import { mergeDecisions } from "./inbox-decisions-merged";
 import { createInboxTakeBack } from "./inbox-take-back";
 import { createInboxAsk } from "./inbox-ask";
 import type { InboxAskTimes } from "./inbox-ask-live";
@@ -5856,7 +5857,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // A draft changed or dropped is the person's doing in the thread ("Recent activity", acted.ts); a save of the same draft is not.
     onEdited: (threadId) => acted.note(threadId),
   });
-  const commentDrafts = createInboxCommentDrafts({ store, serverSession, readBody: (req) => readBody(req), json, onSaved: (threadId) => acted.note(threadId) });
+  const commentDrafts = createInboxCommentDrafts({ store, serverSession, readBody: (req) => readBody(req), json, onSaved: (threadId) => acted.note(threadId), linked: (machine) => machines.nameOf(machine) !== null });
   // A film played: "Recent activity"'s one write of its own (inbox-acted.ts).
   const actedRoute = createInboxActedRoute({ acted, serverSession, readBody: (req) => readBody(req), json });
   const takeBack = createInboxTakeBack({ store, serverSession, readBody: (req) => readBody(req), json });
@@ -6653,7 +6654,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           const writer = from ? { repo: repos.known(from.root) ? (repos.get(from.root) ?? repo) : null } : {};
           return { ...decision, message: { ...decision.message, ...writer }, thread: { ...decision.thread, project: { ...decision.thread.project, repo } } };
         });
-        return json({ serverSession, cursor: store.cursor(), decisions });
+        // `machines=1` (the window's): each linked computer's too, through its door (inbox-decisions-merged.ts).
+        const far = url.searchParams.get("machines") === "1" ? await machines.farDecisions.read() : [];
+        return json({ serverSession, cursor: store.cursor(), decisions: mergeDecisions(decisions, far, (id) => !!store.thread(id), projectFilterOf(url)) });
       }
       if (path === "/api/inbox/projects" && req.method === "GET") return json({ serverSession, cursor: store.cursor(), projects: projectFolders() });
       // Settings → Activity: each thread's messages by hour over `from`..`to` (ISO times; the window sends its local

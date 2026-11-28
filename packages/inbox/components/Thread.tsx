@@ -17,7 +17,7 @@ import { StartedBy } from './StartedBy';
 import { earlierRunsLabel, RunDivider, runFolds, ScheduledFoot } from '../scheduled/thread';
 import { useMessageRefRepos } from '../messageRefRepo';
 import { InboxApiError, InboxHeldError, inboxApi, type OutboxView, type TagMode, type ThreadModel } from '../api';
-import { outboxLine } from '../machines';
+import { createHeldPicks, heldPickLostWords } from '../heldPicks';
 import { ThreadSessions } from './ThreadSessions';
 import { snoozeBackAbove } from '../snoozeBack';
 import { HeldWrites } from './HeldWrites';
@@ -2320,11 +2320,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     return undefined;
   };
 
-  /**
-   * Picks held for another machine (linked machines), by outbox key: drawn as picked until that machine answers. One
-   * it refused, or that could not go, is unpicked again and the person is told; a delivered one is the thread's own.
-   */
-  const heldPicks = useRef(new Map<string, { id: string; answer: QuestionAnswer | null; revision: number }>());
+  /** Picks held for another machine (linked machines; heldPicks.ts, the rule decision mode keeps too). */
+  const [heldPicks] = useState(() => createHeldPicks(revisions.current));
   const outboxNow = useRef(outbox);
   outboxNow.current = outbox;
   const machineNow = useRef(machine);
@@ -2333,23 +2330,16 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   onToastNow.current = onToast;
   /** Settles held picks the outbox says are done: a delivered one is the thread's own; any other is unpicked, with a toast. */
   const settleHeldPicks = useCallback((entries: readonly OutboxView[]) => {
-    for (const entry of entries) {
-      const held = heldPicks.current.get(entry.key);
-      if (!held || entry.state === 'queued' || entry.state === 'sending') continue;
-      heldPicks.current.delete(entry.key);
-      if (entry.state === 'delivered') continue;
-      // It never applied there: the next pick goes with the revision that machine still has.
-      if (revisions.current.get(held.id) === held.revision + 1) revisions.current.delete(held.id);
+    for (const { pick, entry } of heldPicks.settle(entries).lost) {
       setPending((current) => {
-        if (current.get(held.id) !== held.answer) return current;
+        if (current.get(pick.id) !== pick.answer) return current;
         const next = new Map(current);
-        next.delete(held.id);
+        next.delete(pick.id);
         return next;
       });
-      const away = machineNow.current;
-      onToastNow.current?.({ icon: 'warn', lead: `Pick not saved. ${outboxLine(entry, away)?.text ?? `Not delivered to ${away?.name ?? 'the other machine'}.`}`, wrap: true });
+      onToastNow.current?.({ icon: 'warn', lead: heldPickLostWords(entry, machineNow.current), wrap: true });
     }
-  }, []);
+  }, [heldPicks]);
   useEffect(() => settleHeldPicks(outbox), [outbox, settleHeldPicks]);
 
   /** An answer left unsaved with no pane to show why: the toast outlives it. Names the thread, as the pane is gone. */
@@ -2430,9 +2420,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       } catch (cause) {
         if (cause instanceof InboxHeldError) {
           kept = true;
-          heldPicks.current.set(cause.outbox.key, { id, answer, revision });
           // Queued picks on one question apply there in order: the next one goes with the revision this one makes.
-          revisions.current.set(id, revision + 1);
+          heldPicks.hold(cause.outbox.key, { id, answer, revision });
           onToastNow.current?.({ icon: 'clock', lead: cause.message, wrap: true });
           // The outbox may have settled it already (its frame came before this answer).
           settleHeldPicks(outboxNow.current);

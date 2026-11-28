@@ -278,7 +278,8 @@ export type GroupSend =
   /** The thread holds a reply draft (or comments waiting for its Send): the reply goes from the thread, never from here. */
   | { kind: 'draft' }
   | { kind: 'sending' }
-  | { kind: 'sent'; at: string }
+  /** `held`: the outbox keys of its replies held for the linked computer the thread lives on (until they land there). */
+  | { kind: 'sent'; at: string; held?: readonly string[] }
   /** `sent` of `of`: a group whose replies (one per message) went in part, the rest not. */
   | { kind: 'failed'; error: string; sent?: number; of?: number };
 

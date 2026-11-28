@@ -179,6 +179,21 @@ export function rememberArtifactMachines<T extends { pins?: readonly ArtifactIds
   return model;
 }
 
+type DecisionIds = { machine?: string; message?: { id?: string }; thread?: { id?: string; project?: { id?: string } }; pictures?: { inline?: readonly { attachment_id?: string }[]; attachments?: readonly { attachment_id?: string }[] } };
+
+/**
+ * The merged decisions of another machine (`machine`, inbox-decisions-merged.ts in the server): their thread, message,
+ * project and files are that machine's, so a card's pictures and files load there and its answers go there.
+ */
+export function rememberDecisionMachines<T extends { decisions?: readonly DecisionIds[] }>(model: T): T {
+  for (const d of Array.isArray(model?.decisions) ? model.decisions : []) {
+    if (!d || typeof d.machine !== 'string' || !d.machine) continue;
+    const files = [...(d.pictures?.inline ?? []), ...(d.pictures?.attachments ?? [])].map((f) => f?.attachment_id ?? '');
+    rememberMachine([d.thread?.id ?? '', d.message?.id ?? '', d.thread?.project?.id ?? '', ...files], d.machine);
+  }
+  return model;
+}
+
 /** Ids this Inbox's own answers named: theirs for good (an earlier claim by another machine is dropped). */
 export function rememberLocal(ids: Iterable<string>): void {
   for (const id of ids) {

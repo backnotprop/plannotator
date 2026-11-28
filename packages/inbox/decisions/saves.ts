@@ -10,8 +10,10 @@
  */
 import type { HeldThread } from '../data/apply/record';
 import type { InboxQuestion } from '@plannotator/core/inbox-types';
+import type { MachineView, OutboxView } from '@plannotator/core/inbox-wire-models';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
 import { InboxApiError, InboxHeldError } from '../api';
+import { createHeldPicks, heldPickLostWords, type HeldPick } from '../heldPicks';
 import { createPickQueue } from '../pickQueue';
 import { saveOverConflicts } from '../pickConflict';
 import { createTypedSaves, isTypedChange, type TypedSavesTimers } from '../typedAnswers';
@@ -37,6 +39,14 @@ export interface DecisionSavesDeps {
   onFailed: (id: string, error: string) => void;
   /** The Inbox's answer stands instead (replaced, already sent, another window's): read again. */
   onChanged: () => void;
+  /**
+   * A thread on a linked computer (heldPicks.ts, the thread's own rule): an answer held for it says so (`onHeld`, else
+   * `onFailed`); `outbox` is the held writes now, and `machine` names an entry's computer for the words of one that
+   * never applied there.
+   */
+  onHeld?: (id: string, words: string) => void;
+  outbox?: () => Iterable<OutboxView>;
+  machine?: (id: string) => Pick<MachineView, 'name' | 'state'> | null;
   delayMs?: number;
   timers?: TypedSavesTimers;
 }
@@ -60,6 +70,10 @@ export interface DecisionSaves {
   forSend(): Promise<(() => void) | null>;
   /** The page hides or goes: the words in their pause go now with a keepalive request. */
   leave(): void;
+  /** The outbox's entries now (its frames): each held answer it settled is the thread's own, or unpicked and told. */
+  settleHeld(entries: Iterable<OutboxView>): void;
+  /** The answers still held for another computer, in order: a Send made while it is away carries them. */
+  heldPicks(): HeldPick[];
 }
 
 function split(id: string): [string, string] {
@@ -82,6 +96,26 @@ export function createDecisionSaves(deps: DecisionSavesDeps): DecisionSaves {
   };
   const revisionOf = (id: string) => Math.max(revisions.get(id) ?? 0, deps.known(id));
   const newer = (id: string) => queue.hasNewer(id) || typed.has(id);
+  /** Answers held for the linked computer the thread lives on, by outbox key. */
+  const held = createHeldPicks(revisions);
+  const settleHeld = (entries: Iterable<OutboxView>) => {
+    const { delivered, lost } = held.settle(entries);
+    const done = (pick: HeldPick) => {
+      if (!pending.has(pick.id) || pending.get(pick.id) !== pick.answer) return;
+      const next = new Map(pending);
+      next.delete(pick.id);
+      setPending(next);
+    };
+    // A delivered one is the thread's own: the card draws it from the thread (its next read shows it there).
+    for (const pick of delivered) done(pick);
+    for (const { pick, entry } of lost) {
+      // It never applied there: the card goes back to what that computer holds, and the person is told why.
+      if (pending.get(pick.id) === pick.answer) last.delete(pick.id);
+      done(pick);
+      deps.onFailed(pick.id, heldPickLostWords(entry, deps.machine?.(entry.machine) ?? null));
+    }
+    if (delivered.length > 0 || lost.length > 0) deps.onChanged();
+  };
 
   const save =
     (id: string, answer: QuestionAnswer | null, options: { keepalive?: boolean } = {}) =>
@@ -113,8 +147,10 @@ export function createDecisionSaves(deps: DecisionSavesDeps): DecisionSaves {
         if (cause instanceof InboxHeldError) {
           // Held for the computer the thread lives on: it applies there, and the next answer goes on top of it.
           kept = true;
-          revisions.set(id, revision + 1);
-          deps.onFailed(id, cause.message);
+          held.hold(cause.outbox.key, { id, answer, revision });
+          (deps.onHeld ?? deps.onFailed)(id, cause.message);
+          // The outbox may have settled it already (its frame came before this answer).
+          settleHeld(deps.outbox?.() ?? []);
           return true;
         }
         const code = cause instanceof InboxApiError ? cause.code : null;
@@ -182,6 +218,8 @@ export function createDecisionSaves(deps: DecisionSavesDeps): DecisionSaves {
         void deps.pick({ messageId, key, revision, answer, keepalive: true }).catch(() => {});
       }
     },
+    settleHeld,
+    heldPicks: () => held.waiting(),
   };
 }
 

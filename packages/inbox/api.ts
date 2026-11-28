@@ -17,7 +17,7 @@ import type { InboxArtifactPin, InboxArtifactsPage, InboxArtifactType } from '@p
 import type { CloudflareAccessSettings, TailscaleSettings } from './data/reach';
 import { isActionRecord, questionsOnly, splitThreadActions } from './actions';
 import { createListReader, listGridAsked, type ListReadAnswer } from './listRead';
-import { inboxUrl, isContested, localRoute, machineOf, rememberArtifactMachines, rememberLocal, rememberMachine, rememberSearchMachines, selfMachineId, setSelfMachine } from './inboxUrl';
+import { inboxUrl, isContested, localRoute, machineOf, rememberArtifactMachines, rememberDecisionMachines, rememberLocal, rememberMachine, rememberSearchMachines, selfMachineId, setSelfMachine } from './inboxUrl';
 import { farRead, readsServedFor } from './linkedReads';
 import { threadPullsOf } from './threadPulls/model';
 import { learnPullMachines, pullMachine, pullUrl } from './pulls/pullMachines';
@@ -1281,7 +1281,7 @@ export const inboxApi = {
     return get<InboxActivityModel>(inboxUrl('/activity', query.toString()));
   },
   /** Decision mode (on unless Settings › Capabilities turns it off): every decision waiting on the person, in queue order. 404 while it is off. */
-  decisions: () => get<InboxDecisionsModel>(inboxUrl('/decisions')),
+  decisions: () => get<InboxDecisionsModel>(inboxUrl('/decisions', 'machines=1')).then(rememberDecisionMachines),
   /** Tidy: who it would ask in the list's (or the Board's) scope, or about picked `threads`, and the last run; `machine`: a linked machine's. */
   tidy: (project: string | null, surface: 'list' | 'board', machine?: string | null, threads?: readonly string[]) =>
     get<InboxTidyPlan>(inboxUrl('/tidy', new URLSearchParams({ ...(surface === 'board' ? { surface } : {}), ...(project ? { project } : {}), ...(threads ? { threads: threads.join(',') } : {}) }).toString(), machine)),

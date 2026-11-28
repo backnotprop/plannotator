@@ -133,6 +133,13 @@ export interface OutboxEntry {
    */
   send_by?: string;
   /**
+   * A held reply's held picks and marks (their keys): the ones on the decisions it names, waiting for that machine when
+   * the reply was held (`reliedOn`). Its revisions and staged marks are the ones they make there, so one that surely
+   * never applied there takes the reply with it, `refused` with that one's answer, never sent: else the reply could land
+   * on another answer made there meanwhile, the agent reading what the person never sent. Kept here only, never sent on.
+   */
+  after?: string[];
+  /**
    * This Inbox's own write the person is told about when it does not land (an agent's answer in another computer's
    * thread, held while that computer was away; inbox-mcp-far-reply.ts): its refusal is a notice, as a window's write's.
    */
@@ -165,6 +172,34 @@ export type OutboxAnswer = { status: number; body: unknown } | null;
 /** A held answer still sending its files (inbox-outbox-file-lane.ts): the write queue passes it by until they are all there. */
 export function outboxWaitsForFiles(entry: OutboxEntry): boolean {
   return pending(entry) && !!entry.files && entry.files.length > 0 && (entry.sent_files?.length ?? 0) < entry.files.length;
+}
+
+/** `<message id>/<key>` of each decision a reply names (its answers, skips and action items), on its own message by default. */
+function decisionsNamed(messageId: string, list: unknown): string[] {
+  if (!Array.isArray(list)) return [];
+  return list.flatMap((item) => {
+    const named = item as { message_id?: unknown; key?: unknown } | null;
+    if (!named || typeof named.key !== "string") return [];
+    return [`${typeof named.message_id === "string" && named.message_id ? named.message_id : messageId}/${named.key}`];
+  });
+}
+
+/**
+ * The held picks and marks a reply relies on: those waiting for its machine on a decision it names. A pick names its
+ * questions (`messages/<id>/picks`), a mark its action item (`messages/<id>/actions/<key>`).
+ */
+export function reliedOn(waiting: readonly OutboxEntry[], route: string, body: Record<string, unknown>): string[] {
+  const reply = /^messages\/([^/]+)\/reply$/.exec(route);
+  if (!reply) return [];
+  const answers = new Set([...decisionsNamed(reply[1]!, body.questions), ...decisionsNamed(reply[1]!, body.skip)]);
+  const actions = new Set(decisionsNamed(reply[1]!, body.actions));
+  if (answers.size === 0 && actions.size === 0) return [];
+  return waiting.flatMap((entry) => {
+    const pick = /^messages\/([^/]+)\/picks$/.exec(entry.route);
+    if (pick) return decisionsNamed(pick[1]!, entry.body.questions).some((id) => answers.has(id)) ? [entry.key] : [];
+    const mark = /^messages\/([^/]+)\/actions\/([^/]+)$/.exec(entry.route);
+    return mark && actions.has(`${mark[1]}/${mark[2]}`) ? [entry.key] : [];
+  });
 }
 
 /** An agent's answers in one thread of that machine keep their order among themselves: their session and thread. */
@@ -594,6 +629,7 @@ export class InboxOutbox {
       return { entry: existing, fresh: false };
     }
     const n = Math.max(0, ...this.list(machine).map((e) => e.n)) + 1;
+    const after = auto ? [] : reliedOn(this.list(machine, "pending"), route, body);
     const entry = this.save({
       v: 1,
       key,
@@ -618,6 +654,7 @@ export class InboxOutbox {
       ...(auto && own.send_by ? { send_by: own.send_by } : {}),
       ...(auto && own.notify ? { notify: true as const } : {}),
       ...(auto && own.files && own.files.length > 0 ? { files: own.files.map((file) => ({ ...file })) } : {}),
+      ...(after.length > 0 ? { after } : {}),
     });
     return { entry, fresh: true };
   }
@@ -770,6 +807,12 @@ export class InboxOutbox {
       const before = head.follows ? this.entries.get(head.follows) : undefined;
       if (this.pastSendBy(head) || (!head.left && before && !pending(before) && !outboxMayHaveApplied(before))) {
         this.save({ ...head, state: "cancelled", settled_at: this.now().toISOString() });
+        continue;
+      }
+      // A reply whose held pick or mark surely never applied there is refused with it, never sent (`after`).
+      const lost = head.left ? undefined : head.after?.map((key) => this.entries.get(key)).find((e) => !!e && !pending(e) && !outboxMayHaveApplied(e));
+      if (lost) {
+        this.settle(head, { status: lost.status ?? 409, body: lost.answer }, "refused");
         continue;
       }
       // Rule 10: on disk as having left before a byte goes out.
