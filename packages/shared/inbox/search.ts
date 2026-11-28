@@ -1328,6 +1328,7 @@ export class InboxSearchIndex {
         const answer = answerText(q.answer);
         candidates.push({ text: q.prompt, question: ref });
         if (answer) candidates.push({ text: `${q.prompt} → ${answer}`, question: ref });
+        if (q.answered_in_reply) candidates.push({ text: `${q.prompt} → ${q.answered_in_reply.quote}`, question: ref });
         for (const choice of q.choices) candidates.push({ text: `${q.prompt} → ${choice.label}`, question: ref });
         if (q.context) candidates.push({ text: q.context, question: ref });
       }

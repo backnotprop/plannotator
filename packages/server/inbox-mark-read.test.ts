@@ -213,7 +213,7 @@ describe("POST /api/inbox/messages/:id/reply with a skip list (approval inbox-ex
 });
 
 describe("POST /api/inbox/messages/:id/reply with words only (approval inbox-words-only-reply)", () => {
-  const STILL_OPEN = "No question answered yet; it is still open. Don't re-ask it; the person will answer in the Inbox.";
+  const STILL_OPEN = "No question answered yet; it is still open. Don't re-ask it; the person will answer in the Inbox. If their words answer it, name it in answered_in_reply.";
 
   test("Keep open: the question stays open and read_thread hands the agent the words and the still-open line", async () => {
     const { server, client, threadId, messageId } = await setup();

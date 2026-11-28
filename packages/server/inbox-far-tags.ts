@@ -71,7 +71,7 @@ export interface FarReplyInput {
 }
 
 /** The send_message fields a far answer carries (its paths are the other computer's: `project_path` stays there). */
-const FAR_SEND_FIELDS = ["body", "subject", "thread", "reply_to", "idempotency_key", "attachments", "supersedes", "done", "priority", "pulls", "steps", "branch"] as const;
+const FAR_SEND_FIELDS = ["body", "subject", "thread", "reply_to", "idempotency_key", "attachments", "supersedes", "done", "answered_in_reply", "priority", "pulls", "steps", "branch"] as const;
 
 const isMachineId = (value: unknown): value is string => typeof value === "string" && /^ibx_[0-9A-HJKMNP-TV-Z]{26}$/.test(value);
 const shortText = (value: unknown, max: number): string | null => (typeof value === "string" && value.length <= max && !/[\u0000-\u001f\u007f]/.test(value) ? value : null);

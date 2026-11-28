@@ -215,7 +215,7 @@ export function inboxAutoSendInMinutes(autoSendAt: string, now: number): number 
 }
 
 /** The question states a message holds, as the asking rule reads them. */
-type AskingQuestionState = "open" | "picked" | "sent" | "closed" | "superseded";
+type AskingQuestionState = "open" | "picked" | "sent" | "closed" | "superseded" | "answered_in_reply";
 
 /**
  * Whether a Send skips the questions it leaves unanswered, by default (no

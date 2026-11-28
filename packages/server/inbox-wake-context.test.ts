@@ -114,7 +114,7 @@ describe("the details line", () => {
     // What an older connection delivers, and a host with no wake reads, is unchanged.
     expect(command!.body).toBe(reply.body);
     const text = inboxWakeText(command!);
-    expect(text).toContain(`[Thread ${sent.thread_id}: 2 messages, 1 question open, don't re-ask it. Your last message was just now]`);
+    expect(text).toContain(`[Thread ${sent.thread_id}: 2 messages, 1 question open, don't re-ask it; if the reply answers it, use answered_in_reply. Your last message was just now]`);
     expect(text).not.toContain("still open");
     expect(text).toContain("\n\nNot yet, thinking.\n\n");
     const read = await w.client.callTool({ name: "read_thread", arguments: { thread_id: sent.thread_id, agent_session: OWNER } });
@@ -133,7 +133,7 @@ describe("the details line", () => {
     const [command] = await w.poll();
     expect(command!.context).toMatchObject({ open_questions: 1 });
     const text = inboxWakeText(command!);
-    expect(text).toContain("1 question open, don't re-ask it.");
+    expect(text).toContain("1 question open, don't re-ask it; if the reply answers it, use answered_in_reply.");
     expect(text).not.toContain("You have 1 other question");
     expect(text).toContain("## Answers to your questions");
     expect(text).toContain("One for now.");
@@ -141,7 +141,7 @@ describe("the details line", () => {
 
   test("a paragraph the person typed that reads exactly like the sentence stays: another session's question open, the store wrote none", async () => {
     const w = await setup();
-    const typed = "No question answered yet; it is still open. Don't re-ask it; the person will answer in the Inbox.";
+    const typed = "No question answered yet; it is still open. Don't re-ask it; the person will answer in the Inbox. If their words answer it, name it in answered_in_reply.";
     const sent = await w.send("Quota is climbing.");
     await w.send(QUESTION, { reply_to: sent.message_id }, "ses-other");
     const reply = await w.reply(sent.message_id, `Noted.\n\n${typed}`);
@@ -154,7 +154,7 @@ describe("the details line", () => {
 
   test("typed and written both: the store's goes, the person's stays, with an action result moving the first line", async () => {
     const w = await setup({ setAsideDelayMs: 60_000 });
-    const typed = "No question answered yet; it is still open. Don't re-ask it; the person will answer in the Inbox.";
+    const typed = "No question answered yet; it is still open. Don't re-ask it; the person will answer in the Inbox. If their words answer it, name it in answered_in_reply.";
     const sent = (await w.send(`${ACTION}\n\n${QUESTION}`)) as unknown as { message_id: string; actions: { key: string }[] };
     const key = sent.actions[0]!.key;
     await w.post(`/api/inbox/messages/${sent.message_id}/actions/${key}`, { outcome: "done", staged: true });
@@ -178,7 +178,7 @@ describe("the details line", () => {
     const context = fresh.store.wakeContext(stored, OWNER);
     expect(context.still_open_line).toBeUndefined();
     const text = inboxWakeText({ id: reply.id, thread_id: sent.thread_id, subject: null, body: stored.body, context });
-    expect(text).toContain("1 question open, don't re-ask it");
+    expect(text).toContain("1 question open, don't re-ask it; if the reply answers it, use answered_in_reply");
     expect(text).toContain("it is still open");
     expect(text).toContain("Not yet.");
   });
@@ -196,7 +196,7 @@ describe("the details line", () => {
     const asked = await asking.send(`${QUESTION}\n\n${ACTION}`);
     await asking.reply(asked.message_id, "Not yet.");
     const [open] = await asking.poll();
-    const line = `[Thread ${asked.thread_id}: 2 messages, 1 question open, don't re-ask it, 1 action item open. Your last message was just now]`;
+    const line = `[Thread ${asked.thread_id}: 2 messages, 1 question open, don't re-ask it; if the reply answers it, use answered_in_reply, 1 action item open. Your last message was just now]`;
     expect(codexQueueMessage(open!).split("\n")[2]).toBe(line);
     expect(inboxWakeText(open!).split("\n")[2]).toBe(line);
   });
@@ -317,7 +317,7 @@ describe("the Replying to line", () => {
     const lines = inboxWakeText(command!).split("\n");
     expect(lines[1]).toBe(INBOX_WAKE_INSTRUCTION);
     expect(lines[2]).toStartWith("This reply was written to another Claude Code session");
-    expect(lines[3]).toBe(`[Thread ${asked.thread_id}: 3 messages, 1 question open, don't re-ask it]`);
+    expect(lines[3]).toBe(`[Thread ${asked.thread_id}: 3 messages, 1 question open, don't re-ask it; if the reply answers it, use answered_in_reply]`);
   });
 });
 
@@ -391,7 +391,7 @@ describe("the other kinds of turn", () => {
     const text = inboxWakeText(command!);
     expect(text).toContain("## Action items you asked for");
     expect(text).toContain("I am not on that team.");
-    expect(text).toContain(`[Thread ${sent.thread_id}: 2 messages, 1 question open, don't re-ask it.`);
+    expect(text).toContain(`[Thread ${sent.thread_id}: 2 messages, 1 question open, don't re-ask it; if the reply answers it, use answered_in_reply.`);
     // Every paragraph the older wake had is here, but the sentence the details line says instead.
     for (const paragraph of command!.body.split("\n\n")) if (paragraph !== command!.context!.still_open_line) expect(text).toContain(paragraph);
   });
@@ -420,7 +420,7 @@ describe("every host", () => {
   });
 
   test("an older Inbox's command through the mod's copy: the thread id, no details, the words as sent", () => {
-    const old = { type: "reply" as const, id: "msg_R", thread_id: "msg_T", subject: null, body: "Yes.\n\nNo question answered yet; it is still open. Don't re-ask it; the person will answer in the Inbox." };
+    const old = { type: "reply" as const, id: "msg_R", thread_id: "msg_T", subject: null, body: "Yes.\n\nNo question answered yet; it is still open. Don't re-ask it; the person will answer in the Inbox. If their words answer it, name it in answered_in_reply." };
     const text = modWakeText(old);
     expect(text.split("\n")[2]).toBe("[Thread msg_T]");
     expect(text).toContain(old.body);
@@ -432,7 +432,7 @@ describe("every host", () => {
     await w.reply(sent.message_id, "Not yet.");
     const [command] = await w.poll();
     const text = codexQueueMessage(command!);
-    expect(text).toContain(`[Thread ${sent.thread_id}: 2 messages, 1 question open, don't re-ask it. Your last message was just now]`);
+    expect(text).toContain(`[Thread ${sent.thread_id}: 2 messages, 1 question open, don't re-ask it; if the reply answers it, use answered_in_reply. Your last message was just now]`);
     expect(text).toContain("answer in the same thread: send_message with reply_to");
     expect(text).not.toContain("plannotator_inbox");
     expect(text).not.toContain("still open");
@@ -464,7 +464,7 @@ describe("every host", () => {
       expect(delivered).toHaveLength(1);
       const lines = delivered[0]!.split("\n");
       expect(lines[1]).toBe(INBOX_WAKE_INSTRUCTION);
-      expect(lines[2]).toBe(`[Thread ${asked.thread_id}: 2 messages, 1 question open, don't re-ask it. Your last message was just now]`);
+      expect(lines[2]).toBe(`[Thread ${asked.thread_id}: 2 messages, 1 question open, don't re-ask it; if the reply answers it, use answered_in_reply. Your last message was just now]`);
       expect(delivered[0]).not.toContain("still open");
       expect(lines.at(-1)).toBe(INBOX_WAKE_CLOSING_LINE);
     } finally {

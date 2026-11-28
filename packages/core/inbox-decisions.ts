@@ -175,7 +175,7 @@ export function buildDecisionExport(input: DecisionExportInput, options: Decisio
   };
 
   const counts = Object.fromEntries((["decided", ...DECISION_EXPORT_OTHER_STATES] as DecisionExportState[]).map((state) => [state, 0])) as Record<DecisionExportState, number>;
-  const staged = rows.map((entry) => ({ ...entry, state: stateOf(entry.row) }));
+  const staged = rows.map((entry) => ({ ...entry, state: entry.record.answered_in_reply ? ("answered_in_words" as const) : stateOf(entry.row) }));
   // Numbered across the groups: the decisions first (D1…Dn), then each group in its order, each in the order asked.
   const sequence = [staged.filter((e) => e.state === "decided"), ...DECISION_EXPORT_OTHER_STATES.map((state) => staged.filter((e) => e.state === state))].flat();
   const decisions: DecisionExportItem[] = [];

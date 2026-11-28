@@ -68,7 +68,7 @@ export function decisionRowOf(question: InboxQuestionRecord, byId: ReadonlyMap<s
   if (question.superseded_by) fate = "replaced";
   else if (question.set_aside) fate = "set_aside";
   else if (question.answer && question.revision > 0 && question.sent_revision === question.revision) fate = question.answer.skipped ? "skipped" : "answered";
-  else if (closedByArchive(message)) fate = "archived";
+  else if (question.answered_in_reply || closedByArchive(message)) fate = "archived";
   else fate = question.answer ? "picked_unsent" : "open";
   const decided = fate === "answered" || fate === "skipped";
   const { offered, took } = tookRecommendation(question);

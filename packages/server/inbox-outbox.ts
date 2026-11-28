@@ -302,6 +302,7 @@ export const DOOR_WRITES: Readonly<Record<string, DoorWriteKind>> = {
   // A pinned artifact lives on its thread's machine (mark `artifact-pins`): a pin or an unpin puts a state there.
   "POST artifact-pins": "set",
   "POST messages/:id/picks": "set",
+  "POST messages/:id/reopen": "set",
   "POST messages/:id/reply": "append",
   "POST messages/:id/resolve": "set",
   "POST messages/:id/to": "set",

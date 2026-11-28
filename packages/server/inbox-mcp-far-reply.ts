@@ -126,7 +126,7 @@ function farCall(args: Record<string, unknown>): InboxSendCall {
   const ids = (value: unknown) => (Array.isArray(value) ? value.map((id) => (typeof id === "string" ? id.trim() : JSON.stringify(id))) : value === undefined || value === null ? [] : [JSON.stringify(value)]);
   const guide = args.guide && typeof args.guide === "object" ? text((args.guide as { input_sha256?: unknown }).input_sha256) : text(args.guide);
   const live = ids(Array.isArray(args.live_sites) ? args.live_sites.map((site) => (site && typeof site === "object" ? (site as { id?: unknown }).id : site)) : args.live_sites);
-  return { body: text(args.body) ?? "", reply_to: text(args.reply_to), thread_name: null, reply_thread: text(args.thread)?.trim() || null, guide, supersedes: ids(args.supersedes), done: ids(args.done), live };
+  return { body: text(args.body) ?? "", reply_to: text(args.reply_to), thread_name: null, reply_thread: text(args.thread)?.trim() || null, guide, supersedes: ids(args.supersedes), done: ids(args.done), answered: ids(Array.isArray(args.answered_in_reply) ? args.answered_in_reply.map((entry) => (entry && typeof entry === "object" ? (entry as { question?: unknown }).question : entry)) : args.answered_in_reply), live };
 }
 
 export async function farAgentReply(
