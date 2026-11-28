@@ -49,6 +49,7 @@ export interface SemDiffClientOptions {
   timeoutMs?: number;
   coldTimeoutMs?: number;
   downloadTimeoutMs?: number;
+  pooled?: boolean;
   /** The timers every bound runs on. Tests pass their own so they can fire a bound and see exactly which timers this client left. */
   timers?: SemDiffTimers;
 }
@@ -70,7 +71,7 @@ export function hasSomethingToSay(operations: SemanticDiffOperation[]): boolean 
 }
 
 export function createSemDiffClient(options: SemDiffClientOptions): SemDiffClient {
-  const { advert, origin, createWorker, timeoutMs = SEM_DIFF_TIMEOUT_MS, coldTimeoutMs = SEM_DIFF_COLD_TIMEOUT_MS, downloadTimeoutMs = SEM_DIFF_DOWNLOAD_TIMEOUT_MS, timers = realTimers } = options;
+  const { advert, origin, createWorker, timeoutMs = SEM_DIFF_TIMEOUT_MS, coldTimeoutMs = SEM_DIFF_COLD_TIMEOUT_MS, downloadTimeoutMs = SEM_DIFF_DOWNLOAD_TIMEOUT_MS, timers = realTimers, pooled = false } = options;
   const warm = new Set<string>();
   const coldTimedOut = new Map<string, number>();
   const downloading = new Set<string>();
@@ -88,6 +89,7 @@ export function createSemDiffClient(options: SemDiffClientOptions): SemDiffClien
   const watchHead = () => {
     if (watchdog) timers.clear(watchdog);
     watchdog = null;
+    if (pooled) return;
     const head = pending.keys().next();
     if (head.done) return;
     const id = head.value;
@@ -192,16 +194,19 @@ export function createSemDiffClient(options: SemDiffClientOptions): SemDiffClien
   };
 
   const results = new Map<string, Promise<SemDiffAttempt>>();
+  const queuedBehind = new Map<string, number>();
 
-  const compute = (path: string, oldText: string, newText: string, opinion?: SemDiffOpinionRequest, background?: boolean): Promise<SemDiffAttempt> => {
+  const compute = (key: string, path: string, oldText: string, newText: string, opinion?: SemDiffOpinionRequest, background?: boolean): Promise<SemDiffAttempt> => {
     if (stalledDownloads.has(languageForPath(path) ?? '')) return Promise.resolve({ result: null, failed: true });
     const id = nextId++;
     const request: SemDiffRequest = { id, advert: advert!, origin, path, oldText, newText, ...(opinion ? { opinion: { rejected: [...opinion.rejected] } } : {}), ...(background ? { background: true as const } : {}) };
     return new Promise<SemDiffReply | null>((resolve) => {
       pending.set(id, { request, settle: resolve });
+      if (background && pooled) queuedBehind.set(key, id);
       post(id);
       if (pending.size === 1) watchHead();
     }).then((reply) => {
+      if (queuedBehind.get(key) === id) queuedBehind.delete(key);
       if (!reply || !reply.ok) return { result: null, failed: true };
       if (!opinion && !hasSomethingToSay(reply.semanticOperations)) return { result: null, failed: false };
       return {
@@ -222,13 +227,17 @@ export function createSemDiffClient(options: SemDiffClientOptions): SemDiffClien
     const key = `${path}\0${hashText(oldText)}\0${hashText(newText)}${opinion ? `\0opinion\0${opinion.settingsRevision}\0${[...opinion.rejected].sort().join(',')}` : ''}`;
     let found = results.get(key);
     if (!found) {
-      found = compute(path, oldText, newText, opinion, background);
+      found = compute(key, path, oldText, newText, opinion, background);
       results.set(key, found);
       void found.then((outcome) => {
         const keep = !outcome.failed && (!opinion || outcome.result?.secondOpinion?.state === 'ok');
         if (!keep && results.get(key) === found) results.delete(key);
       });
       if (results.size > MAX_CACHED) results.delete(results.keys().next().value!);
+    } else if (!background && queuedBehind.has(key)) {
+      const promote = queuedBehind.get(key)!;
+      queuedBehind.delete(key);
+      void worker?.then((w) => w.postMessage({ promote }), () => {});
     }
     if (!signal) return found;
     return new Promise<SemDiffAttempt>((resolve) => {

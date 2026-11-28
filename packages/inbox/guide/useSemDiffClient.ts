@@ -22,7 +22,7 @@ export function useSemDiffClient(): SemDiffClient | null {
   const raw = latched.current?.value ?? null;
   const advert = useMemo(() => parseSemDiffAdvert(raw), [raw]);
   const client = useMemo(
-    () => (advert && enabled && asked ? createSemDiffClient({ advert, origin: window.location.origin, createWorker: loadSemDiffWorker }) : null),
+    () => (advert && enabled && asked ? createSemDiffClient({ advert, origin: window.location.origin, createWorker: loadSemDiffWorker, pooled: true }) : null),
     [advert, enabled, asked],
   );
   useEffect(() => () => client?.dispose(), [client]);
