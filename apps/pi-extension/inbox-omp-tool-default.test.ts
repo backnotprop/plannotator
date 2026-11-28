@@ -144,4 +144,14 @@ describe("the Inbox tool's default in Oh My Pi", () => {
 		expect(fromEnv.tools).toEqual([]);
 		expect(env.polls).toEqual([]);
 	});
+
+	test("OMP's default never turns the Inbox on: with the Inbox off here (turned-on.ts), no tool and nothing polls", async () => {
+		const { polls } = fakeInbox();
+		// The mark the gate reads, saying off (packages/shared/inbox/turned-on.ts).
+		writeFileSync(join(process.env.PLANNOTATOR_DATA_DIR!, "inbox", "turned-on"), JSON.stringify({ on: false }));
+		const host = await load(true);
+		await Bun.sleep(300);
+		expect(host.tools).toEqual([]);
+		expect(polls).toEqual([]);
+	});
 });
