@@ -114,6 +114,8 @@ export interface FullScreenReply {
   conflict: boolean;
   /** The thread's error after a refused Send (the thread's own line announces it). */
   error: string | null;
+  /** In `error`'s place, a write held for the thread's linked computer: a status (FootLine.tsx HeldLine), never red. */
+  held?: ReactNode;
   /** When a Send from here last went (the card says so for a moment). */
   sentAt: number | null;
   /** The thread's reply box, on the device's own route back to the thread. */
@@ -722,6 +724,7 @@ export function FullScreenComposer({
           {reply.errorActions}
         </p>
       )}
+      {mode === 'reply' && !reply.error && reply.held}
       {/* Off its home, the card's corners resize it (composerDrag.ts). No mark at rest: the cursor, and a faint arc under the pointer. Pointer only. */}
       {resizable && CORNERS.map((which) => <span key={which} className="ib-fcomp-corner" aria-hidden="true" {...corner(which)} />)}
       {drop.over && (

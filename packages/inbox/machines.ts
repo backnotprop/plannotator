@@ -242,6 +242,18 @@ export function threadOutbox(entries: ReadonlyMap<string, OutboxView>, thread: {
     .sort((a, b) => a.queued_at.localeCompare(b.queued_at));
 }
 
+/** When each whole read of the outbox (the window's re-read: every waiting entry and every notice) was asked for. */
+const outboxReads = new WeakMap<ReadonlyMap<string, OutboxView>, number>();
+/** Marks `read` as the whole outbox, as asked for at `asked` (performance.now()); returns it. */
+export function outboxRead<M extends ReadonlyMap<string, OutboxView>>(read: M, asked: number): M {
+  outboxReads.set(read, asked);
+  return read;
+}
+/** When the whole read `entries` was asked for; null for one an `outbox` frame changed since. */
+export function outboxReadAskedAt(entries: ReadonlyMap<string, OutboxView>): number | null {
+  return outboxReads.get(entries) ?? null;
+}
+
 /** Still on its way: never "delivered" before the other machine's Inbox answered (rule 12). */
 export function outboxPending(entry: Pick<OutboxView, 'state'>): boolean {
   return entry.state === 'queued' || entry.state === 'sending';

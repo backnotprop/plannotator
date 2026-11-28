@@ -1592,6 +1592,9 @@ button.ib-band:is(:hover, [data-menu]) { background: var(--ib-band-hover-s, var(
 /* A phone's Edit draft (approval "reply-bar-pairs"): "✎ Draft 2", the count quieter than the word. */
 .ib-draft-n { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--muted-foreground); }
 .ib-error[data-foot-error="above"], .ib-delivered[data-foot-held="above"] { margin: 0 0 8px; }
+/* A held write on the foot's line (FootLine.tsx) sits where the error line would: 8px off the box, under full screen's composer as its error does. */
+.ib-delivered[data-foot-held="below"] { margin-top: 8px; }
+.ib-delivered[data-foot-held="card"] { margin: 0 12px 10px; }
 .ib-reply-l { font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); margin-bottom: 6px; }
 .ib-rbox { border: 1px solid color-mix(in oklch, var(--primary) 60%, transparent); box-shadow: 0 0 0 3px color-mix(in oklch, var(--primary) 14%, transparent); border-radius: 8px; background: var(--card); margin-bottom: 10px; }
 .ib-rtext, .ib-rmirror { display: block; width: 100%; padding: 10px 12px 6px; font: inherit; font-size: var(--ib-fs-14, 14px); line-height: 1.55; min-height: 52px; max-height: min(240px, 30vh); border: 0; outline: none; resize: none; field-sizing: content; background: transparent; color: var(--foreground); }

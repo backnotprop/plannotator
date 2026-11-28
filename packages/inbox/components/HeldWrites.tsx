@@ -41,11 +41,11 @@ export function HeldWrites({ entries, machine, onDismiss }: { entries: readonly 
 /**
  * A held write's state line, as the thread draws it under a held reply: "Sending to Laptop…" while that machine is
  * online, "Will send when Laptop is back" while it is away (outboxLine). Also what a review shows for a Viewed tick
- * held for its machine, so the tick reads as on its way rather than landed.
+ * held for its machine, so the tick reads as on its way rather than landed. `foot`: the thread's foot line (FootLine.tsx).
  */
-export function OutboxStateLine({ line, machine, onDismiss }: { line: NonNullable<ReturnType<typeof outboxLine>>; machine: Pick<MachineView, 'state'> | null; onDismiss?: () => void }) {
+export function OutboxStateLine({ line, machine, onDismiss, foot }: { line: NonNullable<ReturnType<typeof outboxLine>>; machine: Pick<MachineView, 'state'> | null; onDismiss?: () => void; foot?: 'above' | 'below' | 'card' }) {
   return (
-    <div className="ib-delivered" data-delivery={line.tone === 'failed' ? 'undelivered' : 'queued'} data-outbox-line="">
+    <div className="ib-delivered" data-delivery={line.tone === 'failed' ? 'undelivered' : 'queued'} data-outbox-line="" data-foot-held={foot}>
       <span className="ib-dl-main">
         <Icon name={line.tone === 'failed' ? 'warn' : machine?.state === 'online' ? 'send' : 'clock'} size={14} />
         <span className="ib-dl-text">{line.text}</span>

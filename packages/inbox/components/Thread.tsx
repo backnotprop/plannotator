@@ -21,7 +21,7 @@ import { createHeldPicks, heldPickLostWords } from '../heldPicks';
 import { ThreadSessions } from './ThreadSessions';
 import { snoozeBackAbove } from '../snoozeBack';
 import { HeldWrites } from './HeldWrites';
-import { FootLine, useFootHeld } from './FootLine';
+import { FootLine, HeldLine, useFootHeld } from './FootLine';
 import { annotationOf, attachmentFeedback, attachmentImageUrl, isFileComment, OWN_MESSAGE_COMMENT_ROW, readableVersion } from '../attachments';
 import { withPictures } from '../commentPictureFiles';
 import { CommentPictures } from '../commentPictures';
@@ -2340,7 +2340,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const [heldPicks] = useState(() => createHeldPicks(revisions.current));
   const outboxNow = useRef(outbox);
   outboxNow.current = outbox;
-  const footHeld = useFootHeld(outboxAll, machine, setError); // a comment held for that machine: a status on the foot's line
+  const footHeld = useFootHeld({ entries: outboxAll, shown: outbox, machine, thread: thread.thread_id, setLine: setError }); // a comment held for that machine: a status on the foot's line
   const machineNow = useRef(machine);
   machineNow.current = machine;
   const onToastNow = useRef(onToast);
@@ -3897,7 +3897,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             openQuestions: unanswered.length,
             openActions: openActions.length,
             conflict: replyDraft.conflict !== null,
-            error: lineError,
+            error: footHeld.isHeld(error) ? null : lineError, held: footHeld.isHeld(error) && error ? <HeldLine text={error} machine={machine} at="card" /> : null,
             errorActions: error ? undefined : lateMissActions,
             sentAt: composerSentAt,
             onOpenThread: replyInThread,
@@ -3908,8 +3908,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       : null;
   const errorMore = error !== null && errorDetails?.for === error ? errorDetails.text : null;
   const errorUpdateFor = error !== null && errorUpdate?.for === error && onMachineUpdate ? errorUpdate.machine : null;
-  const errorUp = errorUpdateFor === null ? null : { machine: errorUpdateFor, onPress: () => onMachineUpdate?.(errorUpdateFor) };
-  const errorLine = <FootLine line={lineError} held={footHeld.isHeld(error)} above={errorAbove} update={errorUp} details={errorMore} extra={!error && lateMissActions} />;
+  const errorLine = <FootLine line={lineError} held={footHeld.isHeld(error)} machine={machine} above={errorAbove} updateFor={errorUpdateFor} onUpdate={onMachineUpdate} details={errorMore} extra={!error && lateMissActions} />;
   // What describes Send and Edit draft in the closed foot: the draft note (drawn at the row's end on a computer, hidden
   // text on a phone) and what this Send does with the unanswered questions (hidden text; the list shows it).
   const draftNoteId = `ib-foot-draft-${thread.thread_id}`;
@@ -5287,6 +5286,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         <SendingReply sends={sendsDrawn} held={outbox} machine={machine} />
         {showNew && !phone && newPill}
         <div className="ib-sr" aria-live="polite" data-fold-live="">{announced}</div>
+        {footHeld.live(error)}
         {/* The room a step of the middle fold borrows (roomRef, shrinkRoom). */}
         <div className="ib-fold-room" ref={roomRef} aria-hidden="true" data-fold-room="" />
       </div>
