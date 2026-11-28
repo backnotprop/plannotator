@@ -286,7 +286,7 @@ test('a words-only reply left as it is: the questions stay open, and the agent g
   await expect(pane.getByText(/^Skipped · \d{1,2}:\d{2} [AP]M$/)).toHaveCount(0);
   await shot('04c-words-only-keeps-open');
   expect((await agents.codex.nextReply(threadId, 5)).body).toBe(
-    "Received, I'll answer these after lunch.\n\nNo questions answered yet; all 3 are still open. Don't re-ask them; the person will answer in the Inbox.",
+    "Received, I'll answer these after lunch.\n\nNo questions answered yet; all 3 are still open. Don't re-ask them; the person will answer in the Inbox. If their words answer one, name it in answered_in_reply.",
   );
   type Model = { thread: { messages: { questions?: { state: string }[] }[] } };
   const model = (await (await fetch(new URL(`/api/inbox/threads/${threadId}`, world.url))).json()) as Model;

@@ -155,7 +155,7 @@ describe("Done and Can't do it", () => {
     expect(() => store.sendReply(asked.id, { idempotency_key: "k1", words: "", skip: [action.key] })).toThrow(/is an action item/);
     expect(() => store.markAction(asked.id, question.key, { outcome: "done" })).toThrow(/is a question/);
     const { reply } = store.sendReply(asked.id, { idempotency_key: "k2", words: "Looking now." });
-    expect(reply.body).toBe("Looking now.\n\nNo question answered yet; it is still open. Don't re-ask it; the person will answer in the Inbox.");
+    expect(reply.body).toBe("Looking now.\n\nNo question answered yet; it is still open. Don't re-ask it; the person will answer in the Inbox. If their words answer it, name it in answered_in_reply.");
     expect(actionOf(store, asked.id).state).toBe("open");
   });
 });

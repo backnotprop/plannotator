@@ -98,7 +98,7 @@ describe('a thread posted to the forge', () => {
 
   test("a reply to an agent's open question is posted as the person's words, never the Inbox's sentence for the agent", async () => {
     const { forgeCommentsOf } = await import('./model');
-    const stillOpen = "No question answered yet; it is still open. Don't re-ask it; the person will answer in the Inbox.";
+    const stillOpen = "No question answered yet; it is still open. Don't re-ask it; the person will answer in the Inbox. If their words answer it, name it in answered_in_reply.";
     const anchor = anchorOfComment({ filePath: 'src/billing.ts', lineStart: 4, lineEnd: 5, side: 'new' }, files);
     const placed = placeThreads(
       [
@@ -139,7 +139,7 @@ describe('a review with many threads', () => {
 
 describe('a comment taken back', () => {
   test('comes back as the words the person wrote, never the still-open sentence the Inbox wrote after them for the agent', () => {
-    const stillOpen = "No question answered yet; it is still open. Don't re-ask it; the person will answer in the Inbox.";
+    const stillOpen = "No question answered yet; it is still open. Don't re-ask it; the person will answer in the Inbox. If their words answer it, name it in answered_in_reply.";
     const anchor = { file: 'src/billing.ts', side: 'new', line_start: 4, line_end: 5 } as InboxMessage['review_anchor'];
     expect(commentOfMessage(msg({ body: `Use a RangeError here.\n\n${stillOpen}`, review_anchor: anchor }))?.text).toBe('Use a RangeError here.');
   });

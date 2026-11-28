@@ -154,7 +154,7 @@ describe.skipIf(process.platform === "win32")("OpenCode 2's Inbox wake on a host
     expect(delivered.sessionID).toBe(sessionID);
     expect(delivered.text).toContain("Retry with the same key.");
     // The details line names the thread; the closing line ends it.
-    expect(delivered.text).toContain(`\n[Thread ${structured.thread_id}: 2 messages, 1 question open, don't re-ask it. Your last message was just now]\n`);
+    expect(delivered.text).toContain(`\n[Thread ${structured.thread_id}: 2 messages, 1 question open, don't re-ask it; if the reply answers it, use answered_in_reply. Your last message was just now]\n`);
     expect(delivered.text.endsWith(`\n\n${INBOX_WAKE_CLOSING_LINE}`)).toBe(true);
     expect(events.aborted).toBe(0);
     w.proof(`delivered through the events alone:\n${delivered.text}`);

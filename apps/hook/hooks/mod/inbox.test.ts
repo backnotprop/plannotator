@@ -309,7 +309,7 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     const reply = (await thread(w, asked.thread_id)).messages.find((m) => m.id === replyId)!
     expect(withoutContext(text)).toBe(inboxWakeText({ id: replyId, thread_id: asked.thread_id, subject: null, body: bodyInWake(reply.body) }))
     // The details line names the thread; the closing line ends the wake.
-    expect(lines[2]).toBe(`[Thread ${asked.thread_id}: 2 messages, 1 question open, don't re-ask it. Your last message was just now]`)
+    expect(lines[2]).toBe(`[Thread ${asked.thread_id}: 2 messages, 1 question open, don't re-ask it; if the reply answers it, use answered_in_reply. Your last message was just now]`)
     expect(lines.at(-1)).toBe(INBOX_WAKE_CLOSING_LINE)
     // The body sits whole above the closing line, after the first lines.
     expect(text.endsWith(`\n\n${bodyInWake(reply.body)}\n\n${lines.at(-1)}`)).toBe(true)
@@ -599,7 +599,7 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     await waitFor('the wake turn', () => session.turns.find((t) => t.text.includes(replyId)))
     await Bun.sleep(3_000)
     expect(session.host.submits).toHaveLength(1)
-    expect(session.host.submits[0]!.split('\n')[2]).toBe(`[Thread ${update.thread_id}: 3 messages, 1 question open, don't re-ask it. Your last message was just now]`)
+    expect(session.host.submits[0]!.split('\n')[2]).toBe(`[Thread ${update.thread_id}: 3 messages, 1 question open, don't re-ask it; if the reply answers it, use answered_in_reply. Your last message was just now]`)
   }, 120_000)
 
   test('New message: the polls make both sessions of the project live (the writer first); the message reaches the picked session once, as a turn; a gone session is refused', async () => {

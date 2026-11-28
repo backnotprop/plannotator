@@ -40,7 +40,7 @@ test("the approved words, whole, on the owner's three examples", () => {
   );
   expect(INBOX_WAKE_CLOSING_LINE).toBe("[for context: read_thread (opt: set limit) or search · help: plannotator inbox --help]");
   const details = (c: Record<string, unknown>) => wake({ context: c }).split("\n")[2];
-  expect(details({ messages: 14, open_questions: 1, open_actions: 0, last_agent_at: before(MINUTE) })).toBe("[Thread msg_01THREAD: 14 messages, 1 question open, don't re-ask it. Your last message was a minute ago]");
+  expect(details({ messages: 14, open_questions: 1, open_actions: 0, last_agent_at: before(MINUTE) })).toBe("[Thread msg_01THREAD: 14 messages, 1 question open, don't re-ask it; if the reply answers it, use answered_in_reply. Your last message was a minute ago]");
   expect(details({ messages: 20, open_questions: 0, open_actions: 0, last_agent_at: before(11 * HOUR) })).toBe("[Thread msg_01THREAD: 20 messages, nothing open. Your last message was 11 hours ago]");
   expect(details({ messages: 8, open_questions: 0, open_actions: 1, last_agent_at: before(MINUTE) })).toBe("[Thread msg_01THREAD: 8 messages, 1 action item open. Your last message was a minute ago]");
 });
@@ -84,9 +84,9 @@ test("a command the Inbox did not shape prints no details, only the thread id: a
 test("the details line says what is open, in the singular and the plural, with don't re-ask only about questions", () => {
   const details = (q: number, a: number) => wake({ context: context({ open_questions: q, open_actions: a }) }).split("\n")[2];
   expect(details(0, 0)).toContain(", nothing open]");
-  expect(details(2, 0)).toContain(", 2 questions open, don't re-ask them]");
+  expect(details(2, 0)).toContain(", 2 questions open, don't re-ask them; if the reply answers one, use answered_in_reply]");
   expect(details(0, 2)).toContain(", 2 action items open]");
-  expect(details(1, 2)).toContain(", 1 question open, don't re-ask it, 2 action items open]");
+  expect(details(1, 2)).toContain(", 1 question open, don't re-ask it; if the reply answers it, use answered_in_reply, 2 action items open]");
   expect(details(0, 2)).not.toContain("re-ask");
   expect(wake({ context: context({ messages: 1 }) })).toContain(": 1 message, ");
 });
@@ -160,7 +160,7 @@ test("a line a host will hold drops nothing open and nothing else", () => {
   const line = (c: Record<string, unknown>) => inboxWakeDetailsLine("msg_01THREAD", context(c), { now: NOW, queued: true });
   expect(line({ open_questions: 0, open_actions: 0 })).toBe("[Thread msg_01THREAD: 14 messages]");
   expect(line({ open_questions: 0, open_actions: 0, last_agent_at: before(HOUR) })).toBe("[Thread msg_01THREAD: 14 messages. Your last message was an hour ago]");
-  expect(line({ open_questions: 1, open_actions: 0 })).toBe("[Thread msg_01THREAD: 14 messages, 1 question open, don't re-ask it]");
+  expect(line({ open_questions: 1, open_actions: 0 })).toBe("[Thread msg_01THREAD: 14 messages, 1 question open, don't re-ask it; if the reply answers it, use answered_in_reply]");
   expect(line({ open_questions: 0, open_actions: 2 })).toBe("[Thread msg_01THREAD: 14 messages, 2 action items open]");
 });
 
