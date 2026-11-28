@@ -167,7 +167,10 @@ export function readRoute(): Route {
   return routeOf(window.location.hash);
 }
 
-/** The keys whose value is an id the window looks up: an Inbox or plan id, or a pull request's key. */
+/**
+ * The keys whose value is an id the window looks up: an Inbox or plan id, or a pull request's key. `file` is an
+ * attachment id in a thread but an artifact's path in a plan (`#plans=…&file=<path>`), so a plan's is left alone.
+ */
 const ROUTE_ID_KEYS = ['thread', 'msg', 'file', 'guide', 'card', 'project', 'machine', 'initiative', 'board-project', 'board-initiative', 'in', 'plans', 'doc', 'routine', 'stack', 'layer', 'back', 'system', 'local'];
 
 /**
@@ -176,6 +179,7 @@ const ROUTE_ID_KEYS = ['thread', 'msg', 'file', 'guide', 'card', 'project', 'mac
  */
 function withoutLinkTails(params: URLSearchParams): URLSearchParams {
   for (const key of ROUTE_ID_KEYS) {
+    if (key === 'file' && params.has('plans')) continue;
     const value = params.get(key);
     if (value === null) continue;
     const id = routeIdWithoutLinkTail(value);

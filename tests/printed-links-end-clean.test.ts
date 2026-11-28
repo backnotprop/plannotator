@@ -4,8 +4,9 @@
  * `(thread msg_…, http://localhost:59812/#thread=msg_…).`, and a click opened `…#thread=msg_…).`, a thread that
  * does not exist. Covered: the Inbox's send_message and submit_guide answers, thread_pulls' ship log answer, the PR
  * list change line, the prototype refusals and the not-framed note, the live-URL and `--app` errors, the Tailscale
- * setup hints, the Inbox install line, an agent's docs-only launch message, the plan-waiting deny text and
- * `plannotator guide --help`; and every Inbox tool the server registers, asked about a thread and about nothing.
+ * setup hints, the Inbox install line, an agent's docs-only launch message, the plan-waiting deny text,
+ * `plannotator guide --help` and the person's PR verdict reply that reaches the agent; and every Inbox tool the
+ * server registers, asked about a thread and about nothing.
  * Other printed lines are not checked here.
  * The texts come from their real builders (a real store on a temp folder and the tools' own handlers, no Inbox
  * server), each with a link in it, so a reworded line that puts punctuation back after its link fails here.
@@ -28,6 +29,7 @@ import { explainTailscaleSetup } from "../packages/shared/tailscale";
 import { INBOX_INSTALL_TEXT } from "../packages/shared/inbox/agent-link";
 import { resolveAgentLaunch, KNOWN_AGENTS } from "../packages/acp-client/agents";
 import { waitingDenyText } from "../apps/hook/hooks/mod/plan";
+import { pullVerdictReply } from "../packages/inbox/pulls/model";
 import { linksNotEndingClean } from "./helpers/printed-links";
 
 const roots: string[] = [];
@@ -138,6 +140,16 @@ async function printedTexts(): Promise<[string, string][]> {
   expect(docsOnly.length).toBeGreaterThan(0);
   for (const [agent, launch] of docsOnly) if (!launch.ok) texts.push([`resolveAgentLaunch(${agent.label})`, launch.message]);
   texts.push(["waitingDenyText", waitingDenyText(2, `${BASE}#plan=1`)]);
+  // The person's verdict on a PR, as the reply the agent reads: approved or not, with comments or none, a layer or a stack.
+  const pull = { platform: "github", number: 412, title: "Retry failed payouts", url: "https://github.com/acme/api/pull/412" } as const;
+  for (const verdict of ["approved", "changes_requested"] as const) {
+    for (const scope of ["layer", "stack"] as const) {
+      for (const comments of [0, 1]) {
+        const reply = pullVerdictReply(verdict, { pull, scope, base: "main" }, comments, comments ? "## src/a.ts\n\nLine 3: tighten." : "");
+        texts.push([`pullVerdictReply(${verdict}, ${scope}, ${comments})`, [reply.words, reply.feedback ?? ""].join("\n\n")]);
+      }
+    }
+  }
   return texts;
 }
 

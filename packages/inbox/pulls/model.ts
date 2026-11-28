@@ -18,6 +18,7 @@ import {
   type InboxPullStack,
 } from '@plannotator/core/inbox-types';
 import { openLayers } from '@plannotator/core/inbox-pull-handoff';
+import { linkEnd } from '@plannotator/core';
 import { agentName } from '../tags';
 import { startLayer } from './topology';
 import { person, possessiveTail, wordsText, type Words } from './words';
@@ -266,12 +267,15 @@ function pullNoun(pull: Pick<InboxPull, 'platform' | 'number'>): string {
   return `${pull.platform === 'gitlab' ? 'merge request' : 'pull request'} ${inboxPullLabel(pull)}`;
 }
 
-/** The review's subject in the reply: one line, the title cut to 120 characters. */
+/**
+ * The review's subject in the reply: one line, the title cut to 120 characters. It ends with the PR's link, which
+ * `linkEnd` keeps apart from a comma or full stop after it: a terminal links up to the next space.
+ */
 function pullSubject(target: PullReviewTarget): string {
   const title = target.pull.title.replace(/\s+/g, ' ').trim();
   const cut = title.length > 120 ? `${title.slice(0, 119)}…` : title;
   const what = target.scope === 'stack' ? `the stack from ${target.base} up to ${pullNoun(target.pull)}` : pullNoun(target.pull);
-  return `${what} "${cut}" (${target.pull.url})`;
+  return `${what} "${cut}" at ${target.pull.url}`;
 }
 
 /**
@@ -304,15 +308,15 @@ export function pullVerdictReply(
   const lead =
     verdict === 'approved'
       ? comments > 0
-        ? `I approved ${subject}, with ${count} below. Nothing in them blocks it.`
-        : `I approved ${subject}.`
+        ? `I approved ${linkEnd(subject)}, with ${count} below. Nothing in them blocks it.`
+        : `I approved ${linkEnd(subject)}.`
       : comments > 0
         ? `I reviewed ${subject} and I am asking for changes: ${comments === 1 ? 'my comment is' : `my ${comments} comments are`} below.`
         : `I reviewed ${subject} and I am asking for changes.`;
   const words = [lead, note?.trim() ?? ''].filter((part) => part !== '').join('\n\n');
   if (comments === 0) return skills ? { words, feedback: skills } : { words };
   const noun = pullNoun(target.pull);
-  const feedback = `# Feedback on ${noun}\n\nThe following comments are on the diff of ${subject}, one section per file. Line numbers are the file's own: (new) the changed file, (old) the original.\n\n${sections}`.trim();
+  const feedback = `# Feedback on ${noun}\n\nThe following comments are on the diff of ${linkEnd(subject)}, one section per file. Line numbers are the file's own: (new) the changed file, (old) the original.\n\n${sections}`.trim();
   return { words, feedback: skills ? `${feedback}\n\n${skills}` : feedback };
 }
 

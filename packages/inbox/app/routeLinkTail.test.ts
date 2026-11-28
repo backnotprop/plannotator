@@ -32,4 +32,11 @@ describe('an id with the punctuation after its link', () => {
     expect(routeOf('#tag=release.').tag).toBe('release.');
     expect(routeOf('#thread=the layoffs.').thread).toBe('the layoffs.');
   });
+
+  test("a plan's artifact path keeps every character; an Inbox file id still loses the tail", () => {
+    for (const file of ['notes/bug#12.', 'notes/bug#12)', 'notes/bug#12).', 'report.']) {
+      expect(routeOf(`#plans=pln_01M7VKGWJTN05MAA6M48FV0HY3&file=${encodeURIComponent(file)}`).planFile).toBe(file);
+    }
+    expect(routeOf(`#thread=${THREAD}&file=${FILE}).`).file?.id).toBe(FILE);
+  });
 });

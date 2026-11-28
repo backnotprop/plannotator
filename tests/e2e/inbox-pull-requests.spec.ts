@@ -1563,7 +1563,7 @@ test('Review layer by layer: the layer\'s own diff, Next layer, Whole stack from
   await expect(review).toHaveCount(0);
   await expect(page.locator('[data-pulls-stack]')).toBeVisible();
   const verdict = await claude.nextReply(world.threads.stack);
-  expect(String(verdict.body)).toBe('I approved pull request #413 "Jitter on the retry backoff" (https://github.com/northwind/billing-svc/pull/413).');
+  expect(String(verdict.body)).toBe('I approved pull request #413 "Jitter on the retry backoff" at https://github.com/northwind/billing-svc/pull/413 .');
   verdictId = String(verdict.id);
 });
 
