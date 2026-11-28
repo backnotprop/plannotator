@@ -2101,7 +2101,8 @@ ${SANDBOX_SHIM_SCRIPT}
       if (typeof s.isConnected === 'boolean' && !s.isConnected) return false;
       if (typeof e.isConnected === 'boolean' && !e.isConnected) return false;
       // A page that detaches and re-attaches the node (virtualized lists, e.g. Feishu docs) collapses the
-      // live Range onto the still-connected parent: connected but empty, so treat it as dead to re-search by text.
+      // live Range onto the still-connected parent: connected but empty, so treat it as dead
+      // (refreshRecordTargets decides whether it comes back).
       if (range.collapsed) return false;
       return true;
     } catch (ex) {
@@ -2111,28 +2112,20 @@ ${SANDBOX_SHIM_SCRIPT}
 
   // Resolve one contiguous document Range for the first occurrence of text.
   // Overlay-owned text (labels, vim chrome) is skipped by IDENTITY so viewer
-  // chrome can never satisfy a page-text search. With at, only an occurrence
-  // starting at that offset of root's text counts (root may be a text node).
-  function findTextRange(text, root, at) {
+  // chrome can never satisfy a page-text search.
+  function findTextRange(text, root) {
     var scope = root || document.body;
     if (!text || !scope) return null;
+    var walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT, null);
     var buffer = '';
     var nodes = [];
-    if (scope.nodeType === 3) {
-      nodes.push({ node: scope, start: 0 });
-      buffer = scope.data;
-    } else {
-      var walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT, null);
-      while (walker.nextNode()) {
-        var current = walker.currentNode;
-        if (current.parentElement && isViewerOverlayNode(current.parentElement)) continue;
-        nodes.push({ node: current, start: buffer.length });
-        buffer += current.textContent;
-      }
+    while (walker.nextNode()) {
+      var current = walker.currentNode;
+      if (current.parentElement && isViewerOverlayNode(current.parentElement)) continue;
+      nodes.push({ node: current, start: buffer.length });
+      buffer += current.textContent;
     }
-    var idx = typeof at === 'number'
-      ? (buffer.substr(at, text.length) === text ? at : -1)
-      : buffer.indexOf(text);
+    var idx = buffer.indexOf(text);
     if (idx === -1) return null;
     var endIdx = idx + text.length;
     var startEntry = null;
@@ -2149,73 +2142,6 @@ ${SANDBOX_SHIM_SCRIPT}
       range.setStart(startEntry.node, idx - startEntry.start);
       range.setEnd(endEntry.node, endIdx - endEntry.start);
       return range;
-    } catch (ex) {
-      return null;
-    }
-  }
-
-  // A live Range the page collapsed marks the place its text was. Removing the
-  // node it covered (a virtualized row scrolled away) moves both ends to that
-  // place in the parent, and the DOM keeps the point there as siblings come and
-  // go; rewriting the text node's data collapses it inside that node. Two rows
-  // can share the quoted words, so the text is looked for only where it was:
-  // the same node coming back there (same name, same text), nearest the point,
-  // at the same offset. Never the bare quote elsewhere: a highlight moved onto
-  // the other row would point at words the person did not comment on. The
-  // text node itself back in the page (a recycled row) is the first place.
-  // Called on the pass that finds the Range dead, with home/homeOffset from
-  // the last pass it was alive (refreshRecordTargets).
-  function lostPlaceOf(target) {
-    var point = target.range;
-    var home = target.home;
-    if (!point || !point.collapsed || !home || home.nodeType !== 3) return null;
-    try {
-      var lost = { point: point, home: home, homeOffset: target.homeOffset, name: '', text: '', offset: 0 };
-      if (point.startContainer === home || home.isConnected) return lost;
-      if (!point.startContainer.isConnected) return null;
-      var removed = home;
-      while (removed.parentNode && removed.parentNode.nodeType === 1) removed = removed.parentNode;
-      var offset = target.homeOffset;
-      if (removed !== home) {
-        var walker = document.createTreeWalker(removed, NodeFilter.SHOW_TEXT, null);
-        while (walker.nextNode() && walker.currentNode !== home) offset += walker.currentNode.length;
-        if (walker.currentNode !== home) return null;
-      }
-      lost.name = removed.nodeName;
-      lost.text = removed.textContent;
-      lost.offset = offset;
-      return lost;
-    } catch (ex) {
-      return null;
-    }
-  }
-
-  // Whether the place a lost Range marked is still in the page; once it is not,
-  // the target falls back to the restore ladder's search.
-  function lostPlaceConnected(lost) {
-    return lost.home.isConnected || (!!lost.name && lost.point.startContainer.isConnected);
-  }
-
-  function findAtLostPlace(text, lost) {
-    if (lost.home.isConnected) return findTextRange(text, lost.home, lost.homeOffset);
-    if (!lost.name) return null;
-    try {
-      var walker = document.createTreeWalker(
-        lost.point.startContainer,
-        lost.name === '#text' ? NodeFilter.SHOW_TEXT : NodeFilter.SHOW_ELEMENT,
-        null
-      );
-      var before = null;
-      var after = null;
-      while (walker.nextNode()) {
-        var node = walker.currentNode;
-        if (node.nodeName !== lost.name || node.textContent !== lost.text) continue;
-        // A node inserted at the point lands just after it.
-        if (lost.point.comparePoint(node, 0) < 0) before = node;
-        else { after = node; break; }
-      }
-      var back = after || before;
-      return back ? findTextRange(text, back, lost.offset) : null;
     } catch (ex) {
       return null;
     }
@@ -2392,14 +2318,89 @@ ${SANDBOX_SHIM_SCRIPT}
     }
   }
 
+  // A text highlight that was in place and is then lost (the page removed its
+  // text node, which collapses the live Range onto the parent, or rewrote the
+  // node's data, which collapses it inside the node) comes back ONLY by
+  // identity: the very same text nodes, connected again and holding exactly
+  // the text they held while it was in place, get the very same offsets back.
+  // That covers pages that detach and re-attach the same nodes (keyed
+  // reordering, a moved subtree, show/hide by removal). Its words found
+  // anywhere else never re-anchor it: two rows can share them, and a
+  // highlight on the other row would point at words the person did not
+  // comment on. It stays unanchored and is reported so until a reload
+  // restores it from its stored text. While in place each pass notes where
+  // it is (notePlace); while lost each pass costs two isConnected reads and
+  // two string compares (rangeAtPlace). After LOST_PLACE_KEEP_MS lost, the
+  // node references are dropped so nodes the page threw away are not kept
+  // alive, and the target stays unanchored.
+  var LOST_PLACE_KEEP_MS = 300000;
+
+  function notePlace(target) {
+    var place = target.place || (target.place = {
+      startNode: null, startOffset: 0, startText: '', endNode: null, endOffset: 0, endText: '', lostSince: -1
+    });
+    place.lostSince = -1;
+    place.startNode = null;
+    place.endNode = null;
+    try {
+      var range = target.range;
+      var s = range.startContainer;
+      var e = range.endContainer;
+      // A boundary outside a text node has no text to confirm it by: once
+      // lost, such a highlight stays unanchored.
+      if (s.nodeType !== 3 || e.nodeType !== 3) return;
+      place.startOffset = range.startOffset;
+      place.endOffset = range.endOffset;
+      place.startText = s.data;
+      place.endText = e.data;
+      place.startNode = s;
+      place.endNode = e;
+    } catch (ex) {}
+  }
+
+  function rangeAtPlace(place) {
+    var now = monotonicNow();
+    if (place.lostSince < 0) place.lostSince = now;
+    if (now - place.lostSince > LOST_PLACE_KEEP_MS) {
+      place.startNode = null;
+      place.endNode = null;
+      place.startText = '';
+      place.endText = '';
+    }
+    var s = place.startNode;
+    var e = place.endNode;
+    if (!s || !e) return null;
+    try {
+      if (!s.isConnected || !e.isConnected || s.data !== place.startText || e.data !== place.endText) return null;
+      var range = document.createRange();
+      range.setStart(s, place.startOffset);
+      range.setEnd(e, place.endOffset);
+      place.lostSince = -1;
+      return range;
+    } catch (ex) {
+      return null;
+    }
+  }
+
+  function rangeCollapsed(range) {
+    try {
+      return range.collapsed === true;
+    } catch (ex) {
+      return false;
+    }
+  }
+
   // Re-resolve stale live targets from durable data. Element targets
   // re-acquire through their anchor; range targets re-run the text search
-  // (anchor-scoped first). Unresolvable targets stay hidden — never guessed
+  // (anchor-scoped first), except a highlight of a record without an anchor
+  // that was in place and got lost: that one comes back only by identity
+  // (rangeAtPlace). Unresolvable targets stay hidden — never guessed
   // — and each failed search is gated by the generation of its last attempt
   // PLUS the wall-clock backoff and per-pass budget above, so they retry
   // only after the document could actually have changed, and never per
   // frame.
   function refreshRecordTargets(record) {
+    var anchored = !!(record.params && record.params.anchor);
     for (var i = 0; i < record.targets.length; i++) {
       var target = record.targets[i];
       if (target.kind === 'element') {
@@ -2409,30 +2410,24 @@ ${SANDBOX_SHIM_SCRIPT}
           noteDeadSearchResult(target, !!target.element);
         }
       } else if (!rangeAlive(target.range)) {
-        if (target.range) {
-          target.lost = lostPlaceOf(target);
-          target.home = null;
-        }
+        // Only a collapse is the loss rangeAtPlace handles. A Range whose nodes
+        // left the document without collapsing (text in a shadow root whose
+        // host was removed) keeps the search below, as before.
+        if (target.place && target.range && !rangeCollapsed(target.range)) target.place = null;
         target.range = null;
-        if (target.text) {
+        if (target.place && !anchored) {
+          target.range = rangeAtPlace(target.place);
+        } else if (target.text) {
           if (!deadSearchAllowed(target)) continue;
-          if (target.lost && !lostPlaceConnected(target.lost)) target.lost = null;
-          if (target.lost) {
-            target.range = findAtLostPlace(target.text, target.lost);
-          } else {
-            var scopeEl = record.params && record.params.anchor
-              ? resolveAnchorElement(record.params.anchor)
-              : null;
-            target.range = (scopeEl && findTextRange(target.text, scopeEl))
-              || findTextRange(target.text, null);
-          }
-          if (target.range) target.lost = null;
+          var scopeEl = record.params && record.params.anchor
+            ? resolveAnchorElement(record.params.anchor)
+            : null;
+          target.range = (scopeEl && findTextRange(target.text, scopeEl))
+            || findTextRange(target.text, null);
           noteDeadSearchResult(target, !!target.range);
         }
-      } else {
-        // Where the text is, for the pass that finds this Range collapsed.
-        target.home = target.range.startContainer;
-        target.homeOffset = target.range.startOffset;
+      } else if (!anchored) {
+        notePlace(target);
       }
     }
   }

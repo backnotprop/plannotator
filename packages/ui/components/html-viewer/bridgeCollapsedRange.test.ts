@@ -1,12 +1,19 @@
 /**
- * A text highlight on a page that unmounts what scrolls away (virtualized docs) comes back when the text does.
+ * A text highlight whose text the page takes out of the DOM: it comes back only on the very same text, never on
+ * lookalike words, and is reported unanchored while it cannot.
  *
  * Evaluates the SHIPPED bridge functions out of the bridge's string against a live document. When a page removes
- * the node a live Range covers, the DOM moves both ends of the Range onto the still-connected parent: the Range is
- * connected but collapsed. What would regress: that collapsed Range counted as alive, so the highlight stays empty
- * after the text is mounted again and the text search never runs; or the search taking the first occurrence of the
- * quoted words, so a highlight in one row moves onto another row that shares them, while its row is away or after it
- * comes back.
+ * the text node a live Range covers, or rewrites the node's data, the DOM moves the Range's ends and it collapses.
+ * What would regress: that collapsed Range counted as alive (the highlight silently paints nothing and is never
+ * reported); or the highlight re-anchored by searching for its words, which puts it on text the person did not
+ * highlight (another row that shares them); or detached nodes kept alive for good.
+ *
+ * happy-dom does NOT move live Range boundary points when the DOM changes (it leaves the Range on the detached
+ * node). Browsers do, per the DOM spec. The helpers below (liveRemove, liveInsert, replaceAllData) perform the
+ * spec's steps on the test's Range by hand, exactly: the "live range pre-remove steps" (a boundary inside the
+ * removed node moves to (parent, index of the node); a boundary in the parent after it shifts left), the insert
+ * steps (a boundary in the parent after the insertion point shifts right) and the "replace data" steps (setting
+ * a text node's data moves every boundary inside it with offset > 0 to offset 0).
  */
 import { describe, expect, test } from 'bun:test';
 import { BRIDGE_SCRIPT } from './bridge-script';
@@ -33,182 +40,428 @@ const constant = (name: string): number => {
   return Number(match[1]);
 };
 
-type Target = { kind: 'range'; range: Range | null; text: string; markerless: boolean };
-type Record = { id: string; params: { anchor: null }; targets: Target[] };
+const KEEP_MS = constant('LOST_PLACE_KEEP_MS');
 
-/** The bridge's dead-range re-search in this document, with its generation counter exposed. */
+type Target = { kind: 'range'; range: Range | null; text: string; markerless: boolean; searchBackoffUntil?: number };
+type Record = { id: string; params: { anchor: { id: string } | null }; targets: Target[] };
+
+/** The bridge's per-pass target refresh in this document, on a clock the test moves. */
 function bridge() {
   return new Function(
     'document',
     'NodeFilter',
     'DEAD_SEARCH_BACKOFF_MS',
     'DEAD_SEARCH_BACKOFF_MAX_MS',
+    'LOST_PLACE_KEEP_MS',
     `var domGeneration = 1;
      var deadSearchBudget = Infinity;
      var deadSearchSkipped = false;
+     var clock = 1000;
+     function monotonicNow() { return clock; }
      function isViewerOverlayNode() { return false; }
-     function resolveAnchorElement() { return null; }
-     ${['monotonicNow', 'rangeAlive', 'findTextRange', 'lostPlaceOf', 'lostPlaceConnected', 'findAtLostPlace', 'deadSearchAllowed', 'noteDeadSearchResult', 'refreshRecordTargets'].map(extractFunction).join('\n')}
+     function resolveAnchorElement(anchor) { return anchor ? document.getElementById(anchor.id) : null; }
+     ${['rangeAlive', 'findTextRange', 'notePlace', 'rangeAtPlace', 'rangeCollapsed', 'deadSearchAllowed', 'noteDeadSearchResult', 'refreshRecordTargets'].map(extractFunction).join('\n')}
      return {
        rangeAlive: rangeAlive,
        refresh: function(record) { deadSearchBudget = Infinity; refreshRecordTargets(record); },
        pageChanged: function() { domGeneration += 1; },
+       advance: function(ms) { clock += ms; },
      };`,
-  )(document, NodeFilter, constant('DEAD_SEARCH_BACKOFF_MS'), constant('DEAD_SEARCH_BACKOFF_MAX_MS')) as {
+  )(document, NodeFilter, constant('DEAD_SEARCH_BACKOFF_MS'), constant('DEAD_SEARCH_BACKOFF_MAX_MS'), KEEP_MS) as {
     rangeAlive: (range: Range | null) => boolean;
     refresh: (record: Record) => void;
     pageChanged: () => void;
+    advance: (ms: number) => void;
   };
 }
 
-describe.skipIf(!hasDom)('a text highlight on a virtualized page', () => {
-  test('the paragraph is unmounted and mounted again: the highlight finds its text again', () => {
-    document.body.innerHTML = '<div id="list"><p>First row</p><p id="quoted">The quoted sentence.</p><p>Last row</p></div>';
-    const list = document.getElementById('list')!;
-    const text = document.getElementById('quoted')!.firstChild as Text;
-    const range = document.createRange();
-    range.setStart(text, 4);
-    range.setEnd(text, 10);
-    const b = bridge();
-    const record: Record = { id: 'a1', params: { anchor: null }, targets: [{ kind: 'range', range, text: 'quoted', markerless: false }] };
-    b.refresh(record);
-    expect(record.targets[0]!.range!.toString()).toBe('quoted');
+type Bridge = ReturnType<typeof bridge>;
 
-    // Scrolled away: the page removes the row. The Range's ends move onto the list, which is still connected
-    // (the DOM's removing steps, which every browser runs; happy-dom does not, so the test runs that step itself).
-    const row = document.getElementById('quoted')!;
-    const index = Array.prototype.indexOf.call(list.childNodes, row);
-    list.removeChild(row);
-    range.setStart(list, index);
-    range.collapse(true);
-    expect(range.collapsed).toBe(true);
-    expect(range.startContainer).toBe(list);
-    expect(b.rangeAlive(range)).toBe(false);
-    b.pageChanged();
-    b.refresh(record);
-    expect(record.targets[0]!.range).toBeNull();
+describe.skipIf(!hasDom)('a text highlight whose text leaves the page', () => {
+  // Guards: the same nodes detached and re-attached (a keyed move) bring the highlight back at exactly the
+  // characters the person selected, including a selection that began on the space before a word (stored text
+  // trimmed to "quoted", Range " quoted"), and it is reported unanchored only while away.
+  test('the same row moved: restored at the exact original start and end, leading space included', () => {
+    const { list, range, record, b } = setup(
+      '<div id="l"><p id="r0">First row</p><p id="r1">The quoted sentence.</p><p id="r2">Last row</p></div>',
+      'r1', 3, 10, 'quoted',
+    );
+    const row = byId('r1');
+    const node = row.firstChild as Text;
+    liveRemove(row, [range]);
+    pass(record, b);
+    expect(reportedUnanchored(record, b)).toBe(true);
 
-    // Scrolled back: the page mounts a new node with the same text.
-    const again = document.createElement('p');
-    again.textContent = 'The quoted sentence.';
-    list.insertBefore(again, list.lastChild);
-    b.pageChanged();
-    // Past the failed search's backoff, as the next frame after it would be.
-    (record.targets[0] as unknown as { searchBackoffUntil: number }).searchBackoffUntil = 0;
-    b.refresh(record);
-    const found = record.targets[0]!.range!;
-    expect(found.collapsed).toBe(false);
-    expect(found.toString()).toBe('quoted');
-    expect(found.startContainer.parentNode).toBe(again);
+    liveInsert(list, row, null, [range]);
+    pass(record, b);
+    const back = record.targets[0]!.range!;
+    expect(reportedUnanchored(record, b)).toBe(false);
+    expect(back.startContainer).toBe(node);
+    expect(back.startOffset).toBe(3);
+    expect(back.endContainer).toBe(node);
+    expect(back.endOffset).toBe(10);
+    expect(back.toString()).toBe(' quoted');
   });
 
-  test('a highlight whose text is still in place is left alone', () => {
+  // Guards: a highlight spanning two text nodes, hidden by removal and shown again later (same nodes), comes back
+  // with both ends exactly where they were.
+  test('a highlight across two text nodes, hidden by removal and shown again: both ends restored', () => {
+    document.body.innerHTML = '<div id="l"><p id="r0">Intro</p><p id="r1">Net <b>revenue</b> fell sharply</p></div>';
+    const list = byId('l');
+    const row = byId('r1');
+    const first = row.firstChild as Text; // "Net "
+    const last = row.lastChild as Text; // " fell sharply"
+    const range = document.createRange();
+    range.setStart(first, 1);
+    range.setEnd(last, 5);
+    const b = bridge();
+    const record = makeRecord(range, 'et revenue fell');
+    b.refresh(record);
+    liveRemove(row, [range]);
+    for (let i = 0; i < 3; i += 1) {
+      pass(record, b);
+      expect(reportedUnanchored(record, b)).toBe(true);
+    }
+    liveInsert(list, row, null, [range]);
+    pass(record, b);
+    const back = record.targets[0]!.range!;
+    expect(back.startContainer).toBe(first);
+    expect(back.startOffset).toBe(1);
+    expect(back.endContainer).toBe(last);
+    expect(back.endOffset).toBe(5);
+    expect(back.toString()).toBe('et revenue fell');
+  });
+
+  // Guards the accepted limit: a page that destroys the row and builds a new one with identical text (most
+  // virtualizers) leaves the highlight unanchored, reported so, rather than guessed onto the new nodes. A reload
+  // restores it from its stored text (restoreAnnotation, not exercised here).
+  test('the row recreated with identical text: stays unanchored and is reported unanchored', () => {
+    const { list, range, record, b } = setup(
+      '<div id="l"><p id="r0">First row</p><p id="r1">The quoted sentence.</p><p id="r2">Last row</p></div>',
+      'r1', 4, 10, 'quoted',
+    );
+    liveRemove(byId('r1'), [range]);
+    pass(record, b);
+    const again = document.createElement('p');
+    again.textContent = 'The quoted sentence.';
+    liveInsert(list, again, byId('r2'), [range]);
+    for (let i = 0; i < 3; i += 1) {
+      pass(record, b);
+      expect(record.targets[0]!.range).toBeNull();
+      expect(reportedUnanchored(record, b)).toBe(true);
+    }
+  });
+
+  // Guards: two rows share the quoted word; the highlighted row leaves (scrolled away) and later a new copy of it
+  // is mounted. In no pass may the highlight sit on the other row ("Revenue grew."), and it is reported unanchored.
+  test('two rows share the word, the highlighted one is removed: never placed on the other row', () => {
+    const { list, range, record, b } = setup(
+      '<div id="l"><p id="r0">Revenue grew.</p><p id="r1">Revenue fell.</p></div>',
+      'r1', 0, 7, 'Revenue',
+    );
+    liveRemove(byId('r1'), [range]);
+    for (let i = 0; i < 3; i += 1) {
+      pass(record, b);
+      expect(rowOf(record)).not.toBe('r0');
+      expect(reportedUnanchored(record, b)).toBe(true);
+    }
+    const again = document.createElement('p');
+    again.textContent = 'Revenue fell.';
+    liveInsert(list, again, null, [range]);
+    for (let i = 0; i < 3; i += 1) {
+      pass(record, b);
+      expect(rowOf(record)).not.toBe('r0');
+      expect(reportedUnanchored(record, b)).toBe(true);
+    }
+  });
+
+  // Guards (identical rows): the middle of three identical rows is removed; the highlight never moves to a neighbour.
+  test('three identical rows, the middle one removed: not moved to a neighbour', () => {
+    const { range, record, b } = setup(
+      '<div id="l"><p id="r0">Same row text.</p><p id="r1">Same row text.</p><p id="r2">Same row text.</p></div>',
+      'r1', 0, 4, 'Same',
+    );
+    liveRemove(byId('r1'), [range]);
+    for (let i = 0; i < 3; i += 1) {
+      pass(record, b);
+      expect(record.targets[0]!.range).toBeNull();
+      expect(reportedUnanchored(record, b)).toBe(true);
+    }
+  });
+
+  // Guards (text rewritten in place, e.g. an index-keyed list re-sorted): setting the node's data collapses the
+  // Range inside it. The node now says something else, so the highlight is unanchored, not left on the new words;
+  // when the very same node holds the very same text again, the highlight is back on it, exactly.
+  test("a row's text rewritten in place (node.data): unanchored, back exactly when the same text returns", () => {
+    const { range, record, b } = setup(
+      '<div id="l"><p id="r0">Revenue grew.</p><p id="r1">Revenue fell.</p></div>',
+      'r1', 0, 7, 'Revenue',
+    );
+    const t0 = byId('r0').firstChild as Text;
+    const t1 = byId('r1').firstChild as Text;
+    replaceAllData(t0, 'Revenue fell.', [range]);
+    replaceAllData(t1, 'Revenue grew.', [range]);
+    for (let i = 0; i < 3; i += 1) {
+      pass(record, b);
+      expect(record.targets[0]!.range).toBeNull();
+      expect(reportedUnanchored(record, b)).toBe(true);
+    }
+    replaceAllData(t0, 'Revenue grew.', [range]);
+    replaceAllData(t1, 'Revenue fell.', [range]);
+    pass(record, b);
+    const back = record.targets[0]!.range!;
+    expect(back.startContainer).toBe(t1);
+    expect(back.startOffset).toBe(0);
+    expect(back.endOffset).toBe(7);
+  });
+
+  // Guards (text node replaced, replaceChild): the new node is not the node the person highlighted.
+  test('the text node replaced by a new one (replaceChild): unanchored, not re-found', () => {
+    const { range, record, b } = setup(
+      '<div id="l"><p id="r0">Revenue grew.</p><p id="r1">Revenue fell.</p></div>',
+      'r1', 0, 7, 'Revenue',
+    );
+    const row = byId('r1');
+    const old = row.firstChild as Text;
+    const fresh = document.createTextNode('Revenue fell.');
+    // replaceChild = remove the old child, insert the new one at its index.
+    liveRemove(old, [range]);
+    liveInsert(row, fresh, row.firstChild, [range]);
+    for (let i = 0; i < 3; i += 1) {
+      pass(record, b);
+      expect(record.targets[0]!.range).toBeNull();
+      expect(reportedUnanchored(record, b)).toBe(true);
+    }
+  });
+
+  // Guards (rewrite, then removal): once lost, nothing ever falls back to the first occurrence in the document.
+  test('the text rewritten and then the row removed: unanchored, never the first occurrence', () => {
+    const { range, record, b } = setup(
+      '<div id="l"><p id="r0">Revenue grew.</p><p id="r1">Q3 Revenue fell.</p></div>',
+      'r1', 3, 10, 'Revenue',
+    );
+    replaceAllData(byId('r1').firstChild as Text, 'Q3: Revenue fell.', [range]);
+    pass(record, b);
+    expect(record.targets[0]!.range).toBeNull();
+    liveRemove(byId('r1'), [range]);
+    for (let i = 0; i < 3; i += 1) {
+      pass(record, b);
+      expect(rowOf(record)).not.toBe('r0');
+      expect(reportedUnanchored(record, b)).toBe(true);
+    }
+  });
+
+  // Guards: a highlight of an annotation with an anchor keeps main's restore ladder when its Range collapses: the
+  // anchor-scoped text search runs (finding the word inside the anchored element, not the earlier "Revenue grew.");
+  // the identity rule does not pre-empt it.
+  test('an anchored annotation keeps the anchor-scoped search', () => {
+    document.body.innerHTML = '<p id="r0">Revenue grew.</p><div id="card"><p id="r1">Revenue fell.</p></div>';
+    const card = byId('card');
+    const range = document.createRange();
+    range.setStart(byId('r1').firstChild!, 0);
+    range.setEnd(byId('r1').firstChild!, 7);
+    const b = bridge();
+    const record: Record = {
+      id: 'anchored', params: { anchor: { id: 'card' } },
+      targets: [{ kind: 'range', range, text: 'Revenue', markerless: true }],
+    };
+    b.refresh(record);
+    expect(record.targets[0]!.range).toBe(range);
+    // The card re-renders its paragraph with different words around the quote.
+    liveRemove(byId('r1'), [range]);
+    const fresh = document.createElement('p');
+    fresh.id = 'r2';
+    fresh.textContent = 'Revenue fell sharply.';
+    liveInsert(card, fresh, null, [range]);
+    pass(record, b);
+    expect(rowOf(record)).toBe('r2');
+    expect(record.targets[0]!.range!.toString()).toBe('Revenue');
+  });
+
+  // Guards the reload / late-render path: a target that was never in place (a live restore's placeholder) still
+  // finds its text by the restore search, as on main.
+  test('a target never in place still finds its text by the restore search', () => {
+    document.body.innerHTML = '<p id="r0">Late rendered text.</p>';
+    const b = bridge();
+    const record: Record = { id: 'late', params: { anchor: null }, targets: [{ kind: 'range', range: null, text: 'rendered', markerless: false }] };
+    pass(record, b);
+    expect(rowOf(record)).toBe('r0');
+    expect(record.targets[0]!.range!.toString()).toBe('rendered');
+  });
+
+  // Guards the bound: a lost highlight lets go of the detached nodes after LOST_PLACE_KEEP_MS (and then stays
+  // unanchored even if the same node returns); before the bound, the same node returning restores it.
+  test('references to the lost nodes are dropped after the bound', () => {
+    const early = setup('<div id="l"><p id="r0">Row</p><p id="r1">The quoted sentence.</p></div>', 'r1', 4, 10, 'quoted');
+    const earlyRow = byId('r1');
+    liveRemove(earlyRow, [early.range]);
+    pass(early.record, early.b);
+    early.b.advance(KEEP_MS - 1000);
+    liveInsert(early.list, earlyRow, null, [early.range]);
+    pass(early.record, early.b);
+    expect(early.record.targets[0]!.range!.toString()).toBe('quoted');
+
+    const late = setup('<div id="l"><p id="r0">Row</p><p id="r1">The quoted sentence.</p></div>', 'r1', 4, 10, 'quoted');
+    const lateRow = byId('r1');
+    const lateNode = lateRow.firstChild as Text;
+    liveRemove(lateRow, [late.range]);
+    pass(late.record, late.b);
+    expect(holds(late.record.targets[0], lateNode)).toBe(true);
+    late.b.advance(KEEP_MS + 1000);
+    pass(late.record, late.b);
+    expect(holds(late.record.targets[0], lateNode)).toBe(false);
+    liveInsert(late.list, lateRow, null, [late.range]);
+    pass(late.record, late.b);
+    expect(late.record.targets[0]!.range).toBeNull();
+    expect(reportedUnanchored(late.record, late.b)).toBe(true);
+  });
+
+  // Guards: a highlight that never collapses is left exactly as it is (same Range, same offsets) through page
+  // changes, including text appended to its own node (streaming), which keeps the Range in place.
+  test('a highlight that never collapses is untouched', () => {
     document.body.innerHTML = '<p id="p">Some quoted words, quoted twice.</p>';
-    const text = document.getElementById('p')!.firstChild as Text;
+    const text = byId('p').firstChild as Text;
     const range = document.createRange();
     range.setStart(text, 19);
     range.setEnd(text, 25);
     const b = bridge();
-    const record: Record = { id: 'a2', params: { anchor: null }, targets: [{ kind: 'range', range, text: 'quoted', markerless: false }] };
-    document.body.appendChild(document.createElement('div'));
-    b.pageChanged();
-    b.refresh(record);
-    // The second "quoted", not the first occurrence a re-search would pick.
-    expect(record.targets[0]!.range).toBe(range);
-    expect(range.startOffset).toBe(19);
-  });
-
-  test('two rows share the quoted words: the highlight waits for its own row and returns to it, never to the other', () => {
-    const { list, rows, record, b } = rowsWithHighlight(['Revenue grew.', 'Revenue fell.'], 1, 'Revenue');
-    unmount(list, rows[1]!, record);
-    for (let pass = 0; pass < 3; pass += 1) {
-      nextPass(record, b);
-      expect(record.targets[0]!.range).toBeNull();
+    const record = makeRecord(range, 'quoted');
+    for (let i = 0; i < 3; i += 1) {
+      document.body.appendChild(document.createElement('div'));
+      text.appendData(' More.');
+      pass(record, b);
+      expect(record.targets[0]!.range).toBe(range);
+      expect(range.startContainer).toBe(text);
+      expect(range.startOffset).toBe(19);
+      expect(range.endOffset).toBe(25);
     }
-
-    const again = document.createElement('p');
-    again.textContent = 'Revenue fell.';
-    list.appendChild(again);
-    nextPass(record, b);
-    const found = record.targets[0]!.range!;
-    expect(found.toString()).toBe('Revenue');
-    expect(found.startContainer.parentNode).toBe(again);
   });
 
-  test('the same, the other way round: the first row away does not move its highlight onto the second', () => {
-    const { list, rows, record, b } = rowsWithHighlight(['Revenue grew.', 'Revenue fell.'], 0, 'Revenue');
-    unmount(list, rows[0]!, record);
-    nextPass(record, b);
-    expect(record.targets[0]!.range).toBeNull();
-
-    const again = document.createElement('p');
-    again.textContent = 'Revenue grew.';
-    list.insertBefore(again, rows[1]!);
-    nextPass(record, b);
-    expect(record.targets[0]!.range!.startContainer.parentNode).toBe(again);
+  // Guards the non-text boundary decision: a highlight whose start is an element boundary (e.g. a whole-paragraph
+  // selection) has no text to confirm it by, so once lost it stays unanchored: never searched for, even with the
+  // same paragraph back and its words elsewhere on the page.
+  test('a highlight starting on an element boundary, once lost, stays unanchored', () => {
+    document.body.innerHTML = '<div id="l"><p id="r0">Revenue fell.</p><p id="r1">Revenue fell.</p></div>';
+    const list = byId('l');
+    const row = byId('r1');
+    const range = document.createRange();
+    range.setStart(row, 0);
+    range.setEnd(row.firstChild!, 7);
+    const b = bridge();
+    const record = makeRecord(range, 'Revenue');
+    b.refresh(record);
+    liveRemove(row, [range]);
+    pass(record, b);
+    liveInsert(list, row, null, [range]);
+    for (let i = 0; i < 3; i += 1) {
+      pass(record, b);
+      expect(record.targets[0]!.range).toBeNull();
+      expect(reportedUnanchored(record, b)).toBe(true);
+    }
   });
 
-  test('the row node itself comes back (a recycled row): the highlight returns to the same words in it', () => {
-    const { list, rows, record, b } = rowsWithHighlight(['Revenue grew.', 'Net revenue fell, revenue', 'Last row'], 1, 'revenue', 18);
-    unmount(list, rows[1]!, record);
-    nextPass(record, b);
-    expect(record.targets[0]!.range).toBeNull();
+  // Guards robustness: the script runs inside arbitrary pages; a page that patches Range or Node getters to throw
+  // must not abort the overlay pass.
+  test('a page whose Range and Node getters throw cannot abort the pass', () => {
+    const node = setup('<p id="r0">Revenue fell.</p>', 'r0', 0, 7, 'Revenue');
+    Object.defineProperty(byId('r0').firstChild!, 'nodeType', { get() { throw new Error('page getter'); } });
+    expect(() => pass(node.record, node.b)).not.toThrow();
 
-    list.insertBefore(rows[1]!, rows[2]!);
-    nextPass(record, b);
-    const found = record.targets[0]!.range!;
-    expect(found.startContainer).toBe(rows[1]!.firstChild);
-    expect(found.startOffset).toBe(18);
-  });
-
-  test("a page that rewrites the row's text in place keeps the highlight on that row, not the first occurrence", () => {
-    const { rows, record, b } = rowsWithHighlight(['Revenue grew.', 'Revenue fell.'], 1, 'Revenue');
-    const text = rows[1]!.firstChild as Text;
-    const range = record.targets[0]!.range!;
-    // Replacing the data collapses a Range inside it to the node's start (the DOM's replace data steps).
-    text.data = 'Revenue fell.';
-    range.setStart(text, 0);
-    range.collapse(true);
-    nextPass(record, b);
-    const found = record.targets[0]!.range!;
-    expect(found.toString()).toBe('Revenue');
-    expect(found.startContainer).toBe(text);
+    const range = setup('<p id="r0">Revenue fell.</p>', 'r0', 0, 7, 'Revenue');
+    Object.defineProperty(range.range, 'collapsed', { get() { throw new Error('page getter'); } });
+    expect(() => pass(range.record, range.b)).not.toThrow();
   });
 });
 
-/** Rows of text in a list, with a live highlight on `quote` in row `index` (at `offset` in it) already painted once. */
-function rowsWithHighlight(texts: string[], index: number, quote: string, offset = 0) {
-  document.body.innerHTML = '<div id="list"></div>';
-  const list = document.getElementById('list')!;
-  const rows = texts.map((text) => {
-    const row = document.createElement('p');
-    row.textContent = text;
-    list.appendChild(row);
-    return row;
-  });
-  const range = document.createRange();
-  range.setStart(rows[index]!.firstChild!, offset);
-  range.setEnd(rows[index]!.firstChild!, offset + quote.length);
-  expect(range.toString()).toBe(quote);
-  const b = bridge();
-  const record: Record = { id: 'a3', params: { anchor: null }, targets: [{ kind: 'range', range, text: quote, markerless: false }] };
-  b.refresh(record);
-  expect(record.targets[0]!.range).toBe(range);
-  return { list, rows, record, b };
+function byId(id: string): HTMLElement {
+  return document.getElementById(id)!;
 }
 
-/** The page removes a row; the live Range collapses onto the list where the row was (the step happy-dom skips). */
-function unmount(list: HTMLElement, row: HTMLElement, record: Record) {
-  const range = record.targets[0]!.range!;
-  const index = Array.prototype.indexOf.call(list.childNodes, row);
-  list.removeChild(row);
-  range.setStart(list, index);
-  range.collapse(true);
+function makeRecord(range: Range, text: string): Record {
+  return { id: 'a1', params: { anchor: null }, targets: [{ kind: 'range', range, text, markerless: false }] };
+}
+
+/** A document, a live highlight from `start` to `end` in row `rowId`'s first text node, painted once. */
+function setup(html: string, rowId: string, start: number, end: number, text: string) {
+  document.body.innerHTML = html;
+  const node = byId(rowId).firstChild as Text;
+  const range = document.createRange();
+  range.setStart(node, start);
+  range.setEnd(node, end);
+  const b = bridge();
+  const record = makeRecord(range, text);
+  b.refresh(record);
+  expect(record.targets[0]!.range).toBe(range);
+  return { list: byId(rowId).parentElement!, range, record, b };
 }
 
 /** A later reconcile pass after the page changed, past any failed search's backoff. */
-function nextPass(record: Record, b: ReturnType<typeof bridge>) {
+function pass(record: Record, b: Bridge) {
   b.pageChanged();
-  (record.targets[0] as unknown as { searchBackoffUntil: number }).searchBackoffUntil = 0;
+  b.advance(16);
+  for (const target of record.targets) target.searchBackoffUntil = 0;
   b.refresh(record);
+}
+
+/** What the overlay pass reports to the host: no target alive (renderAnnotationOverlay's recordAnchored). */
+function reportedUnanchored(record: Record, b: Bridge): boolean {
+  return !record.targets.some((target) => b.rangeAlive(target.range));
+}
+
+/** The id of the row the highlight starts in, or null when it has none. */
+function rowOf(record: Record): string | null {
+  const range = record.targets[0]!.range;
+  if (!range) return null;
+  const start = range.startContainer;
+  return ((start.nodeType === 3 ? start.parentNode : start) as Element).id;
+}
+
+/** Whether the target (or a plain object it holds) still references the node. */
+function holds(value: unknown, node: Node, depth = 0): boolean {
+  if (value === node) return true;
+  if (!value || typeof value !== 'object' || depth > 2) return false;
+  const proto = Object.getPrototypeOf(value);
+  if (proto !== Object.prototype && proto !== null && !Array.isArray(value)) return false;
+  return Object.values(value as object).some((child) => holds(child, node, depth + 1));
+}
+
+const indexOf = (node: Node) => Array.prototype.indexOf.call(node.parentNode!.childNodes, node);
+
+/** removeChild plus the DOM spec's live range pre-remove steps for the given ranges. */
+function liveRemove(node: Node, ranges: Range[]) {
+  const parent = node.parentNode!;
+  const index = indexOf(node);
+  const points = ranges.map((r) => {
+    let [sc, so, ec, eo] = [r.startContainer, r.startOffset, r.endContainer, r.endOffset];
+    if (node.contains(sc)) { sc = parent; so = index; } else if (sc === parent && so > index) so -= 1;
+    if (node.contains(ec)) { ec = parent; eo = index; } else if (ec === parent && eo > index) eo -= 1;
+    return [sc, so, ec, eo] as const;
+  });
+  parent.removeChild(node);
+  ranges.forEach((r, i) => { const [sc, so, ec, eo] = points[i]!; r.setStart(sc, so); r.setEnd(ec, eo); });
+}
+
+/** insertBefore plus the DOM spec's insert steps for live ranges (a boundary in parent after the index shifts right). */
+function liveInsert(parent: Node, node: Node, before: Node | null, ranges: Range[]) {
+  const index = before ? indexOf(before) : parent.childNodes.length;
+  const points = ranges.map((r) => {
+    let [sc, so, ec, eo] = [r.startContainer, r.startOffset, r.endContainer, r.endOffset];
+    if (sc === parent && so > index) so += 1;
+    if (ec === parent && eo > index) eo += 1;
+    return [sc, so, ec, eo] as const;
+  });
+  parent.insertBefore(node, before);
+  ranges.forEach((r, i) => { const [sc, so, ec, eo] = points[i]!; r.setStart(sc, so); r.setEnd(ec, eo); });
+}
+
+/** node.data = text plus the DOM spec's replace data steps: a boundary inside the node with offset > 0 moves to 0. */
+function replaceAllData(node: Text, text: string, ranges: Range[]) {
+  const points = ranges.map((r) => {
+    let [sc, so, ec, eo] = [r.startContainer, r.startOffset, r.endContainer, r.endOffset];
+    if (sc === node && so > 0) so = 0;
+    if (ec === node && eo > 0) eo = 0;
+    return [sc, so, ec, eo] as const;
+  });
+  node.data = text;
+  ranges.forEach((r, i) => { const [sc, so, ec, eo] = points[i]!; r.setStart(sc, so); r.setEnd(ec, eo); });
 }
