@@ -100,7 +100,7 @@ import { drawMessageHead } from '../parts/MessageHead';
 import { drawMessageBody } from '../parts/MessageBodyView';
 import type { MessageActs } from '../parts/messageActs';
 import { useSendReply } from '../data/actions/send';
-import { gaveUp, replyLanded, sendErrors, unconfirmed, unconfirmedSend, UNCONFIRMED_MS, type UnconfirmedSend } from '../data/actions/sendLanded';
+import { gaveUp, lateKeysOf, replyLanded, sendErrors, unconfirmed, unconfirmedSend, UNCONFIRMED_MS, type UnconfirmedSend } from '../data/actions/sendLanded';
 import { useDrawSend, useSendsDrawn } from '../data/actions/sendDraw';
 import { SendingReply } from '../parts/SendingReply';
 import { pickComposerMode } from '../fullScreenComposer';
@@ -1549,9 +1549,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     setGuard(false);
     setRoute(CLOSED_ROUTE);
     setSkipArmed(null);
-    // A Send given up with no answer may still land: its keys stay with its words (`late`), so Send again is that reply.
-    sendKeys.current = unconfirmed.get(thread.thread_id)?.late?.keys ?? null;
-    sendContents.current = unconfirmed.get(thread.thread_id)?.late?.contents ?? null;
+    // A Send given up with no answer may still land: its keys stay with its words (`late`, across a reload too), so Send again is that reply.
+    lateKeysOf(thread.thread_id, () => threadRef.current.thread_id === thread.thread_id && !sendingAnywhere.current, (late) => ([sendKeys.current, sendContents.current] = [late?.keys ?? null, late?.contents ?? null]));
     revisions.current.clear();
     savedQuestions.current.clear();
     lastAnswers.current.clear();
@@ -2868,10 +2867,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   };
 
   // A thread read shows the remembered Send's reply landed: finished now (while the box still holds its words),
-  // or forgotten.
+  // or forgotten. Not while a Send of this thread is on its way (it ends the record itself); looked at again as it ends.
   useEffect(() => {
     const earlier = unconfirmed.get(thread.thread_id);
-    if (!earlier) return;
+    if (!earlier || sending) return;
     if (!thread.messages.some((m) => m.author.kind === 'person' && m.idempotency_key === earlier.key)) return;
     if (box.open && replyText.get().trim() === earlier.words) {
       finishLanded(earlier);
@@ -2887,7 +2886,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       if (!box.open) void replyDraft.reload();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [thread]);
+  }, [thread, sending]);
 
   // Leaving the thread forgets it: a later Send is always an ordinary one. Not one given up with no answer (`late`):
   // it may still land, and a read of the thread when it is open again finishes it.
@@ -3101,7 +3100,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       // A Send of these same words earlier could not be confirmed (the Inbox was down): its reply is looked for
       // first. There, that Send is finished and nothing goes again; not there, this is an ordinary new Send.
       const earlier = unconfirmed.get(current.thread_id);
-      unconfirmed.delete(current.thread_id);
+      // One given up with no answer (`late`) stays watched until this Send goes or it is seen: it may still land.
+      if (!earlier?.late) unconfirmed.delete(current.thread_id);
       if (earlier && Date.now() - earlier.at < UNCONFIRMED_MS && box.open && earlier.words === boxWords()) {
         const landed = await replyLanded(current.thread_id, earlier.key);
         if (landed === 'unknown') {

@@ -5,7 +5,7 @@
  */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { inboxApi, post } from './api';
-import { InboxWriteTimeout, WITHIN, setWriteIdleForTests } from './apiWrite';
+import { InboxWriteTimeout, LAUNCH_IDLE_MS, WITHIN, WRITE_IDLE_MS, setWriteIdleForTests } from './apiWrite';
 
 const LIMIT = 200;
 const realFetch = globalThis.fetch;
@@ -118,6 +118,20 @@ test('a reply that starts a new session waits for an Inbox slow to prepare it, a
   network(slow({ thread_id: 'thr_N', message: { id: 'msg_N' }, replayed: false }));
   const started = await outcome(inboxApi.startThread({ to: START, body: 'Go.', idempotency_key: 'k5' } as Parameters<typeof inboxApi.startThread>[0]));
   expect(started.error).toBe(undefined);
+});
+
+test('a reply or New message that starts a session, on a connection that died without a word, still ends: given up at its longer limit, the request aborted', async () => {
+  const longer = (LIMIT * LAUNCH_IDLE_MS) / WRITE_IDLE_MS;
+  network(silent);
+  const reply = await outcome(inboxApi.reply('msg_A', { idempotency_key: 'k8', words: 'Carry on.', questions: [], to: START }));
+  expect(reply.error instanceof InboxWriteTimeout).toBe(true);
+  expect(reply.ms).toBeGreaterThanOrEqual(longer - 20);
+  expect(reply.ms).toBeLessThan(longer * 3);
+  expect(calls[0]!.signal?.aborted).toBe(true);
+  const started = await outcome(inboxApi.startThread({ to: START, body: 'Go.', idempotency_key: 'k9' } as Parameters<typeof inboxApi.startThread>[0]));
+  expect(started.error instanceof InboxWriteTimeout).toBe(true);
+  expect(started.ms).toBeGreaterThanOrEqual(longer - 20);
+  expect(calls[1]!.signal?.aborted).toBe(true);
 });
 
 test('an ordinary reply (or one to another live session) to the same slow Inbox is still given up at the limit', async () => {
