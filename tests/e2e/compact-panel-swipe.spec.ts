@@ -130,27 +130,26 @@ async function finger(page: Page, engine: Engine): Promise<Finger> {
     },
     // One script for the whole flick: separate round trips can leave more than the 100 ms a flick's speed is read over.
     async flick(x, y, dx, dy) {
-      await page.evaluate(async ({ x, y, dx, dy }) => {
+      await page.evaluate(({ x, y, dx, dy }) => {
         let target = document.elementFromPoint(x, y)!;
         while (target.shadowRoot) {
           const inner = target.shadowRoot.elementFromPoint(x, y);
           if (!inner || inner === target) break;
           target = inner;
         }
-        const fire = (type: string, px: number, py: number) => {
+        const start = performance.now();
+        const fire = (type: string, px: number, py: number, step: number) => {
           const point = { identifier: 1, clientX: px, clientY: py, pageX: px, pageY: py, screenX: px, screenY: py, target };
           const event = new Event(type, { bubbles: true, cancelable: true, composed: true });
           Object.defineProperty(event, 'touches', { value: type === 'touchend' ? [] : [point] });
           Object.defineProperty(event, 'targetTouches', { value: type === 'touchend' ? [] : [point] });
           Object.defineProperty(event, 'changedTouches', { value: [point] });
+          Object.defineProperty(event, 'timeStamp', { value: start + step * 8 });
           target.dispatchEvent(event);
         };
-        fire('touchstart', x, y);
-        for (let i = 1; i <= 3; i++) {
-          await new Promise((done) => setTimeout(done, 8));
-          fire('touchmove', x + (dx * i) / 3, y + (dy * i) / 3);
-        }
-        fire('touchend', x + dx, y + dy);
+        fire('touchstart', x, y, 0);
+        for (let i = 1; i <= 3; i++) fire('touchmove', x + (dx * i) / 3, y + (dy * i) / 3, i);
+        fire('touchend', x + dx, y + dy, 4);
       }, { x, y, dx, dy });
     },
   };
@@ -185,6 +184,7 @@ const prevented = (page: Page) => page.evaluate(() => (window as unknown as { __
 const touchListeners = (page: Page) => page.evaluate(() => (window as unknown as { __touchListeners: Set<string> }).__touchListeners.size);
 const resetPrevented = (page: Page) => page.evaluate(() => { (window as unknown as { __prevented: number }).__prevented = 0; });
 const left = async (el: Locator) => Math.round((await el.boundingBox())?.x ?? NaN);
+const arrived = (panel: Locator) => expect.poll(() => panel.evaluate((el) => el.getAnimations().length === 0 && Math.round(el.getBoundingClientRect().x) === 0)).toBe(true);
 
 /** Swipes from the page's left and right edges with nothing open: nothing opens and no move is cancelled (Back and Forward stay the browser's). */
 async function edgeSwipesOpenNothing(page: Page, f: Finger, panels: Locator[]) {
@@ -448,12 +448,14 @@ async function withReview(browser: Browser, browserName: string, body: (review: 
     const sidebar = page.locator('[data-pn-review-transient-overlay][aria-label="Review sidebar"]');
     await expect(sheet).toHaveAttribute('data-pn-panel-state', 'open');
     await page.waitForTimeout(300);
+    await arrived(sheet);
     const review: Review = {
       page, f, repo, sheet, sidebar,
       async openSheet() {
         await page.getByRole('button', { name: 'Open review navigation', exact: true }).click();
         await expect(sheet).toHaveAttribute('data-pn-panel-state', 'open');
         await page.waitForTimeout(300);
+        await arrived(sheet);
       },
       async closeSheet() {
         await page.getByRole('button', { name: 'Close review navigation', exact: true }).click();
