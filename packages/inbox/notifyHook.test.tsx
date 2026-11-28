@@ -6,7 +6,10 @@
  * does, a later line of a root (an Unarchive of a thread archived before the
  * page loaded) is never a new thread, a burst collapses into one notice and
  * drops a thread the person opened, a notice is silent only when the bell
- * owns its sound, and two tabs raise each item once. A launched session's
+ * owns its sound, and two tabs raise each item once. The sound hears every
+ * new agent message (a plain reply included, which still raises no notice),
+ * never the person's own, a later line, a routine change line or a snoozed
+ * thread's. A launched session's
  * failed turn (its note, `turn_error`) notifies once per note for Claude
  * Code, Codex and Pi, as "<project>: <agent> couldn't answer", under the
  * same rules as a question: not while its thread is open and visible, not
@@ -22,6 +25,7 @@ import type { InboxAuthor, InboxListRow, InboxMessage, InboxQuestion, InboxSecti
 import type { InboxEvent, ListModel } from './api';
 import type { InboxNotifications } from './notify';
 import { FROZEN_NOTICE_MS, NOTICE_CLAIMS_KEY, TEST_NOTIFICATION_TAG } from './notify';
+import { decideRing, QUIET_GATE, type RingGate } from './soundRing';
 
 const hasDom = typeof document !== 'undefined';
 const { useInboxNotifications } = (hasDom ? await import('./notify') : {}) as typeof import('./notify');
@@ -80,8 +84,18 @@ let host: HTMLElement | null = null;
 /** One hook per tab: tabs[0] is this tab; a second Probe stands for another tab (same storage). */
 const tabs: InboxNotifications[] = [];
 let onScreen: string | null = null;
-let questionsHeard = 0;
+/** What the sound heard, one entry per list read with agent news: whether a question was among it. */
+let heard: boolean[] = [];
+/** The bell on and armed: the probe's sound decides with the real rules (soundRing.ts) on `clock`. */
 let bell = false;
+/** Its choice is "for every agent message" (else "when an agent asks you"). */
+let bellEvery = false;
+let clock = 0;
+let ringGate: RingGate = QUIET_GATE;
+/** How many times the probe's bell rang. */
+let bellRings = 0;
+/** The tab had its first click (the browser lets the bell play). */
+let armed = true;
 let otherTabInFront = false;
 /** Settings → General's notifications switch. */
 let enabled = true;
@@ -95,10 +109,14 @@ function Probe({ index }: { index: number }) {
     onSettings: () => {},
     openThread: (threadId) => onOpenThread(threadId),
     openList: () => onOpenList(),
-    onQuestions: () => {
-      questionsHeard++;
+    onAgentNews: (news) => {
+      heard.push(news.asks);
+      const inFront = front.visible && front.focused;
+      const decided = decideRing(ringGate, { now: clock, enabled: bell, armed, inFront, otherTabInFront, when: bellEvery ? 'messages' : 'asks', ...news });
+      ringGate = decided.gate;
+      if (decided.ring) bellRings++;
+      return decided.rangFor;
     },
-    bellCovers: () => bell,
     otherTabInFront: () => otherTabInFront,
     threadOnScreen: (threadId) => threadId === onScreen,
   });
@@ -198,8 +216,13 @@ describe.if(hasDom)('useInboxNotifications', () => {
   beforeEach(async () => {
     front = { visible: true, focused: true };
     onScreen = null;
-    questionsHeard = 0;
+    heard = [];
     bell = false;
+    bellEvery = false;
+    clock = 0;
+    ringGate = QUIET_GATE;
+    bellRings = 0;
+    armed = true;
     otherTabInFront = false;
     enabled = true;
     onOpenThread = () => {};
@@ -220,12 +243,12 @@ describe.if(hasDom)('useInboxNotifications', () => {
     window.localStorage.clear();
   });
 
-  test('a new thread that asks nothing notifies with the tab in front, and the sound hears nothing', async () => {
+  test('a new thread that asks nothing notifies with the tab in front, and the sound hears it as news that asks nothing', async () => {
     await batch([message('t1', 't1')], list([{ id: 'old', section: 'waiting' }, { id: 't1', section: 'new' }]));
     expect(raised).toHaveLength(1);
     expect(raised[0]!.title.startsWith('billing-svc: Claude Code')).toBe(true);
     expect(raised[0]!.body).toBe('Subject t1');
-    expect(questionsHeard).toBe(0);
+    expect(heard).toEqual([false]);
   });
 
   test('an Unarchive of a thread archived before the page loaded is not a new thread', async () => {
@@ -240,7 +263,7 @@ describe.if(hasDom)('useInboxNotifications', () => {
     await batch([message('m1', 'old'), question('m1', 'q-1')], list([{ id: 'old', section: 'waiting' }]));
     expect(raised).toHaveLength(0);
     // The sound still hears it (it decides for itself, and rings only with no Inbox tab in front).
-    expect(questionsHeard).toBe(1);
+    expect(heard).toEqual([true]);
 
     away();
     await batch([message('m2', 'old'), question('m2', 'q-2')], list([{ id: 'old', section: 'waiting' }]));
@@ -258,6 +281,29 @@ describe.if(hasDom)('useInboxNotifications', () => {
     away();
     await batch([message('m2', 'old')], list([{ id: 'old', section: 'new' }]));
     expect(raised).toHaveLength(0);
+  });
+
+  test("the sound hears each new agent message once, a plain reply included; never the person's own, a later line, a routine change line or a snoozed thread's", async () => {
+    away();
+    const known = list([{ id: 'old', section: 'new' }]);
+    // A plain reply: news that asks nothing (the sound rings for it under "for every agent message").
+    await batch([message('m1', 'old')], known);
+    // The same line again (a catch-up) and a later line of it (a look): not news.
+    await batch([message('m1', 'old'), message('m1', 'old', {}, false)], known);
+    // The person's own reply, from this window or another device.
+    await batch([message('p1', 'old', { author: { kind: 'person' } })], known);
+    // An agent's routine change line: a note of what it did, not words to the person.
+    await batch([message('r1', 'old', { scheduled_change: { scheduled_id: 'sch_1', name: 'Nightly', op: 'paused' } as unknown as InboxMessage['scheduled_change'] })], known);
+    // The Inbox's own launch note (a dialog answered Cancel, a session file gone): not the agent's words.
+    await batch([message('l1', 'old', { launch_note: true, body: 'Codex was told No.' })], known);
+    // A reply in a snoozed thread: nothing an agent writes rings it.
+    await batch([message('m2', 'old')], { ...list([]), snoozed: [{ thread_id: 'old' } as unknown as InboxListRow] } as ListModel);
+    expect(heard).toEqual([false]);
+    // Still no notice for plain news.
+    expect(raised).toHaveLength(0);
+    // Five agents writing at once: one list read, one piece of news (the sound's burst makes it one ring).
+    await batch(['a1', 'a2', 'a3', 'a4', 'a5'].map((id) => message(id, 'old', { author: { ...claude, session: `ses_${id}` } })), known);
+    expect(heard).toEqual([false, false]);
   });
 
   test('a later line of a root the page already listed (a look) is never a new thread', async () => {
@@ -304,20 +350,92 @@ describe.if(hasDom)('useInboxNotifications', () => {
     expect(raised[1]!.body).toBe('Subject t2');
   });
 
-  test('silent only when the bell owns the sound: a question, this tab away, the bell on', async () => {
+  test('silent only when the bell really rang for that news: this tab away, the bell on, and it rang', async () => {
     bell = true;
     // In front: the bell never rings here, so the notice keeps the system's sound.
     await batch([message('m1', 'old'), question('m1', 'q-1')], list([{ id: 'old', section: 'waiting' }]));
     away();
-    // Away, a new thread that asks nothing: the bell does not ring for it.
+    // Away, a new thread that asks nothing: the bell rings for it under either choice.
     await batch([message('t1', 't1')], list([{ id: 'old', section: 'waiting' }, { id: 't1', section: 'new' }]));
     // Away, a question: the bell's.
     await batch([message('t2', 't2'), question('t2', 'q-2')], list([{ id: 't2', section: 'waiting' }]));
     // The bell off (or not armed): the system's sound again.
     bell = false;
     await batch([message('t3', 't3'), question('t3', 'q-3')], list([{ id: 't3', section: 'waiting' }]));
-    expect(raised.map((r) => r.silent)).toEqual([false, false, true, false]);
+    // "For every agent message": the bell rings for a new thread that asks nothing too, so its notice is silent.
+    bell = true;
+    bellEvery = true;
+    clock += 60_000;
+    back();
+    away();
+    await batch([message('t4', 't4')], list([{ id: 't4', section: 'new' }]));
+    expect(raised.map((r) => r.silent)).toEqual([false, true, true, false, true]);
   });
+
+  test('three agents ask seconds apart (three list reads): one ring, and every notice of that burst is silent (one sound, as before)', async () => {
+    bell = true;
+    away();
+    const rows: { id: string; section: InboxSectionId }[] = [];
+    for (const [i, at] of [0, 4_000, 8_000].entries()) {
+      clock = at;
+      rows.push({ id: `q${i}`, section: 'waiting' });
+      await batch([message(`q${i}`, `q${i}`, { author: { ...claude, session: `ses_q${i}` } }), question(`q${i}`, `q-${i}`)], list(rows));
+    }
+    expect(bellRings).toBe(1);
+    expect(raised.length).toBeGreaterThanOrEqual(2);
+    expect(raised.every((r) => r.silent)).toBe(true);
+  });
+
+  test('"every agent message": three new threads seconds apart, one ring, every notice silent', async () => {
+    bell = true;
+    bellEvery = true;
+    away();
+    const rows: { id: string; section: InboxSectionId }[] = [];
+    for (const [i, at] of [0, 4_000, 8_000].entries()) {
+      clock = at;
+      rows.push({ id: `n${i}`, section: 'new' });
+      await batch([message(`n${i}`, `n${i}`, { author: { ...claude, session: `ses_n${i}` } })], list(rows));
+    }
+    expect(bellRings).toBe(1);
+    expect(raised.length).toBeGreaterThanOrEqual(2);
+    expect(raised.every((r) => r.silent)).toBe(true);
+  });
+
+  test('a burst the bell never rang in (no click in the tab yet) keeps the system\'s sound on every notice', async () => {
+    bell = true;
+    bellEvery = true;
+    armed = false;
+    away();
+    await batch([message('u1', 'u1'), question('u1', 'q-u1')], list([{ id: 'u1', section: 'waiting' }]));
+    clock = 4_000;
+    armed = true;
+    await batch([message('u2', 'u2')], list([{ id: 'u1', section: 'waiting' }, { id: 'u2', section: 'new' }]));
+    expect(bellRings).toBe(0);
+    expect(raised.length).toBeGreaterThanOrEqual(1);
+    expect(raised.some((r) => r.silent)).toBe(false);
+  });
+
+  for (const notificationsOn of [true, false]) {
+    test(`agent chatter never swallows a question (notifications ${notificationsOn ? 'on' : 'off'}): A replies at 0 s and 20 s, B asks at 40 s and the bell rings`, async () => {
+      bell = true;
+      bellEvery = true;
+      if (!notificationsOn) {
+        enabled = false;
+        act(() => root!.render(<Probe index={0} />));
+      }
+      away();
+      const known = list([{ id: 'old', section: 'new' }]);
+      await batch([message('a1', 'old')], known);
+      clock = 20_000;
+      await batch([message('a2', 'old')], known);
+      expect(bellRings).toBe(1);
+      clock = 40_000;
+      await batch([message('b1', 'b1', { author: { ...claude, session: 'ses_b' } }), question('b1', 'q-1')], list([{ id: 'old', section: 'new' }, { id: 'b1', section: 'waiting' }]));
+      expect(bellRings).toBe(2);
+      // Its notice is the bell's (silent: one sound), or there is none with notifications off.
+      expect(raised.map((r) => r.silent)).toEqual(notificationsOn ? [true] : []);
+    });
+  }
 
   test('two tabs raise each item once; a tab away defers to another tab in front', async () => {
     act(() => root?.unmount());
@@ -514,6 +632,19 @@ describe.if(hasDom)('useInboxNotifications', () => {
     expect(end).toBe('#thread=t1');
   });
 
+  test("a click on a thread's notice makes the open the person's (Recent activity); the thread opened with no click is not", async () => {
+    const { personOpened, resetRecentActsForTests, routeChanged } = await import('./recentActs');
+    resetRecentActsForTests();
+    // Opened with no click here (an agent's open): not the person's.
+    routeChanged(Date.now(), 'old');
+    expect(personOpened('old')).toBe(false);
+    await batch([message('t1', 't1')], list([{ id: 'old', section: 'waiting' }, { id: 't1', section: 'new' }]));
+    onOpenThread = (threadId) => routeChanged(Date.now(), threadId);
+    await act(async () => notices.at(-1)!.onclick!());
+    expect(personOpened('t1')).toBe(true);
+    resetRecentActsForTests();
+  });
+
   test("a click on a burst's notice, the list already at rest: the address changes and ends with no hash", async () => {
     await batch([message('t1', 't1'), message('t2', 't2')], list([{ id: 't1', section: 'new' }, { id: 't2', section: 'new' }]));
     const { steps, end } = await addressesDuring('', () => notices.at(-1)!.onclick!());
@@ -544,7 +675,8 @@ describe.if(hasDom)('useInboxNotifications', () => {
       { kind: 'agent', host: 'codex', session: 'ses_x', name: 'Codex' },
       { kind: 'agent', host: 'pi', session: 'ses_p', name: 'Pi' },
     ];
-    const failedNote = (id: string, author: InboxAuthor, first = true) => message(id, 'old', { author, turn_error: true, body: "Its turn ended with an error: 429" }, first);
+    // As the Inbox writes it: one of its launch notes, a failed turn's (which the sound does hear).
+    const failedNote = (id: string, author: InboxAuthor, first = true) => message(id, 'old', { author, turn_error: true, launch_note: true, body: "Its turn ended with an error: 429" }, first);
 
     test('notifies once per failed turn for each agent, in the shape of a thread notice', async () => {
       for (const [i, author] of agents.entries()) {
@@ -557,8 +689,8 @@ describe.if(hasDom)('useInboxNotifications', () => {
       expect(raised[0]!.title).toMatch(/^billing-svc: Claude Code couldn't answer$/);
       expect(raised[1]!.title).toBe("billing-svc: Codex couldn't answer");
       expect(raised[2]!.title).toBe("billing-svc: Pi couldn't answer");
-      // Not a question: the bell is not asked to ring.
-      expect(questionsHeard).toBe(0);
+      // Not a question: news that asks nothing (the bell rings for it only under "for every agent message"), once per note.
+      expect(heard).toEqual([false, false, false]);
     });
 
     test('an agent\'s own plain message never notifies, and only the note\'s first line does (a restart\'s catch-up writes no first line)', async () => {

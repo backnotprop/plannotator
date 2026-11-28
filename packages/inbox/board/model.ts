@@ -22,6 +22,7 @@ import {
   INBOX_CARD_LIVE_COLUMNS,
   inboxAgentName,
   inboxCardLine,
+  inboxGroupWaitsOnPerson,
   isInboxCardDropUnseen,
   isInboxCardPersonColumn,
   isInboxCardSentWaiting,
@@ -37,6 +38,10 @@ import {
 
 import type { ForgeRefCardData } from '@plannotator/core/forge-ref-card';
 import { projectNames } from '../search/model';
+import { cardInTag, projectTagMap } from '../projectTags';
+import type { ProjectFolder } from '../api';
+/** The projects as the list gives them, for their tags (projectTags.ts). */
+type TaggedProjects = readonly Pick<ProjectFolder, 'id' | 'tags'>[];
 
 export type BoardView = 'lanes' | 'done' | 'cancelled';
 
@@ -67,18 +72,22 @@ export function cardsInProject<T extends Pick<InboxCardWire, 'project_id'>>(card
  * (`&initiative=none`), or null for every card. It narrows what the project
  * filter left, so the two combine. Given the live initiatives, `none` also
  * holds a card whose initiative is gone, as the counts do (`initiativeCounts`).
+ * A tag also holds the cards of the projects that carry it (`projects`' tags, projectTags.ts); `none` stays the
+ * cards with no tag of their own.
  */
-export function cardsInInitiative<T extends Pick<InboxCardWire, 'initiative'>>(
+export function cardsInInitiative<T extends Pick<InboxCardWire, 'initiative' | 'project_id'>>(
   cards: readonly T[],
   initiative: string | null,
   live?: readonly Pick<InboxInitiative, 'id'>[],
+  projects?: TaggedProjects,
 ): readonly T[] {
   if (initiative === null) return cards;
   if (initiative === INBOX_NO_INITIATIVE) {
     const ids = live ? new Set(live.map((i) => i.id)) : null;
     return cards.filter((card) => !card.initiative || (ids !== null && !ids.has(card.initiative)));
   }
-  return cards.filter((card) => card.initiative === initiative);
+  const projectTags = projectTagMap(projects);
+  return cards.filter((card) => cardInTag(card, initiative, projectTags));
 }
 
 /** The initiatives the person can pick, in the order they were made (a deleted one is gone from the filter and the menus). */
@@ -90,13 +99,15 @@ export function liveInitiatives(initiatives: readonly InboxInitiative[] | undefi
  * How many cards each initiative holds, and how many are in none (`none`),
  * among `cards` (the Board passes the cards on its lanes in the picked
  * project). A card whose initiative was deleted counts as in none (the
- * server already reads it so).
+ * server already reads it so). A card of a tagged project counts in each of its project's tags too, once.
  */
-export function initiativeCounts(cards: readonly Pick<InboxCardWire, 'initiative'>[], live: readonly Pick<InboxInitiative, 'id'>[]): Map<string, number> {
+export function initiativeCounts(cards: readonly Pick<InboxCardWire, 'initiative' | 'project_id'>[], live: readonly Pick<InboxInitiative, 'id'>[], projects?: TaggedProjects): Map<string, number> {
+  const projectTags = projectTagMap(projects);
   const counts = new Map<string, number>([[INBOX_NO_INITIATIVE, 0], ...live.map((i) => [i.id, 0] as [string, number])]);
   for (const card of cards) {
     const key = card.initiative && counts.has(card.initiative) ? card.initiative : INBOX_NO_INITIATIVE;
     counts.set(key, (counts.get(key) ?? 0) + 1);
+    for (const tag of projectTags.get(card.project_id) ?? []) if (tag !== key && counts.has(tag)) counts.set(tag, counts.get(tag)! + 1);
   }
   return counts;
 }
@@ -180,9 +191,6 @@ export function boardLanes(cards: readonly InboxCardWire[], now: number = Date.n
   }));
 }
 
-/** The Inbox sections that say a thread waits on the person (Stopped on you, Holding up work, Waiting on you). */
-const WAITING_SECTIONS: ReadonlySet<string> = new Set(['stopped', 'holding', 'waiting']);
-
 /**
  * "Waiting on you" (display only): a card on the lanes before In review with a
  * linked thread the Inbox already lists as waiting on the person (an agent's
@@ -192,7 +200,8 @@ const WAITING_SECTIONS: ReadonlySet<string> = new Set(['stopped', 'holding', 'wa
  */
 export function waitingThread(card: Pick<InboxCardWire, 'column' | 'threads'>, rowOf: (threadId: string) => { section?: string } | null | undefined): string | null {
   if (!INBOX_CARD_LIVE_COLUMNS.includes(card.column) || isInboxCardPersonColumn(card.column)) return null;
-  return card.threads.find((threadId) => WAITING_SECTIONS.has(rowOf(threadId)?.section ?? '')) ?? null;
+  // The sections that say a thread waits on the person (core's `inboxGroupWaitsOnPerson`: Stopped on you, Holding up work, Waiting on you, Tagged you).
+  return card.threads.find((threadId) => inboxGroupWaitsOnPerson(rowOf(threadId)?.section)) ?? null;
 }
 
 /**
@@ -565,11 +574,14 @@ function dayOfMonth(iso: string): string {
   return Number.isNaN(date.getTime()) ? '' : date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
-/** The working state of a card's agent, from the live sessions: working, idle, or ended (not live). */
+/**
+ * The working state of a card's agent, from the live sessions: working, idle, or ended (not live). Null when unknown,
+ * a live host that reports no turns (`busy` null) included: never "idle" for it.
+ */
 export function agentState(session: string | null, live: readonly { session: string; busy: boolean | null }[] | null): 'working' | 'idle' | 'ended' | null {
   if (!session || live === null) return null;
   const found = live.find((s) => s.session === session);
-  return found ? (found.busy ? 'working' : 'idle') : 'ended';
+  return found ? (found.busy === true ? 'working' : found.busy === false ? 'idle' : null) : 'ended';
 }
 
 /**

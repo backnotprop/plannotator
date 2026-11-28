@@ -27,6 +27,8 @@ async function freshHooks(name: string) {
 function engineOver(options: { inboxRan?: boolean; config?: Record<string, unknown> } = {}) {
   const files = new Map<string, string>([['/bin/sh', '']])
   if (options.inboxRan !== false) files.set(inboxRegistryPathOf(DATA), REGISTRY)
+  // The person turned the Inbox on here (inbox-turned-on.ts).
+  if (options.inboxRan !== false) files.set(`${DATA}/inbox/turned-on`, '{"on":true,"by":"command"}')
   if (options.config) files.set(`${DATA}/config.json`, JSON.stringify(options.config))
   const store = new Map<string, unknown>()
   return {

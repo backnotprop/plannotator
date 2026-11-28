@@ -296,3 +296,104 @@
   .ib-spc-body, .ib-spc-list .ib-spc-body { padding: 8px 16px 48px; }
   .ib-spc-list .ib-spc-body { padding-left: 8px; padding-right: 8px; }
 }
+
+/* Share this space (PlanShare.tsx, approval "share-this-space"): the top bar's button and the panel under it. */
+.ib-shr-btn { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 9px; border-radius: 6px; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 500; line-height: 1; color: var(--muted-foreground); white-space: nowrap; flex-shrink: 0; cursor: pointer; }
+.ib-shr-btn .ib-ic { width: 14px; height: 14px; flex: none; }
+.ib-shr-btn:not([data-phone]):hover, .ib-shr-btn:not([data-phone])[aria-expanded="true"], .ib-shr-btn:not([data-phone])[data-popup-open] { background: var(--muted); color: var(--foreground); }
+.ib-shr-btn:focus-visible, .ib-shr :is(button, a, input):focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.ib-shr-btn[data-state="busy"], .ib-shr-btn[data-state="shared"], .ib-shr-btn[data-state="look"], .ib-shr-btn[data-state="failed"] { color: var(--foreground); }
+.ib-shr-btn[data-state="update"] { color: var(--primary); }
+.ib-shr-btn[data-state="look"] .ib-ic, .ib-shr-btn[data-state="failed"] .ib-ic { color: var(--warning); }
+.ib-shr-btn[data-phone] { height: 36px; padding: 0 10px; font-size: var(--ib-fs-14, 14px); }
+.ib-shr-spin { display: inline-block; width: 12px; height: 12px; flex: none; border-radius: 50%; border: 2px solid color-mix(in oklch, var(--muted-foreground) 30%, transparent); border-top-color: var(--primary); animation: ib-spin 0.9s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .ib-shr-spin { animation: none; } }
+
+.ib-shr { position: relative; width: 336px; max-width: calc(100vw - 16px); box-sizing: border-box; padding: 14px; border-radius: 12px; background: var(--popover); color: var(--popover-foreground); border: 1px solid color-mix(in oklch, var(--border) 70%, transparent); box-shadow: 0 12px 32px -8px rgb(0 0 0 / 0.22), 0 2px 6px rgb(0 0 0 / 0.08); font-size: var(--ib-fs-13, 13px); line-height: 1.45; text-align: left; outline: none; transform-origin: var(--transform-origin, top right); animation: ib-pm-in 120ms cubic-bezier(0.23, 1, 0.32, 1); }
+.ib-shr > :first-child { margin-top: 0; }
+.ib-shr-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ib-shr-head:has(.ib-shr-backb) { justify-content: flex-start; gap: 8px; }
+.ib-shr-title { margin: 0; font-size: var(--ib-fs-14, 14px); font-weight: 600; line-height: 1.45; }
+.ib-shr-who { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+.ib-shr-who .ib-ic { width: 14px; height: 14px; }
+.ib-shr-count { flex-shrink: 0; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.ib-shr-backb { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; margin-left: -3px; border-radius: 6px; cursor: pointer; }
+.ib-shr-backb:hover { background: var(--muted); }
+.ib-shr-backb .ib-ic { width: 14px; height: 14px; }
+
+.ib-shr-seg { display: flex; margin-top: 12px; padding: 2px; border-radius: 8px; background: var(--muted); }
+.ib-shr-segb { flex: 1; text-align: center; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 500; line-height: 26px; border-radius: 6px; color: var(--muted-foreground); cursor: pointer; }
+.ib-shr-segb[aria-checked="true"] { background: var(--card); color: var(--foreground); box-shadow: 0 1px 2px rgb(0 0 0 / 0.12); }
+:root:not(.light) .ib-shr-segb[aria-checked="true"] { background: color-mix(in oklch, var(--foreground) 14%, transparent); }
+
+.ib-shr-arow { display: flex; align-items: center; gap: 10px; margin-top: 12px; min-height: 32px; font-size: var(--ib-fs-13, 13px); }
+.ib-shr-disc { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 28px; height: 28px; border-radius: 50%; background: var(--muted); color: var(--muted-foreground); }
+.ib-shr-disc .ib-ic { width: 14px; height: 14px; }
+.ib-shr-warnrow .ib-shr-disc { color: var(--warning); }
+.ib-shr-atext { flex: 1; min-width: 0; font-weight: 500; overflow-wrap: anywhere; }
+/* The longest access line stays on one line beside Invite: the row gives it its gaps. */
+.ib-shr-oneline { gap: 6px; }
+.ib-shr-oneline .ib-shr-atext { white-space: nowrap; overflow-wrap: normal; }
+:root:not(.light) .ib-shr-disc { background: color-mix(in oklch, var(--foreground) 9%, transparent); }
+
+.ib-shr-b { display: inline-flex; align-items: center; justify-content: center; height: 30px; padding: 0 12px; border-radius: 6px; background: var(--muted); color: var(--foreground); font-size: var(--ib-fs-12-5, 12.5px); font-weight: 500; white-space: nowrap; flex-shrink: 0; cursor: pointer; text-decoration: none; }
+.ib-shr-b:hover { background: color-mix(in oklch, var(--muted) 80%, var(--foreground)); }
+:root:not(.light) .ib-shr-b:not(.ib-shr-pri):not(.ib-shr-danger) { background: color-mix(in oklch, var(--foreground) 11%, transparent); }
+:root:not(.light) .ib-shr-b:not(.ib-shr-pri):not(.ib-shr-danger):hover { background: color-mix(in oklch, var(--foreground) 16%, transparent); }
+.ib-shr-b.ib-shr-pri { background: var(--primary); color: var(--primary-foreground); }
+.ib-shr-b.ib-shr-pri:hover { background: color-mix(in oklch, var(--primary) 90%, transparent); }
+.ib-shr-b.ib-shr-danger { background: var(--destructive); color: var(--destructive-foreground, #fff); }
+.ib-shr-b.ib-shr-dangerq { color: var(--destructive); }
+.ib-shr-b.ib-shr-icb { padding: 0 9px; color: var(--muted-foreground); }
+.ib-shr-b .ib-ic { width: 13px; height: 13px; }
+.ib-shr-b:disabled { opacity: 0.5; cursor: default; }
+
+.ib-shr-linkrow { display: flex; align-items: center; gap: 6px; margin-top: 12px; }
+.ib-shr-field { flex: 1; min-width: 0; height: 32px; box-sizing: border-box; padding: 0 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--background); color: var(--foreground); font: 12px/30px ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-shr-linkrow .ib-shr-b { height: 32px; }
+
+.ib-shr-prog { height: 4px; margin-top: 12px; border-radius: 2px; background: var(--muted); overflow: hidden; }
+.ib-shr-prog i { display: block; height: 4px; border-radius: 2px; background: var(--primary); transition: width 200ms ease-out; }
+@media (prefers-reduced-motion: reduce) { .ib-shr-prog i, .ib-shr { transition: none; animation: none; } }
+
+.ib-shr-msg { display: flex; align-items: center; gap: 8px; margin: 12px 0 0; font-size: var(--ib-fs-13, 13px); }
+.ib-shr-msg.ib-shr-first { margin-top: 2px; }
+.ib-shr-msgico { display: inline-flex; flex-shrink: 0; color: var(--muted-foreground); }
+.ib-shr-msgico .ib-ic { width: 14px; height: 14px; }
+.ib-shr-msg.ib-shr-quiet { color: var(--muted-foreground); }
+.ib-shr-msg.ib-shr-warn .ib-shr-msgico { color: var(--warning); }
+
+.ib-shr-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 14px; min-height: 30px; font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-shr-fr { display: inline-flex; gap: 8px; }
+.ib-shr-det { font-size: var(--ib-fs-12-5, 12.5px); font-weight: 500; color: var(--muted-foreground); cursor: pointer; border-radius: 4px; }
+.ib-shr-det:hover { color: var(--foreground); }
+
+.ib-shr-infowrap { display: inline-flex; flex-shrink: 0; }
+.ib-shr-info { display: inline-flex; padding: 4px; border-radius: 6px; color: var(--muted-foreground); cursor: pointer; }
+.ib-shr-info .ib-ic { width: 14px; height: 14px; }
+.ib-shr-tip { position: absolute; right: 8px; z-index: 1; margin-top: 28px; padding: 6px 9px; border-radius: 6px; background: var(--foreground); color: var(--background); font-size: var(--ib-fs-12, 12px); line-height: 1.4; box-shadow: 0 4px 12px rgb(0 0 0 / 0.2); visibility: hidden; pointer-events: none; }
+.ib-shr-info:hover + .ib-shr-tip, .ib-shr-info:focus-visible + .ib-shr-tip, .ib-shr-tip[data-open] { visibility: visible; }
+
+.ib-shr-rows { margin: 8px 0 0; }
+.ib-shr-row { display: flex; justify-content: space-between; gap: 16px; padding: 5px 0; font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-shr-row + .ib-shr-row { border-top: 1px solid color-mix(in oklch, var(--border) 45%, transparent); }
+.ib-shr-row dt, .ib-shr-row dd { margin: 0; }
+.ib-shr-row dd { color: var(--muted-foreground); text-align: right; font-variant-numeric: tabular-nums; font-size: var(--ib-fs-12, 12px); }
+.ib-shr-grp { margin: 14px 0 0; font-size: var(--ib-fs-12, 12px); font-weight: 600; color: var(--muted-foreground); }
+.ib-shr-grp + .ib-shr-rows { margin-top: 4px; }
+
+/* A phone: the panel is a sheet from the bottom, with larger type and targets. */
+.ib-shr[data-phone] { width: auto; max-width: none; padding: 18px 16px calc(22px + env(safe-area-inset-bottom)); border-radius: 16px 16px 0 0; border-bottom: 0; font-size: var(--ib-fs-15, 15px); animation: ib-oq-up 200ms cubic-bezier(0.23, 1, 0.32, 1); }
+.ib-shr[data-phone] .ib-shr-title { font-size: var(--ib-fs-17, 17px); }
+.ib-shr[data-phone] .ib-shr-segb { line-height: 36px; font-size: var(--ib-fs-15, 15px); }
+.ib-shr[data-phone] .ib-shr-arow { min-height: 40px; font-size: var(--ib-fs-15, 15px); }
+.ib-shr[data-phone] .ib-shr-disc { width: 34px; height: 34px; }
+.ib-shr[data-phone] .ib-shr-b { height: 40px; padding: 0 16px; font-size: var(--ib-fs-15, 15px); }
+.ib-shr[data-phone] .ib-shr-field { height: 40px; line-height: 38px; font-size: var(--ib-fs-13, 13px); }
+.ib-shr[data-phone] .ib-shr-foot { margin-top: 18px; min-height: 40px; font-size: var(--ib-fs-15, 15px); }
+.ib-shr[data-phone] .ib-shr-det { font-size: var(--ib-fs-15, 15px); }
+.ib-shr[data-phone] .ib-shr-msg, .ib-shr[data-phone] .ib-shr-count { font-size: var(--ib-fs-15, 15px); }
+.ib-shr[data-phone] .ib-shr-row { padding: 7px 0; font-size: var(--ib-fs-14, 14px); }
+.ib-shr[data-phone] .ib-shr-row dd { font-size: var(--ib-fs-13, 13px); }
+.ib-shr[data-phone] .ib-shr-backb, .ib-shr[data-phone] .ib-shr-info { width: 40px; height: 40px; align-items: center; justify-content: center; }
+@media (prefers-reduced-motion: reduce) { .ib-shr[data-phone] { animation: none; } }

@@ -48,7 +48,7 @@ async function until(check: () => boolean) {
 type OpenRequest = { project: string; projectKey: string; tab: string; command: string; pathPrepend?: readonly string[] };
 const opened: InboxRexOpened = { opened: true, session: "session:x", window: "window:y", block: "block:z", line: "Rex · my-app / Fake Agent" };
 
-function setup(options: { startIn?: "inbox" | "rex"; answer?: (request: OpenRequest) => Promise<InboxRexOpened>; attached?: boolean; scratch?: boolean } = {}) {
+function setup(options: { startIn?: "inbox" | "rex"; answer?: (request: OpenRequest) => Promise<InboxRexOpened>; attached?: boolean; scratch?: boolean; headless?: boolean; shared?: boolean } = {}) {
   const root = mkdtempSync(join(tmpdir(), "plannotator-launch-rex-"));
   restore.push(() => rmSync(root, { recursive: true, force: true }));
   const dataDir = join(root, "data");
@@ -97,6 +97,8 @@ function setup(options: { startIn?: "inbox" | "rex"; answer?: (request: OpenRequ
     rex: {
       open: async (request) => (opens.push(request), (options.answer ?? (async () => opened))(request)),
       appAttachedNow: async () => (asked.attached++, options.attached ?? true),
+      ...(options.headless ? { headless: true } : {}),
+      ...(options.shared !== undefined ? { shared: () => options.shared === true } : {}),
       paneGone: async (place) => (panes.asked.push(`${place.session}/${place.block}`), await panes.hold, panes.gone),
       closePane: async (place) => (panes.closed.push(`${place.session}/${place.block}`), panes.closes),
     },
@@ -170,6 +172,21 @@ describe("Start in Rex", () => {
     expect(fake.calls).toEqual(["rexCommand new", "start Tidy"]);
     expect(root.launch).toMatchObject({ session_ref: "f2", rex: { unavailable: true } });
     expect(await launch.runOf(root.thread_id)).toMatchObject({ state: "starting", rex: { line: null, unavailable: true } });
+  });
+
+  test("why Rex was not used is kept with the launch, so the line says the true thing: a Rex server that is not running (no app to open there), or one that is another account's", async () => {
+    const server = setup({ headless: true, answer: async () => ({ opened: false, sent: false }) });
+    const first = await server.send();
+    expect(first.root.launch).toMatchObject({ session_ref: "f2", rex: { unavailable: true, why: "server" } });
+    expect(await server.launch.runOf(first.root.thread_id)).toMatchObject({ state: "starting", rex: { unavailable: true, why: "server" } });
+    const shared = setup({ headless: true, answer: async () => ({ opened: false, sent: false, shared: true }) });
+    const second = await shared.send();
+    // It started in the background, once.
+    expect(shared.fake.calls).toEqual(["rexCommand new", "start Tidy"]);
+    expect(second.root.launch).toMatchObject({ rex: { unavailable: true, why: "shared" } });
+    // A Mac's line is as it was: no reason kept.
+    const mac = setup({ answer: async () => ({ opened: false, sent: false }) });
+    expect((await mac.send()).root.launch!.rex).toEqual({ unavailable: true });
   });
 
   test("Rex said no to the tab (an error answer: it made nothing): the agent starts in the background, and the line says so", async () => {
@@ -317,6 +334,36 @@ describe("Start in Rex", () => {
     const stopped = (await (await post(id, "stop"))!.json()) as { run: { state: string; stopped_by_person?: boolean } };
     expect(panes.closed).toEqual(["session:x/block:z"]);
     expect(stopped.run).toMatchObject({ state: "stopped", stopped_by_person: true });
+  });
+
+  test("Stopped before it ever connected (held at a prompt in its tab), then a reply: it really starts again, in a new Rex tab on its own id as a first start (nothing to resume); never without the Stop", async () => {
+    const { clock, fake, store, opens, panes, send, post, launch } = setup({ answer: async () => (opens.length > 1 ? { ...opened, block: "block:new" } : opened) });
+    const { root, id } = await send();
+    // Never connected: a reply waits for it (its line says to look at its tab), and starts nothing by itself.
+    clock.now += 5_000;
+    store.sendReply(root.id, { words: "Are you there?", idempotency_key: "reply-unconnected-0" });
+    launch.sweep(false);
+    await Bun.sleep(30);
+    expect(opens).toHaveLength(1);
+    expect((await (await post(id, "stop"))!.json()) as { run: unknown }).toMatchObject({ run: { state: "stopped", stopped_by_person: true } });
+    expect(panes.closed).toEqual(["session:x/block:z"]);
+    panes.gone = true;
+    // Nothing written since the Stop: nothing starts (the reply before it stays for the person's next one).
+    launch.sweep(false);
+    await Bun.sleep(30);
+    expect(opens).toHaveLength(1);
+    // "Your reply starts it again": it does.
+    store.sendReply(root.id, { words: "Go on, please.", idempotency_key: "reply-unconnected-1" });
+    await until(() => opens.length === 2);
+    expect(fake.calls.filter((call) => /^(rexCommand|start|resume) /.test(call))).toEqual(["rexCommand new", "rexCommand fresh"]);
+    expect(opens[1]!.command).toContain("--session session-r1");
+    // Addressed as before (the root and the reply reach it once it connects), and Stop closes its new pane.
+    await until(() => store.message(root.id)!.launch!.rex?.block === "block:new");
+    expect(store.message(root.id)!.to).toEqual({ host: FAKE, session: "session-r1" });
+    expect((await launch.runOf(root.thread_id))?.state).toBe("starting");
+    launch.sweep(false);
+    await Bun.sleep(30);
+    expect(opens).toHaveLength(2);
   });
 
   test("Stop in Rex that cannot work: no pane known (Rex never asked), or Rex said no; each with its own true words, and nothing counts as stopped", async () => {
@@ -569,15 +616,35 @@ describe("Settings → Agents: Start new agents in", () => {
     expect(behind.launch.rexPanes()!.size).toBe(0);
   });
 
-  test("Rex is asked whether its app is here only for this computer's own Settings answer: never for the routines' clock or the tailnet", async () => {
+  test("a Rex with no app on its computer (a server used from elsewhere): the tailnet's Settings read says whether it is here too, so the row shows where the person is; a linked machine's or a phone's read never asks", async () => {
+    const { launch, asked } = setup({ startIn: "inbox", headless: true });
+    const read = (via: string, door?: { platform: string; window: boolean }) => launch.route(new Request("http://127.0.0.1/api/inbox/launch/settings", { headers: { Host: "127.0.0.1" } }), "/api/inbox/launch/settings", via, door);
+    expect(((await (await read("tailnet"))!.json()) as { launch: Record<string, unknown> }).launch).toMatchObject({ rex_here: true, rex_headless: true });
+    expect(((await (await read("local"))!.json()) as { launch: Record<string, unknown> }).launch.rex_here).toBe(true);
+    expect(asked.attached).toBe(2);
+    expect(((await (await read("tailnet", { platform: "ios", window: false }))!.json()) as { launch: Record<string, unknown> }).launch.rex_here).toBeUndefined();
+    expect(asked.attached).toBe(2);
+  });
+
+  test("a Rex server that answered but is another account's (a shared one): Settings' read says so, so the row never says the server isn't running; never while Rex is here, and never on a read that does not ask Rex", async () => {
+    const read = async (launch: ReturnType<typeof setup>["launch"], url = "http://127.0.0.1/api/inbox/launch/settings") =>
+      ((await (await launch.route(new Request(url, { headers: { Host: "127.0.0.1" } }), "/api/inbox/launch/settings", "local"))!.json()) as { launch: Record<string, unknown> }).launch;
+    const shared = setup({ headless: true, attached: false, shared: true });
+    expect(await read(shared.launch)).toMatchObject({ rex_here: false, rex_headless: true, rex_shared: true });
+    expect("rex_shared" in (await read(shared.launch, "http://127.0.0.1/api/inbox/launch/settings?ahead=1"))).toBe(false);
+    const away = setup({ headless: true, attached: false, shared: false });
+    expect("rex_shared" in (await read(away.launch))).toBe(false);
+    const here = setup({ headless: true, attached: true, shared: true });
+    expect("rex_shared" in (await read(here.launch))).toBe(false);
+  });
+
+  test("Rex is asked whether its app is here only for Settings → Agents' own read: never for the routines' clock, New message's pick or a save", async () => {
     const { launch, asked } = setup({ startIn: "inbox" });
     // The routines' clock and the window's settings model: whether Launch is on, no Rex.
     expect(launch.enabled()).toBe(true);
     expect(launch.settingsState().enabled).toBe(true);
     expect("rex_here" in launch.settingsState()).toBe(false);
     const read = (via: string) => launch.route(new Request("http://127.0.0.1/api/inbox/launch/settings", { headers: { Host: "127.0.0.1" } }), "/api/inbox/launch/settings", via);
-    expect(((await (await read("tailnet"))!.json()) as { launch: Record<string, unknown> }).launch.rex_here).toBeUndefined();
-    expect(asked.attached).toBe(0);
     // New message's agent pick reads ahead: no Rex either.
     const ahead = await launch.route(new Request("http://127.0.0.1/api/inbox/launch/settings?ahead=1", { headers: { Host: "127.0.0.1" } }), "/api/inbox/launch/settings", "local");
     expect(((await ahead!.json()) as { launch: Record<string, unknown> }).launch.rex_here).toBeUndefined();
@@ -593,6 +660,20 @@ describe("Settings → Agents: Start new agents in", () => {
     // Settings → Agents' own read on this computer: the one that asks.
     expect(((await (await read("local"))!.json()) as { launch: Record<string, unknown> }).launch.rex_here).toBe(true);
     expect(asked.attached).toBe(1);
+  });
+
+  test("a Mac's Rex app attached: Settings → Agents' read over the tailnet says Rex is here too, so the row shows in a window on the tailnet address (this computer's or another's); the device door never asks", async () => {
+    const { launch, asked } = setup({ startIn: "inbox", attached: true });
+    const read = async (via: string, door?: { platform: string; window: boolean }) =>
+      ((await (await launch.route(new Request("http://127.0.0.1/api/inbox/launch/settings", { headers: { Host: "127.0.0.1" } }), "/api/inbox/launch/settings", via, door))!.json()) as { launch: Record<string, unknown> }).launch;
+    expect((await read("tailnet")).rex_here).toBe(true);
+    expect(asked.attached).toBe(1);
+    expect((await read("local", { platform: "ios", window: false })).rex_here).toBeUndefined();
+    expect((await read("local", { platform: "machine", window: true })).rex_here).toBeUndefined();
+    expect(asked.attached).toBe(1);
+    const gone = setup({ startIn: "rex", attached: false });
+    const away = ((await (await gone.launch.route(new Request("http://127.0.0.1/api/inbox/launch/settings", { headers: { Host: "127.0.0.1" } }), "/api/inbox/launch/settings", "tailnet"))!.json()) as { launch: Record<string, unknown> }).launch;
+    expect(away.rex_here).toBe(false);
   });
 
   test("saved to config.json, read back with which agents can start there (whether Rex is here stays the pane's own read); anything else is refused", async () => {

@@ -7,8 +7,8 @@ import { inboxUrl } from './inboxUrl';
  * holds the picked threads (`machine`, null for this one): only that machine's sessions can read them.
  */
 export const combineApi = {
-  /** Who can be asked about these threads, and the Combines worth showing. */
-  plan: (threads: readonly string[], machine: string | null) => apiGet<InboxCombinePlan>(inboxUrl('/combine', `threads=${threads.join(',')}`, machine)),
+  /** Who can be asked about these threads, and the Combines worth showing; `all` (picks on two computers): every running agent there. */
+  plan: (threads: readonly string[], machine: string | null, all = false) => apiGet<InboxCombinePlan>(inboxUrl('/combine', `threads=${threads.join(',')}${all ? '&all=1' : ''}`, machine)),
   /** The Combines worth showing (one still waiting, or one settled within a day). */
   list: (machine: string | null) => apiGet<InboxCombinePlan>(inboxUrl('/combine', undefined, machine)),
   start: (input: { thread_ids: readonly string[]; session: string; words?: string; idempotency_key: string }, machine: string | null) =>

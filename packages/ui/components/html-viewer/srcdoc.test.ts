@@ -1054,6 +1054,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
       type: "plannotator-bridge-set-input-method",
       method: "pinpoint",
     });
+    postBridge({ type: "plannotator-bridge-set-annotate-mode", active: true });
     // Mode affordance: crosshair cursor attribute while pinpoint is active.
     expect(document.body.hasAttribute("data-plannotator-pinpoint-cursor")).toBe(true);
 
@@ -5232,5 +5233,72 @@ describe("injectPrintDefaults", () => {
     expect(css).not.toContain("break-inside");
     expect(css).not.toContain("break-after");
     expect(css).not.toContain("min-height");
+  });
+});
+
+describe.if(hasDom)("bridge start mode (the srcdoc tag)", () => {
+  /** Run the bridge the way a framed srcdoc page does: the script element
+   * buildSrcdocInjection wrote is the document's currentScript while it runs.
+   * Its own frame, so it never meets the shared bridge above. */
+  function startBridge(startInteract: boolean | undefined) {
+    const posts: Array<Record<string, unknown>> = [];
+    const fakeParent = {
+      postMessage(data: unknown) {
+        if (data && typeof data === "object") posts.push(data as Record<string, unknown>);
+      },
+    };
+    const frame = document.createElement("iframe");
+    document.documentElement.appendChild(frame);
+    const win = frame.contentWindow!;
+    const doc = frame.contentDocument!;
+    const holder = doc.createElement("template");
+    holder.innerHTML = buildSrcdocInjection({ tokens: {}, isLight: true, hostTheme: false, diffActive: false, startInteract });
+    const script = holder.content.querySelector("script")!;
+    Object.defineProperty(doc, "currentScript", { configurable: true, get: () => script });
+    new Function("window", "document", "location", "history", "parent", "top", script.textContent!)(
+      win, doc, win.location, win.history, fakeParent, fakeParent,
+    );
+    Object.defineProperty(doc, "currentScript", { configurable: true, get: () => null });
+    if (!posts.some((p) => p.type === "plannotator-bridge-ready")) doc.dispatchEvent(new Event("DOMContentLoaded"));
+    const post = (data: Record<string, unknown>) => win.dispatchEvent(new MessageEvent("message", {
+      data, source: fakeParent as unknown as Window,
+    }));
+    const target = doc.createElement("p");
+    target.textContent = "A paragraph on the page";
+    doc.body.appendChild(target);
+    const click = () => {
+      const before = posts.filter((p) => p.type === "plannotator-bridge-selection").length;
+      const event = new MouseEvent("click", { bubbles: true, cancelable: true });
+      target.dispatchEvent(event);
+      return { prevented: event.defaultPrevented, selections: posts.filter((p) => p.type === "plannotator-bridge-selection").length - before };
+    };
+    const cursor = () => doc.body.hasAttribute("data-plannotator-pinpoint-cursor");
+    return { frame, post, click, cursor };
+  }
+
+  test("by default the page is armed from the first message: no Interact gap before set-annotate-mode", () => {
+    const bridge = startBridge(undefined);
+    try {
+      // The parent's first message is the input method; set-annotate-mode comes after it.
+      bridge.post({ type: "plannotator-bridge-set-input-method", method: "pinpoint" });
+      expect(bridge.cursor()).toBe(true);
+      expect(bridge.click()).toEqual({ prevented: true, selections: 1 });
+    } finally {
+      bridge.frame.remove();
+    }
+  });
+
+  test("with startInteract the page starts in Interact until the parent arms it", () => {
+    const bridge = startBridge(true);
+    try {
+      bridge.post({ type: "plannotator-bridge-set-input-method", method: "pinpoint" });
+      expect(bridge.cursor()).toBe(false);
+      expect(bridge.click()).toEqual({ prevented: false, selections: 0 });
+      bridge.post({ type: "plannotator-bridge-set-annotate-mode", active: true });
+      expect(bridge.cursor()).toBe(true);
+      expect(bridge.click()).toEqual({ prevented: true, selections: 1 });
+    } finally {
+      bridge.frame.remove();
+    }
   });
 });

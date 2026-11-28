@@ -13,6 +13,8 @@ import { withoutInboxSkillsBlock } from './skill-reference-block';
 import { INLINE_DESTINATION, stripInlineMarkup } from './inline-markdown';
 import { withoutInboxReplyQuoteLead } from './inbox-reply-quote';
 import { withoutInboxThreadMentions } from './inbox-thread-mention';
+import { parseInboxRunBlocks, parseInboxSecretBlocks } from './inbox-run-blocks';
+import { skillReactionText } from './inbox-skill-reaction';
 
 /**
  * Where "new since you looked" starts: the seq of the person's last look at
@@ -68,6 +70,14 @@ export function holdsUnsentPick(message: InboxMessageWire): boolean {
   return (message.questions ?? []).some((q) => q.state === 'picked');
 }
 
+/**
+ * An agent's message holding a `:::run` or `:::secret` card: it stays open like one with a pick, so a run's card
+ * (its result, Run again, a field) is not folded away under the person's reply that its run wrote.
+ */
+export function holdsRunCard(message: InboxMessageWire): boolean {
+  return message.author.kind === 'agent' && /^[ \t]*:::[ \t]*(run|secret)\b/im.test(message.body) && (parseInboxRunBlocks(message.body).length > 0 || parseInboxSecretBlocks(message.body).length > 0);
+}
+
 export interface FoldPlan {
   /** The messages that open folded to one line. */
   folded: Set<string>;
@@ -99,7 +109,7 @@ export const OPEN_NEWEST_MAX = 20;
  * newest OPEN_NEWEST_MAX (the read messages above it fold as before), so the
  * "New since you looked" line sits right above that fold and the thread
  * opens where it did. The thread's first message is never hidden. One
- * holding a pick not sent stays open, as before.
+ * holding a pick not sent, or a run or secret card (holdsRunCard), stays open, as before.
  */
 export function planFolds(messages: readonly InboxMessageWire[], fresh: ReadonlySet<string>, boundary: number | null): FoldPlan {
   const folded = new Set<string>();
@@ -124,7 +134,7 @@ export function planFolds(messages: readonly InboxMessageWire[], fresh: Readonly
     early = [];
   };
   messages.forEach((message, index) => {
-    const pick = holdsUnsentPick(message);
+    const pick = holdsUnsentPick(message) || holdsRunCard(message);
     if (many && index >= firstNew && index < newestFrom) {
       flush();
       if (pick) {
@@ -254,7 +264,8 @@ export function foldSnippet(
       }
       return { kind: 'words', text: reasked === 1 ? 'Asked to re-ask the open question' : `Asked to re-ask ${reasked} open questions in one message` };
     }
-    const said = words(replyWords(message.body));
+    // A skill emoji's reply reads as the words "🦃 /bro" (inbox-skill-reaction.ts).
+    const said = skillReactionText(message) ?? words(replyWords(message.body));
     if (said) return { kind: 'words', text: said };
     const sent = messages.flatMap((m) => (m.questions ?? []).filter((q) => q.sent_reply_id === message.id && q.answer !== null));
     if (sent.length > 0) return { kind: 'answers', parts: answeredParts(sent) };
@@ -445,3 +456,5 @@ export function isDelivered(message: InboxMessageWire, root: InboxMessageWire): 
 // A list row's grey line (inbox-row-preview.ts), through this subpath: core 0.25.22 is published, and a new subpath
 // would need a core release (packages/ui smoke:package), as inbox-rows-words goes through inbox-types.
 export { INBOX_ROW_PREVIEW_MAX, inboxRowPreview, inboxRowPreviewWords, type InboxRowPreviewInput, type InboxRowPreviewQuestion } from './inbox-row-preview';
+// A skill emoji's reply as the person reads it (inbox-skill-reaction.ts), through this subpath for the same reason.
+export { skillReactionShownBody, skillReactionText } from './inbox-skill-reaction';

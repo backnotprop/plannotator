@@ -3,6 +3,7 @@ import { inboxNextTagColour, inboxTagLook, inboxTagLookColour, inboxTagShownHex,
 import { inboxApi } from './api';
 import type { MachinesModel } from './machines';
 import { machineOf } from './inboxUrl';
+import { machineServesReads, useLinkedReadsRev } from './linkedReads';
 import { setSidebarSectionOpen } from './sidebarSections';
 import { canTagThread, rowTagsHere, tagById, tagsOnOwnRows, threadTagsHere, tagsSectionShown, tagThreadCounts, tagWaitingCounts, tagWrite, type ListTag, type ThreadTagsHost } from './threadTags';
 import { initiativeDeletedToast } from './board/model';
@@ -12,6 +13,12 @@ import { keepTints } from './tagTintSheet';
 import type { ListTagColours } from './parts/RowTint';
 import type { InboxToastModel } from './components/Toast';
 import { eachRow, tagsToast } from './bulkWrites';
+import { useProjectTags } from './useProjectTags';
+import { tagWrites } from './tagWrites';
+import { tagActivity } from './tagSort';
+import type { ProjectFolder } from './api';
+
+const NO_PROJECTS: readonly ProjectFolder[] = [];
 
 function withEntry<V>(map: ReadonlyMap<string, V>, key: string, value: V | undefined): ReadonlyMap<string, V> {
   const next = new Map(map);
@@ -38,6 +45,8 @@ interface TagsInputs {
   tagGone: (tag: ListTag) => void;
   /** The list's `tag_colours`; null from an Inbox before tag colours (then no row is tinted and the menus offer none). */
   tagColours: InboxTagColours | null;
+  /** The list's projects: their tags (useProjectTags.ts). */
+  projects?: readonly ProjectFolder[];
 }
 
 /** The colour menu of a sidebar tag (TagsSection): what it shows and what a pick does. */
@@ -60,20 +69,32 @@ export interface TagColourControls {
 
 export type { ListTagColours };
 
-export function useThreadTagsHost({ listTags, across, routeTag, machines, windowRows, openRow, latestSections, rowOf, showError, showToast, dismissToast, refreshList, openTag, tagGone, tagColours }: TagsInputs) {
+export function useThreadTagsHost({ listTags, across, routeTag, machines, windowRows, openRow, latestSections, rowOf, showError, showToast, dismissToast, refreshList, openTag, tagGone, tagColours, projects = NO_PROJECTS }: TagsInputs) {
 const [tagPatches, setTagPatches] = useState<ReadonlyMap<string, readonly string[]>>(() => new Map());
+  // Of two quick ticks, only the latest write takes its tick back (tagWrites.ts).
+  const [tagWritesHere] = useState(tagWrites);
   const tagsOfRow = useCallback((row: Pick<InboxListRow, 'thread_id' | 'tags' | 'machine'>) => rowTagsHere(row, machines, tagPatches), [tagPatches, machines]);
+  // Project tags (projectTags.ts): the filters read a row's own tags and its project's; the project's ⋯ sets them.
+  const { filterTagsOfRow, projectTagsHost } = useProjectTags({ projects, machines, tagsOfRow, showError, showToast, dismissToast, refreshList });
   const filterTag = routeTag && listTags ? tagById(listTags, routeTag) : null;
   const shownTagId = filterTag?.id ?? routeTag;
   const tagCounts = useMemo(() => tagThreadCounts(windowRows, tagsOfRow), [windowRows, tagsOfRow]);
   const tagWaiting = useMemo(() => tagWaitingCounts(latestSections, tagsOfRow), [latestSections, tagsOfRow]);
-  const tagsHere = useMemo(() => (listTags ? tagsOnOwnRows(listTags, windowRows, machines.self, tagsOfRow) : []), [listTags, windowRows, machines.self, tagsOfRow]);
+  const tagLatest = useMemo(() => tagActivity(windowRows, tagsOfRow), [windowRows, tagsOfRow]);
+  // `linkedRev`: a linked machine's marks, which say whether its search takes a Tag filter, may come after the rows.
+  const linkedRev = useLinkedReadsRev();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const tagsHere = useMemo(() => (listTags ? tagsOnOwnRows(listTags, windowRows, machines.self, tagsOfRow, machineServesReads) : []), [listTags, windowRows, machines.self, tagsOfRow, linkedRev]);
   const tagsShown = listTags !== null && tagsSectionShown(listTags, windowRows, tagsOfRow);
   const setThreadTag = async (threadId: string, tag: ListTag, on: boolean, undo = true) => {
     const before = tagPatches.get(threadId) ?? rowOf(threadId)?.tags ?? (openRow?.thread_id === threadId ? openRow.tags : undefined) ?? [];
     const next = on ? (before.includes(tag.id) ? before : [...before, tag.id]) : before.filter((id) => id !== tag.id);
     if (tag.id) setTagPatches((current) => withEntry<readonly string[]>(current, threadId, next));
-    const unpatch = () => setTagPatches((current) => withEntry<readonly string[]>(current, threadId, undefined));
+    const turn = tagWritesHere.start(threadId);
+    // Only the latest write on the thread takes its tick back (two quick ticks never flicker).
+    const unpatch = () => {
+      if (tagWritesHere.latest(threadId, turn)) setTagPatches((current) => withEntry<readonly string[]>(current, threadId, undefined));
+    };
     try {
       await inboxApi.setThreadTag(threadId, tagWrite(tag, machineOf(threadId), machines.self), on);
     } catch (cause) {
@@ -148,8 +169,10 @@ const [tagPatches, setTagPatches] = useState<ReadonlyMap<string, readonly string
             rows: windowRows,
             rowTags: tagsOfRow,
             here: tagsHere,
+            filterTags: filterTagsOfRow,
+            projects: projectTagsHost,
           },
-    [listTags, tagPatches, windowRows, openRow, tagCounts, machines, filterTag, tagsOfRow, tagsHere],
+    [listTags, tagPatches, windowRows, openRow, tagCounts, machines, filterTag, tagsOfRow, tagsHere, filterTagsOfRow, projectTagsHost],
   );
   const setThreadTagRef = useRef(setThreadTag);
   setThreadTagRef.current = setThreadTag;
@@ -162,6 +185,7 @@ const [tagPatches, setTagPatches] = useState<ReadonlyMap<string, readonly string
     : {
         tags: listTags,
         waiting: tagWaiting,
+        activity: tagLatest,
         shown: tagsShown,
         tagId: shownTagId,
         onOpen: openTag,
@@ -295,5 +319,5 @@ const [tagPatches, setTagPatches] = useState<ReadonlyMap<string, readonly string
       },
     };
   }, [coloursKept, showColours, setShow, listTags, tagsOfRow, colourOf, shownTagId]);
-  return { tagsOfRow, filterTag, shownTagId, threadTagsHost, sidebarTags: sidebarTags && { ...sidebarTags, colours: colourControls }, listColours };
+  return { tagsOfRow, filterTagsOfRow, filterTag, shownTagId, threadTagsHost, sidebarTags: sidebarTags && { ...sidebarTags, colours: colourControls }, listColours };
 }

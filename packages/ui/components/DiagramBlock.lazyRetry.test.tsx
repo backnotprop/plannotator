@@ -39,6 +39,10 @@ import {
   setMathRendererLoader,
   type MathRenderer,
 } from '../utils/math';
+import { drawMermaidFencesWithMermaid } from '../test-setup/mermaidEngine';
+
+// A stand-in Mermaid runtime draws here; Pele is DiagramBlock.engine.test.tsx's.
+drawMermaidFencesWithMermaid();
 
 const hasDom = typeof document !== 'undefined';
 const RETRY_DELAY_MS = 10;
@@ -102,7 +106,7 @@ const cases = [
     runtime: fakeMermaid,
     element: <MermaidBlock block={mermaidBlock} />,
     source: mermaidBlock.content,
-    errorTitle: 'Mermaid Error',
+    errorTitle: 'Diagram error',
   },
   {
     name: 'Graphviz',
@@ -133,7 +137,7 @@ describe('Mermaid pending state', () => {
     expect(el.querySelector('[data-mermaid-pending]')).not.toBeNull();
     expect(el.textContent).toContain('Rendering diagram');
     expect(el.textContent).toContain(mermaidBlock.content);
-    expect(el.textContent).not.toContain('Mermaid Error');
+    expect(el.textContent).not.toContain('Diagram error');
     expect(el.innerHTML).not.toContain('data-sentinel="diagram"');
 
     await act(async () => { release!(); });
@@ -268,7 +272,7 @@ describe('Mermaid diagram-type chunk', () => {
 
     expect(renders).toBe(2);
     expect(el.innerHTML).toContain('data-sentinel="diagram"');
-    expect(el.textContent).not.toContain('Mermaid Error');
+    expect(el.textContent).not.toContain('Diagram error');
   });
 
   // Safari keeps the failed fetch for the page, so neither a re-attempt nor a
@@ -291,7 +295,7 @@ describe('Mermaid diagram-type chunk', () => {
     expect(renders).toBe(2);
     expect(el.querySelector('[data-lazy-load-failed]')).not.toBeNull();
     expect(el.querySelector('pre')?.textContent).toBe(mermaidBlock.content);
-    expect(el.textContent).not.toContain('Mermaid Error');
+    expect(el.textContent).not.toContain('Diagram error');
     expect(el.textContent).not.toContain('Rendering diagram');
   });
 });
@@ -354,7 +358,7 @@ describe('Mermaid sourceOnError', () => {
     const el = await mount(<MermaidBlock block={mermaidBlock} readOnly sourceOnError />);
     await settle(RETRY_DELAY_MS * 5);
 
-    expect(el.textContent).toContain('Mermaid Error');
+    expect(el.textContent).toContain('Diagram error');
     expect(el.textContent).toContain(mermaidBlock.content);
     const retry = el.querySelector<HTMLButtonElement>('button[title="Retry loading the diagram renderer"]');
     expect(retry).not.toBeNull();
@@ -368,7 +372,7 @@ describe('Mermaid sourceOnError', () => {
 
     expect(calls).toBe(before + 1);
     expect(el.innerHTML).toContain('data-sentinel="diagram"');
-    expect(el.textContent).not.toContain('Mermaid Error');
+    expect(el.textContent).not.toContain('Diagram error');
   });
 
   test.skipIf(!hasDom)('a source that does not render shows the plain fence, no panel and no Retry', async () => {
@@ -378,7 +382,7 @@ describe('Mermaid sourceOnError', () => {
     await settle(RETRY_DELAY_MS * 5);
 
     expect(el.querySelector('pre')?.textContent).toBe(mermaidBlock.content);
-    expect(el.textContent).not.toContain('Mermaid Error');
+    expect(el.textContent).not.toContain('Diagram error');
     expect(el.textContent).not.toContain('Parse error');
     expect(el.textContent).not.toContain('Rendering diagram');
     expect(el.querySelector('button[title="Retry loading the diagram renderer"]')).toBeNull();

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import React, { act } from 'react';
+import React, { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { PackageChangesCard } from './PackageChangesCard';
 import { adoptPackageChangesConfig, resetPackageChangesSetting } from '@plannotator/ui/hooks/usePackageChangesSetting';
@@ -195,5 +195,40 @@ describe('PackageChangesCard', () => {
 
     await render();
     expect((document.querySelector('[aria-controls]') as HTMLButtonElement).getAttribute('aria-expanded')).toBe('false');
+  });
+
+  test.skipIf(!hasDom)("All files: an unchanged card reports its height once, so the header slot's redraw does not loop every frame", async () => {
+    stubServer([]);
+    adoptPackageChangesConfig({ packageChanges: { card: true, lookup: false } });
+    // As AllFilesCodeView: a report bumps the item's version and calls updateItem; Pierre republishes the header slot
+    // on the next frame, which draws the card again (a fresh callback each time, as `remeasure` is).
+    let updateItems = 0;
+    let draws = 0;
+    function HeaderSlot() {
+      const [version, setVersion] = useState(0);
+      draws += 1;
+      return (
+        <div data-version={version}>
+          <PackageChangesCard
+            filePath="package.json"
+            reviewSnapshotId="s1"
+            onHeightChange={() => {
+              updateItems += 1;
+              setTimeout(() => setVersion((v) => v + 1), 16);
+            }}
+          />
+        </div>
+      );
+    }
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await act(async () => root?.render(<HeaderSlot />));
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(document.querySelectorAll('[data-package-row]')).toHaveLength(2);
+    // A few frames with nothing changing.
+    await act(async () => { await new Promise((r) => setTimeout(r, 120)); });
+    expect(updateItems).toBe(1);
+    expect(draws).toBeLessThanOrEqual(3);
   });
 });

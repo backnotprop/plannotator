@@ -26,6 +26,14 @@ export interface PullAllFilesProps {
   /** A file the PR does not change: shown whole in place of the diff. */
   onOpen: (path: string) => void;
   handleRef?: Ref<PullChangesTreeHandle>;
+  /** The risk bars' files (pulls/riskBars.ts): each one's row has the mark before its icon. Absent: none. */
+  risk?: PullTreeRisk | null;
+}
+
+/** The files a High or Medium judgment names, for the tree's risk bars. */
+export interface PullTreeRisk {
+  level: 'high' | 'medium';
+  files: ReadonlySet<string>;
 }
 
 export interface PullRepoFileProps {
@@ -48,4 +56,6 @@ export interface PullChangesTreeProps {
   head: ReactNode;
   onSelect: (path: string, how?: { via: 'focus' }) => void;
   handleRef?: Ref<PullChangesTreeHandle>;
+  /** The risk bars' files: each one's row has the mark before its icon. Absent: none. */
+  risk?: PullTreeRisk | null;
 }

@@ -27,9 +27,11 @@ import { Icon } from '../icons';
 import { FileName } from './FileName';
 import { CopyFileButton } from './CopyFileButton';
 import { ImageAttachmentView } from './ImageAttachmentView';
+import { SkillFilePane } from './SkillFilePane';
 import { VideoAttachmentView } from './VideoAttachmentView';
 import { Tip } from './Tip';
 import type { FileRef } from '../fileRefs';
+import { fileNotFoundSentence, fileNotFoundShort, fileNotFoundWords } from '../fileMissingWords';
 
 const noop = () => {};
 const NO_ANNOTATIONS: [] = [];
@@ -74,7 +76,18 @@ function standIn(view: Extract<ReferencedFileView, { found: true }>, messageId: 
   };
 }
 
-export function ReferencedFilePane({
+type ReferencedFilePaneProps = Parameters<typeof ReferencedFile>[0] & {
+  /** For a skill: the message that used it (`fileRef.messageId`), where it was written and what it carried. */
+  skillMessage?: Parameters<typeof SkillFilePane>[0]['message'];
+};
+
+/** A file the message names, or (`fileRef.skill`) a skill the person's message used, read only (SkillFilePane). */
+export function ReferencedFilePane({ skillMessage, ...props }: ReferencedFilePaneProps) {
+  if (props.fileRef.skill) return <SkillFilePane threadId={props.threadId} name={props.fileRef.path} message={skillMessage} phone={props.phone} full={props.full} onClose={props.onClose} />;
+  return <ReferencedFile {...props} />;
+}
+
+function ReferencedFile({
   threadId,
   fileRef,
   phone,
@@ -97,7 +110,8 @@ export function ReferencedFilePane({
 }) {
   const source = useInboxFileSource();
   const [view, setView] = useState<ReferencedFileView | null>(null);
-  const [failed, setFailed] = useState(false);
+  /** The view could not be read (a network or server error): its words, never a claim about where the file is. */
+  const [failed, setFailed] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const scope = useMemo<ReferencedFileScope>(() => ({ thread: threadId, message: fileRef.messageId }), [threadId, fileRef.messageId]);
   const key = `${fileRef.messageId}\u0000${fileRef.path}`;
@@ -106,7 +120,7 @@ export function ReferencedFilePane({
   useEffect(() => {
     let live = true;
     setView(null);
-    setFailed(false);
+    setFailed(null);
     setError(null);
     inboxApi
       .referencedFile(scope, fileRef.path)
@@ -116,7 +130,7 @@ export function ReferencedFilePane({
         if (answer.found && answer.attachment_id) void attachedRef.current(answer.attachment_id, null);
         else setView(answer);
       })
-      .catch(() => live && setFailed(true));
+      .catch((cause) => live && setFailed(cause instanceof InboxApiError ? cause.message : 'The file could not be opened.'));
     return () => {
       live = false;
     };
@@ -188,8 +202,10 @@ export function ReferencedFilePane({
   const [armed, setArmed] = useState(!phone);
   const htmlComments = writes && !phone && kind === 'html';
 
-  const missing = failed || (view !== null && !view.found);
+  const missing = view !== null && !view.found;
   const reason = view && !view.found ? view.reason : 'missing';
+  const lookedIn = view && !view.found ? view.looked_in : undefined;
+  const short = fileNotFoundShort(name, lookedIn);
 
   return (
     <section
@@ -241,14 +257,30 @@ export function ReferencedFilePane({
               )}
             </div>
           )}
+          {failed && (
+            <div className="ib-error ib-view-error" role="alert" data-ref-failed="">
+              {failed}
+            </div>
+          )}
           {!view && !failed && <div className="ib-refwait" aria-hidden="true" />}
           {missing && (
             <div className="ib-refmissing" role="status" data-ref-missing={reason}>
               <span className="ib-refmissing-ic">
                 <Icon name="doc" size={22} />
               </span>
-              <span className="ib-refmissing-name">{fileRef.path}</span>
-              <span className="ib-refmissing-t">{reason === 'refused' ? 'does not show here.' : 'is not on this computer.'}</span>
+              {reason === 'refused' ? (
+                <>
+                  <span className="ib-refmissing-name">{fileRef.path}</span>
+                  <span className="ib-refmissing-t">does not show here.</span>
+                </>
+              ) : short ? (
+                <span className="ib-refmissing-t">{fileNotFoundSentence(name, lookedIn)}</span>
+              ) : (
+                <>
+                  <span className="ib-refmissing-name">{name}</span>
+                  <span className="ib-refmissing-t">{fileNotFoundWords(lookedIn!)}</span>
+                </>
+              )}
             </div>
           )}
           {found && found.contents !== undefined && (kind === 'markdown' || kind === 'text') && (

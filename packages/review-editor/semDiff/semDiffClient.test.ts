@@ -455,53 +455,56 @@ test('the cold limit starts when the engine and its grammar have arrived, so a s
 });
 
 test('a grammar download that never ends gives up after its bound: that language falls back to the plain diff without starting it again, other languages still answer', async () => {
-  const live = new Set<unknown>();
-  const realSet = globalThis.setTimeout;
-  const realClear = globalThis.clearTimeout;
-  globalThis.setTimeout = ((fn: () => void, ms?: number) => {
-    const timer = realSet(() => {
-      live.delete(timer);
-      fn();
-    }, ms);
-    live.add(timer);
-    return timer;
-  }) as typeof setTimeout;
-  globalThis.clearTimeout = ((timer: ReturnType<typeof setTimeout>) => {
-    live.delete(timer);
-    realClear(timer);
-  }) as typeof clearTimeout;
-  try {
-    let made = 0;
-    const posted: string[] = [];
-    const createWorker = () => {
-      made++;
-      return {
-        onmessage: null as ((e: MessageEvent<unknown>) => void) | null,
-        onerror: null,
-        postMessage(request: SemDiffRequest) {
-          posted.push(request.path);
-          const say = (data: unknown) => queueMicrotask(() => this.onmessage?.({ data } as MessageEvent<unknown>));
-          if (request.path.endsWith('.tsx')) say({ id: request.id, ok: true, semanticOperations: [], semanticFolds: [], patch: '' });
-          else say({ download: 'start', language: 'typescript' });
-        },
-        terminate() {},
-      } as unknown as Worker;
-    };
-    const client = createSemDiffClient({ advert, origin: 'http://x', createWorker, timeoutMs: 30, coldTimeoutMs: 60_000, downloadTimeoutMs: 40 });
-    const first = client.attempt('a.ts', 'const a = 1;\n', 'const a = 2;\n');
-    const second = client.attempt('b.ts', 'const b = 1;\n', 'const b = 2;\n');
-    const other = client.attempt('c.tsx', 'const c = 1;\n', 'const c = 2;\n');
-    expect(await other).toEqual({ result: null, failed: false });
-    expect(await first).toEqual({ result: null, failed: true });
-    expect(await second).toEqual({ result: null, failed: true });
-    expect(await client.attempt('d.ts', 'const d = 1;\n', 'const d = 2;\n')).toEqual({ result: null, failed: true });
-    expect(await client.attempt('e.tsx', 'const e = 1;\n', 'const e = 2;\n')).toEqual({ result: null, failed: false });
-    expect(made).toBe(1);
-    expect(posted).toEqual(['a.ts', 'b.ts', 'c.tsx', 'e.tsx']);
-    client.dispose();
-    expect(live.size).toBe(0);
-  } finally {
-    globalThis.setTimeout = realSet;
-    globalThis.clearTimeout = realClear;
-  }
+  // The client's own timers only, on a clock this test fires: a real 40 ms bound raced the test's awaits on a loaded runner,
+  // and a patched global setTimeout also counted timers that other code in the same process started meanwhile.
+  const live = new Map<number, { fn: () => void; ms: number }>();
+  let nextTimer = 1;
+  const timers = {
+    set: (fn: () => void, ms: number) => {
+      const id = nextTimer++;
+      live.set(id, { fn, ms });
+      return id;
+    },
+    clear: (timer: unknown) => {
+      live.delete(timer as number);
+    },
+  };
+  let made = 0;
+  const posted: string[] = [];
+  const createWorker = () => {
+    made++;
+    return {
+      onmessage: null as ((e: MessageEvent<unknown>) => void) | null,
+      onerror: null,
+      postMessage(request: SemDiffRequest) {
+        posted.push(request.path);
+        const say = (data: unknown) => queueMicrotask(() => this.onmessage?.({ data } as MessageEvent<unknown>));
+        if (request.path.endsWith('.tsx')) say({ id: request.id, ok: true, semanticOperations: [], semanticFolds: [], patch: '' });
+        else say({ download: 'start', language: 'typescript' });
+      },
+      terminate() {},
+    } as unknown as Worker;
+  };
+  const client = createSemDiffClient({ advert, origin: 'http://x', createWorker, timeoutMs: 30, coldTimeoutMs: 60_000, downloadTimeoutMs: 40, timers });
+  let settled = 0;
+  const first = client.attempt('a.ts', 'const a = 1;\n', 'const a = 2;\n');
+  const second = client.attempt('b.ts', 'const b = 1;\n', 'const b = 2;\n');
+  void first.then(() => settled++);
+  void second.then(() => settled++);
+  const other = client.attempt('c.tsx', 'const c = 1;\n', 'const c = 2;\n');
+  expect(await other).toEqual({ result: null, failed: false });
+  // While the download runs, the only bound left is the download's own (the cold limit waits for the grammar).
+  expect([...live.values()].map((t) => t.ms)).toEqual([40]);
+  expect(settled).toBe(0);
+  const [[bound, { fn }]] = [...live];
+  live.delete(bound);
+  fn();
+  expect(await first).toEqual({ result: null, failed: true });
+  expect(await second).toEqual({ result: null, failed: true });
+  expect(await client.attempt('d.ts', 'const d = 1;\n', 'const d = 2;\n')).toEqual({ result: null, failed: true });
+  expect(await client.attempt('e.tsx', 'const e = 1;\n', 'const e = 2;\n')).toEqual({ result: null, failed: false });
+  expect(made).toBe(1);
+  expect(posted).toEqual(['a.ts', 'b.ts', 'c.tsx', 'e.tsx']);
+  client.dispose();
+  expect(live.size).toBe(0);
 });

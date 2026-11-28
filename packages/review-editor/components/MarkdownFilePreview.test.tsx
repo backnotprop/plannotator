@@ -237,7 +237,7 @@ describe.if(hasDom)('commenting in a Markdown preview', () => {
   });
 
   /** An added Markdown file, previewed whole, under the given review state. */
-  async function mountAdded(text: string, stateExtras: Record<string, unknown> = {}) {
+  async function mountAdded(text: string, stateExtras: Record<string, unknown> = {}, previewProps: Partial<React.ComponentProps<typeof MarkdownFilePreview>> = {}) {
     const patch = [
       'diff --git a/docs/guide.md b/docs/guide.md',
       'new file mode 100644',
@@ -259,6 +259,7 @@ describe.if(hasDom)('commenting in a Markdown preview', () => {
             patch={patch}
             contents={{ fileContents: { forPath: 'docs/guide.md', old: null, new: text }, loading: false, stale: false }}
             variant="single"
+            {...previewProps}
           />
         </ReviewStateProvider>,
       );
@@ -345,6 +346,26 @@ describe.if(hasDom)('commenting in a Markdown preview', () => {
     await settle(30);
     expect(imgSrcs(el)).toContain('https://tracker.example/p.png');
     expect(el.querySelector('[data-markdown-preview-remote-images]')).toBeNull();
+  });
+
+  test('a page that never loads remote images: each is the quiet placeholder, in a PR review or not, with nothing offering to load it', async () => {
+    for (const extras of [{ prMetadata: { url: 'https://github.com/o/r/pull/1' } }, {}]) {
+      const el = await mountAdded(REMOTE_DOC, extras, { neverLoadRemoteImages: true });
+      await settle(30);
+      expect(imgSrcs(el)).toEqual(['/api/review-markdown-image?doc=docs%2Fguide.md&side=new&src=img%2Fa.png&snapshot=snap-1']);
+      expect(el.querySelectorAll('[data-image-unavailable]').length).toBe(2);
+      expect(el.querySelector('[data-markdown-preview-remote-images]')).toBeNull();
+      expect(el.querySelector('[data-markdown-preview-load-remote]')).toBeNull();
+      // A click on a placeholder loads nothing.
+      const placeholder = el.querySelector('[data-image-unavailable]') as HTMLElement;
+      await act(async () => { placeholder.click(); await new Promise((r) => setTimeout(r, 30)); });
+      await settle(30);
+      expect(imgSrcs(el)).toEqual(['/api/review-markdown-image?doc=docs%2Fguide.md&side=new&src=img%2Fa.png&snapshot=snap-1']);
+      await act(async () => root!.unmount());
+      host!.remove();
+      root = null;
+      host = null;
+    }
   });
 
   test('an image source is sent to the route as written, never trimmed', async () => {
@@ -451,6 +472,43 @@ describe.if(hasDom)('commenting in a Markdown preview', () => {
     expect(imported).toEqual([urls.engine, `${urls.engine}?r=1`]);
     expect(host.querySelector('[data-stub-diagram]')?.textContent).toBe('flowchart LR\n  A --> B');
     expect(host.querySelector('[data-review-diagram]')).toBeNull();
+  });
+
+  test("a fence the host's source check refuses stays code and never imports the engine; an accepted one beside it does", async () => {
+    const { ReviewDiagramFence } = await import('./ReviewDiagramFence');
+    const { DiagramSourceAcceptContext } = await import('@plannotator/ui/components/diagramSourceAccept');
+    const urls = { engine: '/assets/diagram-engine/engine-source-check.js', mermaid: '/m.js', graphviz: '/g.js' };
+    const imported: string[] = [];
+    const importer = async (url: string) => {
+      imported.push(url);
+      return {
+        apiVersion: 1,
+        DiagramFence: ({ block }: { block: { content: string } }) => <div data-stub-diagram="">{block.content}</div>,
+      };
+    };
+    const refused = { id: 'r1', type: 'code', language: 'mermaid', content: 'flowchart LR\n  X --> Y', order: 0, startLine: 1 } as const;
+    const accepted = { id: 'a1', type: 'code', language: 'mermaid', content: 'flowchart LR\n  A --> B', order: 0, startLine: 1 } as const;
+    const check = (_kind: string, source: string) => source !== refused.content;
+    const fence = (block: typeof refused | typeof accepted) => (
+      <ReviewDiagramFence block={block as never} kind="mermaid" urls={urls} importer={importer} fallback={<pre><code>{block.content}</code></pre>} />
+    );
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await act(async () => {
+      root!.render(<DiagramSourceAcceptContext.Provider value={check}>{fence(refused)}</DiagramSourceAcceptContext.Provider>);
+    });
+    await settle(60);
+    expect(imported).toEqual([]);
+    expect(Array.from(host.querySelectorAll('pre > code')).map((c) => c.textContent)).toEqual([refused.content]);
+    expect(host.querySelector('[data-review-diagram]')).toBeNull();
+    await act(async () => {
+      root!.render(<DiagramSourceAcceptContext.Provider value={check}>{fence(refused)}{fence(accepted)}</DiagramSourceAcceptContext.Provider>);
+    });
+    await settle(60);
+    expect(imported).toEqual([urls.engine]);
+    expect(Array.from(host.querySelectorAll('[data-stub-diagram]')).map((n) => n.textContent)).toEqual([accepted.content]);
+    expect(Array.from(host.querySelectorAll('pre > code')).map((c) => c.textContent)).toEqual([refused.content]);
   });
 });
 

@@ -5,6 +5,10 @@ export interface FakeOpenCodeLaunchState {
   version?: string;
   plugin?: { version: string; status?: "active" | "failed"; error?: string } | null;
   models?: { providerID: string; id: string; variants: string[] }[];
+  /** The model OpenCode starts on (`GET /api/model/default` from `--standalone api`); absent, that read fails. */
+  defaultModel?: { providerID: string; id: string };
+  /** `exit`: the model list read (`--standalone api GET /api/model`) ends with an error, as a broken config does. */
+  listFails?: "exit";
   /** OpenCode's own agents (`GET /api/agent`); absent, that read fails, as an OpenCode that can't list them. */
   agents?: { id: string; mode: "primary" | "subagent" | "all"; hidden: boolean }[];
   failTurn?: string | null;
@@ -46,6 +50,8 @@ const models = () => (state().models || [
 ]).map((m) => ({ id: m.id, modelID: m.id, providerID: m.providerID, name: m.id, enabled: true, variants: m.variants.map((v) => ({ id: v, settings: { reasoningEffort: v } })) }));
 if (args[0] === "--standalone" && args[1] === "api") {
   log({ event: "cli", argv: args });
+  if (args[2] === "GET" && args[3] === "/api/model" && s0.listFails === "exit") { process.stderr.write("Error: the config could not be read\n"); process.exit(1); }
+  if (args[2] === "GET" && args[3] === "/api/model/default" && s0.defaultModel) { process.stdout.write(JSON.stringify({ data: s0.defaultModel })); process.exit(0); }
   if (args[2] === "GET" && args[3] === "/api/model") { process.stdout.write(JSON.stringify({ location: { directory: process.cwd() }, data: models() })); process.exit(0); }
   if (args[2] === "GET" && args[3] === "/api/agent" && s0.agents) { process.stdout.write(JSON.stringify({ location: { directory: process.cwd() }, data: s0.agents })); process.exit(0); }
   process.exit(1);
@@ -179,6 +185,8 @@ export function installFakeOpenCodeLaunch(root: string, state: FakeOpenCodeLaunc
     existsSync(file("calls.jsonl"))
       ? readFileSync(file("calls.jsonl"), "utf8")
           .split("\n")
+          // A line is whole only once its newline is written: the last piece is "" or a line still being appended.
+          .slice(0, -1)
           .filter(Boolean)
           .map((line) => JSON.parse(line) as FakeOpenCodeLaunchCall)
       : [];

@@ -37,6 +37,7 @@ export interface InboxPull {
   author: string | null;
   /** The person (the CLI's signed-in account) wrote it. */
   mine: boolean;
+  author_member?: true;
   /** Review was requested from the person (or one of their teams). */
   requested: boolean;
   /** The person is one of its assignees (GitHub `assignee:@me`, GitLab `assignedMergeRequests`); absent from an older Inbox. */
@@ -118,11 +119,13 @@ export interface InboxPullLink {
    * `session`: the session that sent it (absent from an older Inbox).
    */
   guide: { message_id: string; title: string; steps: number; review: boolean; session?: string | null } | null;
+  picture_it_asked_at?: string;
+  picture_it_page?: { message_id: string; title: string; at: string; seen?: true };
   /**
    * `owner` only: what the hand-off asked for first (a guided review, or the person's own curation), or `thread`: nothing
    * (a PR page's Start a thread; the thread is the PR's page from then on). Absent for an older choice.
    */
-  ask?: "guide" | "custom" | "thread";
+  ask?: InboxPullAsk;
   /**
    * `owner` only: the thread was started from the PR's page (Start a thread), so it is the PR's page; kept when that
    * thread later asks for a guided review (`ask` then `guide`). Absent otherwise.
@@ -307,6 +310,9 @@ export interface InboxPullDiffAnswer {
   head_sha?: string | null;
   /** The PR's own description as Markdown (a stack's whole diff too: this layer's): null when it has none or the forge did not say. */
   description?: string | null;
+  /** The PR's state as the forge said at this read: one merged or closed elsewhere shows so on its open page. Absent: not read. */
+  state?: InboxPullState;
+  merged_at?: string | null;
 }
 
 /**
@@ -331,6 +337,12 @@ export interface InboxFileContents {
 export const INBOX_PULLS_SEARCH_MAX = 50;
 /** Merged PRs are asked back this many days (to put a stack's merged layers under it). */
 export const INBOX_PULLS_MERGED_DAYS = 14;
+
+/**
+ * A reopen (the board's Close, then Undo) is taken only for a PR this Inbox closed this recently. The server refuses
+ * one past it; the board's Undo line goes when it ends.
+ */
+export const INBOX_PULL_REOPEN_WINDOW_MS = 5 * 60_000;
 
 /** `#412` on GitHub, `!61` on GitLab. */
 export function inboxPullLabel(pull: Pick<InboxPull, "platform" | "number">): string {
@@ -694,6 +706,10 @@ export function inboxPullUrlsIn(text: string): string[] {
 }
 
 /** How a PR hand-off's details begin (the window's `pullHandoffMessage` opening): what tells them apart from the words. */
+export type InboxPullAsk = "guide" | "custom" | "thread" | "picture_it";
+export const INBOX_PULL_ASKS: readonly InboxPullAsk[] = ["guide", "custom", "thread", "picture_it"];
+export const isInboxPullAsk = (value: unknown): value is InboxPullAsk => INBOX_PULL_ASKS.includes(value as InboxPullAsk);
+
 export const PULL_DETAILS_START = "You're being asked to help me review and understand a ";
 /** Only a Start a thread's details have this step (`pullHandoffMessage`'s `thread` kind). */
 export const PULL_THREAD_STEP = "We discuss it in this thread.";

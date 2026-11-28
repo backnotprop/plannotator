@@ -242,3 +242,56 @@ export function inboxScheduledDecide(input: {
   }
   return { kind: "run", due_at: handled_through, late, missed_before: due.count - 1, handled_through };
 }
+
+/**
+ * The characters a plain name may hold: letters (with their marks), numbers, emoji, a space, and punctuation no inline
+ * renderer of a thread reads as markup where these lines put a name (always mid-line, after a space: inside a link's
+ * words, or before `.`, ` (` or `).`). The window's InlineMarkdown, core `cleanInline` and the phone's inline Markdown
+ * draw them as typed (`'` the window draws as `’`, its smart quotes: only how it looks; the line keeps `'`). Left
+ * out, so such a name is code: `"`, `_ * ~` (emphasis), `[ ] ! < > & \ $ # @ : / | =` and backticks (links,
+ * pictures, tags, references, escapes, math, refs, mentions, emoji codes, URLs, paths), and any other space, control or
+ * direction mark.
+ */
+const PLAIN_NAME = /^[\p{L}\p{M}\p{N}\p{Extended_Pictographic}\p{Emoji_Modifier}\p{Regional_Indicator}\u200D\uFE0F .,'’\-–—()+?]*$/u;
+
+/** A path may also hold `/`, `_` and a leading `~/`, and no `.`: see `isPlainLineText`. */
+const PLAIN_PATH = /^(?:~\/)?[\p{L}\p{M}\p{N}\p{Extended_Pictographic}\p{Emoji_Modifier}\p{Regional_Indicator}\u200D\uFE0F ,'’\-–—()+?/_]*$/u;
+
+/**
+ * Whether text reads as typed, and draws as nothing but its words, written into a change line as it is. Besides the
+ * characters above: no space at either end; no `www.` (an address GFM links bare); no `..` or `--` (the window's
+ * smart punctuation draws `…`, `–` and `—`, and a name's last `.` meets the line's own); no word shaped like a Linear
+ * issue (`ENG-42`: the window links it when Linear is on). A path: no `.` (a bare path or code file the window opens
+ * ends in `.ext`), its `~` only as `~/` at its start (after a space, so it never closes a strikethrough), and each `_`
+ * after an ASCII letter, digit or `_` (so it never opens emphasis: InlineMarkdown's and `cleanInline`'s rule).
+ */
+function isPlainLineText(text: string, kind: "name" | "path"): boolean {
+  if (!(kind === "path" ? PLAIN_PATH : PLAIN_NAME).test(text)) return false;
+  if (text.startsWith(" ") || text.endsWith(" ")) return false;
+  if (/www\./i.test(text) || text.includes("..") || text.includes("--")) return false;
+  // The Linear linker's shape (`linearCards.tsx` MAYBE_IDENTIFIER), without its end check: wider, never narrower.
+  if (/(?<![\w/.-])[A-Za-z][A-Za-z0-9]{0,9}-[1-9]/.test(text)) return false;
+  if (kind === "path" && /(?<![A-Za-z0-9_])_/.test(text)) return false;
+  // Nothing invisible: a filler letter or a selector with no emoji to sit on would leave the line reading as empty.
+  if (/\p{Default_Ignorable_Code_Point}/u.test(text.replace(/[\u200D\uFE0F]/gu, ""))) return false;
+  // A mark needs a letter to sit on: no name made only of marks, none starting a word.
+  if (!/[^\p{M}\u200D\uFE0F]/u.test(text) || /(^| )\p{M}/u.test(text)) return false;
+  return true;
+}
+
+/**
+ * A routine's name (or a folder's path) as text in a change line. A plain one (`isPlainLineText`) is written as it
+ * is, as it always was. Any other is inline code, so it is never a picture, a link, a tag, a mention or an issue ref,
+ * whoever named it (a name is free text, an agent's anywhere), and still reads exactly as typed everywhere: the window
+ * draws a code span's text as it is, a plain-text line (a list row's preview, a folded line: core `cleanInline`) drops
+ * only the backticks, and an agent reading the thread reads it as literal text. The fence is one backtick longer than
+ * any run in the text, padded with a space when the text starts or ends with one, as CommonMark reads it; a line break
+ * reads as a space, so the span stays on its line.
+ */
+export function routineLineText(text: string, kind: "name" | "path" = "name"): string {
+  if (isPlainLineText(text, kind)) return text;
+  const one = text.replace(/[\r\n]+/g, " ");
+  const ticks = "`".repeat(Math.max(0, ...[...one.matchAll(/`+/g)].map((m) => m[0].length)) + 1);
+  const pad = one.startsWith("`") || one.endsWith("`") || (one.startsWith(" ") && one.endsWith(" ")) ? " " : "";
+  return `${ticks}${pad}${one}${pad}${ticks}`;
+}

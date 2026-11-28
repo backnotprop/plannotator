@@ -1,6 +1,6 @@
 /**
  * The Inbox's `/create-routine` skill (docs/agent-guides/inbox-routines.md): the person picks it in a message or
- * reply box, and the window pastes this body into what they send (human-only, as `/shape` and the review skills go),
+ * reply box, and the window pastes this body into what they send (human-only, as the review skills go),
  * so the agent reading their message learns to make the routine: with its Inbox tool's `routine` action first (the
  * connection fills the tool's session, so the grant below matches), else with `plannotator routine` from the shell
  * (apps/hook/server/routine-command.ts), whose call names a session only when the shell has one. The Inbox lists it

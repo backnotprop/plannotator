@@ -1,0 +1,46 @@
+{
+  "about": "Invented cases for the words the window says after a row action. scripts/mobile/vectors-actions.ts runs the window's own functions over these and over fixtures/rows.json (packages/inbox/markRead.ts, bulkWrites.ts, rowMenu.ts, packages/core/inbox-format.ts) and scripts/mobile/vectors.ts writes vectors/acts.json.",
+  "names": [
+    "Claude Code",
+    "Claude Code (worktree agent-a0316994da8440ab5)",
+    "A name that is exactly forty characters!!",
+    "  spaced   out   name  ",
+    "🧑‍🚀🧑‍🚀🧑‍🚀🧑‍🚀🧑‍🚀🧑‍🚀🧑‍🚀🧑‍🚀🧑‍🚀🧑‍🚀🧑‍🚀🧑‍🚀🧑‍🚀🧑‍🚀🧑‍🚀🧑‍🚀🧑‍🚀🧑‍🚀🧑‍🚀🧑‍🚀🧑‍🚀🧑‍🚀🧑‍🚀🧑‍🚀🧑‍🚀🧑‍🚀🧑‍🚀🧑‍🚀🧑‍🚀🧑‍🚀🧑‍🚀🧑‍🚀🧑‍🚀🧑‍🚀🧑‍🚀🧑‍🚀🧑‍🚀🧑‍🚀🧑‍🚀🧑‍🚀🧑‍🚀🧑‍🚀",
+    "مساعد البرمجة الذي يعمل على فرع طويل الاسم جدا في المستودع",
+    "Reviewer-with-a-very-long-unbroken-identifier-0123456789abcdef"
+  ],
+  "links": [
+    { "thread_id": "msg_R0000000000000000000000001", "url": "http://localhost:59999/", "via": "local", "origin": "http://localhost:59999" },
+    { "thread_id": "msg_R0000000000000000000000001", "url": "http://localhost:59999/", "via": "tailnet", "origin": "https://desk.example.ts.net:8443" },
+    { "thread_id": "msg_R0000000000000000000000002", "url": null, "via": null, "origin": "https://desk.example.ts.net:8443" },
+    { "thread_id": "msg_R0000000000000000000000003", "url": null, "via": null, "origin": "https://192.0.2.10:8443" }
+  ],
+  "bulk": [
+    { "action": "archive", "made": 1, "held": 0, "held_on": [], "refused": 0, "refusal": null, "detail": null },
+    { "action": "archive", "made": 3, "held": 0, "held_on": [], "refused": 0, "refusal": null, "detail": null },
+    { "action": "archive", "made": 1284, "held": 0, "held_on": [], "refused": 0, "refusal": null, "detail": null },
+    { "action": "archive", "made": 2, "held": 0, "held_on": [], "refused": 1, "refusal": "This thread is archived.", "detail": null },
+    { "action": "archive", "made": 2, "held": 0, "held_on": [], "refused": 1, "refusal": null, "detail": null },
+    { "action": "archive", "made": 0, "held": 0, "held_on": [], "refused": 2, "refusal": "This thread is archived.", "detail": null },
+    { "action": "archive", "made": 3, "held": 1, "held_on": ["Work Mac"], "refused": 0, "refusal": null, "detail": null },
+    { "action": "archive", "made": 3, "held": 3, "held_on": ["Work Mac"], "refused": 0, "refusal": null, "detail": null },
+    { "action": "archive", "made": 4, "held": 2, "held_on": ["Work Mac", "Studio"], "refused": 0, "refusal": null, "detail": null },
+    { "action": "snooze", "made": 3, "held": 0, "held_on": [], "refused": 0, "refusal": null, "detail": "Wed 8:00 AM" },
+    { "action": "snooze", "made": 2, "held": 1, "held_on": ["Work Mac"], "refused": 1, "refusal": "That time has passed.", "detail": "Wed 8:00 AM" },
+    { "action": "read", "made": 3, "held": 0, "held_on": [], "refused": 0, "refusal": null, "detail": null },
+    { "action": "unread", "made": 1, "held": 0, "held_on": [], "refused": 0, "refusal": null, "detail": null },
+    { "action": "star", "made": 2, "held": 0, "held_on": [], "refused": 0, "refusal": null, "detail": null },
+    { "action": "unstar", "made": 2, "held": 0, "held_on": [], "refused": 0, "refusal": null, "detail": null },
+    { "action": "priority-add", "made": 5, "held": 0, "held_on": [], "refused": 0, "refusal": null, "detail": null },
+    { "action": "priority-remove", "made": 1, "held": 0, "held_on": [], "refused": 0, "refusal": null, "detail": null }
+  ],
+  "set_aside": [
+    { "questions": 1, "actions": 0, "threads": 1 },
+    { "questions": 2, "actions": 0, "threads": 1 },
+    { "questions": 0, "actions": 1, "threads": 1 },
+    { "questions": 0, "actions": 3, "threads": 1 },
+    { "questions": 2, "actions": 1, "threads": 1 },
+    { "questions": 1284, "actions": 0, "threads": 3 },
+    { "questions": 1, "actions": 1, "threads": 2 }
+  ]
+}

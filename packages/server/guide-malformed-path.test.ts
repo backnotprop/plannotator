@@ -43,6 +43,7 @@ const MALFORMED: Array<[method: string, path: string]> = [
   ["POST", "/api/guide/%/share"],
   ["DELETE", "/api/guide/%/share"],
   ["DELETE", "/api/guides/%"],
+  ["PATCH", "/api/guides/%"],
 ];
 
 describe("Bun review: a malformed escape in a guide route's id", () => {

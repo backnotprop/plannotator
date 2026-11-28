@@ -2,7 +2,9 @@
  * Artifact pins in the window (approval "inbox-artifact-stars"; the word is Pin). DOM-gated (DOM_TESTS=1).
  * What would regress: the thread grid's Pinned group (its order, the newest pin first; "Everything else" after it;
  * the grid as it always was with nothing pinned in this thread), a card's pin and the viewer's pin not saving on the
- * server or not showing at once, a refused pin staying shown, and the Wall's filters not reaching its read.
+ * server or not showing at once, a refused pin staying shown, and the Wall's filters not reaching its read; on a
+ * linked machine's thread, the pin missing (or offered by an older machine that would refuse it), the press going to
+ * this machine instead of the thread's, its answer wiping this machine's pins, and a held press lost or unsaid.
  */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
@@ -17,7 +19,8 @@ const { FullScreenMore } = (hasDom ? await import('./components/OpenIn') : {}) a
 const { AttachmentTiles } = (hasDom ? await import('./components/AttachmentTiles') : {}) as typeof import('./components/AttachmentTiles');
 const { ArtifactsWall } =(hasDom ? await import('./components/ArtifactsWall') : {}) as typeof import('./components/ArtifactsWall');
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
-const { resetArtifactPinsForTest } = (hasDom ? await import('./artifactPins') : {}) as typeof import('./artifactPins');
+const { readArtifactPins, resetArtifactPinsForTest, sayArtifactPinHeld } =(hasDom ? await import('./artifactPins') : {}) as typeof import('./artifactPins');
+const { rememberMachine, resetMachineRoutes, setSelfMachine } = (hasDom ? await import('./inboxUrl') : {}) as typeof import('./inboxUrl');
 
 const THREAD = 'msg_01M6XV5A40WH334FPF7KQQH5S5';
 const OTHER = 'msg_01M6XV5A3QFRSQX5MXKS88YFED';
@@ -29,19 +32,29 @@ let savedFetch: typeof fetch;
 let serverPins: InboxArtifactPin[] = [];
 let posts: { thread_id: string; key: string; pinned: boolean }[] = [];
 let refuse = false;
+/** Every URL a POST went to; `held`: a linked machine's door is away, so this Inbox holds the write (202). */
+let postedTo: string[] = [];
+let held = false;
 
 beforeEach(() => {
   if (!hasDom) return;
   serverPins = [];
   posts = [];
   refuse = false;
+  postedTo = [];
+  held = false;
   savedFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
-    if (!url.startsWith('/api/inbox/artifact-pins')) return new Response('{}', { status: 404 });
+    if (!/^\/api\/inbox\/(?:m\/ibx_[0-9A-Z]{26}\/)?artifact-pins/.test(url)) return new Response('{}', { status: 404 });
     if (init?.method === 'POST') {
       const body = JSON.parse(String(init.body)) as { thread_id: string; key: string; pinned: boolean };
       posts.push({ thread_id: body.thread_id, key: body.key, pinned: body.pinned });
+      postedTo.push(url);
+      if (held) {
+        const outbox = { key: 'k1', machine: MAC, route: 'artifact-pins', state: 'queued', queued_at: '2026-11-20T10:00:00.000Z', settled_at: null, status: null, answer: null, notice: null, dismissed: false };
+        return new Response(JSON.stringify({ outbox, machine: { id: MAC, name: 'MacBook', state: 'offline' } }), { status: 202, headers: { 'Content-Type': 'application/json' } });
+      }
       if (refuse) return new Response(JSON.stringify({ error: 'No.', code: 'artifact_not_found' }), { status: 404 });
       serverPins = body.pinned ? [...serverPins.filter((p) => p.key !== body.key), { key: body.key, thread_id: body.thread_id, pinned_at: '2026-11-08T12:00:00.000Z' }] : serverPins.filter((p) => p.key !== body.key);
     }
@@ -57,6 +70,7 @@ afterEach(() => {
   host = null;
   globalThis.fetch = savedFetch;
   resetArtifactPinsForTest();
+  resetMachineRoutes();
 });
 
 function mount(node: React.ReactNode): HTMLElement {
@@ -258,4 +272,76 @@ test.skipIf(!hasDom)('the Wall: Pinned, a type chip and Show more reach its read
   await settle();
   expect(reads.at(-1)).toMatchObject({ pinned: true, type: 'videos' });
   expect(el.querySelector('[data-wall-empty] b')?.textContent).toBe('No pinned artifacts yet');
+});
+
+// A linked machine's thread (approval "inbox-linked-marks": one experience across the person's computers): the pin
+// lives on that machine, so the press goes there; an older Inbox there offers none until it updates.
+const SELF = `ibx_01K${'0'.repeat(22)}S`;
+const MAC = `ibx_01K${'0'.repeat(22)}M`;
+const MINI = `ibx_01K${'0'.repeat(22)}N`;
+const FAR = 'msg_01M6XV5A40WH334FPF7KQQFAR0';
+const OLD = 'msg_01M6XV5A40WH334FPF7KQQ01D0';
+
+function linkMachines() {
+  setSelfMachine(SELF, [
+    { id: SELF, self: true, name: 'Studio', marks: [] },
+    { id: MAC, name: 'MacBook', marks: ['star', 'artifact-pins'], list_cursor: 3, state: 'online' },
+    { id: MINI, name: 'Mini', marks: ['star'], list_cursor: 3, state: 'online' },
+  ]);
+  rememberMachine([FAR, 'att_far'], MAC);
+  rememberMachine([OLD, 'att_old'], MINI);
+}
+
+test.skipIf(!hasDom)('a linked machine’s thread shows the pin; the press goes to that machine and this machine’s pins stay; an older machine shows none', async () => {
+  linkMachines();
+  resetArtifactPinsForTest([{ key: 'att_here', thread_id: THREAD, pinned_at: '2026-11-08T10:00:00.000Z' }]);
+  const el = mount(
+    <>
+      <ArtifactPinButton threadId={THREAD} artifactKey="att_here" name="here.png" surface="bar" />
+      <ArtifactPinButton threadId={FAR} artifactKey="att_far" name="far.png" surface="bar" />
+      <ArtifactPinButton threadId={OLD} artifactKey="att_old" name="old.png" surface="bar" />
+    </>,
+  );
+  const button = (key: string) => el.querySelector<HTMLButtonElement>(`[data-artifact-pin="${key}"]`);
+  expect(button('att_old')).toBeNull();
+  expect(button('att_far')?.getAttribute('aria-label')).toBe('Pin far.png');
+  act(() => button('att_far')!.click());
+  await settle();
+  expect(postedTo).toEqual([`/api/inbox/m/${MAC}/artifact-pins`]);
+  expect(posts).toEqual([{ thread_id: FAR, key: 'att_far', pinned: true }]);
+  // MacBook answered with its own pins only: this machine's pin is still shown.
+  expect(button('att_far')!.getAttribute('aria-pressed')).toBe('true');
+  expect(button('att_here')!.getAttribute('aria-pressed')).toBe('true');
+  // Unpin goes there too.
+  act(() => button('att_far')!.click());
+  await settle();
+  expect(postedTo.at(-1)).toBe(`/api/inbox/m/${MAC}/artifact-pins`);
+  expect(posts.at(-1)).toEqual({ thread_id: FAR, key: 'att_far', pinned: false });
+  expect(button('att_far')!.getAttribute('aria-pressed')).toBe('false');
+  expect(button('att_here')!.getAttribute('aria-pressed')).toBe('true');
+});
+
+test.skipIf(!hasDom)('MacBook asleep: the press is held for it, the clock words say so, and the pin shows once MacBook has it', async () => {
+  linkMachines();
+  resetArtifactPinsForTest([]);
+  held = true;
+  const said: string[] = [];
+  const stop = sayArtifactPinHeld((cause) => said.push(cause.message));
+  try {
+    const el = mount(<ArtifactPinButton threadId={FAR} artifactKey="att_far" name="far.png" surface="wall" />);
+    const button = el.querySelector<HTMLButtonElement>('[data-artifact-pin="att_far"]')!;
+    act(() => button.click());
+    await settle();
+    expect(postedTo).toEqual([`/api/inbox/m/${MAC}/artifact-pins`]);
+    expect(said).toEqual(['Waiting for MacBook: this applies when MacBook is back.']);
+    // Not drawn as pinned before MacBook confirms (as a held star); the button stays live for another press.
+    expect(button.getAttribute('aria-pressed')).toBe('false');
+    expect(button.disabled).toBe(false);
+    // MacBook back, the held pin delivered: its `artifact-pins` event reads the pins again, and it shows.
+    serverPins = [{ key: 'att_far', thread_id: FAR, pinned_at: '2026-11-20T10:05:00.000Z', machine: MAC }];
+    await act(async () => readArtifactPins());
+    expect(button.getAttribute('aria-pressed')).toBe('true');
+  } finally {
+    stop();
+  }
 });

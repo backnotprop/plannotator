@@ -251,11 +251,11 @@ const projectRow = (el: HTMLElement) => el.querySelector<HTMLButtonElement>(`.ib
 const inboxNav = (el: HTMLElement) => el.querySelector<HTMLButtonElement>('.ib-side [data-inbox-nav]')!;
 const lit = (el: HTMLElement) => [...el.querySelectorAll('.ib-listcol [data-thread-id][data-lit]')].map((r) => r.getAttribute('data-thread-id')!);
 
-/** An agent's message lands while the list is held: the list on screen does not take it, "1 new · Show" says so. */
+/** An agent's message lands while the list is held: the list on screen does not take it, the line says what came (newsWords.ts). */
 async function heldArrival(el: HTMLElement, reply_to?: string): Promise<string> {
   const late = await agentSends('A late note from the agent.', reply_to);
   act(() => pokeStream!());
-  await until(() => notice(el)?.textContent?.includes('1 new') === true, 'the "1 new" notice');
+  await until(() => /^(New from .+: “|.+ replied in “)/.test(notice(el)?.textContent ?? ''), 'the "1 new" notice');
   return late;
 }
 
@@ -402,9 +402,9 @@ test.skipIf(!hasDom)('a list read that lands after a newer one never takes its p
   // Meanwhile an agent writes, and the next read lands at once: "1 new · Show".
   await agentSends('Written while the first read was on its way.');
   act(() => pokeStream!());
-  await until(() => notice(el)?.textContent?.includes('1 new') === true, 'the "1 new" notice');
+  await until(() => /^(New from .+: “|.+ replied in “)/.test(notice(el)?.textContent ?? ''), 'the "1 new" notice');
   // The older read lands now: the newer list stays, and so does its notice.
   release();
   await wait(400);
-  expect(notice(el)?.textContent ?? '').toContain('1 new');
+  expect(notice(el)?.textContent ?? '').toMatch(/^New from .+: “/);
 }, 30_000);

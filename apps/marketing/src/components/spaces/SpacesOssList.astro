@@ -1,0 +1,23 @@
+---
+// The repositories in the header's "Open source" drop-down: the lead card, the
+// rows and the link to every repository. The same list sits in the drop-down
+// (wide screens) and in the phone menu. Every link opens in a new tab.
+import type { OssMenuRepo } from '../../lib/oss-stars';
+
+interface Props {
+  summary: string | null;
+  lead: OssMenuRepo;
+  rows: OssMenuRepo[];
+  all: string;
+  allHref: string;
+}
+
+const { summary, lead, rows, all, allHref } = Astro.props;
+const star = 'M8 1.6l1.95 4 4.4.62-3.2 3.1.76 4.38L8 11.64 4.09 13.7l.76-4.38-3.2-3.1 4.4-.62z';
+---
+{summary && <span class="vh">{summary}</span>}
+<a class="os-card" href={lead.href} target="_blank" rel="noreferrer" data-menu-item><span class="os-name">{lead.name}</span>{lead.count && <span class="os-big" title={lead.said}><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d={star}/></svg><b aria-hidden="true">{lead.count}</b><span class="vh">, {lead.said}</span></span>}<span class="os-line">{lead.line}</span></a>
+{rows.map((repo) => (
+  <a class="os-row" href={repo.href} target="_blank" rel="noreferrer" data-menu-item><span class="os-name">{repo.name}</span>{repo.count && <span class="os-st" title={repo.said}><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d={star}/></svg><span aria-hidden="true">{repo.count}</span><span class="vh">, {repo.said}</span></span>}<span class="os-line">{repo.line}</span></a>
+))}
+<a class="os-all" href={allHref} target="_blank" rel="noreferrer" data-menu-item>{all}</a>

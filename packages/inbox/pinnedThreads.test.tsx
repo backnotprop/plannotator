@@ -330,9 +330,10 @@ test.skipIf(!hasDom)("the header ⋯ menu's Star thread pins and Unstar thread u
   await renderApp(`#thread=${ids.waiting}`);
   await until(() => !!document.querySelector('[data-thread-more]'), 'the header ⋯');
   expect(document.querySelector('[data-pin-toggle]')).toBeNull();
-  // In its own group with Add to Priority and Add tag, after the read action and Snooze (which lead the menu), with a separator on each side.
+  // In its own group with Add to Priority and Add tag, after the read actions and Snooze (which lead the menu), with a separator on each side.
+  // The thread is open, so its questions still wait but it was looked at: it offers Mark unread too (owner, 2026-11-25).
   const first = await openThreadMenu();
-  expect([...threadMenu()!.querySelectorAll('[role="menuitem"]')].slice(0, 6).map((el) => el.textContent?.trim())).toEqual(['Mark read', 'Snooze', 'Star thread', 'Add to Priority', 'Add tag', 'Copy thread']);
+  expect([...threadMenu()!.querySelectorAll('[role="menuitem"]')].slice(0, 7).map((el) => el.textContent?.trim())).toEqual(['Mark read', 'Mark unread', 'Snooze', 'Star thread', 'Add to Priority', 'Add tag', 'Copy thread']);
   expect(first.previousElementSibling?.getAttribute('role')).toBe('separator');
   expect(first.nextElementSibling?.hasAttribute('data-thread-priority-item')).toBe(true);
   expect(first.nextElementSibling?.nextElementSibling?.hasAttribute('data-add-tag-item')).toBe(true);

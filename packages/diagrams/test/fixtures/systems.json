@@ -1,0 +1,346 @@
+{
+  "title": "Quillfin Video: from upload to screen",
+  "subtitle": "What runs today, what is being built, and what comes next",
+  "tag": "EXAMPLE",
+  "steps": [
+    [
+      1,
+      "Encode on GPUs"
+    ],
+    [
+      2,
+      "One record for each video"
+    ],
+    [
+      3,
+      "Recommendations"
+    ]
+  ],
+  "steps_label": "Rollout",
+  "note": {
+    "title": "Example",
+    "lines": [
+      "Quillfin Video is an invented company.",
+      "Every system, owner and status is made up."
+    ]
+  },
+  "columns": [
+    [
+      {
+        "title": "Where videos come from",
+        "tone": "default",
+        "footer": "Owner: Creator team",
+        "sub": "Four ways in",
+        "sections": [
+          {
+            "tiles": [
+              "Creator app",
+              "Web uploader",
+              "Partner API",
+              {
+                "label": "Live streams",
+                "status": "trial"
+              }
+            ],
+            "cols": 2
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "title": "Processing",
+        "tone": "default",
+        "footer": "Owner: Media team",
+        "step": 1,
+        "sections": [
+          {
+            "tiles": [
+              "Upload checks",
+              "Transcoding",
+              {
+                "label": "GPU encoding",
+                "status": "building"
+              },
+              {
+                "label": "Auto captions",
+                "status": "planned"
+              }
+            ],
+            "cols": 2
+          }
+        ]
+      },
+      {
+        "title": "Video record",
+        "tone": "default",
+        "footer": "Owner: Media team",
+        "step": 2,
+        "sub": "Everything known about each video",
+        "status": "building",
+        "sections": [
+          {
+            "row": [
+              {
+                "graph": {
+                  "nodes": {
+                    "channel": "Channel",
+                    "video": "Video",
+                    "rendition": "Rendition",
+                    "caption": "Caption",
+                    "view": "View",
+                    "language": "Language"
+                  },
+                  "links": [
+                    [
+                      "channel",
+                      "video",
+                      "publishes"
+                    ],
+                    [
+                      "video",
+                      "rendition",
+                      "encoded as"
+                    ],
+                    [
+                      "video",
+                      "caption",
+                      "has"
+                    ],
+                    [
+                      "video",
+                      "view",
+                      "watched in"
+                    ],
+                    [
+                      "caption",
+                      "language",
+                      "written in"
+                    ]
+                  ],
+                  "at": {
+                    "channel": [
+                      0,
+                      0
+                    ],
+                    "video": [
+                      1.5,
+                      0
+                    ],
+                    "rendition": [
+                      3,
+                      0
+                    ],
+                    "language": [
+                      0,
+                      2
+                    ],
+                    "caption": [
+                      1.5,
+                      2
+                    ],
+                    "view": [
+                      3,
+                      2
+                    ]
+                  }
+                }
+              },
+              {
+                "card": {
+                  "title": "Example: video 7Q4M",
+                  "rows": [
+                    [
+                      "Length",
+                      "12 min 40 s"
+                    ],
+                    [
+                      "Renditions",
+                      "1080p, 720p, 480p"
+                    ],
+                    [
+                      "Captions",
+                      "English, Spanish"
+                    ],
+                    [
+                      "Status",
+                      "Ready to play"
+                    ]
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "title": "Storage",
+        "tone": "default",
+        "footer": "Owner: Platform team",
+        "sections": [
+          {
+            "tiles": [
+              "Original files",
+              "Renditions"
+            ],
+            "cols": 2,
+            "label": "Files"
+          },
+          {
+            "tiles": [
+              "Metadata database",
+              {
+                "label": "Search index",
+                "status": "trial"
+              },
+              {
+                "label": "Cold archive",
+                "status": "planned"
+              }
+            ],
+            "cols": 3,
+            "label": "Records"
+          }
+        ]
+      },
+      {
+        "title": "Recommendations",
+        "tone": "default",
+        "footer": "Owner: Not yet named",
+        "step": 3,
+        "status": "planned",
+        "sections": [
+          {
+            "tiles": [
+              "Watch history",
+              "Ranking model"
+            ],
+            "cols": 2
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "title": "Player apps",
+        "tone": "neutral",
+        "footer": "Owner: Apps team",
+        "sections": [
+          {
+            "tiles": [
+              "Web",
+              "Phones",
+              {
+                "label": "TV",
+                "status": "building"
+              }
+            ],
+            "cols": 1
+          }
+        ]
+      },
+      {
+        "title": "Service health",
+        "tone": "neutral",
+        "footer": "Owner: Reliability team",
+        "sections": [
+          {
+            "tiles": [
+              "Playback errors",
+              "Start-up time",
+              {
+                "label": "Old dashboards",
+                "status": "retiring"
+              }
+            ],
+            "cols": 1
+          }
+        ]
+      }
+    ]
+  ],
+  "gap": 88,
+  "row_gap": 40,
+  "groups": [
+    {
+      "label": "Media pipeline",
+      "members": [
+        "Processing",
+        "Video record"
+      ],
+      "sub": "Run by the media team"
+    }
+  ],
+  "links": [
+    {
+      "from": "Where videos come from",
+      "to": "Processing",
+      "start": "right",
+      "end": "left",
+      "kind": "flow"
+    },
+    {
+      "from": "Processing",
+      "to": "Video record",
+      "start": "bottom",
+      "end": "top",
+      "kind": "flow"
+    },
+    {
+      "from": "Video record",
+      "to": "Storage",
+      "start": "right",
+      "end": "left",
+      "kind": "flow"
+    },
+    {
+      "from": "Video record",
+      "to": "Recommendations",
+      "start": "right",
+      "end": "left",
+      "kind": "planned"
+    },
+    {
+      "from": "Storage",
+      "to": "Player apps",
+      "start": "right",
+      "end": "left",
+      "kind": "flow"
+    },
+    {
+      "from": "Storage",
+      "to": "Service health",
+      "start": "right",
+      "end": "left",
+      "label": "logs",
+      "kind": "flow"
+    },
+    {
+      "from": "Recommendations",
+      "to": "Player apps",
+      "start": "right",
+      "end": "left",
+      "kind": "planned"
+    },
+    {
+      "from": "Where videos come from",
+      "to": "Player apps",
+      "start": "top",
+      "end": "top",
+      "label": "Live streams skip processing",
+      "kind": "flow",
+      "via_y": -80.0
+    },
+    {
+      "from": "Where videos come from",
+      "to": "Service health",
+      "start": "bottom",
+      "end": "bottom",
+      "label": "Upload failures go straight to service health",
+      "kind": "flow",
+      "via_y": 547.0
+    }
+  ]
+}

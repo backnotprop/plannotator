@@ -16,6 +16,7 @@ import {
   getGitDiffFingerprint,
   getGitSnapshotMaterializationPatch,
   gitAddFile,
+  isP4DiffType,
   parseJjCommitDiffType,
   gitResetFile,
   parseWorktreeDiffType,
@@ -741,7 +742,10 @@ export function resolveInitialDiffType(
   configuredDiffType: DiffType,
 ): DiffType {
   if (gitContext.vcsType === "p4") {
-    return "p4-default";
+    const { diffOptions } = gitContext;
+    if (diffOptions.some((option) => option.id === "p4-default")) return "p4-default";
+    const firstChangelist = diffOptions.find((option) => isP4DiffType(option.id));
+    return (firstChangelist?.id ?? "p4-default") as DiffType;
   }
   // jj: a saved jj mode the change offers wins; anything else (a Git mode,
   // or Evolution diff with no history) falls to the first option, Current change.

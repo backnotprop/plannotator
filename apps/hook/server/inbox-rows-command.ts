@@ -15,6 +15,7 @@ import { INBOX_ROWS_DEFAULT, inboxRowsRead, type InboxRowsOption } from "@planno
 import { INBOX_ROWS_USAGE, INBOX_ROWS_WORDS, inboxRowsApply, inboxRowsChangeLines, inboxRowsListing, inboxRowsListingJson, type InboxRowsBy } from "@plannotator/core/inbox-types";
 import { inboxEnsureFailedWords, type InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
 import { hasHelpFlag } from "./cli";
+import { localRouteFetch, type InboxRouteFetch } from "./inbox-route-fetch";
 import { writeWholeToStdout } from "./write-whole-stdout";
 
 /** One request never waits longer: a wedged Inbox must not hang the agent. */
@@ -39,6 +40,8 @@ export interface RowsCommandDeps {
   out?: (text: string) => void | Promise<void>;
   err?: (text: string) => void;
   timeoutMs?: number;
+  /** A paired cloud agent's way to the person's Inbox (inbox-call-command.ts `inboxPairedRouteFetch`), in place of this computer's. */
+  fetchRoute?: InboxRouteFetch;
 }
 
 /** Run `plannotator inbox rows …`; resolves to the exit code. */
@@ -58,16 +61,20 @@ export async function runInboxRowsCommand(argv: readonly string[], deps: RowsCom
     err(`${code}: ${message}\n`);
     return 1;
   };
-  let entry: InboxRegistryEntry;
-  try {
-    entry = await deps.ensureRunning();
-  } catch (error) {
-    err(`${inboxEnsureFailedWords(error)}\n`);
-    return 1;
+  let route: InboxRouteFetch;
+  if (deps.fetchRoute) route = deps.fetchRoute;
+  else {
+    let entry: InboxRegistryEntry;
+    try {
+      entry = await deps.ensureRunning();
+    } catch (error) {
+      err(`${inboxEnsureFailedWords(error)}\n`);
+      return 1;
+    }
+    route = localRouteFetch(entry.port, deps.timeoutMs ?? REQUEST_TIMEOUT_MS);
   }
   const request = async (post?: Record<string, unknown>) => {
-    const signal = AbortSignal.timeout(deps.timeoutMs ?? REQUEST_TIMEOUT_MS);
-    const response = await fetch(`http://127.0.0.1:${entry.port}/api/inbox/settings`, post ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(post), signal } : { signal });
+    const response = await route("/api/inbox/settings", post ? { method: "POST", body: JSON.stringify(post) } : undefined);
     const body = (await response.json().catch(() => null)) as Record<string, unknown> | null;
     return { status: response.status, body };
   };

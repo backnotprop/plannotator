@@ -30,7 +30,8 @@ interface PlanDiffViewerProps {
   repoInfo?: { display: string; branch?: string } | null;
   baseVersionLabel?: string;
   baseVersion?: number;
-  maxWidth?: number;
+  /** Omitted: 832. null: no cap, like the Viewer. */
+  maxWidth?: number | null;
   // Annotation props
   annotations?: Annotation[];
   onAddAnnotation?: (ann: Annotation) => void;
@@ -122,7 +123,7 @@ export const PlanDiffViewer: React.FC<PlanDiffViewerProps> = ({
     <div
       className={`relative z-50 w-full${fillHeight ? ' flex flex-col print:block' : ''}`}
       data-viewer-fill-height={fillHeight ? '' : undefined}
-      style={maxWidth ? { maxWidth } : { maxWidth: 832 }}
+      style={maxWidth === null ? undefined : { maxWidth: maxWidth || 832 }}
     >
       <article className={`w-full ${fillHeight ? 'flex-1 ' : ''}bg-card border border-border/50 rounded-xl shadow-xl p-5 md:p-8 lg:p-10 xl:p-12 relative`} data-doc-text-root="">
         {/* Top-left: repo info + diff badge — matches Viewer layout (flex-col) so badge doesn't jump position */}

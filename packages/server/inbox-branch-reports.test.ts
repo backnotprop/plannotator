@@ -79,7 +79,7 @@ const READ_SHAPES: RegExp[] = [
   /^rev-parse --verify --quiet --end-of-options \S+\^\{commit\}$/,
   /^symbolic-ref refs\/remotes\/origin\/HEAD$/,
   /^show-ref --verify( --quiet)? refs\/(heads|remotes\/origin)\/[\w./-]+$/,
-  /^for-each-ref --sort=-committerdate --format=%\(refname\)%00%\(committerdate:unix\) refs\/heads\/$/,
+  /^for-each-ref --sort=-committerdate --format=%\(refname\)%00%\(committerdate:unix\)%00%\(objectname\)%00%\(upstream:track\) refs\/heads\/$/,
   /^rev-list --count --end-of-options \S+\.\.refs\/heads\/[\w./-]+$/,
   /^worktree list --porcelain$/,
   /^config --get-regexp -- \^remote\\\.\.\*\\\.url\$$/,

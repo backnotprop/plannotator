@@ -45,6 +45,20 @@ export default function FreeLayout({ tree, active, gap, title, renderPane, onFoc
       syncing.current = false;
     }
   }, [store, tree, active]);
+  // The engine's live region counts "1 panes" (upstream, not edited here): its text node is said right, in place, so
+  // the engine's next count still lands in it.
+  useEffect(() => {
+    const region = document.querySelector('.ib-layout > .pierre-layout-sr');
+    if (!region || typeof MutationObserver === 'undefined') return;
+    const say = () => {
+      const text = region.firstChild;
+      if (text?.nodeType === Node.TEXT_NODE && text.nodeValue === '1 panes') text.nodeValue = '1 pane';
+    };
+    say();
+    const observer = new MutationObserver(say);
+    observer.observe(region, { childList: true, characterData: true, subtree: true });
+    return () => observer.disconnect();
+  }, []);
   // A press or focus in a pane (the engine's own handlers) makes it the active one.
   useEffect(
     () =>

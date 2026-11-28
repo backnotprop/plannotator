@@ -294,7 +294,7 @@ test.skipIf(!hasDom)("an agent's message that arrives while reading stays behind
   const late = await agentSends('A late note from the agent.');
   act(() => pokeStream!());
   await until(() => el.querySelector('[data-inbox-notice]') !== null, 'the "1 new" notice');
-  expect(el.querySelector('[data-inbox-notice]')!.textContent).toContain('1 new in');
+  expect(el.querySelector('[data-inbox-notice]')!.textContent).toMatch(/^New from .+: “/);
   expect(rowOf(el, late)).toBeNull();
 
   closeThread();
@@ -302,7 +302,7 @@ test.skipIf(!hasDom)("an agent's message that arrives while reading stays behind
   await until(() => rowOf(el, first) === null, 'the settle');
   // Closing settled only the person's own read: the agent's message still waits.
   expect(rowOf(el, late)).toBeNull();
-  expect(el.querySelector('[data-inbox-notice]')!.textContent).toContain('1 new in');
+  expect(el.querySelector('[data-inbox-notice]')!.textContent).toMatch(/^New from .+: “/);
 
   // Show from the keyboard: its line goes away, and focus goes to the row it brought in, not to the page.
   const notice = el.querySelector('[data-inbox-notice]') as HTMLButtonElement;
@@ -330,7 +330,7 @@ test.skipIf(!hasDom)('Show lights exactly the rows it brought in, after they sli
   const reply = await agentSends('One more thing on this one.', moved);
   expect(reply).toBeTruthy();
   act(() => pokeStream!());
-  await until(() => el.querySelector('[data-inbox-notice]')?.textContent?.includes('2 new in') === true, 'the "2 new" notice');
+  await until(() => el.querySelector('[data-inbox-notice]')?.textContent?.startsWith('1 new thread, 1 reply') === true, 'the "1 new thread, 1 reply" notice');
   const lit = () => [...el.querySelectorAll('.ib-listcol [data-thread-id][data-lit]')].map((r) => r.getAttribute('data-thread-id')!).sort();
 
   // A close settles the person's own read and lights nothing.
@@ -821,7 +821,7 @@ test.skipIf(!hasDom)('pinning the open thread leaves the held row order and the 
   await until(() => el.querySelector('[data-inbox-notice]') !== null, 'the "1 new" notice');
   const held = order(el);
   const notice = el.querySelector('[data-inbox-notice]')!.textContent;
-  expect(notice).toContain('1 new in');
+  expect(notice).toMatch(/^New from .+: “/);
   // Star thread from the header's ⋯ menu (Base UI opens on the pointer's press).
   const more = el.querySelector<HTMLElement>('[data-thread-more]')!;
   await act(async () => {
@@ -852,14 +852,14 @@ test.skipIf(!hasDom)("an agent's message in a Priority thread, while the list is
   await agentSends('A late note in the Priority thread.', added);
   act(() => pokeStream!());
   await until(() => el.querySelector('[data-inbox-notice]') !== null, 'the "1 new" notice');
-  expect(el.querySelector('[data-inbox-notice]')!.textContent).toContain('1 new in');
+  expect(el.querySelector('[data-inbox-notice]')!.textContent).toMatch(/^.+ replied in “/);
   expect(sectionOfRow(el, added)).toBe('priority');
 
   closeThread();
   await wait(SETTLE_BEAT_MS + 60);
   await until(() => sectionOfRow(el, first) !== 'new', 'the settle');
   expect(sectionOfRow(el, added)).toBe('priority');
-  expect(el.querySelector('[data-inbox-notice]')!.textContent).toContain('1 new in');
+  expect(el.querySelector('[data-inbox-notice]')!.textContent).toMatch(/^.+ replied in “/);
   act(() => (el.querySelector('[data-inbox-notice]') as HTMLButtonElement).click());
   await until(() => el.querySelector('[data-inbox-notice]') === null, 'Show');
   expect(sectionOfRow(el, added)).toBe('priority');

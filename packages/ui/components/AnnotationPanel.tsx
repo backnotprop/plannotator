@@ -21,6 +21,13 @@ import { HostTitle } from './HostTitle';
 import { isCommentSubmitKey } from '../utils/commentSubmitKey';
 import { useConfigValue } from '../config/useConfig';
 import { imageRegionNumbers, RegionCardInfo, RegionNumber, regionOf } from './ImageRegions';
+import {
+  ANNOTATION_QUOTE_CLASS,
+  ANNOTATION_TEXT_CLASS,
+  ANNOTATION_TYPE_COLOR,
+  ANNOTATION_TYPE_LABEL,
+  AnnotationCardByline,
+} from './AnnotationCardParts';
 
 /** What a region card (#2100) needs from its panel: each region's number on
  *  its image, and how to load the image for the crop thumbnail. */
@@ -28,23 +35,12 @@ const RegionCardContext = createContext<{ numbers: ReadonlyMap<string, number>; 
   numbers: new Map(),
 });
 
-// Card type-word colors. Deletion uses `destructive` (reliably red on every
-// theme, matching the in-document .deletion highlight). Comment uses the
-// `annotation-comment` token, which defaults to each theme's --accent (so it
-// stays consistent with the .comment highlight) but is overridden to a legible
-// blue in neutral themes whose accent is a low-contrast gray (e.g. "simple").
-// Global has no in-document highlight, so it uses a fixed legible purple.
-const TYPE_COLOR: Record<AnnotationType, string> = {
-  [AnnotationType.DELETION]: 'text-destructive',
-  [AnnotationType.COMMENT]: 'text-annotation-comment',
-  [AnnotationType.GLOBAL_COMMENT]: 'text-purple-500',
-};
-
-const TYPE_LABEL: Record<AnnotationType, string> = {
-  [AnnotationType.DELETION]: 'Deletion',
-  [AnnotationType.COMMENT]: 'Comment',
-  [AnnotationType.GLOBAL_COMMENT]: 'Global',
-};
+// The card's parts (type word and colour, byline, quote and text styles) live
+// in AnnotationCardParts so the contents rail's mark card reads the same.
+const TYPE_COLOR = ANNOTATION_TYPE_COLOR;
+const TYPE_LABEL = ANNOTATION_TYPE_LABEL;
+const CardByline = AnnotationCardByline;
+export { ANNOTATION_TYPE_COLOR, ANNOTATION_TYPE_LABEL, AnnotationCardByline, ANNOTATION_QUOTE_CLASS, ANNOTATION_TEXT_CLASS };
 
 const PencilIcon = () => (
   <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -840,51 +836,6 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
   return <RegionCardContext.Provider value={regionCards}>{panel}</RegionCardContext.Provider>;
 };
 
-function formatTimestamp(ts: number): string {
-  const now = Date.now();
-  const diff = now - ts;
-  const seconds = Math.floor(diff / 1000);
-  const minutes = Math.floor(seconds / 60);
-  const hours = Math.floor(minutes / 60);
-  const days = Math.floor(hours / 24);
-
-  if (seconds < 60) return 'now';
-  if (minutes < 60) return `${minutes}m`;
-  if (hours < 24) return `${hours}h`;
-  if (days < 7) return `${days}d`;
-
-  // An older date names its year: "Oct 20" alone reads as this October.
-  const date = new Date(ts);
-  const thisYear = date.getFullYear() === new Date(now).getFullYear();
-  return date.toLocaleDateString(
-    undefined,
-    thisYear ? { month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' },
-  );
-}
-
-/**
- * A card's "author · time" line. The author truncates (its full name in the
- * title) while the time never shrinks, so a long name cannot push the time
- * out; `<bdi>` keeps a right-to-left name from reordering the time around it.
- * The text reads exactly as before: "Alice (me) · 5m".
- */
-const CardByline: React.FC<{ author?: string; isMe: boolean; timestamp: number }> = ({ author, isMe, timestamp }) => (
-  <span data-annotation-byline="true" className="flex min-w-0 items-center text-[10px] text-muted-foreground/50">
-    {author ? (
-      <>
-        <HostTitle title={author} cut>
-          <span data-annotation-author="true" className="min-w-0 truncate">
-            <bdi>{author}</bdi>
-          </span>
-        </HostTitle>
-        {isMe ? <span data-annotation-me="true" className="shrink-0 whitespace-pre"> (me)</span> : null}
-        <span className="shrink-0 whitespace-pre"> · </span>
-      </>
-    ) : null}
-    <span data-annotation-time="true" className="shrink-0">{formatTimestamp(timestamp)}</span>
-  </span>
-);
-
 /** Pinned card for committed direct edits: +N/−M summary, expandable unified
  *  diff, and a two-step discard. Not part of the annotation timeline — edits
  *  are document state, not a selection-anchored note. */
@@ -1294,7 +1245,7 @@ const AnnotationCard: React.FC<{
         ) : (
           <AnnotationText
             text={annotation.text || ''}
-            className="whitespace-pre-wrap [overflow-wrap:anywhere] text-[13px] leading-relaxed text-foreground/90"
+            className={ANNOTATION_TEXT_CLASS}
             sectionRefs={sectionRefs}
             onNavigateAnchor={onNavigateAnchor}
           />
@@ -1307,7 +1258,7 @@ const AnnotationCard: React.FC<{
           )}
           {/* Quote — the annotated text */}
           {!region && parts?.quote !== false && (
-            <p className="mb-1.5 line-clamp-2 whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[11px] leading-relaxed text-muted-foreground/80">
+            <p className={ANNOTATION_QUOTE_CLASS}>
               "{annotation.originalText}"
             </p>
           )}
@@ -1320,7 +1271,7 @@ const AnnotationCard: React.FC<{
               shownText && (
                 <AnnotationText
                   text={shownText}
-                  className="whitespace-pre-wrap [overflow-wrap:anywhere] text-[13px] leading-relaxed text-foreground/90"
+                  className={ANNOTATION_TEXT_CLASS}
                   sectionRefs={sectionRefs}
                   onNavigateAnchor={onNavigateAnchor}
                 />

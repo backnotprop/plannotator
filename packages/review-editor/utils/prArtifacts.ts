@@ -162,6 +162,27 @@ function isKnownGitLabAssetUrl(
     || url.pathname.startsWith(`${projectPath}/uploads/`);
 }
 
+const FORGEJO_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * A Forgejo upload: `/attachments/<uuid>` or the repository-scoped
+ * `/<owner>/<repo>/attachments/<uuid>`. The editor writes these as relative
+ * links, so they carry no file extension of their own.
+ */
+export function isKnownForgejoAssetUrl(
+  url: URL,
+  metadata: Extract<PRMetadata, { platform: 'forgejo' }>,
+): boolean {
+  if (url.origin.toLowerCase() !== new URL(metadata.url).origin.toLowerCase()) return false;
+  const parts = url.pathname.split('/');
+  if (parts.length === 3) return parts[1] === 'attachments' && FORGEJO_UUID_RE.test(parts[2] ?? '');
+  return parts.length === 5
+    && parts[1]?.toLowerCase() === metadata.owner.toLowerCase()
+    && parts[2]?.toLowerCase() === metadata.repo.toLowerCase()
+    && parts[3] === 'attachments'
+    && FORGEJO_UUID_RE.test(parts[4] ?? '');
+}
+
 function resolveArtifactUrl(raw: string, baseUrl: string): URL | null {
   try {
     const url = new URL(raw, baseUrl);
@@ -179,8 +200,10 @@ function classifyArtifactUrl(
 ): PRArtifactKind | null {
   const urlExtension = /\.([a-z0-9]+)$/.exec(url.pathname.toLowerCase())?.[1];
   const labelExtension = /\.([a-z0-9]+)$/.exec(label.trim().toLowerCase())?.[1];
+  // A GitHub or Forgejo upload URL has no extension; the link text is the file name.
   const extension = urlExtension ?? (
-    metadata.platform === 'github' && isKnownGitHubAssetUrl(url, metadata.host)
+    (metadata.platform === 'github' && isKnownGitHubAssetUrl(url, metadata.host))
+      || (metadata.platform === 'forgejo' && isKnownForgejoAssetUrl(url, metadata))
       ? labelExtension
       : undefined
   );
@@ -233,7 +256,9 @@ function artifactDedupeKey(url: URL, metadata: PRMetadata): string {
   const pathKey = `${url.origin.toLowerCase()}${url.pathname}`;
   const isPlatformUpload = metadata.platform === 'github'
     ? isKnownGitHubAssetUrl(url, metadata.host)
-    : metadata.platform === 'gitlab' && isKnownGitLabAssetUrl(url, metadata);
+    : metadata.platform === 'gitlab'
+      ? isKnownGitLabAssetUrl(url, metadata)
+      : metadata.platform === 'forgejo' && isKnownForgejoAssetUrl(url, metadata);
   if (isPlatformUpload) return pathKey;
 
   const semanticQuery = new URLSearchParams();

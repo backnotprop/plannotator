@@ -39,7 +39,7 @@ import { join, resolve } from 'node:path';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { markTourDecided } from '../helpers/tour-decided';
 import { installFakePi, type FakePi } from '../helpers/fake-pi';
-import { inboxScratch, rememberInboxOf, removeInboxScratch, stopScratchInbox } from './inbox-scratch';
+import { E2E_GROUP_TIP_SEEN, inboxScratch, rememberInboxOf, removeInboxScratch, stopScratchInbox } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -148,7 +148,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   for (const dir of [home, bin, dataDir]) mkdirSync(dir, { recursive: true });
   const fake = installFakePi({ bin, state: join(root, 'fake-pi'), home });
   markTourDecided(dataDir);
-  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ inboxLaunch: { enabled: true } }));
+  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ inboxLaunch: { enabled: true }, inboxReveals: { ...E2E_GROUP_TIP_SEEN } }));
   const env: Record<string, string> = {
     // Only the fakes and the system's own tools: never the agents installed on the machine running the spec.
     PATH: `${bin}:/usr/bin:/bin`,

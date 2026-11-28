@@ -17,6 +17,12 @@
          (packages/server/inbox-app-icons.ts). -->
     <link rel="manifest" href="/manifest.webmanifest">
     <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+    <!-- The person's own themes (plannotator theme add): the server answers this from its data
+         dir with their stylesheet and registry entries. A classic script, so it runs before the
+         app's module script and the first frame is drawn in a custom theme too. With none it adds
+         nothing; on a page with no server behind it, it is a harmless 404. See
+         packages/shared/theme-files.ts. vite-ignore: Vite leaves it as written (and drops the attribute). -->
+    <script vite-ignore src="/plannotator-themes.js"></script>
 
   </head>
   <body class="overflow-hidden overscroll-none antialiased">

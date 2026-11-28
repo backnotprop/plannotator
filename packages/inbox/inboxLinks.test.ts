@@ -85,6 +85,20 @@ describe('the route', () => {
     expect(routeOf('#routine=sch_A')).toMatchObject({ page: 'scheduled', scheduled: 'sch_A' });
   });
 
+  test('an old link to a Shape board opens just its thread, or the list', () => {
+    const thread = routeOf('#thread=msg_T2&shape=shp_01ABC');
+    expect(thread).toMatchObject({ page: 'inbox', thread: 'msg_T2', guide: null });
+    expect(thread).not.toHaveProperty('shape');
+    const review = routeOf('#thread=msg_T2&guide=msg_R1&shape=shp_01ABC');
+    expect(review).toMatchObject({ page: 'inbox', thread: 'msg_T2', guide: 'msg_R1', guideAt: null });
+    expect(review).not.toHaveProperty('shape');
+    for (const hash of ['#shapes', '#shapes&shape=shp_01ABC']) {
+      const list = routeOf(hash);
+      expect(list).toMatchObject({ page: 'inbox', thread: null, guide: null, file: null });
+      expect(list).not.toHaveProperty('shape');
+    }
+  });
+
   test('no route in the hash leaves the link alone', () => {
     expect(inboxLinkHash(`${LOCAL}/`, onThisComputer)).toBeNull();
     expect(inboxLinkHash(`${LOCAL}/#`, onThisComputer)).toBeNull();

@@ -1,0 +1,25 @@
+{
+  "title": "A product team's release cycle",
+  "subtitle": "Written as JSON with the ring layout. Draw it with: open-diagram draw examples/release_cycle.json",
+  "tag": "EXAMPLE",
+  "ring": [
+    {"id": "plan", "title": "Plan", "tiles": ["Roadmap", "Pick the next bet"], "cols": 1},
+    {"id": "build", "title": "Build", "tiles": ["Write code", "Code review"], "cols": 1},
+    {"id": "test", "title": "Test", "tiles": ["Automated tests", {"label": "Beta group", "status": "trial"}], "cols": 1},
+    {"id": "ship", "title": "Ship", "tiles": ["Staged rollout", "Release notes"], "cols": 1},
+    {"id": "measure", "title": "Measure", "tiles": ["Usage", {"label": "Error alerts", "status": "building"}], "cols": 1},
+    {"id": "learn", "title": "Learn", "tiles": ["Customer calls", "Team retro"], "cols": 1}
+  ],
+  "center": [
+    {"id": "goals", "title": "Product goals", "tone": "accent", "tiles": ["Keep customers", "Grow usage"], "cols": 1}
+  ],
+  "gap": 84,
+  "links": [
+    {"from": "plan", "to": "build"},
+    {"from": "build", "to": "test"},
+    {"from": "test", "to": "ship"},
+    {"from": "ship", "to": "measure"},
+    {"from": "measure", "to": "learn"},
+    {"from": "learn", "to": "plan", "label": "next cycle"}
+  ]
+}

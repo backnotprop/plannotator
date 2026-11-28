@@ -129,4 +129,11 @@ describe('the remembered choice', () => {
     stored.set(LIST_VIEW_COOKIE, 'List');
     expect(readListView()).toBe('grouped');
   });
+
+  test('Agents is remembered for the next load as List is', () => {
+    writeListView('agents');
+    expect(stored.get(LIST_VIEW_COOKIE)).toBe('agents');
+    resetListViewForTests();
+    expect(readListView()).toBe('agents');
+  });
 });

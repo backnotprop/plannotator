@@ -1,6 +1,8 @@
 /**
  * Release (build job): the sha256 of every embedded page as the CLI serves
- * it, for scripts/smoke-pages.mjs, in `sha256sum` format.
+ * it, for scripts/smoke-pages.mjs, in `sha256sum` format. A page is digested
+ * as a person with no custom theme gets it (the smoke's sandbox has none):
+ * without its `/plannotator-themes.js` tag (packages/shared/theme-files.ts).
  *
  * usage: bun scripts/page-digests.ts <file>...
  *
@@ -13,6 +15,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { basename } from "node:path";
 import { openPackedApp, PACKED_ASSETS_MARKER } from "../packages/shared/packed-app";
+import { pageWithoutCustomThemes } from "../packages/shared/theme-files";
 
 const sha256 = (bytes: string | Buffer) => createHash("sha256").update(bytes).digest("hex");
 
@@ -25,7 +28,7 @@ for (const file of process.argv.slice(2)) {
     continue;
   }
   const app = openPackedApp(text);
-  console.log(`${sha256(app.html)}  ${basename(file)}`);
+  console.log(`${sha256(pageWithoutCustomThemes(app.html))}  ${basename(file)}`);
   const indexAt = markerAt + PACKED_ASSETS_MARKER.length;
   const index = JSON.parse(text.slice(indexAt, text.indexOf("\n", indexAt))) as Record<string, unknown>;
   for (const path of Object.keys(index)) {

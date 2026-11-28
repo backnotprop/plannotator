@@ -3,7 +3,7 @@ import { inboxUrl, machineOf } from './inboxUrl';
 
 /** Where a referenced file's project-relative path starts: the server finds the folder (packages/server/inbox-open-in.ts). */
 /** `from: 'root'`: a diff's path, which starts at the top of the repository wherever the agent stood. */
-export type OpenInFileScope = { thread: string; message?: string; from?: 'root' } | { shape: string } | { repo: string; pull?: string };
+export type OpenInFileScope = { thread: string; message?: string; from?: 'root' } | { repo: string; pull?: string };
 
 /** A referenced file's text for its hover: this computer's, or a pull request's at its head commit (`pull`). */
 export type OpenInFileCode = { found: false } | { found: true; contents: string; pull?: { label: string; platform: 'github' | 'gitlab'; url: string } };
@@ -11,10 +11,11 @@ export type OpenInFileCode = { found: false } | { found: true; contents: string;
 /**
  * A file an agent's message names, for the pane (approval "inbox-file-refs-open-viewer"): text whole, an image or a
  * film read by `referencedFileRawUrl`, any other kind by name only. `attachment_id`: the message already carries it
- * (the pane opens that attachment instead). `reason`: not on this computer, or a file the Inbox never shows (a secret).
+ * (the pane opens that attachment instead). `reason`: found nowhere it looked, or a file the Inbox never shows (a secret).
  */
 export type ReferencedFileView =
-  | { found: false; name: string; path: string; reason: 'missing' | 'refused' }
+  /** `looked_in` (a missing file): where it was looked for first, from the project folder when it lies there; absent when no path is safe to name. */
+  | { found: false; name: string; path: string; reason: 'missing' | 'refused'; looked_in?: string }
   | {
       found: true;
       name: string;

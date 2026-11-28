@@ -3,7 +3,7 @@ import type { FileTreeRowDecorationContext, FileTreeRowParts, FileTreeSortEntry,
 import { FileTree as PierreFileTree, useFileTree } from '@pierre/trees/react';
 import type { FileTreeNode } from '../utils/buildFileTree';
 import type { DiffFile } from '../types';
-import { GROUP_ICONS, TreeRowMenu, ancestorsOf, countParts, fileRowParts, gitStatusFor, type FileRowState } from './treeRows';
+import { GROUP_ICONS, TreeRowMenu, ancestorsOf, countParts, fileRowParts, gitStatusFor, leadAtRoot, type FileRowState } from './treeRows';
 import { treeLook } from './treeLook';
 import { useTreeSearchKeys } from './treeSearchKeys';
 
@@ -31,6 +31,7 @@ export type ChangesTreePick = { via: 'focus' };
 
 interface ChangesTreeViewProps extends FileRowState {
   touch?: boolean;
+  searchAccessory?: React.ReactNode;
   tree: FileTreeNode[];
   groups: ChangesTreeGroup[] | null;
   initiallyFoldedGroups?: ReadonlySet<string>;
@@ -301,7 +302,7 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
 
   useEffect(() => {
     model.refreshRows();
-  }, [model, viewedFiles, annotationCounts, markdownPreviewedPaths, showViewedControls, props.threadCount]);
+  }, [model, viewedFiles, props.stagedFiles, annotationCounts, markdownPreviewedPaths, showViewedControls, props.threadCount, props.fileLead]);
 
   const openFocused = useCallback(() => {
     const focused = model.getFocusedPath();
@@ -356,12 +357,18 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
     },
   }), [model, gitStatus, syncSelection]);
 
+  // A marked file at the root, outside any group: the tree makes room for its mark (treeLook).
+  const leadRoom = useMemo(() => !groups && leadAtRoot(tree.flatMap((node) => (node.type === 'file' ? [node.path] : [])), props.fileLead), [groups, tree, props.fileLead]);
+
   return (
     <PierreFileTree
       model={model}
+      header={props.searchAccessory}
       className="review-file-tree"
       data-changes-tree=""
+      data-review-tree-filter={props.searchAccessory ? '' : undefined}
       data-tree-grouping={props.grouping ?? 'none'}
+      data-lead-room={leadRoom ? '' : undefined}
       style={{ height: '100%' }}
       renderContextMenu={(item, context) => {
         const entry = live.current.layout.entries.get(item.path);

@@ -109,7 +109,7 @@ export function shortProjectNames(projects: readonly LabeledProject[]): Map<stri
         while (depth < parts.length - 1 && !differs(depth)) depth += 1;
         return { parts, shown: parentsOf(parts, depth) };
       });
-      // A home folder spelled out ("Users/ramos/…") reads "~", unless two places would then read the same.
+      // A home folder spelled out ("Users/sam/…") reads "~", unless two places would then read the same.
       const tilde = raw.map(({ parts, shown }) => {
         const home = homeAt(parts);
         const from = parts.length - 1 - shown.length;

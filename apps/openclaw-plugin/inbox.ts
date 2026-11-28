@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { loadConfig, resolveInboxTool } from "../../packages/shared/config";
 import { getPlannotatorDataDir } from "../../packages/shared/data-dir";
 import { discoverInboxTools, InboxAgentConnection, InboxWake } from "../../packages/shared/inbox/agent-link";
+import { isInboxTurnedOn } from "../../packages/shared/inbox/turned-on";
 import { inboxAgentTool, type InboxToolInfo } from "../../packages/shared/inbox/connection";
 import {
   inboxSessionOf,
@@ -93,7 +94,8 @@ export class OpenClawInbox {
   }
 
   private switchOn(): boolean {
-    return resolveInboxTool(loadConfig(), this.env, OPENCLAW_INBOX_HOST);
+    // Only once the person turned the Inbox on here (turned-on.ts), and OpenClaw's own switch allows it.
+    return resolveInboxTool(loadConfig(), this.env, OPENCLAW_INBOX_HOST) && isInboxTurnedOn(this.dataDir, this.env);
   }
 
   private say(message: string): void {

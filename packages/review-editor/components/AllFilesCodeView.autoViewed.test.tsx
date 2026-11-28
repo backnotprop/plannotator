@@ -46,6 +46,8 @@ const viewerState = {
   // at-bottom from the very first tick, including the mount seed.
   scrollHeight: SCROLL_HEIGHT,
   height: VIEWPORT_HEIGHT,
+  // Overridable so a shorter (filtered) list can be laid out.
+  tops: ITEM_TOPS,
 };
 let emitScroll: ((position: number) => void) | null = null;
 let lastCodeViewProps: Record<string, unknown> | null = null;
@@ -114,7 +116,7 @@ mock.module('@pierre/diffs/react', () => ({
         getScrollTop: () => viewerState.scrollTop,
         getScrollHeight: () => viewerState.scrollHeight,
         getHeight: () => viewerState.height,
-        getTopForItem: (id: string) => ITEM_TOPS[id],
+        getTopForItem: (id: string) => viewerState.tops[id],
         scrollTo: () => {},
       }),
     }));
@@ -197,6 +199,11 @@ async function scrollTo(position: number) {
   });
 }
 
+/** The reader's own wheel (window capture sees it wherever it lands). */
+async function wheel() {
+  await act(async () => { document.body.dispatchEvent(new Event('wheel', { bubbles: true })); });
+}
+
 afterEach(async () => {
   if (root) await act(async () => root?.unmount());
   root = null;
@@ -207,6 +214,7 @@ afterEach(async () => {
   viewerState.collapsed = new Set();
   viewerState.scrollHeight = SCROLL_HEIGHT;
   viewerState.height = VIEWPORT_HEIGHT;
+  viewerState.tops = ITEM_TOPS;
 });
 
 afterAll(() => {
@@ -334,6 +342,88 @@ describe.if(hasDom)('AllFilesCodeView auto-view emission', () => {
     // at-bottom override reports the LAST item, so that is what emits.
     await scrollTo(0);
     expect(passed).toEqual(['c.ts']);
+  });
+
+  test('a filter that shortens the list marks nothing until the reader scrolls it', async () => {
+    // Release QA (file filters): putting the reader back on their file after
+    // the list changed lands at the bottom of a shorter list, and that scroll,
+    // which nobody made, marked the last file.
+    const passed: string[] = [];
+    const onFileScrolledPast = (path: string) => passed.push(path);
+    await render({ onFileScrolledPast });
+    await scrollTo(1000); // the reader is on b.ts
+    passed.length = 0;
+
+    // Filter to b.ts and c.ts: 600px of list in a 500px viewport. Putting b.ts
+    // back at the top is clamped to 100, the bottom.
+    viewerState.tops = { 'b.ts': 0, 'c.ts': 300 };
+    viewerState.scrollHeight = 600;
+    viewerState.scrollTop = 100;
+    await render({ files: [FILES[1]!, FILES[2]!], onFileScrolledPast });
+    // A wheel between the restore's scrollTo and its scroll event cannot hand
+    // that scroll to the reader.
+    await wheel();
+    await scrollTo(100);
+    expect(passed).toEqual([]);
+
+    // The reader's own wheel at the bottom does count.
+    await wheel();
+    await scrollTo(100);
+    expect(passed).toEqual(['c.ts']);
+  });
+
+  test('after the restore window, a scroll with no input counts as the reader\'s', async () => {
+    // A native scrollbar drag can send no press event, and Enter in Go to File
+    // or a search field is a key in a text field: once the restore's own
+    // scroll is over, every scroll counts as it always did.
+    const passed: string[] = [];
+    const onFileScrolledPast = (path: string) => passed.push(path);
+    await render({ onFileScrolledPast });
+    await scrollTo(1000);
+    passed.length = 0;
+    viewerState.tops = { 'b.ts': 0, 'c.ts': 300 };
+    viewerState.scrollHeight = 600;
+    viewerState.scrollTop = 100;
+    await render({ files: [FILES[1]!, FILES[2]!], onFileScrolledPast });
+    await scrollTo(100); // the restore's own scroll
+    expect(passed).toEqual([]);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 400)); });
+    await scrollTo(100);
+    expect(passed).toEqual(['c.ts']);
+  });
+
+  test('a restore whose scroll never fires an event still ends its window', async () => {
+    const passed: string[] = [];
+    const onFileScrolledPast = (path: string) => passed.push(path);
+    await render({ onFileScrolledPast });
+    await scrollTo(1000);
+    passed.length = 0;
+    viewerState.tops = { 'b.ts': 0, 'c.ts': 300 };
+    viewerState.scrollHeight = 600;
+    viewerState.scrollTop = 100;
+    await render({ files: [FILES[1]!, FILES[2]!], onFileScrolledPast });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 400)); });
+    await scrollTo(100);
+    expect(passed).toEqual(['c.ts']);
+  });
+
+  test('clearing a filter that puts the reader back further down passes nothing', async () => {
+    // The remount seeds at the top (a.ts), then the restore jumps to the
+    // reader's file: that jump is not the reader moving on from a.ts, nor
+    // reaching the end of the list.
+    const passed: string[] = [];
+    const onFileScrolledPast = (path: string) => passed.push(path);
+    viewerState.tops = { 'b.ts': 0, 'c.ts': 1000 };
+    viewerState.scrollHeight = 2000;
+    await render({ files: [FILES[1]!, FILES[2]!], onFileScrolledPast }); // filtered, reading b.ts
+
+    viewerState.tops = ITEM_TOPS;
+    viewerState.scrollHeight = SCROLL_HEIGHT;
+    viewerState.scrollTop = 0;
+    await render({ files: FILES, onFileScrolledPast }); // cleared
+    await scrollTo(1000);
+    await scrollTo(2500);
+    expect(passed).toEqual([]);
   });
 
   test('without the handler the component behaves exactly as before', async () => {

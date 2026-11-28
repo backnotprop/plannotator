@@ -13,6 +13,7 @@ import { buildHeadingSlugMap } from '../utils/slugify';
 import { copyTextToClipboard } from '../utils/clipboard';
 import { getRichCopyEnabled } from '../utils/richCopyPolicy';
 import { BlockRenderer } from './BlockRenderer';
+import { FootnoteList, FootnoteProvider, useFootnotes } from './footnotes/Footnotes';
 import { sourceLineAttrs } from '../utils/sourceLineAttrs';
 import { BELOW_TITLE_SLOT_MARKER } from '../utils/belowTitleSlot';
 import { indexQuestionBlocks, isQuestionDirectiveKind, type IndexedQuestion, type ParsedQuestion, type QuestionAnswer } from '@plannotator/core/question-block';
@@ -303,6 +304,9 @@ export interface ViewerProps {
    *  `parseQuestionAnswer` are ignored. Absent: answers come from the
    *  annotations carrying `questionAnswer` (Plannotator's own path). */
   questionAnswers?: ReadonlyMap<string, QuestionAnswer> | Readonly<Record<string, QuestionAnswer>>;
+  /** Draw only the question card with this key (the Inbox's decision mode): its key and number are still read from
+   *  the whole document, every other block is left out. Absent: the whole document. */
+  onlyQuestionKey?: string;
   /** Explicit save mode for question cards: edits stay a draft in the card,
    *  which shows Save answer and Cancel (and no Skip); Save calls this with
    *  the question's key and the answer, or null when the draft is empty. Return
@@ -352,6 +356,14 @@ export interface ViewerProps {
    *  `QuestionBlock`). Default false: each line shows as text, as before
    *  (today's card). The Plannotator Inbox passes true. */
   questionOptionLines?: boolean;
+  /** Whether `:::question` cards read change lines (core
+   *  `ParseQuestionBlockOptions.changeLines`): `Where:`, `Before:`, `After:`
+   *  and `Source:` at the block's indent, and `Before:` / `After:` under a
+   *  `- [ ]` choice. The card then draws the Where with a pin, each place's
+   *  Now / After, and each choice's own version (see `QuestionChange`).
+   *  Default false: each line shows as text, as before (today's card). The
+   *  Plannotator Inbox passes true. */
+  questionChangeLines?: boolean;
   /** Host content right after a question's choices (the Plannotator Inbox's
    *  "Try prototype" tab; see `QuestionBlock` `renderAfterChoices`). Absent:
    *  today's card. */
@@ -567,9 +579,11 @@ export interface ViewerHandle {
    * the host can keep the words some other way. Markdown `Viewer`: a text
    * selection, a global comment, a diagram part. `HtmlViewer`: a pin or a
    * text selection (with `onHostDraft`, the draft is handed to the host,
-   * which keeps the words itself).
+   * which keeps the words itself). `globalAnchor`: where a global comment's
+   * box opens, for a host that hides the Viewer's own Global comment button
+   * and offers its own (absent: that button, as before).
    */
-  reopenComment?: (annotation: Annotation, onMissing?: () => void) => boolean;
+  reopenComment?: (annotation: Annotation, onMissing?: () => void, globalAnchor?: HTMLElement | null) => boolean;
   /**
    * The comment being written in the viewer's own composer, as the comment
    * its submit would add, with empty words (the host reads them from the
@@ -581,6 +595,15 @@ export interface ViewerHandle {
    * selection's comment.
    */
   peekComment?: () => Annotation | null;
+  /**
+   * Markdown `Viewer` only, for a host that offers the document actions from
+   * its own controls (a menu) and hides the Viewer's own: open the global
+   * comment box at `anchor`, as the Global comment button does. Returns false
+   * when authoring is off. The DOM is unchanged.
+   */
+  openGlobalComment?: (anchor: HTMLElement) => boolean;
+  /** Markdown `Viewer` only: copy the document's Markdown, as Copy does. Resolves false when the clipboard refused. */
+  copyDocument?: () => Promise<boolean>;
 }
 
 interface CodeBlockToolbarTarget {
@@ -937,6 +960,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   checkboxOverrides,
   onAnswerQuestion,
   questionAnswers: hostQuestionAnswers,
+  onlyQuestionKey,
   onSaveQuestionAnswer,
   saveQuestionAnswerLabel,
   renderQuestionFooter,
@@ -945,6 +969,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   questionDecisionLines = true,
   questionContractLines = false,
   questionOptionLines = false,
+  questionChangeLines = false,
   renderQuestionAfterChoices,
   questionPictureChoices = true,
   questionPictureBadge,
@@ -1022,14 +1047,18 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   const fenceThemeRef = useRef(fenceTheme);
   fenceThemeRef.current = fenceTheme;
 
-  const handleCopyPlan = async () => {
+  const handleCopyPlan = async (): Promise<boolean> => {
     if (await copyTextToClipboard(markdown)) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } else {
-      console.error('Failed to copy');
+      return true;
     }
+    console.error('Failed to copy');
+    return false;
   };
+  // The handle's Copy reads the text on screen now, so a new text does not make the handle again.
+  const copyPlanRef = useRef(handleCopyPlan);
+  copyPlanRef.current = handleCopyPlan;
   const containerRef = useRef<HTMLDivElement>(null);
   // "Open in" opens the document's file at the picked comment's line, else the
   // selected text's, read at the click (documentOpenInLine). A plan diff view's
@@ -1089,13 +1118,20 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   // anchor ids stay stable across re-renders and duplicate heading texts get
   // `-1`/`-2`/... suffixes rather than colliding on the same id.
   const headingSlugMap = useMemo(() => buildHeadingSlugMap(blocks), [blocks]);
+  // GFM footnotes: null for a document that defines none (then nothing below changes).
+  const footnotes = useFootnotes(blocks);
   // `:::question` blocks: numbered in document order, answers drawn from the
   // annotations that carry `questionAnswer` (matched by question key, so an
   // answer follows its question across re-parses).
   const questionIndex = useMemo(() => {
-    const list = indexQuestionBlocks(blocks, { decisionLines: questionDecisionLines, contractLines: questionContractLines, ...(questionOptionLines ? { optionLines: true } : {}) });
+    const list = indexQuestionBlocks(blocks, {
+      decisionLines: questionDecisionLines,
+      contractLines: questionContractLines,
+      ...(questionOptionLines ? { optionLines: true } : {}),
+      ...(questionChangeLines ? { changeLines: true } : {}),
+    });
     return { byBlock: new Map(list.map((q) => [q.blockId, q])), total: list.length };
-  }, [blocks, questionDecisionLines, questionContractLines, questionOptionLines]);
+  }, [blocks, questionDecisionLines, questionContractLines, questionOptionLines, questionChangeLines]);
   // A host that keeps answers itself (`questionAnswers`) replaces the
   // annotation-derived map; each entry is validated like any other reader.
   const answersByKey = useMemo(
@@ -1567,7 +1603,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   // that block, a diagram part's in its diagram (once drawn), a text
   // selection's through the highlighter. Kinds with no composer here say no.
   const [diagramReopen, setDiagramReopen] = useState<{ blockId: string; request: DiagramReopenRequest } | null>(null);
-  const reopenComment = useCallback((annotation: Annotation, onMissing?: () => void): boolean => {
+  const reopenComment = useCallback((annotation: Annotation, onMissing?: () => void, globalAnchor?: HTMLElement | null): boolean => {
     const words = annotation.text ?? '';
     if (annotation.imageRegion != null || annotation.questionAnswer || annotation.mathTargets?.length) return false;
     if (annotation.type !== AnnotationType.COMMENT && annotation.type !== AnnotationType.GLOBAL_COMMENT) return false;
@@ -1579,7 +1615,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     };
     if (annotation.type === AnnotationType.GLOBAL_COMMENT) {
       if (readOnlyRef.current) return false;
-      const anchorEl = globalCommentButtonRef.current;
+      const anchorEl = globalAnchor ?? globalCommentButtonRef.current;
       if (!anchorEl) return false;
       setViewerCommentPopover({ anchorEl, contextText: '', isGlobal: true, initialText: words });
       return true;
@@ -1665,7 +1701,13 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     takeSelection,
     reopenComment,
     peekComment,
-  }), [hookRemoveHighlight, clearAllHighlights, applyAnnotations, blocks, takeSelection, scrollToAnchor, reopenComment, peekComment]);
+    openGlobalComment: (anchorEl: HTMLElement) => {
+      if (authoringOff) return false;
+      setViewerCommentPopover({ anchorEl, contextText: '', isGlobal: true });
+      return true;
+    },
+    copyDocument: () => copyPlanRef.current(),
+  }), [hookRemoveHighlight, clearAllHighlights, applyAnnotations, blocks, takeSelection, scrollToAnchor, reopenComment, peekComment, authoringOff]);
 
   // --- Viewer-specific: code block annotation ---
 
@@ -1887,7 +1929,14 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
 
   // The highlighter skips region comments; one whose image is no longer in
   // the document (or whose region is malformed) is unanchored, and says so.
+  // The host's callback is read through a ref (as the highlighter and the
+  // diagram blocks read it): a host passing a new function each render that
+  // stores the report as state would otherwise re-run this without end.
+  const onRestoreReportRef = useRef(onRestoreReport);
+  onRestoreReportRef.current = onRestoreReport;
+  const reportsRestore = onRestoreReport !== undefined;
   useEffect(() => {
+    const onRestoreReport = onRestoreReportRef.current;
     if (onRestoreReport === undefined) return;
     const rows = annotations.filter((ann) => ann.imageRegion != null);
     if (rows.length === 0) return;
@@ -1899,7 +1948,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
       })
       .map((ann) => ann.id);
     onRestoreReport({ attempted: rows.map((ann) => ann.id), unanchored });
-  }, [annotations, blocks, onRestoreReport]);
+  }, [annotations, blocks, reportsRestore]);
 
   // The document's diagram blocks, in order: a diagram comment that names
   // none of them (an external POST, a deleted fence) is resolved by anchor
@@ -1914,14 +1963,16 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   );
   // With no diagram in the document nobody can resolve a diagram comment:
   // it is unanchored, and the highlighter (which skips it) will not say so.
+  // The host's callback through the ref above, for the same reason.
   useEffect(() => {
+    const onRestoreReport = onRestoreReportRef.current;
     if (diagramBlockKey !== '' || onRestoreReport === undefined) return;
     // `!= null`, not `!== undefined`: a nullish anchor is no anchor at all —
     // the highlighter restores such a row by text, so it must not be counted
     // here as a diagram comment nothing could resolve.
     const ids = annotations.filter((ann) => ann.diagramAnchor != null).map((ann) => ann.id);
     if (ids.length > 0) onRestoreReport({ attempted: ids, unanchored: ids });
-  }, [annotations, diagramBlockKey, onRestoreReport]);
+  }, [annotations, diagramBlockKey, reportsRestore]);
 
   // The host's `belowTitle` slot (see the prop). Absent → the block list is
   // returned as is, so the DOM is the one without the prop. The wrapper's
@@ -1952,6 +2003,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     <LocalLinkContext.Provider value={resolveLocalLink ?? null}>
     <DiagramAnchorClaimsContext.Provider value={diagramClaims}>
     <CommentDraftScopeContext.Provider value={commentDraftScope}>
+    <FootnoteProvider index={footnotes}>
     <div
       className={`relative z-50 w-full${fillHeight ? ' flex flex-col print:block' : ''}`}
       data-viewer-fill-height={fillHeight ? '' : undefined}
@@ -2047,7 +2099,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
         )}
         {frontmatter && <><div className="clear-right md:hidden" /><FrontmatterCard frontmatter={frontmatter} markdown={markdown} /></>}
         {!frontmatter && blocks.length > 0 && blocks[0].type !== 'heading' && <div className="mt-4" />}
-        {withBelowTitle(groupBlocks(blocks).map(group =>
+        {withBelowTitle(groupBlocks(footnotes ? footnotes.bodyBlocks : blocks).filter((group) => onlyQuestionKey === undefined || (group.type !== 'list-group' && questionIndex.byBlock.get(group.block.id)?.question.key === onlyQuestionKey)).map(group =>
           group.type === 'list-group' ? (
             (() => {
               const indices = computeListIndices(group.blocks);
@@ -2263,6 +2315,19 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
             })()
           )
         ))}
+
+        {footnotes && (
+          <FootnoteList
+            index={footnotes}
+            imageBaseDir={imageBaseDir}
+            onImageClick={onBlockImageClick}
+            onOpenLinkedDoc={onOpenLinkedDoc}
+            onOpenCodeFile={onOpenCodeFile}
+            githubRepo={linkRepo?.display}
+            repoHost={linkRepo?.host}
+            onNavigateAnchor={scrollToAnchor}
+          />
+        )}
 
         {/* Text selection toolbar */}
         {selectionCommentsOn && !hostComposes && toolbarState && (
@@ -2514,6 +2579,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
         document.body
       )}
     </div>
+    </FootnoteProvider>
     </CommentDraftScopeContext.Provider>
     </DiagramAnchorClaimsContext.Provider>
     </LocalLinkContext.Provider>

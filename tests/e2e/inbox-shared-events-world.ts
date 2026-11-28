@@ -84,7 +84,7 @@ export function stubPage(options: { noLocks?: boolean } = {}): void {
   // The sound: counted, never played.
   const sound = { oscillators: 0 };
   window.__sound = sound;
-  const param = () => ({ value: 1, setValueAtTime() {}, exponentialRampToValueAtTime() {} });
+  const param = () => ({ value: 1, setValueAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {} });
   class CountingAudioContext {
     state = 'running';
     currentTime = 0;

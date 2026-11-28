@@ -30,6 +30,8 @@ export interface MessageArms {
   subscribe(id: string, listener: () => void): () => void;
   /** The ref for a message's `<article>` (stable per id). */
   ref(id: string): (element: HTMLElement | null) => void;
+  /** A message's `<article>` while it is drawn, else null (the pill's count looks up the new ones by it). */
+  element(id: string): HTMLElement | null;
   /** Arm a message now (a press on one of its plain controls). */
   arm(id: string): void;
   /** After an armed message's controls are drawn: put back focus a re-mounted trigger lost. */
@@ -169,6 +171,7 @@ export function createMessageArms(): MessageArms {
       return ref;
     },
     arm,
+    element: (id) => elements.get(id) ?? null,
     settled(id) {
       const place = refocus.get(id);
       if (place === undefined) return;

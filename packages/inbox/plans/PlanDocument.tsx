@@ -8,14 +8,14 @@
  */
 import { useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { Viewer } from '@plannotator/ui/components/Viewer';
-import { DeferredMarkdownContentsRail } from '@plannotator/ui/components/DeferredMarkdownContentsRail';
 import { CONTENTS_RAIL_MIN_PANE_WIDTH } from '@plannotator/ui/utils/annotationHelpers';
 import { planPictureTypeOf, type PlanDocumentKind } from '@plannotator/core/plans';
 import { PlanContentRules, PlanHtmlFrame, planBlocks, resolvePlanLink } from './planContent';
 import { ScrollViewportProvider } from '@plannotator/ui/hooks/useScrollViewport';
 import { diagramDocumentBlocks, parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
-import { contentsButtonMode, INBOX_CONTENTS_MIN_HEADINGS, showsContents, useContentsRailWaited, useContentsShown } from '../contents';
-import { ContentsHide, ContentsPanel } from '../components/ContentsPanel';
+import { contentsButtonMode, showsContents, useContentsRailWaited, useContentsShown } from '../contents';
+import { ContentsPanel } from '../components/ContentsPanel';
+import { FileContentsRail } from '../parts/FileContentsRail';
 import { useVersionText } from './store';
 import { plansApi } from './client';
 import { tableRows } from '../wallFaceText';
@@ -223,15 +223,13 @@ function PlanTextDocument({ id, version, doc = null, kind = 'markdown', title = 
       </ScrollViewportProvider>
     </div>
       {hasContents && !phone && (
-        <DeferredMarkdownContentsRail
+        <FileContentsRail
           key={`rail:${docKey}`}
           blocks={blocks}
           scrollViewport={viewport}
-          contentSelector="[data-doc-text-root]"
           hidden={!contentsShown}
           onAvailableChange={(fits) => setRailFit({ key: docKey, fits })}
-          panelAction={<ContentsHide onHide={() => setContentsShown(false)} />}
-          minHeadings={INBOX_CONTENTS_MIN_HEADINGS}
+          onHide={() => setContentsShown(false)}
         />
       )}
     </div>

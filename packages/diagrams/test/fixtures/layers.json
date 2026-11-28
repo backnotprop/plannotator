@@ -1,0 +1,143 @@
+{
+  "title": "A web product, top to bottom",
+  "tag": "EXAMPLE",
+  "steps_label": "Steps",
+  "panels": [
+    {
+      "title": "People",
+      "tone": "accent",
+      "sections": [
+        {
+          "tiles": [
+            "Shoppers",
+            "Store staff",
+            "Partners"
+          ],
+          "cols": 3
+        }
+      ],
+      "x": 0,
+      "y": 0.0,
+      "width": 457.140625
+    },
+    {
+      "title": "Apps",
+      "tone": "default",
+      "sections": [
+        {
+          "tiles": [
+            "Website",
+            "Mobile app",
+            {
+              "label": "Staff tablets",
+              "status": "retiring"
+            }
+          ],
+          "cols": 3
+        }
+      ],
+      "x": 0,
+      "y": 139.0,
+      "width": 457.140625
+    },
+    {
+      "title": "Services",
+      "tone": "default",
+      "sections": [
+        {
+          "tiles": [
+            "Search",
+            "Orders",
+            "Payments",
+            {
+              "label": "Notifications",
+              "status": "building"
+            }
+          ],
+          "cols": 4
+        }
+      ],
+      "x": 0,
+      "y": 278.0,
+      "width": 457.140625
+    },
+    {
+      "title": "Data",
+      "tone": "neutral",
+      "sections": [
+        {
+          "tiles": [
+            "Main database",
+            "Search index",
+            {
+              "label": "Event log",
+              "status": "planned"
+            }
+          ],
+          "cols": 3
+        }
+      ],
+      "x": 0,
+      "y": 417.0,
+      "width": 457.140625
+    },
+    {
+      "title": "Sign-in and access",
+      "tone": "default",
+      "footer": "Owner: Security team",
+      "sections": [
+        {
+          "tiles": [
+            "Single sign-on",
+            {
+              "label": "Passkeys",
+              "status": "trial"
+            },
+            "Audit log"
+          ],
+          "cols": 1
+        }
+      ],
+      "x": 553.140625,
+      "y": 152.25,
+      "width": 200
+    }
+  ],
+  "links": [
+    {
+      "from": "People",
+      "to": "Apps",
+      "start": "bottom",
+      "end": "top",
+      "kind": "flow"
+    },
+    {
+      "from": "Apps",
+      "to": "Services",
+      "start": "bottom",
+      "end": "top",
+      "kind": "flow"
+    },
+    {
+      "from": "Services",
+      "to": "Data",
+      "start": "bottom",
+      "end": "top",
+      "kind": "flow"
+    },
+    {
+      "from": "Sign-in and access",
+      "to": "Apps",
+      "start": "left",
+      "end": "right",
+      "kind": "planned"
+    },
+    {
+      "from": "Sign-in and access",
+      "to": "Services",
+      "start": "left",
+      "end": "right",
+      "kind": "planned"
+    }
+  ]
+}

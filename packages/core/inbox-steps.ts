@@ -76,11 +76,23 @@ export function inboxStepsProgress(steps: readonly Pick<InboxStep, "step" | "sta
   };
 }
 
-/** A status as an agent may send it: trimmed, any case. Anything else is refused by the caller. */
+const INBOX_STEP_STATUS_ALIASES: Readonly<Record<string, InboxStepStatus>> = {
+  active: "doing",
+  in_progress: "doing",
+  "in-progress": "doing",
+  "in progress": "doing",
+  pending: "todo",
+  completed: "done",
+  complete: "done",
+  skipped: "dropped",
+};
+
+/** A status as an agent may send it: trimmed, any case, or a common other word for one (`in_progress`, `pending`, `completed`, `skipped`). Anything else is refused by the caller. */
 export function inboxStepStatusOf(value: unknown): InboxStepStatus | null {
   if (typeof value !== "string") return null;
   const key = value.trim().toLowerCase();
-  return (INBOX_STEP_STATUSES as readonly string[]).includes(key) ? (key as InboxStepStatus) : null;
+  if ((INBOX_STEP_STATUSES as readonly string[]).includes(key)) return key as InboxStepStatus;
+  return Object.hasOwn(INBOX_STEP_STATUS_ALIASES, key) ? INBOX_STEP_STATUS_ALIASES[key]! : null;
 }
 
 /**

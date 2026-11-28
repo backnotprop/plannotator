@@ -54,7 +54,8 @@ function inbox(start: InboxScheduledRow[], options: { hold?: string; fail?: numb
     return json({ scheduled: row });
   };
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const path = String(input);
+    // The list is the merged read (`?machines=1`): this computer's routines here, with no linked computer.
+    const path = String(input).replace('?machines=1', '');
     const method = init?.method ?? 'GET';
     const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : null;
     calls.push({ method, path, body, keepalive: init?.keepalive === true });

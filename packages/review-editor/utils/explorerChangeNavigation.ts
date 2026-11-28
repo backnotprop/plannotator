@@ -145,3 +145,26 @@ export async function stepChange(
   scroller.scrollTop = startTop;
   return 'end';
 }
+
+/**
+ * Runs Next / previous change presses one at a time, in order: a press made
+ * while the previous one still waits to land in the next file runs after that
+ * landing and steps on from there. A held key's repeats are dropped while a
+ * press is running or waiting, so letting go stops the view instead of
+ * draining a backlog. A failed press is reported and the next one still runs.
+ */
+export function changeStepQueue(
+  run: (direction: ChangeStep) => Promise<unknown>,
+  onError: (error: unknown) => void,
+): (direction: ChangeStep, repeat?: boolean) => void {
+  let tail: Promise<void> = Promise.resolve();
+  let pending = 0;
+  return (direction, repeat = false) => {
+    if (repeat && pending > 0) return;
+    pending += 1;
+    tail = tail
+      .then(() => run(direction))
+      .then(() => undefined, onError)
+      .finally(() => { pending -= 1; });
+  };
+}

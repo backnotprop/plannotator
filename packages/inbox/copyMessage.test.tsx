@@ -250,6 +250,12 @@ test("the person's reply keeps their words and drops what the Inbox wrote for th
   expect(messageMarkdown(message(M2, { kind: 'person' }, replyBody(undefined), 31))).toBe('Answered 1 question.');
 });
 
+test("a skill emoji's reply copies as the thread draws it, “🦃 /bro”; a typed /bro reply as its words", () => {
+  const skills = '**Skills referenced** (the person is asking you to invoke these skills when acting on this reply):\n- `bro`';
+  expect(messageMarkdown(message(M2, { kind: 'person' }, `/bro\n\n${skills}`, 31, { skill_reaction: { emoji: '🦃', skill: 'bro' } } as Partial<InboxMessageWire>))).toBe('🦃 /bro');
+  expect(messageMarkdown(message(M2, { kind: 'person' }, '/bro', 31))).toBe('/bro');
+});
+
 test('a thread: the subject, the project and count, then each message under its author and time (the approved sample)', () => {
   const t = sample();
   const at = (m: number) => copyTime(t.messages[m]!.created_at);
@@ -429,8 +435,9 @@ test.skipIf(!hasDom)("each open message's ⋯ sits after Reply; Copy message cop
   expect(button.hasAttribute('data-phone')).toBe(false);
   await press(button);
   await until(() => !!messageMenu(), 'the message menu');
-  // The approved items, in order, Copy thread after a separator.
-  expect(labels(messageMenu())).toEqual(['Copy message', 'Copy link to message', 'Copy thread']);
+  // The approved items, in order (approval "inbox-reactions-every-message", item 5): an agent's message leads with Reply and
+  // New thread from this message (the emoji row only where the message takes a reaction); Copy thread after a separator.
+  expect(labels(messageMenu())).toEqual(['Reply', 'New thread from this message', 'Copy message', 'Copy link to message', 'Copy thread']);
   expect(messageMenu()!.querySelector('[role="separator"]')).not.toBeNull();
   expect(button.hasAttribute('data-open')).toBe(true);
   await choose(item(messageMenu(), 'message'));
@@ -529,12 +536,14 @@ test.skipIf(!hasDom)('the keyboard: ⋯ opens with the arrows, the arrows walk t
   await key('ArrowDown');
   await until(() => !!messageMenu(), 'the menu from the keyboard');
   const highlighted = () => items(messageMenu()).findIndex((el) => el.hasAttribute('data-highlighted'));
-  await until(() => highlighted() === 0, 'Copy message highlighted');
+  await until(() => highlighted() === 0, 'New thread from this message highlighted');
+  // The separators are skipped.
   await key('ArrowDown');
-  await until(() => highlighted() === 1, 'Copy link to message highlighted');
-  // The separator is skipped.
+  await until(() => highlighted() === 1, 'Copy message highlighted');
   await key('ArrowDown');
-  await until(() => highlighted() === 2, 'Copy thread highlighted');
+  await until(() => highlighted() === 2, 'Copy link to message highlighted');
+  await key('ArrowDown');
+  await until(() => highlighted() === 3, 'Copy thread highlighted');
   await key('Escape');
   await until(() => !messageMenu(), 'the menu to close on Escape');
   await until(() => document.activeElement === button, 'focus back on ⋯');
@@ -552,7 +561,7 @@ test.skipIf(!hasDom)('a right-click on the head line opens the same menu; Escape
   await until(() => !!document.querySelector('[data-message-menu][data-context]'), 'the context menu');
   // Ours, not the browser's.
   expect(event!.defaultPrevented).toBe(true);
-  expect(labels(document.querySelector('[data-message-menu][data-context]'))).toEqual(['Copy message', 'Copy link to message', 'Copy thread']);
+  expect(labels(document.querySelector('[data-message-menu][data-context]'))).toEqual(['Reply', 'New thread from this message', 'Copy message', 'Copy link to message', 'Copy thread']);
   expect(more(M4)!.hasAttribute('data-open')).toBe(true);
   await key('Escape');
   await until(() => !messageMenu(), 'the context menu to close');

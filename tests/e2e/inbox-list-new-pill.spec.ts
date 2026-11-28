@@ -4,15 +4,16 @@
  * (scripts/inbox-sim.ts). The DOM tests (packages/inbox/listNewPill.test.tsx, showLight.test.tsx) prove the rules
  * with stand-ins; this proves what needs a layout.
  *
- * - The reader is scrolled down, so the "N new · Show" line at the list's top is out of view: news shows the pill
- *   at the list's bottom edge, counting, the list's rows stay as they are, and the pill stays (it is still there
- *   after the seven seconds a fading pill would have taken).
- * - A press on it is Show and "take me there": the line goes, the rows come to the middle of the list, and each is
- *   lit only once it is in view, for the light's whole 3 s from there.
- * - With the line in view there is no pill, and scrolling to where the rows will land draws and lights nothing.
- * - Show on the line never scrolls the list. The row it brought in below the view is not lit; the pill counts it;
- *   a press on the pill goes there and the row is lit for its whole time.
- * - A 390 px phone: the pill is above the list's bottom edge with a 44 px target, and a tap brings the row in view.
+ * - The reader is scrolled down: news is held behind the bar ("New from Claude Code: “…” · Show", newsWords.ts),
+ *   which sticks to the top of the list's scroll box (in view, never covering a row at rest; its arrival moves no
+ *   row) and says what came; no pill shows for held news, the rows stay as they are, and that holds past the seven
+ *   seconds a fading pill would have taken (the owner, 2026-11-17).
+ * - Show on the bar never scrolls the list. The rows it brought in below the view are counted by the pill, which
+ *   appears only then; a press goes there, and each row is lit only once it is in view, for the light's whole 3 s.
+ * - With the bar in view at the top there is no pill either, and scrolling to where the rows will land draws and
+ *   lights nothing; the bar stays stuck in view while the reader scrolls, and a row reached with ↑ stops below it.
+ * - A 390 px phone: the bar sticks above the sticky group header, the pill comes after Show above the list's bottom
+ *   edge with a 44 px target, and a tap brings the row in view.
  *
  * Build the binary first (see inbox.spec.ts), then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-list-new-pill.spec.ts`.
@@ -84,7 +85,7 @@ const body = (page: Page) => page.locator('.ib-listcol .ib-lbody');
 const pill = (page: Page) => page.locator('[data-list-new-pill]');
 const line = (page: Page) => page.locator('[data-inbox-notice]');
 
-/** The list, loaded and scrolled down inside "Waiting on you": whatever the line says, it is out of view. */
+/** The list, loaded and scrolled down inside "Waiting on you". */
 async function openScrolled(page: Page): Promise<void> {
   await page.goto(world.url);
   await expect(body(page).locator('[data-thread-id]').first()).toBeVisible();
@@ -92,6 +93,12 @@ async function openScrolled(page: Page): Promise<void> {
     el.scrollTop = 400;
   });
   await expect(pill(page)).toHaveAttribute('data-off', '');
+}
+
+/** The bar is stuck at the scroll box's top edge, whole, and no row's top is under it except rows passing beneath. */
+async function barStuck(page: Page): Promise<void> {
+  await expect(line(page)).toBeInViewport({ ratio: 1 });
+  await expect.poll(async () => Math.abs((await placeIn(page, '[data-held-bar]')).top)).toBeLessThanOrEqual(1);
 }
 
 /** Where the pill and a row are inside the list's scroll box. */
@@ -104,7 +111,7 @@ function placeIn(page: Page, selector: string) {
   }, selector);
 }
 
-test('scrolled down, news shows the pill at the bottom edge and the list holds; it counts and stays; a press shows the rows in the middle, lit once in view', async ({ browser }: { browser: Browser }) => {
+test('scrolled down, held news sticks the bar at the top and shows no pill; Show leaves the list where it is and the pill then goes to the rows, lit once in view', async ({ browser }: { browser: Browser }) => {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   try {
     const page = await context.newPage();
@@ -112,24 +119,57 @@ test('scrolled down, news shows the pill at the bottom edge and the list holds; 
     const order = () => body(page).locator('[data-thread-id]').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-thread-id')));
     const before = await order();
 
+    // The row in the middle of the view: the bar coming in above it while the reader is scrolled down moves nothing.
+    const middle = await page.evaluate(() => {
+      const box = document.querySelector('.ib-listcol .ib-lbody')!.getBoundingClientRect();
+      const mid = (box.top + box.bottom) / 2;
+      const el = [...document.querySelectorAll<HTMLElement>('.ib-lbody [data-thread-id]')].find((node) => node.getBoundingClientRect().top <= mid && node.getBoundingClientRect().bottom >= mid)!;
+      return { id: el.getAttribute('data-thread-id')!, top: el.getBoundingClientRect().top };
+    });
+
     const first = await news();
-    await expect(pill(page)).not.toHaveAttribute('data-off', '');
-    await expect(pill(page)).toHaveText('1 new');
-    await expect(pill(page)).toHaveAccessibleName('1 new message below, show and go there');
-    await expect(line(page)).not.toBeInViewport();
-    // At the list's bottom edge, inside it, once it has risen into place (it comes in from 6 px lower).
-    await expect.poll(async () => (await placeIn(page, '[data-list-new-pill]')).bottom).toBeGreaterThanOrEqual(8);
-    expect((await placeIn(page, '[data-list-new-pill]')).bottom).toBeLessThanOrEqual(24);
-    // The list held still: the same rows in the same order, the new one not drawn.
+    await expect(line(page)).toContainText(/^New from Claude Code: “Fresh update \d+”/);
+    await barStuck(page);
+    expect(Math.abs((await page.locator(`.ib-lbody [data-thread-id="${middle.id}"]`).boundingBox())!.y - middle.top)).toBeLessThanOrEqual(1);
+    // Held: no pill, and the list held still (the same rows in the same order, the new one not drawn).
+    await expect(pill(page)).toHaveAttribute('data-off', '');
     expect(await order()).toEqual(before);
 
     const second = await news();
-    await expect(pill(page)).toHaveText('2 new');
-    await expect(pill(page)).toHaveAccessibleName('2 new messages below, show and go there');
-    // It stays: past the time a fading pill would be gone, it is still there, whole.
+    await expect(line(page)).toContainText(/^2 new threads/);
+    // Still none, past the time a fading pill would have run.
     await page.waitForTimeout(7000);
+    await expect(pill(page)).toHaveAttribute('data-off', '');
+    // The reader scrolls further: the bar stays stuck in view.
+    await body(page).evaluate((el) => {
+      el.scrollTop += 300;
+    });
+    await barStuck(page);
+
+    // Show from where the reader is: the list does not move; the rows it brought in are below, so the pill comes.
+    // A row in the middle of the view keeps its place on screen (the bar leaving the flow is absorbed above it).
+    const anchor = await page.evaluate(() => {
+      const box = document.querySelector('.ib-listcol .ib-lbody')!.getBoundingClientRect();
+      const mid = (box.top + box.bottom) / 2;
+      const el = [...document.querySelectorAll<HTMLElement>('.ib-lbody [data-thread-id]')].find((node) => {
+        const rect = node.getBoundingClientRect();
+        return rect.top <= mid && rect.bottom >= mid;
+      })!;
+      return el.getAttribute('data-thread-id')!;
+    });
+    const anchorTop = async () => (await placeIn(page, `.ib-lbody [data-thread-id="${anchor}"]`)).top;
+    const restingTop = await anchorTop();
+    await line(page).click();
+    await expect(line(page)).toHaveCount(0);
     await expect(pill(page)).not.toHaveAttribute('data-off', '');
-    await expect(pill(page)).not.toHaveAttribute('data-fading', '');
+    await expect(pill(page)).toHaveText('2 new');
+    await expect(pill(page)).toHaveAccessibleName('2 new messages below, go there');
+    await expect(pill(page).locator('..')).toHaveAttribute('data-edge', 'bottom');
+    await page.waitForTimeout(800);
+    expect(Math.abs((await anchorTop()) - restingTop)).toBeLessThanOrEqual(1);
+    // At the list's bottom edge, inside it, once it has risen into place (it comes in from 6 px lower).
+    await expect.poll(async () => (await placeIn(page, '[data-list-new-pill]')).bottom).toBeGreaterThanOrEqual(8);
+    expect((await placeIn(page, '[data-list-new-pill]')).bottom).toBeLessThanOrEqual(24);
 
     // Each frame from the press on: when each new row is first in view in the list, when it is lit, when the light goes.
     await page.evaluate((ids) => {
@@ -161,7 +201,6 @@ test('scrolled down, news shows the pill at the bottom edge and the list holds; 
     }, [first, second]);
 
     await pill(page).click();
-    await expect(line(page)).toHaveCount(0);
     await expect(pill(page)).toHaveAttribute('data-off', '');
     const row = page.locator(`.ib-lbody [data-thread-id="${first}"]`);
     await expect(row).toBeInViewport({ ratio: 1 });
@@ -182,7 +221,7 @@ test('scrolled down, news shows the pill at the bottom edge and the list holds; 
   }
 });
 
-test('with the "N new" line in view there is no pill; Show never scrolls, and the pill then goes to the row it brought in below', async ({ browser }: { browser: Browser }) => {
+test('at rest the bar covers no row and shows no pill; it stays stuck while the reader scrolls; Show never scrolls, and the pill then goes to the row it brought in below', async ({ browser }: { browser: Browser }) => {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   try {
     const page = await context.newPage();
@@ -190,15 +229,45 @@ test('with the "N new" line in view there is no pill; Show never scrolls, and th
     await expect(body(page).locator('[data-thread-id]').first()).toBeVisible();
     const held = await news();
     await expect(line(page)).toBeInViewport();
-    await expect(line(page)).toContainText('1 new');
+    await expect(line(page)).toContainText(/^New from Claude Code: “Fresh update \d+”/);
     await expect(pill(page)).toHaveAttribute('data-off', '');
-    // The reader scrolls down afterwards: that news had its sign, so still none.
+    // At rest the bar is in the flow: the first row starts below it, uncovered.
+    const bar = await placeIn(page, '[data-held-bar]');
+    expect((await placeIn(page, '.ib-lbody [data-thread-id]')).top).toBeGreaterThanOrEqual(bar.top + bar.height - 1);
+    // The reader scrolls down afterwards: the bar stays stuck in view, and still no pill.
     await body(page).evaluate((el) => {
       el.scrollTop = 400;
     });
-    await expect(line(page)).not.toBeInViewport();
+    await barStuck(page);
     await page.waitForTimeout(500);
     await expect(pill(page)).toHaveAttribute('data-off', '');
+    // Focus on the stuck bar (Tab, or a click that scrolls its target into view) moves nothing: the bar sits inside the
+    // list's scroll padding, which once made the browser scroll 418 px trying to bring it below that padding.
+    const still = await placeIn(page, '.ib-lbody [data-thread-id]');
+    const firstId = await body(page).locator('[data-thread-id]').first().getAttribute('data-thread-id');
+    const scrolledTo = await body(page).evaluate((el) => el.scrollTop);
+    await line(page).focus();
+    await expect(line(page)).toBeFocused();
+    expect(await body(page).evaluate((el) => el.scrollTop)).toBe(scrolledTo);
+    expect((await placeIn(page, `.ib-lbody [data-thread-id="${firstId}"]`)).top).toBe(still.top);
+    // ↑ from the first row wholly below the stuck bar: each row it reaches is scrolled to below the bar, never under it.
+    const start = await page.evaluate(() => {
+      const bar = document.querySelector('[data-held-bar]')!.getBoundingClientRect();
+      const el = [...document.querySelectorAll<HTMLElement>('.ib-lbody [data-thread-id]')].find((node) => node.getBoundingClientRect().top >= bar.bottom - 1)!;
+      el.focus({ preventScroll: true });
+      return el.getAttribute('data-thread-id')!;
+    });
+    await expect(page.locator(`.ib-lbody [data-thread-id="${start}"]`)).toBeFocused();
+    for (let n = 0; n < 3; n++) {
+      await page.keyboard.press('ArrowUp');
+      const place = await page.evaluate(() => {
+        const bar = document.querySelector('[data-held-bar]')!.getBoundingClientRect();
+        const row = (document.activeElement as HTMLElement).getBoundingClientRect();
+        return { moved: (document.activeElement as HTMLElement).getAttribute('data-thread-id'), rowTop: row.top, barBottom: bar.bottom };
+      });
+      expect(place.moved).not.toBe(start);
+      expect(place.rowTop).toBeGreaterThanOrEqual(place.barBottom - 1);
+    }
     // They scroll on to where the row will land: it is still held behind the line, so nothing is drawn or lit.
     await body(page).evaluate((el) => {
       el.scrollTop = el.scrollHeight;
@@ -242,12 +311,26 @@ test('with the "N new" line in view there is no pill; Show never scrolls, and th
   }
 });
 
-test('a 390 px phone: the pill is above the bottom edge with a 44 px target, and a tap brings the row into view', async ({ browser }: { browser: Browser }) => {
+test('a 390 px phone: the bar sticks above the sticky group header; after Show the pill is above the bottom edge with a 44 px target, and a tap brings the row into view', async ({ browser }: { browser: Browser }) => {
   const context = await browser.newContext({ ...devices['iPhone 15'], viewport: { width: 390, height: 844 } });
   try {
     const page = await context.newPage();
     await openScrolled(page);
     const first = await news();
+    await expect(line(page)).toContainText(/^New from Claude Code: “Fresh update \d+”/);
+    await barStuck(page);
+    await expect(pill(page)).toHaveAttribute('data-off', '');
+    // The group header stuck at the top sits under the bar, not behind it.
+    const bar = await placeIn(page, '[data-held-bar]');
+    const stuckBand = await page.evaluate(() => {
+      const box = document.querySelector('.ib-listcol .ib-lbody')!.getBoundingClientRect();
+      const tops = [...document.querySelectorAll<HTMLElement>('.ib-lbody .ib-band')].map((band) => band.getBoundingClientRect().top - box.top).filter((top) => top >= 0);
+      return Math.min(...tops);
+    });
+    expect(stuckBand).toBeGreaterThanOrEqual(bar.top + bar.height - 1);
+
+    await line(page).tap();
+    await expect(line(page)).toHaveCount(0);
     await expect(pill(page)).not.toHaveAttribute('data-off', '');
     await expect(pill(page)).toHaveText('1 new');
     // Once it has risen into place (it comes in from 6 px lower).
@@ -259,7 +342,6 @@ test('a 390 px phone: the pill is above the bottom edge with a 44 px target, and
     expect(target).toBeGreaterThanOrEqual(44);
 
     await pill(page).tap();
-    await expect(line(page)).toHaveCount(0);
     await expect(page.locator(`.ib-lbody [data-thread-id="${first}"]`)).toBeInViewport({ ratio: 1 });
     await expect(pill(page)).toHaveAttribute('data-off', '');
   } finally {

@@ -4,20 +4,25 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createReadStream, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import type { IncomingMessage } from "node:http";
 import { tmpdir } from "node:os";
+import { pipeline } from "node:stream";
 import { join, resolve as resolvePath } from "node:path";
 import { saveDraft, loadDraft, deleteDraft, getDraftGeneration, missingDraftHeaders } from "../generated/draft.ts";
 import { type createReviewDraftSession, type ReviewDraftKeys } from "../generated/review-draft.ts";
 import { faviconBody, faviconIcoBody } from "../generated/favicon.ts";
 import { getServerConfig } from "../generated/config.ts";
+import { getPlannotatorDataDir } from "../generated/data-dir.ts";
+import { customThemesAnswer, pageWithCustomThemes } from "../generated/theme-files.ts";
 import { listReferenceSkills, readReferenceSkillContent } from "../generated/review-skill-loader.ts";
 
 import { crossOriginRefusalBody } from "../generated/request-origin.ts";
 import { checkServerSession, serverSessionMismatchBody } from "../generated/server-session.ts";
 import { localImageContentType, localImageResponseHeaders } from "../generated/local-image.ts";
+import { annotateMediaAnswer } from "../generated/html-assets-node.ts";
 import { starAskRoute, starAskService, type StarAskSurface } from "../generated/star-ask.ts";
+import { launchSwitchRoute, launchSwitchService } from "../generated/launch-switch.ts";
 import { piPingVersion } from "./daily-ping.ts";
 import { json, parseBody, send, toWebRequest } from "./helpers.ts";
 import { isSameOriginRequest } from "./request-origin-guard.ts";
@@ -91,6 +96,23 @@ function validateUploadExtension(fileName: string): {
 	}
 
 	return { valid: true, ext };
+}
+
+/**
+ * `/api/annotate-media` (packages/server/shared-handlers.ts
+ * `handleAnnotateMedia`): the same answer, its byte span streamed from disk.
+ */
+export function handleAnnotateMediaRequest(req: IncomingMessage, res: Res, url: URL, servedDocuments: ReadonlySet<string>): void {
+	if (!isSameOriginRequest(req)) return send(res, "Access denied", 403);
+	const range = typeof req.headers.range === "string" ? req.headers.range : null;
+	const answer = annotateMediaAnswer(url.searchParams.get("path"), url.searchParams.get("base"), servedDocuments, range);
+	if (!("headers" in answer)) return send(res, "Video unavailable", answer.status);
+	res.writeHead(answer.status, answer.headers);
+	if (!("path" in answer) || answer.end < answer.start) {
+		res.end();
+		return;
+	}
+	pipeline(createReadStream(answer.path, { start: answer.start, end: answer.end }), res, () => {});
 }
 
 // Every /api/image answer carries the sandbox CSP, nosniff and CORP (see
@@ -288,6 +310,22 @@ export function handleFavicon(res: Res, pathname = "/favicon.png"): void {
 }
 
 /**
+ * `/plannotator-themes.js`: the person's own themes for the page's first
+ * frame, and with `?syntax=<id>` that theme's code colours. Mirrors
+ * packages/server/shared-handlers.ts handleCustomThemesScript() (the answer
+ * itself is packages/shared/theme-files.ts, vendored).
+ */
+/** The page with the person's themes written in (mirrors shared-handlers.ts customThemesPage). */
+export function customThemesPage(html: string): string {
+	return pageWithCustomThemes(html, getPlannotatorDataDir());
+}
+
+export function handleCustomThemesScript(res: Res, search: URLSearchParams = new URLSearchParams()): void {
+	const answer = customThemesAnswer(getPlannotatorDataDir(), search);
+	send(res, Buffer.from(answer.body), answer.status, answer.headers);
+}
+
+/**
  * List global agent skills for comment skill references. Used by plan +
  * annotate servers. Takes no client input (fixed roots only) and degrades to an
  * empty catalog on any failure so the composer never breaks.
@@ -415,6 +453,22 @@ export async function handleStarAskRequest(
 	if (!url.pathname.startsWith("/api/star-ask/")) return false;
 	const body = req.method === "POST" ? await parseBody(req) : undefined;
 	const answered = await starAskRoute(starAskService(() => piPingVersion() !== undefined), surface, req.method ?? "GET", url.pathname, body, { remote });
+	if (!answered) return false;
+	json(res, answered.body, answered.status);
+	return true;
+}
+
+/** This process's launch switch (generated/launch-switch.ts): a release is the published package (release CI's `release.json`). */
+export const piLaunchSwitch = () => launchSwitchService(() => piPingVersion() !== undefined);
+
+/**
+ * The launch switch's one-time dialog (generated/launch-switch.ts, the Bun servers' `handleLaunchSwitch`):
+ * `POST /api/launch-switch/claim`, `/shown` and `/answer`, answered from the kept copy only. False for any other path.
+ */
+export async function handleLaunchSwitchRequest(req: IncomingMessage, res: import("node:http").ServerResponse, url: URL): Promise<boolean> {
+	if (!url.pathname.startsWith("/api/launch-switch/")) return false;
+	const body = req.method === "POST" ? await parseBody(req) : undefined;
+	const answered = launchSwitchRoute(piLaunchSwitch(), req.method ?? "GET", url.pathname, body);
 	if (!answered) return false;
 	json(res, answered.body, answered.status);
 	return true;

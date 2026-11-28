@@ -8,9 +8,12 @@
  *
  * On the wire (GET and POST /api/inbox/settings `diff_options`) each field
  * has a snake_case name; config.json keeps code review's names. Whole file
- * (`expandUnchanged`) and Hide whitespace are not here: they need the local
- * repository, and the Inbox does not show them. Fonts are set in code
- * review's Settings only.
+ * (`expand_unchanged`, config.json `expandUnchanged`) is here: the Inbox's
+ * diffs read whole files too, so it shows the switch. Hide whitespace is not:
+ * it needs the local repository, and the Inbox does not show it. The code
+ * font and its size (`font_family`, `font_size`), Power Up's switch
+ * (`power_up`) and its motion (`power_up_motion`) are here for Settings →
+ * Reviews, the same page as code review's.
  *
  * `diff_style` stays as an alias of `diff_options.diff_style` (pages and
  * scripts from before).
@@ -27,6 +30,12 @@ export interface InboxDiffOptions {
   background_intensity: "subtle" | "normal" | "strong" | null;
   tab_size: number | null;
   semantic: boolean | null;
+  expand_unchanged: boolean | null;
+  font_family: string | null;
+  font_size: string | null;
+  /** Power Up (config.json `diffOptions.powerUp`, on unless set): off, the Inbox never asks a provider either. */
+  power_up: boolean | null;
+  power_up_motion: "stream" | "still" | null;
 }
 
 type WireKey = keyof InboxDiffOptions;
@@ -52,6 +61,13 @@ export const INBOX_DIFF_OPTION_FIELDS: Record<WireKey, Field> = {
   background_intensity: { config: "lineBgIntensity", read: oneOf("subtle", "normal", "strong"), rule: "subtle, normal or strong" },
   tab_size: { config: "tabSize", read: (value) => (Number.isInteger(value) && (value as number) >= 1 && (value as number) <= 8 ? value : undefined), rule: "a whole number from 1 to 8" },
   semantic: { config: "semantic", read: bool, rule: "true or false" },
+  expand_unchanged: { config: "expandUnchanged", read: bool, rule: "true or false" },
+  // Empty is the theme's font; a name is one family as the person typed it (code review keeps it as typed, up to 200 characters).
+  font_family: { config: "fontFamily", read: (value) => (typeof value === "string" && value.length <= 200 && !/[\u0000-\u001f]/.test(value) ? value : undefined), rule: "a font family name of up to 200 characters, or empty for the theme's" },
+  // Empty is the theme's size; the slider's sizes are whole px from 8 to 24.
+  font_size: { config: "fontSize", read: (value) => (value === "" || (typeof value === "string" && /^(?:[89]|1\d|2[0-4])px$/.test(value)) ? value : undefined), rule: "8px to 24px, or empty for the theme's" },
+  power_up: { config: "powerUp", read: bool, rule: "true or false" },
+  power_up_motion: { config: "powerUpMotion", read: oneOf("stream", "still"), rule: "stream or still" },
 };
 
 const WIRE_KEYS = Object.keys(INBOX_DIFF_OPTION_FIELDS) as WireKey[];

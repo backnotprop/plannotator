@@ -323,6 +323,25 @@ describe('a picture that fails to load after the highlighter moved the text besi
     expect([...el.querySelectorAll('img')].every((i) => i.hidden && i.alt === '')).toBe(true);
   });
 
+  test.skipIf(!hasDom)('a sound or video player: the placeholder shows and the words stay', async () => {
+    const plays: ImageResolver = (src) => ({ kind: 'src', src: `data:video/mp4;name=${encodeURIComponent(src)};base64,AAAA`, media: 'video' });
+    const el = await mount(<Harness markdown={'![clip](gone.mp4)words after it'} resolver={plays} />);
+    const video = el.querySelector<HTMLVideoElement>('video')!;
+    const words = video.nextSibling as Text;
+    expect(words.nodeType).toBe(Node.TEXT_NODE);
+    const mark = document.createElement('mark');
+    words.parentNode!.insertBefore(mark, words);
+    mark.appendChild(words);
+    await act(async () => {
+      video.dispatchEvent(new Event('error'));
+    });
+    expect(el.querySelector('mark')!.textContent).toBe('words after it');
+    const chip = el.querySelector<HTMLElement>('[data-image-unavailable]')!;
+    expect(chip.textContent).toBe('clip');
+    expect(chip.getAttribute('title')).toBe('Video could not be loaded');
+    expect(el.querySelector<HTMLVideoElement>('video')!.hidden).toBe(true);
+  });
+
   test.skipIf(!hasDom)('a Shows picture and picture tiles: the card falls back and keeps its text', async () => {
     const el = await mount(<Harness markdown={SINGLE} />);
     wrapEveryText(el);

@@ -10,7 +10,6 @@ import type { ActionMark } from '../components/ActionChecklist';
 import type { OpenQuestionsDecide } from '../components/OpenQuestions';
 import type { StepsSubscribe } from '../steps/useThreadSteps';
 import type { Signal } from '../signal';
-import type { ShapeReplyPart } from '../shape/addToReply';
 import type { ThreadPullReview } from '../threadPulls/ThreadPulls';
 import type { OpenFileRef } from '../components/ReferencedFilePane';
 
@@ -73,15 +72,10 @@ export interface ThreadPaneProps {
   onUnsnooze?: () => void;
   replyRequest?: string | null;
   onReplyOpened?: () => void;
-  shapeButton?: ReactNode;
-  /** The thread's open board (ThreadShapeLayer): it takes the messages' and the reply's place under the header. */
-  board?: ReactNode;
   onSide?: (selected: string, source?: string) => void;
   onSideWords?: (words: string, taken?: () => void) => void;
   replyWords?: string | null;
   onReplyWordsTaken?: () => void;
-  replyPart?: ShapeReplyPart | null;
-  onReplyPartTaken?: () => void;
   backLabel?: string;
   cardChip?: ReactNode;
   threadSteps?: { on: boolean; subscribe: StepsSubscribe; boardCard?: { title: string; onOpen: () => void } | null } | null;
@@ -97,7 +91,6 @@ export interface ThreadPaneProps {
   remote?: boolean | null;
   onBackToList?: (fileName: string | null) => void;
   onToast?: (toast: Omit<InboxToastModel, 'id'>) => void;
-  onToastGone?: (onUndo: () => void) => void;
   linkOf?: (messageId?: string) => string;
   onInboxLink?: (href: string) => (() => void) | null;
   landing?: { messageId: string; terms: readonly string[]; questionKey: string | null; focus?: 'prompt' } | null;

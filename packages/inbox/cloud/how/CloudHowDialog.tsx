@@ -2,7 +2,6 @@ import { useId, useRef, useState, type ReactNode } from 'react';
 import { Icon } from '../../icons';
 import { Modal } from '../../components/Updates';
 import { HowElsewhere } from './HowElsewhere';
-import { HowLimits } from './HowLimits';
 import { HowPairing } from './HowPairing';
 import { HowRelay } from './HowRelay';
 import { HowReplies } from './HowReplies';
@@ -37,13 +36,6 @@ const PANELS: Panel[] = [
     seen: 'Your computer and the cloud agent each call out to the relay in the middle. Messages in the relay are locked.',
     title: 'Messages pass through a locked mailbox',
     line: 'Your computer and the agent each call out to the relay, so your computer opens no door to the internet. Only they hold the keys: the relay cannot read a word.',
-  },
-  {
-    id: 'limits',
-    picture: <HowLimits />,
-    seen: 'The agent sees every thread: its own, other agents’ and those in other projects. It cannot answer your questions, approve anything, run anything on your computer or open your files.',
-    title: 'It works across your whole Inbox',
-    line: 'Any thread in any project: it reads, searches and posts there, always under its own name.',
   },
   {
     id: 'replies',

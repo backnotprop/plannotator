@@ -77,6 +77,15 @@ export function threadDecisionExport(store: InboxStore, threadId: string, option
   });
 }
 
+/** The zone of the person's computer (this one), for a request that names none: a paired agent's, sent from a machine in another zone. */
+export function inboxDecisionsZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
+}
+
 /** The download, or null when the path is not this route. */
 export async function inboxDecisionExportRoute(url: URL, store: InboxStore, options: { version: string; now?: () => Date }): Promise<Response | null> {
   const match = INBOX_DECISION_EXPORT_ROUTE.exec(url.pathname);
@@ -85,7 +94,7 @@ export async function inboxDecisionExportRoute(url: URL, store: InboxStore, opti
   const raw = url.searchParams.get("format") ?? "md";
   if (!(raw in FORMATS)) return Response.json({ error: "format: md, html or json.", code: "validation_error" }, { status: 422 });
   const format = raw as DecisionExportFormat;
-  const built = threadDecisionExport(store, threadId, { tz: url.searchParams.get("tz") ?? "UTC", version: options.version, now: options.now });
+  const built = threadDecisionExport(store, threadId, { tz: url.searchParams.get("tz") || inboxDecisionsZone(), version: options.version, now: options.now });
   if (!built) return Response.json({ error: "No such thread.", code: "thread_not_found" }, { status: 404 });
   const { doc, pictures } = built;
   if (format !== "md") await withPictures(doc, pictures, store);

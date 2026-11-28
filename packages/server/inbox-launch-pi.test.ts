@@ -194,18 +194,27 @@ describe("Pi's launch host, against the fake pi", () => {
     const made = await host.rexCommand!(launch, { name: "Tidy the readme", login: env, resume: false });
     if (!made.ok) throw new Error("no command");
     expect(made.ref).toBe(made.session);
-    expect(made.command).not.toContain("readme");
     expect(fake.starts()).toEqual([]);
     runTerminal(made.command);
     await until("the tab's pi to start", () => fake.terminals().length === 1, 4_000);
     const [call] = fake.terminals();
-    expect(call!.argv).toEqual(["--session-id", made.session]);
+    // Named for its thread, as a background start is: without it Pi names the session itself, and the list's row reads that name.
+    expect(call!.argv).toEqual(["--session-id", made.session, "--name", "Tidy the readme"]);
     expect(call!.cwd).toBe(folder);
     expect(call!.inboxTool).toBe("1");
     expect(call!.dataDir).toBe(dataDir);
     // A reply to it once it ended: the same session.
     const again = await host.rexCommand!({ ...launch, session: made.session, session_ref: made.session }, { name: "Tidy", login: env, resume: true });
     expect(again.ok && again.command).toContain(made.session);
+    // Started again, it keeps the name it has (the person may have renamed it in Pi).
+    expect(again.ok && again.command).not.toContain("--name");
+    // One that never took a turn (stopped before it connected): its own id again, named as a first start is.
+    const fresh = await host.rexCommand!({ ...launch, session: made.session, session_ref: made.session }, { name: "Tidy", login: env, resume: true, fresh: true });
+    expect(fresh.ok && fresh.command).toContain(`'--session-id' '${made.session}' '--name' 'Tidy'`);
+    // A Pi whose thread is named like another session's flag is never taken for that session's process.
+    const other = "99999999-2222-4333-8444-555555555555";
+    expect(piSessionProcesses(`  700     1 pi --mode rpc --session-id ${made.session} --name --session-id ${other}\n`, other)).toEqual([]);
+    expect(piSessionProcesses(`  700     1 pi --mode rpc --session-id ${made.session} --name --session-id ${other}\n`, made.session).map((p) => p.pid)).toEqual([700]);
   });
 
   test("Start in Rex: a Pi in its tab lists as `pi` alone, so the claim its extension wrote says which session it runs", async () => {

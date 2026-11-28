@@ -285,13 +285,14 @@ describe("OpenCode through the launch engine, against the fake opencode2", () =>
 
 describe("OpenCode host pieces", () => {
   test("the spawn env drops an outer OpenCode's markers and Plannotator's names, and sets what the plugin watches", () => {
-    expect(openCodeSpawnEnv({ PATH: "/bin", OPENCODE: "1", OPENCODE_SERVER_PASSWORD: "theirs", PLANNOTATOR_PORT: "1", XDG_CONFIG_HOME: "/c" }, "/data", "ses_abc", "pw")).toEqual({
+    expect(openCodeSpawnEnv({ PATH: "/bin", OPENCODE: "1", OPENCODE_PASSWORD: "inherited", OPENCODE_SERVER_PASSWORD: "theirs", PLANNOTATOR_PORT: "1", XDG_CONFIG_HOME: "/c" }, "/data", "ses_abc", "pw")).toEqual({
       PATH: "/bin",
       XDG_CONFIG_HOME: "/c",
       PLANNOTATOR_INBOX_TOOL: "1",
       PLANNOTATOR_INBOX_LAUNCHED: "1",
       PLANNOTATOR_INBOX_LAUNCHED_SESSION: "ses_abc",
       PLANNOTATOR_DATA_DIR: "/data",
+      OPENCODE_PASSWORD: "pw",
       OPENCODE_SERVER_USERNAME: "opencode",
       OPENCODE_SERVER_PASSWORD: "pw",
     });

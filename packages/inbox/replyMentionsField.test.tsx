@@ -21,7 +21,7 @@ import type { MentionRef } from './threadMentions';
 const hasDom = typeof document !== 'undefined';
 const { InboxComposerField } = (hasDom ? await import('./components/ComposerField') : {}) as typeof import('./components/ComposerField');
 const { pressThreadRow, scrollStep, setThreadDragHitTestForTests } = (hasDom ? await import('./threadDrag') : {}) as typeof import('./threadDrag');
-const { clearReplyMentions, noteDraftMentions, requestMention, resetReplyMentionsForTests } = (hasDom ? await import('./threadMentions') : {}) as typeof import('./threadMentions');
+const { clearReplyMentions, noteDraftMentions, requestMention, resetReplyMentionsForTests, useMentionBoxOpener } = (hasDom ? await import('./threadMentions') : {}) as typeof import('./threadMentions');
 const { rememberMachine, resetMachineRoutes, setSelfMachine } = (hasDom ? await import('./inboxUrl') : {}) as typeof import('./inboxUrl');
 const { noteMentionRefs } = (hasDom ? await import('./data/threadMentionRefs') : {}) as typeof import('./data/threadMentionRefs');
 const { replyWordsWithMentions } = (hasDom ? await import('./threadMentions') : {}) as typeof import('./threadMentions');
@@ -67,6 +67,8 @@ afterEach(() => {
 function Box({ initial = '', card = false, extras }: { initial?: string; card?: boolean; extras?: ReactNode }) {
   const [value, setValue] = useState(initial);
   words = value;
+  // The pane's half, as Thread.tsx calls it with the box open: whether the reply holds words not sent yet.
+  useMentionBoxOpener(HERE, true, false, () => {}, value.trim() !== '');
   return (
     <div className="pn-inbox">
       <div className={card ? 'ib-fcomp' : 'ib-rbox'} data-testid="box">
@@ -273,22 +275,25 @@ describe.skipIf(!hasDom)('the ways that are not a drag', () => {
     expect(words).toBe(`Compare with ${RATE.title} `);
   });
 
-  test('on the open thread itself the item is disabled and says so', () => {
+  test('on the open thread itself there is no item (it would take room and do nothing)', () => {
     window.location.hash = `#thread=${HERE}`;
     draw(
-      <Menu.Root open>
-        <Menu.Portal>
-          <Menu.Positioner>
-            <Menu.Popup>
-              <MentionMenuItem rows={[{ thread_id: HERE, thread_name: 'Login redirect loop', subject: null, resolved_at: null, project: { id: 'p', name: 'harbor' } } as never]} phone={false} />
-            </Menu.Popup>
-          </Menu.Positioner>
-        </Menu.Portal>
-      </Menu.Root>,
+      <>
+        <Box initial="Compare with" />
+        <Menu.Root open>
+          <Menu.Portal>
+            <Menu.Positioner>
+              <Menu.Popup>
+                <MentionMenuItem rows={[{ thread_id: HERE, thread_name: 'Login redirect loop', subject: null, resolved_at: null, project: { id: 'p', name: 'harbor' } } as never]} phone={false} />
+                <span data-testid="menu-drawn" />
+              </Menu.Popup>
+            </Menu.Positioner>
+          </Menu.Portal>
+        </Menu.Root>
+      </>,
     );
-    const item = document.querySelector<HTMLElement>('[data-row-action="mention"]')!;
-    expect(item.getAttribute('aria-disabled')).toBe('true');
-    expect(item.textContent).toContain('This thread');
+    expect(document.querySelector('[data-testid="menu-drawn"]')).not.toBeNull();
+    expect(document.querySelector('[data-row-action="mention"]')).toBeNull();
   });
 
   test('a pasted thread link becomes the same mention; a file paste is left to the box', () => {

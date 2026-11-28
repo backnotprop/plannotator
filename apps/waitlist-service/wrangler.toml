@@ -12,7 +12,7 @@ database_id = "797d1a5a-d2da-4fc1-8aab-debe8c54c50d"
 # Comma-separated list of origins allowed to POST signups.
 # Override at deploy time with `wrangler secret put ALLOWED_ORIGINS` if you
 # want to keep the value private.
-ALLOWED_ORIGINS = "https://plannotator.ai,http://localhost:3002"
+ALLOWED_ORIGINS = "https://plannotator.ai,https://spaces-test.plannotator.ai,http://localhost:3002"
 
 # Optional bearer token required to call GET /admin/list.
 # Set with `wrangler secret put ADMIN_TOKEN`.

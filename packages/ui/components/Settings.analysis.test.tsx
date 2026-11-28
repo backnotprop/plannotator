@@ -15,7 +15,8 @@ afterEach(async () => {
   if (hasDom) document.body.replaceChildren();
 });
 
-describe('Settings Analysis tab', () => {
+// The Analysis tab's layers now sit on Settings → Reviews.
+describe('Settings Reviews tab: analysis layers', () => {
   test.skipIf(!hasDom)('shows both independent analysis layer toggles', async () => {
     host = document.createElement('div');
     document.body.appendChild(host);
@@ -32,7 +33,7 @@ describe('Settings Analysis tab', () => {
     });
 
     const analysisTab = Array.from(document.querySelectorAll<HTMLButtonElement>('button'))
-      .find((button) => button.textContent?.trim() === 'Analysis');
+      .find((button) => button.textContent?.trim() === 'Reviews');
     await act(async () => analysisTab?.click());
 
     const switches = Array.from(document.querySelectorAll('[role="switch"]'));

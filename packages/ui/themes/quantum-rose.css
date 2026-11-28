@@ -65,9 +65,12 @@
   --secondary: #ffd6ff;
   --secondary-foreground: #91185c;
   --muted: #ffe3f2;
-  --muted-foreground: #c04283;
+  /* Was #c04283: darker, same hue and chroma, so it reads at 4.5:1 on the background. */
+  --muted-foreground: #bd4081;
   --accent: #ffc1e3;
   --accent-foreground: #91185c;
+  /* --accent is a pale fill here; accent used as text is the same pink, darker (4.5:1 on the background). */
+  --accent-text: #955f7e;
   --destructive: #d13869;
   --destructive-foreground: #ffffff;
   --border: #ffc7e6;

@@ -59,6 +59,11 @@ delete process.env.PLANNOTATOR_AGENT_TOOL;
 // (apps/relay/test) sets its `wrangler dev` URL in the env it spawns.
 process.env.PLANNOTATOR_RELAY_URL = "http://127.0.0.1:9";
 
+// "Share this space" sends a plan to a Spaces host (packages/shared/spaces/). Tests never reach one: a closed
+// loopback port refuses at once. A test of the share hands its client a stand-in (tests/helpers/fake-spaces.ts).
+// tests/spaces-host-pin.test.ts guards this.
+process.env.PLANNOTATOR_SPACES_URL = "http://127.0.0.1:9";
+
 // The Inbox publishes itself over the tailnet when this is on: a contributor
 // who set it in their shell must not make every Inbox test run the real
 // `tailscale` CLI. Tests that need it inject a scripted runner.

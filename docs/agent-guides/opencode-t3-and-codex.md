@@ -123,6 +123,28 @@ headed `— Feedback · 2 comments.` under `Files: notes.md, mock.html`, and
 
 In a server the Inbox started (`PLANNOTATOR_INBOX_LAUNCHED=1`), the plugin's wake watches each root session as it is created (`session.created`), not only once it ran, so the Inbox's first message reaches a session that has had no turn; with `PLANNOTATOR_INBOX_LAUNCHED_SESSION` it watches that session from the start (a restart). The rest is "OpenCode" in `inbox-launch.md`. Test: `inbox-v2-wake.test.ts` "OpenCode 2 started by the Inbox".
 
+### OpenCode 2: a prompt waiting in the terminal (Inbox)
+
+The plugin's Inbox link says `blocked: { kind }` on its polls and in a `state`
+event while a session waits on the person in OpenCode (`noteOpenCodePrompt`,
+`openCodeBlocked` in `apps/opencode-plugin/inbox.ts`): `permission.asked`
+holds a `permission` until `permission.replied` for that request;
+`question.asked` holds a `question` until `question.replied` or
+`question.rejected` for that request (`requestID`; the names in the installed
+SDK's v2 types, 1.19.3); `form.created` holds one until any later `form.*`
+event for that form. A permission wins over a question. Everything clears when
+the turn ends (`session.execution.succeeded` / `failed` / `interrupted`),
+whenever the plugin finds the session not running by any other way (a lost end
+event found by the idle cross-check, the event stream gone, the session
+deleted: `endOpenCodePrompts`), and nothing is said for a session it does not
+think is running. The Inbox's 45 s expiry does not bound a stale word: it
+guards only against a plugin that stops polling, so the plugin itself must stop
+saying it. Only the kind leaves the plugin, never the action, patterns or the
+question's words. Which question events a real OpenCode 2 raises is not yet
+proved on one. The Inbox side: "Status marks for every agent" in
+[inbox-notifications-and-agents.md](inbox-notifications-and-agents.md). Tests:
+`apps/opencode-plugin/inbox-blocked.test.ts`.
+
 ### OpenCode 2: the installer updates a running service's plugin
 
 The OpenCode 2 service keeps the plugin it loaded. When it is running with an

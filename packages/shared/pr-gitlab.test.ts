@@ -2,8 +2,35 @@ import { describe, expect, spyOn, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fetchGlMR, fetchGlMRContext, parsePaginatedArray, submitGlMRReview } from "./pr-gitlab";
+import { parseDiffToFiles } from "@plannotator/core/diff-files";
+import { checkGlAuth, fetchGlMR, fetchGlMRContext, parsePaginatedArray, reconstructPatch, submitGlMRReview, type GitLabDiffEntry } from "./pr-gitlab";
 import type { CommandResult, PRReviewFileComment, PRRuntime } from "./pr-types";
+
+describe("reconstructPatch", () => {
+  const entry = (path: string, more: Partial<GitLabDiffEntry> = {}): GitLabDiffEntry => ({
+    old_path: path, new_path: path, new_file: false, deleted_file: false, renamed_file: false,
+    diff: "@@ -1 +1 @@\n-before\n+after\n", ...more,
+  });
+  const shown = (entries: GitLabDiffEntry[]) =>
+    parseDiffToFiles(reconstructPatch(entries)).map(({ path, additions, deletions }) => ({ path, additions, deletions }));
+
+  test("a file whose diff has no final line break does not swallow the next file", () => {
+    expect(shown([entry("ledger.py", { diff: "@@ -1 +1 @@\n-total = 0\n+total = 1" }), entry("format.py")])).toEqual([
+      { path: "ledger.py", additions: 1, deletions: 1 },
+      { path: "format.py", additions: 1, deletions: 1 },
+    ]);
+  });
+
+  test("git's no-newline marker stays the file's last line", () => {
+    const patch = reconstructPatch([entry("ledger.py", { diff: "@@ -1 +1 @@\n-a\n+b\n\\ No newline at end of file" }), entry("format.py")]);
+    expect(patch).toContain("+b\n\\ No newline at end of file\ndiff --git a/format.py b/format.py\n");
+  });
+
+  test("a path with a tab or a line break in it is shown whole", () => {
+    expect(shown([entry("notes\tdraft.md"), entry("line\nbreak.md", { new_file: true, diff: "@@ -0,0 +1 @@\n+x\n" })]).map(({ path }) => path))
+      .toEqual(["notes\tdraft.md", "line\nbreak.md"]);
+  });
+});
 
 describe("fetchGlMR", () => {
   test("uses GitLab raw diffs so binary markers and collapsed files are preserved", async () => {
@@ -1007,5 +1034,31 @@ describe("submitGlMRReview positions", () => {
     expect(positions).toEqual([
       { position_type: "text", base_sha: "base", head_sha: "head", start_sha: "start", new_path: "src/keep.ts", old_path: "src/keep.ts", new_line: 3 },
     ]);
+  });
+});
+
+describe("checkGlAuth", () => {
+  const runtimeFor = (signedIn: string[], calls: string[][]): PRRuntime => ({
+    async runCommand(command, args) {
+      calls.push([command, ...args]);
+      const at = args.indexOf("--hostname");
+      // A newer glab without --hostname checks the current context's host: here a self-hosted one that is signed out.
+      const host = at >= 0 ? args[at + 1]! : "git.northwind.example";
+      return signedIn.includes(host)
+        ? { stdout: `${host}\n  ✓ Logged in to ${host} as dana\n`, stderr: "", exitCode: 0 }
+        : { stdout: "", stderr: `${host}\n  x ${host} has not been authenticated with glab.`, exitCode: 1 };
+    },
+  });
+
+  test("gitlab.com is checked by name, not as whatever host the current context names", async () => {
+    const calls: string[][] = [];
+    await expect(checkGlAuth(runtimeFor(["gitlab.com"], calls), "gitlab.com")).resolves.toBeUndefined();
+    expect(calls).toEqual([["glab", "auth", "status", "--hostname", "gitlab.com"]]);
+  });
+
+  test("a self-hosted host is checked by name, and a signed-out one says how to sign in", async () => {
+    const calls: string[][] = [];
+    await expect(checkGlAuth(runtimeFor([], calls), "git.northwind.example")).rejects.toThrow("glab auth login --hostname git.northwind.example");
+    expect(calls).toEqual([["glab", "auth", "status", "--hostname", "git.northwind.example"]]);
   });
 });

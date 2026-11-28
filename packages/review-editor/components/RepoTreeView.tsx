@@ -6,7 +6,7 @@ import type { DiffFile } from '../types';
 import type { RepoFilesState } from '../hooks/useRepoFiles';
 import { initialRepoExpansion } from '../utils/repoTree';
 import { prefetchRepoFile } from '../hooks/useRepoFileText';
-import { TreeRowMenu, ancestorsOf, countParts, fileRowParts, folderLineCounts, gitStatusFor, notePart, type FileRowState } from './treeRows';
+import { TreeRowMenu, ancestorsOf, countParts, fileRowParts, folderLineCounts, gitStatusFor, leadAtRoot, notePart, type FileRowState } from './treeRows';
 import { treeLook } from './treeLook';
 import { useTreeSearchKeys } from './treeSearchKeys';
 
@@ -19,9 +19,11 @@ export interface RepoTreeHandle {
 
 interface RepoTreeViewProps extends FileRowState {
   touch?: boolean;
+  searchAccessory?: React.ReactNode;
   repo: ReadyRepoFiles;
   loadDir: (dir: string) => void;
   files: DiffFile[];
+  visiblePaths?: ReadonlySet<string>;
   activePath: string | null;
   onSelectFile: (index: number) => void;
   onDoubleClickFile?: (index: number) => void;
@@ -40,32 +42,38 @@ const ON_DISK_TITLES: Record<RepoOnDiskChange, string> = {
 const dirPath = (dir: string) => `${dir.replace(/\/$/, '')}/`;
 const LOADING = 'Loading\u2026';
 
-function listPaths(repo: ReadyRepoFiles, changed: readonly string[], loading: ReadonlySet<string> = new Set()): string[] {
+function listPaths(paths: ReadyRepoFiles['paths'], dirs: ReadyRepoFiles['dirs'], changed: readonly string[], loading: ReadonlySet<string>): string[] {
   const out = new Set<string>();
-  if (repo.paths) {
-    for (const path of repo.paths) out.add(path);
+  if (paths) {
+    for (const path of paths) out.add(path);
   } else {
-    for (const entries of repo.dirs.values()) {
+    for (const entries of dirs.values()) {
       for (const entry of entries) out.add(entry.type === 'dir' ? dirPath(entry.path) : entry.path);
     }
   }
   for (const path of changed) out.add(path);
-  for (const dir of loading) if (!repo.dirs.has(dir)) out.add(`${dirPath(dir)}${LOADING}`);
+  for (const dir of loading) if (!dirs.has(dir)) out.add(`${dirPath(dir)}${LOADING}`);
   return [...out];
 }
 
 export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
-  const { repo, files, activePath, handleRef } = props;
+  const { repo, files, visiblePaths, activePath, handleRef } = props;
   const changedIndex = useMemo(() => new Map(files.map((file, index) => [file.path, index])), [files]);
-  const changedPaths = useMemo(() => files.map((file) => file.path), [files]);
+  const changedPaths = useMemo(
+    () => visiblePaths ? [...visiblePaths] : files.map((file) => file.path),
+    [files, visiblePaths],
+  );
   const [loading, setLoading] = useState<ReadonlySet<string>>(() => new Set());
-  const paths = useMemo(() => listPaths(repo, changedPaths, loading), [repo, changedPaths, loading]);
+  const paths = useMemo(
+    () => listPaths(repo.paths, repo.dirs, changedPaths, loading),
+    [repo.paths, repo.dirs, changedPaths, loading],
+  );
 
   const folderCounts = useRef(new Map<string, { additions: number; deletions: number }>());
   folderCounts.current = useMemo(() => folderLineCounts(files), [files]);
   const lastOpened = useRef<string | null>(null);
-  const live = useRef({ props, changedIndex });
-  live.current = { props, changedIndex };
+  const live = useRef({ props, changedIndex, changedPaths, paths });
+  live.current = { props, changedIndex, changedPaths, paths };
 
   const ensureLoaded = useCallback((dir: string) => {
     const { props: p } = live.current;
@@ -173,7 +181,7 @@ export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
 
   useEffect(() => {
     model.refreshRows();
-  }, [model, props.viewedFiles, props.annotationCounts, props.markdownPreviewedPaths, props.showViewedControls, props.threadCount, repo.onDisk, files]);
+  }, [model, props.viewedFiles, props.stagedFiles, props.annotationCounts, props.markdownPreviewedPaths, props.showViewedControls, props.threadCount, props.fileLead, repo.onDisk, files]);
 
   const openFocused = useCallback(() => {
     const focused = model.getFocusedPath();
@@ -236,8 +244,9 @@ export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
 
   React.useImperativeHandle(handleRef, () => ({
     setAllFoldersExpanded: (expanded: boolean) => {
-      const dirs = expanded ? [...initialRepoExpansion(live.current.props.files.map((f) => f.path), live.current.props.activePath)].map(dirPath) : [];
-      model.resetPaths(listPaths(live.current.props.repo, live.current.props.files.map((f) => f.path)), { initialExpandedPaths: dirs });
+      const { props: p, changedPaths, paths } = live.current;
+      const dirs = expanded ? [...initialRepoExpansion(changedPaths, p.activePath)].map(dirPath) : [];
+      model.resetPaths(paths, { initialExpandedPaths: dirs });
       model.setGitStatus(gitStatus);
       for (const dir of dirs) ensureLoaded(dir);
     },
@@ -262,11 +271,17 @@ export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
     },
   }), [model, gitStatus, ensureLoaded]);
 
+  // A marked changed file at the repository's root: the tree makes room for its mark (treeLook).
+  const leadRoom = useMemo(() => leadAtRoot(files.flatMap((file) => (file.path.includes('/') ? [] : [file.path])), props.fileLead), [files, props.fileLead]);
+
   return (
     <PierreFileTree
       model={model}
+      header={props.searchAccessory}
       className="review-file-tree"
       data-repo-file-tree=""
+      data-review-tree-filter={props.searchAccessory ? '' : undefined}
+      data-lead-room={leadRoom ? '' : undefined}
       aria-label="All files"
       style={{ height: '100%' }}
       renderContextMenu={(item, context) =>

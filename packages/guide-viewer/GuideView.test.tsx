@@ -843,6 +843,19 @@ describe('GuideView bare (the Inbox PR page)', () => {
     });
   }, 15_000);
 
+  // Guards the page shifting under a folded file that leaves the outer window: its box kept the header's height alone,
+  // dropping what the renderer draws under it while folded (a generated file's strip, a lockfile's package changes).
+  test.skipIf(!hasDom)('a folded file away from the window keeps the height it last drew', async () => {
+    await withCommentedFile(async ({ path, report, away }) => {
+      const props = [...latestCodeViewProps].reverse().find((p) => (p.files as DiffFile[])[0]?.path === path)!;
+      await act(async () => (props.onFileCollapsedChange as (file: string, collapsed: boolean) => void)(path, true));
+      await report(120);
+      expect(boxHeight(path)).toBe('138px');
+      await away();
+      expect(boxHeight(path)).toBe('138px');
+    });
+  }, 15_000);
+
   // Guards the opened lines being lost: the viewer holds them, so leaving the outer window closed the gap, the box
   // shrank under the reader, the file below jumped and the file was read again.
   for (const marker of ['data-expand-button', 'data-unmodified-lines']) test.skipIf(!hasDom)(`a file whose gap was opened (${marker}) stays mounted past the window, and the files near the viewport still mount`, async () => {

@@ -23,6 +23,7 @@ import { clockTime, dayWords, formatCount } from '../format';
 import { codexAccountLine } from '../codexAccount';
 import { hostLabel } from '../compose/model';
 import { launchStartIn } from '../data/actions/launchStartIn';
+import { INBOX_REX_SERVER_AWAY_SETTINGS, INBOX_REX_SHARED_AGAIN } from '@plannotator/core/inbox-run-line';
 
 /** The agents New message starts, as Settings names them in "Start new agents in". */
 const REX_LAUNCH_AGENTS = ['claude-code', 'pi', 'codex', 'opencode'];
@@ -651,8 +652,8 @@ export function AgentsSettings({
 }) {
   const [launchState, setLaunchState] = useState(launch ?? null);
   const [launchBusy, setLaunchBusy] = useState(false);
-  // `rex_here` comes only from this pane's own read (the window's settings model never asks Rex): kept across the model's changes.
-  useEffect(() => setLaunchState((was) => (launch ? { ...launch, rex_here: was?.rex_here } : null)), [launch?.enabled, launch?.full_permissions, launch?.follows, launch?.needs_consent, launch?.bypass_off, launch?.own_mode, launch?.scratch_dir, launch?.settings_file]);
+  // `rex_here` (and `rex_shared` with it) comes only from this pane's own read (the window's settings model never asks Rex): kept across the model's changes.
+  useEffect(() => setLaunchState((was) => (launch ? { ...launch, rex_here: was?.rex_here, rex_shared: was?.rex_shared } : null)), [launch?.enabled, launch?.full_permissions, launch?.follows, launch?.needs_consent, launch?.bypass_off, launch?.own_mode, launch?.scratch_dir, launch?.settings_file]);
   // Shown: the switches as they stand now (full permissions never set: it follows the login shell, read again here).
   useEffect(() => {
     if (!launch) return;
@@ -666,7 +667,7 @@ export function AgentsSettings({
     };
   }, [launch?.enabled]);
   /** A save's answer: it never asks Rex (`rex_here` absent), so the pane keeps what its own read said. */
-  const takeLaunch = (next: InboxLaunchSettings) => setLaunchState((was) => ({ ...next, rex_here: next.rex_here ?? was?.rex_here }));
+  const takeLaunch = (next: InboxLaunchSettings) => setLaunchState((was) => (next.rex_here !== undefined ? next : { ...next, rex_here: was?.rex_here, rex_shared: was?.rex_shared }));
   // "Start agents from New message": config.json `inboxLaunch.enabled`, read live (New message's New session rows follow).
   const toggleEnabled = async () => {
     if (!launchState || launchBusy) return;
@@ -688,8 +689,9 @@ export function AgentsSettings({
       setLaunchBusy(false);
     }
   };
-  // "Start new agents in" (`inboxLaunch.startIn`): in the background, or Rex. Rex is offered while its app is
-  // attached on this computer, or while it is the choice (so it can be turned back); the agents that can't run in Rex say so.
+  // "Start new agents in" (`inboxLaunch.startIn`): in the background, or Rex. Rex is offered while it is on that
+  // computer (`rex_here`: a Mac's app attached there; on Linux or FreeBSD, `rex_headless`, this account's own Rex
+  // server answering), or while it is the choice (so it can be turned back); the agents that can't run in Rex say so.
   const pickStartIn = async (next: 'inbox' | 'rex') => {
     if (!launchState || launchBusy || launchState.start_in === next) return;
     setLaunchBusy(true);
@@ -724,7 +726,7 @@ export function AgentsSettings({
             {notRexNames.length > 0 ? `; ${listWords(notRexNames)} always ${notRexNames.length === 1 ? 'starts' : 'start'} in the background.` : '.'}
             {inRex && launchState.rex_here === false && (
               <span className="block" data-launch-rex-away="">
-                Rex isn't open on this computer now, so new agents start in the background until it is.
+                {launchState.rex_shared ? INBOX_REX_SHARED_AGAIN : launchState.rex_headless ? INBOX_REX_SERVER_AWAY_SETTINGS : "Rex isn't open on this computer now, so new agents start in the background until it is."}
               </span>
             )}
           </>

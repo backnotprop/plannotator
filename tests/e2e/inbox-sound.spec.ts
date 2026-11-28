@@ -1,5 +1,5 @@
 /**
- * The Inbox's question sound ("Ding-dong") and its one-time dialog, proved in
+ * The Inbox's sound ("Ding-dong") and its one-time dialog, proved in
  * a real Chromium against a compiled binary. The spec compiles its own binary
  * with a release version (0.29.0; the shared e2e binary is 0.0.0-dev, and a
  * dev build never reports an update), into a temp dir, from the built apps
@@ -14,9 +14,12 @@
  * check is off and points at a dead port, so nothing asks GitHub.
  *
  * Proves: a question while the tab is hidden rings once; a burst of three
- * rings once; a visible tab rings nothing; a plain message rings nothing; the
- * sound off rings nothing (and notifications stop being silent); two tabs
- * ring once; a fresh install never shows the dialog; after an update the
+ * rings once; a visible tab rings nothing; a plain reply rings under the
+ * default ("every agent message") and not under "questions and new threads";
+ * a question right after agent chatter still rings;
+ * the sound off rings nothing (and notifications stop being silent); two tabs
+ * ring once; the two sound choices stay inside their Settings row from 320 to
+ * 1440 px; a fresh install never shows the dialog; after an update the
  * dialog shows once, in one of two tabs, and not again on reload.
  * Screenshots (light and dark) land in PLANNOTATOR_SOUND_SHOTS (default
  * .local/proof/sound/).
@@ -30,6 +33,10 @@ import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { E2E_LAUNCH_OFF, inboxScratch, launchOff, removeInboxScratch } from './inbox-scratch';
 import { savedConfig } from '../helpers/saved-config';
+import { RING_LOCK_MS } from '../../packages/inbox/soundRing';
+
+/** "Rings nothing": a ring, if any, plays within RING_LOCK_MS of the list read (every tab has handled the event by then). */
+const quietFor = (page: Page) => page.waitForTimeout(RING_LOCK_MS + 500);
 
 const repo = resolve(__dirname, '../..');
 const shots = resolve(process.env.PLANNOTATOR_SOUND_SHOTS ?? join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo, '.local/proof')), 'sound'));
@@ -274,17 +281,38 @@ test('a question while the tab is hidden rings once, and its notification is sil
   await expect.poll(() => page.evaluate(() => window.__notified.at(-1))).toMatchObject({ silent: true });
 });
 
-test('a burst of three questions rings once', async () => {
+test('a burst of three questions rings once, and every notice of it is silent (one sound)', async () => {
   await awayAgain(page);
   const before = await rings(page);
+  const notices = await page.evaluate(() => window.__notified.length);
   const codex = await agent(fresh, 'Codex', 'codex');
   const opencode = await agent(fresh, 'OpenCode', 'opencode');
   const a = await codex.send({ project_path: fresh.project, body: question('Drop the refunds table?') });
+  await settled(page, a.thread_id);
   const b = await opencode.send({ project_path: fresh.project, body: question('Rotate the webhook secret?') });
+  await settled(page, b.thread_id);
   const c = await codex.send({ project_path: fresh.project, body: question('And cap the retries?') });
-  for (const sent of [a, b, c]) await settled(page, sent.thread_id);
-  await page.waitForTimeout(800);
+  await settled(page, c.thread_id);
+  await quietFor(page);
   expect(await rings(page)).toBe(before + 1);
+  const raised = await page.evaluate((from) => window.__notified.slice(from), notices);
+  expect(raised.length).toBeGreaterThan(1);
+  expect(raised.map((n) => n.silent)).toEqual(raised.map(() => true));
+});
+
+test('by default three new threads seconds apart ring once, and every notice of that burst is silent', async () => {
+  await awayAgain(page);
+  const before = await rings(page);
+  const notices = await page.evaluate(() => window.__notified.length);
+  for (const [i, body] of ['Starting the index rebuild.', 'Picked up the flaky test.', 'Looking at the slow query.'].entries()) {
+    const sent = await fresh.agents[i % fresh.agents.length]!.send({ project_path: fresh.project, body });
+    await settled(page, sent.thread_id);
+  }
+  await quietFor(page);
+  expect(await rings(page)).toBe(before + 1);
+  const raised = await page.evaluate((from) => window.__notified.slice(from), notices);
+  expect(raised.length).toBeGreaterThan(1);
+  expect(raised.map((n) => n.silent)).toEqual(raised.map(() => true));
 });
 
 test('with the tab visible and focused nothing rings', async () => {
@@ -295,15 +323,31 @@ test('with the tab visible and focused nothing rings', async () => {
   expect(await rings(page)).toBe(before);
 });
 
-test('a plain message rings nothing; the next question in that burst-free moment does', async () => {
+test('by default a plain reply rings once; a question right after it still rings (chatter never swallows a question)', async () => {
   await awayAgain(page);
   const before = await rings(page);
-  const plain = await fresh.agents[0]!.send({ project_path: fresh.project, body: 'The migration finished. Nothing needed from you.' });
-  await settled(page, plain.thread_id);
-  expect(await rings(page)).toBe(before);
-  const asked = await fresh.agents[0]!.send({ project_path: fresh.project, body: question('Delete the backup now?') });
-  await settled(page, asked.thread_id);
+  const started = await fresh.agents[0]!.send({ project_path: fresh.project, body: 'Starting the migration now.' });
+  await settled(page, started.thread_id);
   await expect.poll(() => rings(page)).toBe(before + 1);
+  // A fresh burst, then a plain reply in that thread: it rings.
+  await awayAgain(page);
+  const reply = await fresh.agents[0]!.send({ project_path: fresh.project, body: 'The migration finished. Nothing needed from you.', reply_to: started.thread_id as string });
+  await settled(page, reply.thread_id);
+  await expect.poll(() => rings(page)).toBe(before + 2);
+  // Another plain reply seconds later: within the burst, quiet.
+  const more = await fresh.agents[0]!.send({ project_path: fresh.project, body: 'Indexes rebuilt too.', reply_to: started.thread_id as string });
+  await settled(page, more.thread_id);
+  await quietFor(page);
+  expect(await rings(page)).toBe(before + 2);
+  // Another agent asks, still within 30 s of that chatter: the question rings, and its notification is the bell's (silent).
+  const notices = await page.evaluate(() => window.__notified.length);
+  const asked = await fresh.agents[1]!.send({ project_path: fresh.project, body: question('Delete the backup now?') });
+  await settled(page, asked.thread_id);
+  await expect.poll(() => rings(page)).toBe(before + 3);
+  await quietFor(page);
+  expect(await rings(page)).toBe(before + 3);
+  await expect.poll(() => page.evaluate(() => window.__notified.length)).toBeGreaterThan(notices);
+  expect(await page.evaluate(() => window.__notified.at(-1)?.silent)).toBe(true);
 });
 
 test('two Inbox tabs ring once between them; any tab in front keeps both quiet', async () => {
@@ -318,7 +362,7 @@ test('two Inbox tabs ring once between them; any tab in front keeps both quiet',
   const sent = await fresh.agents[1]!.send({ project_path: fresh.project, body: question('Pause the nightly import?') });
   await settled(page, sent.thread_id);
   await settled(second, sent.thread_id);
-  await page.waitForTimeout(800);
+  await quietFor(page);
   expect((await rings(page)) + (await rings(second))).toBe(before + 1);
 
   // The second tab comes to the front: the first, hidden, stays quiet too.
@@ -327,7 +371,7 @@ test('two Inbox tabs ring once between them; any tab in front keeps both quiet',
   const quiet = (await rings(page)) + (await rings(second));
   const more = await fresh.agents[1]!.send({ project_path: fresh.project, body: question('Then resume it at noon?') });
   await settled(page, more.thread_id);
-  await page.waitForTimeout(800);
+  await quietFor(page);
   expect((await rings(page)) + (await rings(second))).toBe(quiet);
   // It goes to the back before it closes, as a tab does when the person moves on: a tab still
   // "in front" (the page's last word, if its goodbye is lost in a headless close) keeps the other
@@ -336,13 +380,14 @@ test('two Inbox tabs ring once between them; any tab in front keeps both quiet',
   await second.close();
 });
 
-test('Settings: the row, Play always plays, and the switch off silences the next question (notifications ring the system again)', async () => {
+test('Settings: the row, Play always plays, "questions and new threads" rings a new thread but not a plain reply, and the switch off silences the next question (notifications ring the system again)', async () => {
   await setFront(page, true, true);
   await page.getByRole('button', { name: 'Settings' }).click();
   const block = page.locator('[data-settings-notifications]');
   const row = block.locator('[data-settings-sound]');
   await expect(row).toContainText('Play a sound');
-  await expect(row).toContainText('When an agent asks you');
+  await expect(row.getByRole('radio', { name: 'every agent message' })).toBeChecked();
+  await expect(row).toContainText('A reply, a new thread or a question, while no Inbox tab is in front');
   await expect(row.getByRole('slider', { name: 'Volume' })).toHaveValue('60');
   await page.locator('.ib-spage').evaluate((el) => el.scrollTo(0, el.scrollHeight));
   await shot(page, 'settings-sound-row');
@@ -350,6 +395,23 @@ test('Settings: the row, Play always plays, and the switch off silences the next
   const before = await rings(page);
   await row.getByRole('button', { name: 'Play the sound' }).click();
   await expect.poll(() => rings(page)).toBe(before + 1);
+
+  await row.getByRole('radio', { name: 'questions and new threads' }).check();
+  await expect.poll(() => config(fresh).inboxSound?.when).toBe('asks');
+  await expect(row.locator('.ib-desc')).toHaveText('While no Inbox tab is in front');
+  await awayAgain(page);
+  const asks = await rings(page);
+  const started = await fresh.agents[0]!.send({ project_path: fresh.project, body: 'Backups rotated. Nothing needed from you.' });
+  await expect.poll(async () => (await page.request.get(`${fresh.url}api/inbox/threads/${started.thread_id}`)).status()).toBe(200);
+  await expect.poll(() => rings(page)).toBe(asks + 1);
+  await expect.poll(() => page.evaluate(() => window.__notified.at(-1))).toMatchObject({ silent: true });
+  await fresh.agents[0]!.send({ project_path: fresh.project, body: 'And the logs too.', reply_to: started.message_id });
+  await quietFor(page);
+  expect(await rings(page)).toBe(asks + 1);
+  const asked = await fresh.agents[0]!.send({ project_path: fresh.project, body: question('Keep last week’s backup too?') });
+  await expect.poll(async () => (await page.request.get(`${fresh.url}api/inbox/threads/${asked.thread_id}`)).status()).toBe(200);
+  await expect.poll(() => rings(page)).toBe(asks + 2);
+  await setFront(page, true, true);
 
   const sw = row.getByRole('switch', { name: 'Play a sound' });
   await sw.click();
@@ -362,10 +424,74 @@ test('Settings: the row, Play always plays, and the switch off silences the next
   const off = await rings(page);
   const sent = await fresh.agents[2]!.send({ project_path: fresh.project, body: question('Archive last year’s invoices?') });
   await expect.poll(async () => (await page.request.get(`${fresh.url}api/inbox/threads/${sent.thread_id}`)).status()).toBe(200);
-  await page.waitForTimeout(1200);
+  await quietFor(page);
   expect(await rings(page)).toBe(off);
   await expect.poll(() => page.evaluate(() => window.__notified.at(-1)?.title)).toContain('Codex');
   expect(await page.evaluate(() => window.__notified.at(-1)?.silent)).toBe(false);
+});
+
+test('Settings: the two "Play a sound" choices stay inside their row at every width, side by side at 1280 px, with the slider and the switch beside them', async () => {
+  await setFront(page, true, true);
+  await page.evaluate(() => (location.hash = '#settings/general'));
+  const row = page.locator('[data-settings-notifications] [data-settings-sound]');
+  const sw = row.getByRole('switch', { name: 'Play a sound' });
+  await sw.click();
+  await expect(sw).toHaveAttribute('aria-checked', 'true');
+  const asks = row.getByRole('radio', { name: 'questions and new threads' });
+  await expect(asks).toBeChecked();
+  await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
+  const sidebar = page.locator('.pn-inbox .ib-sb');
+  const faults = (at: string, oneLine: boolean) =>
+    row.evaluate(
+      (el, [at, oneLine]) => {
+        const box = (q: Element) => q.getBoundingClientRect();
+        const txt = box(el.querySelector('.ib-txt')!);
+        const seg = el.querySelector('.ib-sound-when')!;
+        const choices = [...seg.querySelectorAll('.ib-seg-o')];
+        const ctl = box(el.querySelector('.ib-ctl')!);
+        const out: string[] = [];
+        if (el.scrollWidth > el.clientWidth + 1) out.push(`row scrolls (${el.scrollWidth} > ${el.clientWidth})`);
+        const spage = document.querySelector('.ib-spage')!;
+        if (spage.scrollWidth > spage.clientWidth + 1) out.push(`page scrolls (${spage.scrollWidth} > ${spage.clientWidth})`);
+        for (const o of choices) {
+          if (box(o).right > Math.min(box(seg).right, txt.right) + 1) out.push(`a choice ends at ${Math.round(box(o).right)}, past the column's ${Math.round(txt.right)}`);
+          if (o.scrollWidth > o.clientWidth + 1) out.push(`a choice is cut (${o.scrollWidth} > ${o.clientWidth})`);
+        }
+        if (oneLine && new Set(choices.map((o) => Math.round(box(o).top))).size > 1) out.push('the choices are not on one line');
+        if (ctl.right > box(el).right + 1) out.push(`the controls end past the row`);
+        if (ctl.left < txt.right - 1 && ctl.top < txt.bottom - 1) out.push('the controls overlap the column');
+        const inLine = choices.reduce((sum, o) => sum + o.scrollWidth, 0) + 2 * (choices.length - 1) + 6;
+        return out.length ? `${at}: column ${Math.round(txt.width)} px, the pair in a line ${inLine} px: ${out.join('; ')}` : '';
+      },
+      [at, oneLine] as const,
+    );
+  const broken: string[] = [];
+  for (const [width, withSidebar] of [[320, false], [390, false], [768, false], [1024, false], [1280, false], [1440, false], [1280, true]] as const) {
+    await page.setViewportSize({ width, height: 900 });
+    if (withSidebar) {
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+      await page.keyboard.press('Control+b');
+      await expect(sidebar).toHaveAttribute('data-state', 'expanded');
+      await expect(page.locator('.ib-sb-panel[data-hidden]')).toHaveCount(0);
+    }
+    await row.scrollIntoViewIfNeeded();
+    await expect(row.getByRole('slider', { name: 'Volume' })).toBeVisible();
+    await expect(sw).toBeVisible();
+    await page.waitForTimeout(300);
+    const name = `row-${width}${withSidebar ? '-sidebar' : ''}`;
+    const oneLine = width === 1280 && !withSidebar;
+    broken.push(await faults(name, oneLine));
+    await row.locator('xpath=..').screenshot({ path: join(shots, `${name}.png`) });
+    if (oneLine) {
+      await row.getByRole('radio', { name: 'every agent message' }).check();
+      await page.waitForTimeout(300);
+      broken.push(await faults(`${name}, every agent message chosen`, true));
+      await asks.check();
+    }
+  }
+  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
+  await page.setViewportSize({ width: 1280, height: 820 });
+  expect(broken.filter(Boolean)).toEqual([]);
 });
 
 test('after an update the dialog shows once: in one of two tabs opened together, and never again on reload', async ({ browser }) => {
@@ -384,7 +510,7 @@ test('after an update the dialog shows once: in one of two tabs opened together,
   await other.close();
   const dialog = shown.locator('dialog[data-dialog="sound-intro"]');
   await expect(dialog.getByRole('heading', { name: 'The Inbox can ring now' })).toBeVisible();
-  await expect(dialog).toContainText('A soft doorbell when an agent asks you something and this tab is hidden.');
+  await expect(dialog).toContainText('A soft doorbell when an agent sends you something and this tab is hidden.');
   // This browser has not decided about notifications: the one line says so.
   await expect(dialog.locator('[data-sound-nline="not-allowed"]')).toHaveText("Notifications aren't allowed yet.Allow");
   await expect(dialog.getByRole('button', { name: 'Keep it on' })).toBeFocused();

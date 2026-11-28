@@ -45,6 +45,14 @@ const pr = (over: Partial<InboxPull> = {}): InboxPull => {
   };
 };
 
+test('a prefixed number filters to the forge it identifies', () => {
+  const github = pr({ number: 412 });
+  const gitlab = pr({ platform: 'gitlab', number: 412 });
+  expect([github, gitlab].filter((pull) => matchesQuery(pull, '#412'))).toEqual([github]);
+  expect([github, gitlab].filter((pull) => matchesQuery(pull, '!412'))).toEqual([gitlab]);
+  expect([github, gitlab].filter((pull) => matchesQuery(pull, '412'))).toHaveLength(2);
+});
+
 describe('needsYou (your turn)', () => {
   test('a review asked of you, or changes asked on your own PR', () => {
     expect(needsYou(pr({ requested: true }))).toBe('review');

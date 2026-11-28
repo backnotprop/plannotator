@@ -384,3 +384,69 @@ test("a finger's fan has finger-sized room: neighbours on an arc 44 px apart, in
     }
   }
 });
+
+test.skipIf(!hasDom)("a 44 px face (the list's Agents view) draws at 44, and its picker's plate and arcs move out with it", async () => {
+  host = document.createElement('div');
+  host.className = 'pn-inbox';
+  document.body.append(host);
+  root = createRoot(host);
+  act(() => root!.render(<div className="ib-agh"><AgentMark id="ses_big" host="claude-code" name="Ops" size={44} /></div>));
+  const icon = document.querySelector<HTMLButtonElement>('[data-agent-icon="ses_big"]')!;
+  expect(icon.querySelector('.am')!.getAttribute('data-size')).toBe('44');
+  icon.getBoundingClientRect = () => ({ left: 8, top: 362, width: 44, height: 44, right: 52, bottom: 406, x: 8, y: 362, toJSON: () => ({}) }) as DOMRect;
+  pointer(icon, 'pointerdown', { x: 30, y: 384 });
+  press(icon);
+  await until(() => group() !== null, 'a click on the big face to open its picker');
+  // The plate's hole and the dial's arcs grow by half of what the face gained over the sidebar's 28 px button.
+  expect((document.querySelector<HTMLElement>('.am-fan-dial')!.style.getPropertyValue('--grow'))).toBe('8px');
+  const near = (spots: { x: number; y: number }[][]) => Math.min(...spots[0]!.map((s) => Math.hypot(s.x, s.y)));
+  expect(near(fan.fanArcs(30, 384, 1024, 768, false, true, false, 8).spots)).toBeGreaterThan(near(fan.fanArcs(30, 384, 1024, 768).spots) + 7);
+});
+
+test.skipIf(!hasDom)("a face in the list keeps its fan inside the list's pane: the first agent at the pane's top left spills nothing over the sidebar", async () => {
+  host = document.createElement('div');
+  host.className = 'pn-inbox';
+  document.body.append(host);
+  root = createRoot(host);
+  act(() => root!.render(<div className="ib-listcol"><div className="ib-agh"><AgentMark id="ses_top" host="claude-code" name="Ops" size={44} /></div></div>));
+  const pane = document.querySelector<HTMLElement>('.ib-listcol')!;
+  // A 1024 × 768 window, the list's pane from x 240 to 620; the face 18 px in from its left and 72 px down.
+  pane.getBoundingClientRect = () => ({ left: 240, top: 0, width: 380, height: 768, right: 620, bottom: 768, x: 240, y: 0, toJSON: () => ({}) }) as DOMRect;
+  const icon = document.querySelector<HTMLButtonElement>('[data-agent-icon="ses_top"]')!;
+  icon.getBoundingClientRect = () => ({ left: 258, top: 72, width: 44, height: 44, right: 302, bottom: 116, x: 258, y: 72, toJSON: () => ({}) }) as DOMRect;
+  pointer(icon, 'pointerdown', { x: 280, y: 94 });
+  press(icon);
+  await until(() => group() !== null, 'a click on the face to open its picker');
+  const spots = [...document.querySelectorAll<HTMLElement>('.am-fan-i')].map((el) => ({ x: 280 + parseFloat(el.style.getPropertyValue('--x')), y: 94 + parseFloat(el.style.getPropertyValue('--y')) }));
+  expect(spots.length).toBeGreaterThan(10);
+  const pad = FAN_OPTIONS.margin + FAN_OPTIONS.item / 2 - 0.5;
+  for (const s of spots) {
+    expect(s.x).toBeGreaterThanOrEqual(240 + pad);
+    expect(s.x).toBeLessThanOrEqual(620 - pad);
+    expect(s.y).toBeGreaterThanOrEqual(pad);
+  }
+  // No choice on the face itself.
+  for (const s of spots) expect(Math.hypot(s.x - 280, s.y - 94)).toBeGreaterThan(22 + FAN_OPTIONS.item / 2);
+  expectNothingStopsTheBlur();
+});
+
+/** Nothing from the fan up is clipped, filtered or masked: any of them would leave the plate's blur nothing to blur. */
+function expectNothingStopsTheBlur() {
+  const plate = document.querySelector<HTMLElement>('.am-fan-plate');
+  expect(plate).not.toBeNull();
+  for (let el: HTMLElement | null = document.querySelector<HTMLElement>('.am-fan'); el; el = el.parentElement) {
+    const style = getComputedStyle(el);
+    for (const prop of ['clip-path', 'filter', 'mask', 'mask-image', '-webkit-mask-image']) {
+      const value = el.style.getPropertyValue(prop) || style.getPropertyValue(prop);
+      expect(value === '' || value === 'none' ? '' : `${el.className} ${prop}: ${value}`).toBe('');
+    }
+  }
+}
+
+test.skipIf(!hasDom)("the sidebar's fan: nothing above its plate is clipped, filtered or masked while it shows", async () => {
+  const icon = mount();
+  pointer(icon, 'pointerdown', { x: 29, y: 384 });
+  press(icon);
+  await until(() => group() !== null, 'a click on the mark to open its picker');
+  expectNothingStopsTheBlur();
+});

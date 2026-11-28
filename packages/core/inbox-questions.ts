@@ -25,6 +25,7 @@
 
 import { resolveReferenceLinks } from "./markdown-structure";
 import { cutText } from "./text-cut";
+import { inboxInlineMediaKind } from "./inbox-inline-media";
 // The grapheme-safe cuts, re-exported here: core's export map is checked against the published package, and the Inbox is what uses them.
 export { cutText, sliceText } from "./text-cut";
 // The subject of a thread the person starts: beside deriveInboxSubject, so the store and compose's preview share it.
@@ -55,6 +56,7 @@ import {
   type QuestionExportItem,
   type QuestionKind,
   type ParsedQuestion,
+  type QuestionChangeValue,
   questionLabelWithoutImage,
   questionChoiceWithoutRecommendedMarker,
   parseQuestionChoiceText,
@@ -63,6 +65,7 @@ import { INBOX_ROW_WAITS_MAX, INBOX_ROW_WAIT_ENTRY_MAX, INBOX_ROW_WAIT_HOLDS_MAX
 import type {
   InboxRowWait,
   InboxQuestionContract,
+  InboxQuestionScenarios,
   InboxQuestion,
   InboxQuestionFacts,
   InboxQuestionRecord,
@@ -151,8 +154,28 @@ export function prototypeTargets(markdown: string): PrototypeTarget[] {
   return out;
 }
 
+/**
+ * The sounds and videos a body's questions show where the card draws only pictures (a picture choice, `Shows:`,
+ * `Before:` / `After:`), each with the question it is in, in block order. The card draws them as text, so the send
+ * result says so. Pure; never throws.
+ */
+export function inboxQuestionMedia(markdown: string): { key: string; prompt: string; src: string }[] {
+  const out: { key: string; prompt: string; src: string }[] = [];
+  const side = (value: QuestionChangeValue | undefined) => (value?.kind === "image" ? [value.src] : []);
+  const sides = (group: { before?: QuestionChangeValue; after?: QuestionChangeValue }) => [...side(group.before), ...side(group.after)];
+  for (const { key, parsed } of questionBlocksOf(markdown, false, true)) {
+    const sources = [
+      ...(parsed.shows?.kind === "image" ? [parsed.shows.src] : []),
+      ...(parsed.change?.groups ?? []).flatMap(sides),
+      ...parsed.choices.flatMap((choice) => [...(choice.image ? [choice.image.src] : []), ...sides(choice), ...(choice.places ?? []).flatMap(sides)]),
+    ];
+    for (const src of new Set(sources)) if (inboxInlineMediaKind(src.replace(/[?#].*$/s, ""))) out.push({ key, prompt: parsed.prompt, src });
+  }
+  return out;
+}
+
 /** Each question block of a body (or an attached file, `frontmatter` as its viewer reads it), parsed as the Inbox reads it. */
-function questionBlocksOf(markdown: string, frontmatter = false): { key: string; startLine: number; parsed: ParsedQuestion }[] {
+function questionBlocksOf(markdown: string, frontmatter = false, changeLines = false): { key: string; startLine: number; parsed: ParsedQuestion }[] {
   if (typeof markdown !== "string" || !markdown.includes(":::question")) return [];
   // Each block is read over the markdown with reference links resolved, as
   // the renderer reads it, so a prompt written with a reference link keeps
@@ -168,7 +191,7 @@ function questionBlocksOf(markdown: string, frontmatter = false): { key: string;
     const inner = lines.slice(1, CLOSE_RE.test(lines.at(-1) ?? "") && lines.length > 1 ? -1 : undefined);
     // The Inbox records no decisions: a `Decision:` line is context. It reads the option lines
     // (`Pros:`, `Cons:`, `Prototype:`; approval "inbox-question-tradeoffs").
-    const parsed = parseQuestionBlock(location.directiveKind, inner.join("\n"), { decisionLines: false, optionLines: true });
+    const parsed = parseQuestionBlock(location.directiveKind, inner.join("\n"), { decisionLines: false, optionLines: true, ...(changeLines ? { changeLines: true } : {}) });
     if (parsed !== null) out.push({ key: location.key, startLine: location.startLine, parsed });
   }
   return out;
@@ -222,8 +245,29 @@ function prototypeFact(prototype: { target: string; label?: string }): { target:
   return { target: prototype.target, ...(prototype.label ? { label: prototype.label } : {}) };
 }
 
-function contractFacts(parsed: Pick<ParsedQuestion, "stakes" | "shows" | "why" | "reversible" | "prototype">): InboxQuestionContract {
+/** A scenario table as stored and served: a deep copy, absent when malformed (a hand-edited record: a
+ *  missing list, a `null` column, row or cell, a word that is not a string). Never throws. */
+function scenariosFact(table: InboxQuestionScenarios | undefined): InboxQuestionScenarios | undefined {
+  const str = (v: unknown): v is string => typeof v === "string";
+  const obj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null;
+  if (!obj(table) || !Array.isArray(table.columns) || !Array.isArray(table.rows)) return undefined;
+  const { columns, rows } = table as { columns: unknown[]; rows: unknown[] };
+  if (!columns.every((c) => obj(c) && str(c.choice) && str(c.header))) return undefined;
+  const cellOk = (c: unknown) => obj(c) && str(c.verdict) && (c.detail === undefined || str(c.detail));
+  if (!rows.every((r) => obj(r) && str(r.situation) && Array.isArray(r.cells) && r.cells.every(cellOk))) return undefined;
   return {
+    columns: table.columns.map((c) => ({ choice: c.choice, header: c.header })),
+    rows: table.rows.map((r) => ({
+      situation: r.situation,
+      cells: r.cells.map((cell) => ({ verdict: cell.verdict, ...(cell.detail ? { detail: cell.detail } : {}) })),
+    })),
+  };
+}
+
+function contractFacts(parsed: Pick<ParsedQuestion, "stakes" | "shows" | "why" | "reversible" | "prototype" | "scenarios">): InboxQuestionContract {
+  const scenarios = scenariosFact(parsed.scenarios);
+  return {
+    ...(scenarios ? { scenarios } : {}),
     ...(parsed.prototype ? { prototype: prototypeFact(parsed.prototype) } : {}),
     ...(parsed.stakes ? { stakes: parsed.stakes } : {}),
     ...(parsed.shows ? { shows: { kind: parsed.shows.kind, label: parsed.shows.label, src: parsed.shows.src } } : {}),
@@ -240,6 +284,7 @@ function wireContract(facts: InboxQuestionContract): InboxQuestionContract {
     ...(typeof facts.why === "string" && facts.why ? { why: facts.why } : {}),
     ...(facts.reversible ? { reversible: { value: false as const, why: facts.reversible.why ?? null } } : {}),
     ...(facts.prototype && typeof facts.prototype.target === "string" ? { prototype: prototypeFact(facts.prototype) } : {}),
+    ...(scenariosFact(facts.scenarios) ? { scenarios: scenariosFact(facts.scenarios)! } : {}),
   };
 }
 
@@ -519,6 +564,14 @@ export function parseInboxSupersedeRef(value: unknown): { message_id: string; ke
   const match = SUPERSEDE_REF_RE.exec(value.trim());
   if (!match) return null;
   return { message_id: match[1]!, key: match[2] ?? null };
+}
+
+const BARE_KEY_RE = /^(?:q|a)-[0-9a-f]{8}(?:-\d{1,3})?$/;
+
+export function parseInboxBareKey(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const key = value.trim();
+  return BARE_KEY_RE.test(key) ? key : null;
 }
 
 /** A question that can still be superseded: one the person has not answered and sent. */
@@ -1108,6 +1161,22 @@ export const INBOX_SET_ASIDE_HEADING = "Set aside for now; don't wait on these:"
 export function composeInboxSetAsideBody(questions: readonly (Pick<InboxQuestionRecord, "position" | "prompt" | "attachment"> & { kind?: string })[]): string {
   const lines = numberedLines(questions);
   return [INBOX_SET_ASIDE_HEADING, "", ...lines, "", "The person closed them unanswered in the Inbox. Ask again if you still need an answer to go on."].join("\n");
+}
+
+/**
+ * The Inbox's note to an agent whose open questions another session moved into its own thread and then archived
+ * this one (resolve_message's `moved_to`; the owner 2026-11-21: "The Inbox tells it, quietly"). Words approved
+ * 2026-11-22. `{from}` / `{to}`: the threads' names in quotes, `{from_id}` / `{to_id}` their ids (so the
+ * agent can read_thread the other), `{agent}` the session that moved them.
+ */
+export const INBOX_MOVED_NOTE_TEMPLATE =
+  "Your questions in {from} ({from_id}) were moved to another thread by {agent}: {to} ({to_id}). Don't wait on them here. The person answers there, and {agent} gets the answer.";
+
+/** INBOX_MOVED_NOTE_TEMPLATE filled in. A thread with no name reads "your thread" / "a thread". */
+export function composeInboxMovedNoteBody(v: { from: string | null; from_id: string; agent: string; to: string | null; to_id: string }): string {
+  const named = (name: string | null, none: string) => (name && name.trim() ? JSON.stringify(name.replace(/\s+/g, " ").trim()) : none);
+  const values: Record<string, string> = { from: named(v.from, "your thread"), from_id: v.from_id, agent: v.agent, to: named(v.to, "a thread"), to_id: v.to_id };
+  return INBOX_MOVED_NOTE_TEMPLATE.replace(/\{(from|from_id|agent|to|to_id)\}/g, (_, key: string) => values[key]!);
 }
 
 /** The first line of the note an Undo of Mark read sends once the agent was told. */

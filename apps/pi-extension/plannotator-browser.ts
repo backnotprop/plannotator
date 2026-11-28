@@ -25,6 +25,7 @@ import {
 	unstageFile,
 } from "./server.ts";
 import { BROWSER_SESSION_STOPPED } from "./browser-session-error.ts";
+import { hasCurrentPiSession, isCtxAlive } from "./current-pi-session.ts";
 import type { SessionBridge } from "./generated/ai/session-bridge.ts";
 import type { HostControl } from "./generated/host-control.ts";
 import type { AnnotateBundleFile } from "./generated/annotate-bundle.ts";
@@ -538,7 +539,8 @@ async function createCodeReviewBrowserSession(
 				"Supported formats:\n" +
 				"  GitHub: https://github.com/owner/repo/pull/123\n" +
 				"  GitLab: https://gitlab.com/group/project/-/merge_requests/42\n" +
-				"  Bitbucket Cloud: https://bitbucket.org/workspace/repo/pull-requests/7",
+				"  Bitbucket Cloud: https://bitbucket.org/workspace/repo/pull-requests/7\n" +
+				"  Forgejo / Gitea: https://codeberg.org/owner/repo/pulls/5",
 			);
 		}
 
@@ -556,7 +558,7 @@ async function createCodeReviewBrowserSession(
 			ghAccountEnv = access.childEnv;
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
-			// REST-only platforms (Bitbucket) have no CLI to be missing; their auth
+			// REST-only platforms (Bitbucket, Forgejo) have no CLI to be missing; their auth
 			// error already names the env vars and token scopes to set.
 			if (cliName && (msg.includes("not found") || msg.includes("ENOENT"))) {
 				throw new Error(`${getPlatformLabel(prRef)} CLI (${cliName}) is not installed. Install it from ${cliUrl}`);
@@ -831,6 +833,12 @@ async function createCodeReviewBrowserSession(
 
 	const server = await startServerWithSelfPreemption(() => startReviewServer({
 		sessionBridge: options.sessionBridge,
+		// The decision goes to the session that opened the review, or to the
+		// one Pi switched to since (index.ts). With neither (the moment between
+		// two sessions) Send is refused as "away" and the draft kept; sending
+		// again a moment later works. The server lives in Pi's process, so it
+		// never outlives Pi itself.
+		agentPresence: () => (isCtxAlive(ctx) || hasCurrentPiSession() ? "here" : "away"),
 		liveReviewAgent: piLiveReviewAgent(ctx),
 		rawPatch,
 		gitRef,

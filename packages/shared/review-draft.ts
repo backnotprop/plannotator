@@ -97,7 +97,9 @@ export function prDraftTargetKey(meta: PRMetadata, scope: PRDiffScope): string {
     ? `github|${meta.host.toLowerCase()}|${meta.owner.toLowerCase()}/${meta.repo.toLowerCase()}|${meta.number}`
     : meta.platform === "bitbucket"
       ? `bitbucket|${meta.host.toLowerCase()}|${meta.workspace.toLowerCase()}/${meta.repo.toLowerCase()}|${meta.number}`
-      : `gitlab|${meta.host.toLowerCase()}|${meta.projectPath.toLowerCase()}|${meta.iid}`;
+      : meta.platform === "forgejo"
+        ? `forgejo|${meta.scheme ?? "https"}|${meta.host.toLowerCase()}|${meta.owner.toLowerCase()}/${meta.repo.toLowerCase()}|${meta.number}`
+        : `gitlab|${meta.host.toLowerCase()}|${meta.projectPath.toLowerCase()}|${meta.iid}`;
   return `pr-${contentHash(`v1|${identity}|${scope}`)}`;
 }
 

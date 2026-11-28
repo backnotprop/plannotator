@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { getImageSrc } from '@plannotator/ui/components/ImageThumbnail';
-import type { ImageAttachment } from '@plannotator/ui/types';
+import { getImageSrc, ImageThumbnail } from '@plannotator/ui/components/ImageThumbnail';
+import type { Annotation, ImageAttachment } from '@plannotator/ui/types';
+import { addedToComment, isWordlessMarkup } from '../markup';
 import { Icon } from '../icons';
 import { Tip } from './Tip';
 import type { InboxToastModel } from './Toast';
@@ -71,6 +72,23 @@ export function MarkupPicture({ image }: { image: ImageAttachment }) {
   return (
     <span className="ib-markpic" data-markup-picture="">
       <img src={getImageSrc(image.path)} alt={image.name} />
+    </span>
+  );
+}
+
+/**
+ * A comment card's body in the file's panel: a drawing with no words as its picture. A film's card draws no image row
+ * (its frame is in the header), so the pictures and files added to its comment show here, as the image row shows them.
+ */
+export function fileCardBody(annotation: Annotation, film: boolean): ReactNode {
+  if (isWordlessMarkup(annotation)) return <MarkupPicture image={annotation.images![0]!} />;
+  const added = film ? addedToComment(annotation) : [];
+  if (added.length === 0) return null;
+  return (
+    <span className="ib-cardadded" data-comment-added="">
+      {added.map((image) => (
+        <ImageThumbnail key={image.path} path={image.path} size="sm" showRemove={false} file={image.kind === 'file'} />
+      ))}
     </span>
   );
 }

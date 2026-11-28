@@ -187,7 +187,9 @@ afterEach(async () => {
   // The box's words the pane saves as it goes (a failed Send leaves them in the box) land on this stub before the real
   // fetch is back: nothing is left unsaved in the drafts' module state for a later test (the restart guard reads it).
   for (let i = 0; i < 100 && replyDraftUnsaved(); i += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+  const left = replyDraftUnsaved();
   globalThis.fetch = savedFetch;
+  if (left) throw new Error('the test left a reply draft save on its way, or words not saved');
 });
 
 async function settle(turns = 4, ms = 20) {

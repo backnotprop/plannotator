@@ -1,0 +1,80 @@
+name: Mobile contract
+
+# The native app's contract (apps/mobile/contract, docs/agent-guides/mobile.md),
+# checked apart from the Inbox's CI. Never a required check: red here holds
+# back only the app, never an Inbox pull request or release.
+#
+# `contract` runs scripts/mobile/check.ts: is every committed contract file
+# in step with the product? An Inbox pull request touches neither the
+# contract nor its scripts, so it never starts this workflow; when main moves
+# ahead (a push to main, or the nightly), the run goes red and its first line
+# says what to do: run `bun scripts/mobile/all.ts` in a mobile PR.
+#
+# `ledger` runs the ledger's clock (scripts/mobile/parity-debts.ts): an
+# `undecided` row or an `owed` debt older than 14 days fails it.
+#
+# Both are scripts, not test files: no `bun test` (the Test workflow's lanes,
+# main's full run, a release's checks) runs either. Neither installs more
+# than the repository's packages, on GitHub's ubuntu runners, in seconds.
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'apps/mobile/contract/**'
+      - 'scripts/mobile/**'
+      - '.github/workflows/mobile-contract.yml'
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: "17 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    name: The mobile contract is in step with the product
+    concurrency:
+      group: mobile-contract-${{ github.ref }}
+      cancel-in-progress: true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+          no-cache: true
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - name: Check the contract
+        run: bun scripts/mobile/check.ts
+
+  ledger:
+    name: The parity ledger's clock (no decision or debt older than 14 days)
+    concurrency:
+      group: mobile-ledger-${{ github.ref }}
+      cancel-in-progress: true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+          no-cache: true
+
+      - name: Check the ledger's dates
+        run: bun scripts/mobile/parity-debts.ts

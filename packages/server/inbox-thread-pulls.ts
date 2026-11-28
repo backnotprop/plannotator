@@ -197,6 +197,13 @@ export function createThreadPullStates(options: {
     return age < (refresh ? CARD_MARK_REFRESH_MS : CARD_MARK_FRESH_MS);
   };
 
+  /** A closed PR is read again while it closed in the last week, and its last read is older than CLOSED_REREAD_MS. */
+  const closedDue = (pull: InboxThreadPull, hit: Cached | undefined): boolean => {
+    const closedAt = Date.parse(pull.read_at ?? pull.added_at);
+    if (!Number.isFinite(closedAt) || now() - closedAt > CLOSED_REREAD_FOR_MS) return false;
+    return !hit || now() - hit.at >= CLOSED_REREAD_MS;
+  };
+
   const tellWindows = (key: string) => {
     if (!options.onLiveChange) return;
     const threads = [...new Set(store.allThreadPulls().filter((pull) => pull.pull === key).map((pull) => pull.thread_id))];
@@ -314,8 +321,10 @@ export function createThreadPullStates(options: {
       // The person's Try again (after signing in or installing): what the CLIs say about their hosts is read again now.
       if (retry) hostsOf.clear();
       for (const pull of pulls) {
-        // Merged and closed are final: never read again.
-        if (pull.state === "merged" || pull.state === "closed") continue;
+        // Merged is final: never read again. Closed can be reopened: one closed in the last week is read again, at most
+        // every CLOSED_REREAD_MS, so a reopened PR comes back (Grid's Dropped, the row's mark).
+        if (pull.state === "merged") continue;
+        if (pull.state === "closed" && !closedDue(pull, cache.get(pull.pull))) continue;
         if (seen.has(pull.pull) || fresh(cache.get(pull.pull), refresh, retry)) continue;
         seen.add(pull.pull);
         if (fixture) {
@@ -346,6 +355,10 @@ export function createThreadPullStates(options: {
 
 /** How long the person's Add waits for the new PR's first read before answering with what is known. */
 export const THREAD_PULLS_ADD_WAIT_MS = 1_500;
+/** A closed PR is read again at most this often (it may be reopened)... */
+export const CLOSED_REREAD_MS = 10 * 60_000;
+/** ...for this long after it was seen closed. */
+export const CLOSED_REREAD_FOR_MS = 7 * 24 * 60 * 60_000;
 
 /**
  * How long the person's Try again waits for the read before answering with what is known: under the window's own

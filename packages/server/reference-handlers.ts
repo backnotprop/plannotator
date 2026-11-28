@@ -82,6 +82,7 @@ export interface HandleDocOptions {
 	 *  (`resolveBundleSourceSavePaths`). Every other document stays read-only. */
 	sourceSaveBundlePaths?: ReadonlySet<string>;
 	onSourceDocumentServed?: (path: string) => void;
+	onDocumentServed?: (path: string) => void;
 	rootPaths?: string[];
 	/** A reader on this machine (`isThisMachineReader`, this-machine-reader.ts): documents are served from anywhere, code files keep the roots (`isDocServeAllowed`). */
 	anyPath?: boolean;
@@ -222,6 +223,7 @@ function applyDocOptions<T extends Record<string, unknown>>(
 }
 
 function docJson(data: Record<string, unknown>, options?: HandleDocOptions, sourceSnapshot?: SourceFileSnapshot): Response {
+	if (typeof data.filepath === "string") options?.onDocumentServed?.(data.filepath);
 	return Response.json(applyDocOptions(data, options, sourceSnapshot));
 }
 

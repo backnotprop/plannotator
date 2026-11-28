@@ -6,6 +6,7 @@ import { HostMark, Icon } from '../icons';
 import { hostName, sessionWords } from './NewMessage';
 import { ShortcutHint, useShortcutHintShown } from '../shortcuts/hint';
 import { inboxAppShortcuts } from '../shortcuts/app.shortcuts';
+import { pollWhileShown } from '../data/shownPoll';
 
 /**
  * Replying when the session that asked has ended (design record "replying
@@ -112,14 +113,14 @@ export interface EndedSessions {
 
 /**
  * Which of `sessions` have ended, as `askerHasEnded` reads one (the sessions route's `asker`, with its grace),
- * read when the list changes and every 10 s: the other sessions one Send reaches (a pick on an ended session's
+ * read when the list changes and every 10 s while the pane shows: the other sessions one Send reaches (a pick on an ended session's
  * question while the words go to a live one). A read that fails says nothing ended.
  *
  * Each session keeps its last known state while the list changes (a pick changes it), and a session not read
  * yet is `unchecked`, never "not ended": a Send pressed before its read lands waits for `check`, so it cannot
  * go to an ended session without the route choice. An empty list (a thread with one agent) reads nothing.
  */
-export function useEndedSessions(threadId: string, sessions: readonly string[]): EndedSessions {
+export function useEndedSessions(threadId: string, sessions: readonly string[], parked = false): EndedSessions {
   const key = sessions.join('\u0000');
   const [known, setKnown] = useState<KnownEnded>({ threadId, ended: new Map() });
   const latest = useRef({ threadId, key, known });
@@ -130,15 +131,17 @@ export function useEndedSessions(threadId: string, sessions: readonly string[]):
     const load = async () => {
       const list = key.split('\u0000');
       const read = await Promise.all(list.map(async (session) => [session, await sessionEnded(threadId, session)] as const));
-      if (current) setKnown((was) => withRead(was, threadId, read));
+      // A read that changes nothing drawn sets nothing (even an updater that keeps the state draws once).
+      const drawn = latest.current.known;
+      if (current && withRead(drawn, threadId, read) !== drawn) setKnown((was) => withRead(was, threadId, read));
     };
-    void load();
-    const timer = setInterval(() => void load(), 10_000);
+    // Not while the tab is hidden or the pane parked; once the moment it shows again (data/shownPoll.ts).
+    const stop = parked ? null : pollWhileShown(() => void load(), 10_000);
     return () => {
       current = false;
-      clearInterval(timer);
+      stop?.();
     };
-  }, [threadId, key]);
+  }, [threadId, key, parked]);
   const list = key ? key.split('\u0000') : [];
   const knownHere = known.threadId === threadId ? known.ended : null;
   const ended = new Set(list.filter((session) => knownHere?.get(session) === true));

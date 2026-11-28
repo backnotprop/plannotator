@@ -1,0 +1,5 @@
+// Copy to Local.xcconfig (untracked) to run on your own iPhone.
+// DEVELOPMENT_TEAM: your Apple Team ID (a free personal team is enough at first).
+// APP_BUNDLE_ID: a bundle id that team may use.
+DEVELOPMENT_TEAM = ABCDE12345
+APP_BUNDLE_ID = com.example.plannotator
