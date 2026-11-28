@@ -188,11 +188,11 @@ export function aimable(pick: readonly string[], alone: (session: string) => boo
  * and none can once the reply goes to the most it takes (`chosen`: everyone it goes to, typed tags too). `rows`: the
  * list, for its start row.
  */
-export function canAddRecipient(row: RecipientRow, chosen: readonly string[], rows: readonly RecipientRow[] = []): boolean {
+export function canAddRecipient(row: RecipientRow, chosen: readonly string[], rows: readonly RecipientRow[] = [], max: number = RECIPIENTS_MAX): boolean {
   if (chosen.includes(row.session)) return true;
   // A new session takes the reply alone: it is never a second recipient, nor joined by one.
   if (row.start || rows.some((r) => r.start && chosen.includes(r.session))) return false;
-  return row.state !== 'ended' && row.state !== 'old' && chosen.length < RECIPIENTS_MAX;
+  return row.state !== 'ended' && row.state !== 'old' && chosen.length < max;
 }
 
 /** A restored choice without the sessions this window does not know (a draft naming one it never listed): null when none is left. */
