@@ -24,6 +24,8 @@
  * - A conflict retry (another client saved the same answer, sendSameAnswers.ts) still goes, with the same key, and a
  *   retry that never answers ends too.
  * - A good network: one POST, no read back, nothing after.
+ * - One press is one Send (the box's controller calls the pane's Send once), and Discard pressed while a Send is on its
+ *   way does nothing: when that Send then fails, the words are still in the box and in its draft.
  *
  * The limit itself (inactivity, a slow answer that keeps coming is not cut off) is in apiWrite.test.ts.
  *
@@ -977,4 +979,42 @@ describe('New message (a thread\'s live session)', () => {
     expect(messagePosts[1]!.key === messagePosts[0]!.key).toBe(false);
     expect([...stored.values()].map((m) => m.words)).toEqual(['Also bump the client to 2.4, and the docs.']);
   });
+});
+
+test.skipIf(!hasDom)('one press is one Send: a second press while it is out posts nothing, and Send again after it was given up carries the same key', async () => {
+  replyMode = 'hang';
+  const el = await open();
+  const send = el.querySelector<HTMLButtonElement>('.ib-rbox [data-reply-send]')!;
+  await act(async () => {
+    send.click();
+    send.click();
+  });
+  await settle(2);
+  expect(replyPosts.length).toBe(1);
+  await until(() => state(el).line !== null, LIMIT * 6);
+  expect(state(el)).toEqual({ line: MAY_HAVE_GONE, words: WORDS, sendable: true });
+  replyMode = 'ok';
+  await pressSend(el);
+  await until(() => stored.size === 1 && !busy(el), LIMIT * 6);
+  expect(replyPosts.map((p) => p.words)).toEqual([WORDS, WORDS]);
+  expect(replyPosts[1]!.key).toBe(replyPosts[0]!.key);
+  expect(stored.size).toBe(1);
+});
+
+test.skipIf(!hasDom)('Discard pressed while a Send is on its way does nothing: when that Send then fails, the words are still in the box and its draft', async () => {
+  replyMode = 'hang';
+  const el = await open();
+  await pressSend(el);
+  await settle(2);
+  expect(busy(el)).toBe(true);
+  // The bin (a computer) and the Draft line's Discard (a phone, above the box): whichever this box draws.
+  const discards = [...el.querySelectorAll<HTMLButtonElement>('[data-reply-discard], [data-draft-stamp] [data-draft-discard]')];
+  expect(discards.length > 0).toBe(true);
+  await act(async () => {
+    for (const button of discards) button.click();
+  });
+  await settle(2);
+  await until(() => state(el).line !== null, LIMIT * 6);
+  expect(state(el)).toEqual({ line: MAY_HAVE_GONE, words: WORDS, sendable: true });
+  expect(draftNow).toBe(WORDS);
 });

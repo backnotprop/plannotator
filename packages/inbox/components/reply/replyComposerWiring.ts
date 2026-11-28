@@ -8,9 +8,9 @@
  *   threads keep drafts) on the host's `page`; the files hook takes `files` (its announcements, its uploader, what an
  *   unmount does with uploads). The host reads both back on the handle (`handle.wired`).
  * - `host.send` is the host's own Send, called once per press, synchronously inside the press: it claims the draft,
- *   clears it (`clear_draft`), empties the box and says what happened itself. The controller only keeps a second
- *   press out while it runs, and keeps the box read-only (no Discard, attach, paste, drop, a tile's remove or Put
- *   back) while it, or a Send the host started itself (`view().sending`), is out.
+ *   clears it (`clear_draft`), empties the box and says what happened itself. The controller keeps a second press
+ *   out while it runs, and keeps the box read-only (no typing, Discard, attach, paste, drop, a tile's remove or Put
+ *   back) while the host says its Send is out (`view().sending`, from the moment the Send holds the words).
  * - The controller's own draft restore, file save, thread change and error line do not run: the host's do.
  *
  * `view()` is read as the box is drawn (and when a key or a press needs it): what the box shows and the host's
@@ -63,8 +63,11 @@ export interface ReplyComposerWiring {
   mentions: ThreadMentions;
   /** The draft hook's options, as the host builds them each render (its store, if not the page's default). */
   draft: ReplyDraftOptions;
-  /** The files hook's options, as the host builds them each render (no `uploader`: the hook's own). */
-  files: ReplyComposerFilesOptions;
+  /**
+   * The files hook's options, as the host builds them each render (no `uploader`: the hook's own). The words a long
+   * paste is placed in are the controller's; `setText` is how the hook changes them (Put back, a paste's tile).
+   */
+  files: Omit<ReplyComposerFilesOptions, 'text'> & { setText: (text: string) => void };
   view: () => ReplyComposerWiringView;
 }
 

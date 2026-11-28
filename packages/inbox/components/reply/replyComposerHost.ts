@@ -9,7 +9,8 @@
  *   when it did not. A rejected Send may be pressed again any number of times; the words and files stay each time.
  * - Idempotency is the host's: it mints a key the first time a message is sent and keeps it while what would be sent
  *   is unchanged (`body`, `files` in order, `to`, `reply_to`, `extra`), dropping it on a confirmed Send or a change.
- *   The controller holds no key; for an unchanged box each press hands over those same values.
+ *   The controller holds no key; for an unchanged box each press hands over those same values. `draft` is not one of
+ *   them: the box saves its words again after a rejected Send, so `result.draft` changes from press to press.
  * - While a Send is out the box is read-only: the field takes no keys, and Discard, attach, paste, drop, `addFiles`,
  *   a tile's remove and Put back do nothing. `handle.cancel()` frees the box (words and files kept) when the host
  *   gives up on the press; that press's later settling is ignored.
@@ -19,6 +20,8 @@
  * - After a good Send: with `sendClearsDraft` the controller makes NO draft store call (no discard, no save); without
  *   it, exactly one `discard(threadId, { base: result.draft })`, and none when `result.draft` is null. The box is free
  *   at once; its next words are saved once that discard answers (a rejected one shows in `handle.draft.clearFailed`).
+ * - "Not saved" (a save that did not land, words longer than a draft holds) is drawn only when the host gives a
+ *   `draftStamp` slot to draw it in; with none, nothing shows (`handle.draft.failed` / `tooLong` still say so).
  * - A save refused as `draft_conflict` never replaces or drops the box's words: saving pauses, `onDraftConflict` gets
  *   the store's own error and its newer draft, and `handle.draft.keepMine()` / `takeTheirs()` resume.
  *   `handle.draft.reload()` is how a host says the draft changed elsewhere: an untouched box takes the newer words,

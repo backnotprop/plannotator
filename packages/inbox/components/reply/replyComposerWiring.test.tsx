@@ -83,7 +83,7 @@ function WiredBox({ store, uploader, seen, out }: { store: ReplyDraftStore; uplo
       page,
       mentions,
       draft: { store },
-      files: { uploader, onPasted: (names) => seen.pasted.push(...names) },
+      files: { uploader, onPasted: (names) => seen.pasted.push(...names), setText: (text) => composer.handle.replyText.set(text) },
       view: (): ReplyComposerWiringView => ({
         open: true,
         sending: hostSending,
@@ -197,21 +197,15 @@ test.skipIf(!hasDom)('the chord the host takes sends nothing; Escape is the host
   expect(seen.calls.join('|')).toBe('change words|chord|escape');
 });
 
-test.skipIf(!hasDom)('while a Send is out, pressed here or the host’s own, Discard, attach, a tile’s remove and typing do nothing', async () => {
+test.skipIf(!hasDom)('while the host’s Send holds the words, Discard, attach, a tile’s remove and typing do nothing', async () => {
   const { el, seen, finish, handle } = mount();
   typeIn(el, 'keep these words');
   attach(el, notes('a.txt'));
   expect(tiles(el)).toBe(1);
   await act(async () => finish[0]!(upload('upl_a', 'a.txt')));
-  // A press of the box: out until the host's Send ends.
+  // A press of the box: the host's Send holds the words and says so (`view().sending`) until it ends.
   pressSend(el);
   expect(seen.sends.length).toBe(1);
-  pressDiscard(el);
-  attach(el, notes('b.txt'));
-  act(() => el.querySelector<HTMLButtonElement>('[aria-label="Remove a.txt"]')?.click());
-  expect(field(el).readOnly).toBe(false); // the host draws "sending" itself (`view().sending`), and it has not yet
-  await act(async () => seen.ends[0]!());
-  // A Send the host started itself (a shortcut's, the closed foot's): the box is read-only and holds the same.
   act(() => setHostSending(true));
   expect(field(el).readOnly).toBe(true);
   typeIn(el, 'typed meanwhile');
@@ -221,7 +215,9 @@ test.skipIf(!hasDom)('while a Send is out, pressed here or the host’s own, Dis
   expect(seen.calls.join('|')).toBe('change keep these words|attach 1');
   expect(handle.current.replyText.get()).toBe('keep these words');
   expect(tiles(el)).toBe(1);
+  await act(async () => seen.ends[0]!());
   act(() => setHostSending(false));
+  expect(field(el).readOnly).toBe(false);
   pressDiscard(el);
   expect(seen.calls.at(-1)).toBe('discard');
   expect(handle.current.replyText.get()).toBe('');

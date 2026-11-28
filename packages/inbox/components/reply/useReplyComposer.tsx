@@ -109,8 +109,11 @@ export function useReplyComposer(host: ReplyComposerHost | ReplyComposerWiredHos
   const pressSeq = useRef(0);
   const [outFor, setOutFor] = useState<readonly string[]>([]);
   const syncOut = () => setOutFor([...out.current.keys()]);
-  /** A Send of the shown thread is out: pressed here, or (a wired host) one the host started itself. */
-  const busy = () => out.current.has(threadRef.current) || (wiredView()?.sending ?? false);
+  /**
+   * A Send of the shown thread is out. A wired host says so itself (`view().sending`): its Send reads who is still
+   * running before it starts (the words typed meanwhile count), and only then holds the box.
+   */
+  const busy = () => wiredView()?.sending ?? out.current.has(threadRef.current);
   /** The thread whose good Send's discard was rejected. */
   const [clearFailed, setClearFailed] = useState<string | null>(null);
   const textRef = useRef<HTMLTextAreaElement | null>(null);
@@ -121,7 +124,15 @@ export function useReplyComposer(host: ReplyComposerHost | ReplyComposerWiredHos
   const files = useComposeFiles(
     NO_FILES,
     wiring
-      ? wiring.files
+      ? {
+          ...wiring.files,
+          text: {
+            get value() {
+              return replyText.get();
+            },
+            set: (text) => wiring.files.setText(text),
+          },
+        }
       : {
           uploader: seams!.uploader,
           text: {
