@@ -104,6 +104,7 @@ packages/inbox/permissionFocus.test.tsx
 packages/inbox/replyBoxTyping.test.tsx
 packages/inbox/paneFailureKeepsReply.test.tsx
 packages/inbox/replyFootPhone.test.tsx
+packages/inbox/sendAlwaysEnds.test.tsx
 packages/inbox/replyDraftNeverLost.test.tsx
 packages/inbox/farReplyDrafts.test.tsx
 packages/inbox/composeAutosave.test.tsx
@@ -988,6 +989,8 @@ packages/inbox/reviewSettings/reviewsSettings.test.tsx
 packages/inbox/guide/usePowerUp.test.tsx
 packages/inbox/guide/useViewedTicks.test.tsx
 packages/inbox/components/reply/replyBoxParity.test.tsx
+packages/inbox/components/reply/replyBoxSeams.test.tsx
+packages/inbox/components/reply/replyDraftPages.test.tsx
 packages/inbox/guide/diffFontLoad.test.tsx
 packages/ui/components/diagram/DiagramCanvas.controlsReserve.test.tsx
 packages/ui/components/diagram/diagramSourceAccept.test.tsx

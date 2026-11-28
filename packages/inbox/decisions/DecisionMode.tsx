@@ -26,6 +26,7 @@ import { readInboxQuestionKind } from '@plannotator/core/inbox-types';
 import { whenTime } from '@plannotator/core/inbox-format';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
 import { InboxApiError, inboxApi } from '../api';
+import { sendReadMs } from '../apiWrite';
 import { replyKeysToRenew, type SendTarget, type SentContents } from '../sendTargets';
 import { agentName, formatCount } from '../format';
 import { HostMark, Icon } from '../icons';
@@ -466,7 +467,7 @@ export function DecisionMode(props: DecisionModeProps) {
       let draft: { draft: unknown };
       let model: Awaited<ReturnType<typeof inboxApi.thread>>;
       try {
-        [draft, model] = await Promise.all([inboxApi.replyDraft(first.thread.id), inboxApi.thread(first.thread.id)]);
+        [draft, model] = await Promise.all([inboxApi.replyDraft(first.thread.id), inboxApi.thread(first.thread.id, sendReadMs())]);
       } catch {
         setSend(key, { kind: 'failed', error: "Couldn't check the thread for a draft reply, so nothing was sent." });
         return 'failed';

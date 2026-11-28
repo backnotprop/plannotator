@@ -31,7 +31,7 @@ export interface ComposeFile {
   progress: number;
   upload: InboxUpload | null;
   error: string | null;
-  /** A local preview of an image picked in this tab (never for a reopened draft). */
+  /** A local preview of an image picked in this tab; a reopened draft's only from its uploader's `previewUrl`. */
   preview: string | null;
   /** A long paste attached as a file (pastedText.ts): the words it holds, so Put back can return them. */
   pasted?: PastedText | null;
@@ -71,8 +71,11 @@ interface PasteAnchor {
   lead: string;
 }
 
-/** A draft's file as a tile; a long paste comes back as a pasted text tile, its words read on Put back. */
-const fromUpload = (file: InboxDraftFile): ComposeFile => {
+/**
+ * A draft's file as a tile; a long paste comes back as a pasted text tile, its words read on Put back. An image's
+ * preview is the host's address for it (`previewUrl`), never one made from a local path; with none, its kind's icon.
+ */
+const fromUpload = (file: InboxDraftFile, previewUrl?: DraftFileUploader['previewUrl']): ComposeFile => {
   const { pasted, ...upload } = file;
   return {
     key: upload.upload_id,
@@ -82,7 +85,7 @@ const fromUpload = (file: InboxDraftFile): ComposeFile => {
     progress: 1,
     upload,
     error: null,
-    preview: null,
+    preview: upload.kind === 'image' && !pasted ? (previewUrl?.(upload.upload_id) ?? null) : null,
     // `at` 0: long past its Undo, so the tile offers Put back in box.
     ...(pasted ? { pasted: { text: null, preview: pasted.preview, at: 0 } } : {}),
   };
@@ -133,7 +136,7 @@ export function useComposeFiles(
     onUnmountUploads?: (uploads: Promise<InboxUpload | null>[]) => void;
   } = {},
 ) {
-  const [files, setFiles] = useState<ComposeFile[]>(() => initial.map(fromUpload));
+  const [files, setFiles] = useState<ComposeFile[]>(() => initial.map((file) => fromUpload(file, options.uploader?.previewUrl?.bind(options.uploader))));
   const aborts = useRef(new Map<string, AbortController>());
   /** Each upload on its way, by its file's key: settles with the upload, or null when it fails or is stopped. */
   const inFlight = useRef(new Map<string, Promise<InboxUpload | null>>());
@@ -607,7 +610,7 @@ export function useComposeFiles(
     }
     anchoredIn.current = words;
     undoArm.current = null;
-    const added = list.filter((file) => !here.has(file.upload_id)).map(fromUpload);
+    const added = list.filter((file) => !here.has(file.upload_id)).map((file) => fromUpload(file, uploader.current.previewUrl?.bind(uploader.current)));
     const next = [...filesRef.current.filter(keep), ...added];
     filesRef.current = next;
     namesRef.current = next.map((file) => file.name);

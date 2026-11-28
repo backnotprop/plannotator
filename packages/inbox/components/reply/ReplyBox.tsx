@@ -10,7 +10,6 @@
  * skip's spoken line, and the live-session choice or the error line under it.
  */
 import type { ClipboardEvent, ComponentProps, ReactNode, RefObject } from 'react';
-import type { InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
 import { AttachFilesButton, ComposeFileTiles, type ComposeFile, type useFileDrop } from '../../compose/ComposeFiles';
 import { plural } from '../../format';
 import { Icon } from '../../icons';
@@ -20,21 +19,22 @@ import { REPLY_FILES_SUMMARY_FROM, focusReplyFromBox } from '../../thread/replyB
 import { caretToEndOnFirstFocus } from '../../thread/replyCaret';
 import type { useReplyQuote } from '../../useReplyQuote';
 import { DraftHead, DraftOffer, type DraftConflict } from '../DraftLabel';
-import type { OtherFieldVoice } from '../FieldVoice';
-import { ChangedNotice, type JumpTarget } from '../ReplacedQuestion';
+import type { JumpTarget } from '../ReplacedQuestion';
 import { ReplyActions, ReplyAnswers, type ActionRow, type DraftAnswer } from '../ReplyAnswers';
 import { ReplyQuoteLine } from '../ReplyQuote';
 import { ReplyRow } from '../ReplyRow';
 import { ReplySummary, type FootComments } from '../ReplySummary';
 import { Tip } from '../Tip';
-import { VoiceMicButton, VoiceStatusLine } from '../VoiceMic';
+import { ReplyBoxRecipientControl } from './ReplyBoxRecipients';
+import type { ReplyBoxRecipients, ReplyBoxSkills, ReplyBoxVoice } from './replyBoxSeams';
 
 type FieldProps = ComponentProps<typeof ReplyTextField>;
 type ReplyQuote = ReturnType<typeof useReplyQuote>;
 
 export interface ReplyBoxProps {
   phone: boolean;
-  thread: InboxThread;
+  /** The thread the reply answers: its mentions (a dragged row, a pasted link) are taken by its field. */
+  threadId: string;
   // Above the box.
   /** A saved draft is offered (Restore draft). */
   offerShown: boolean;
@@ -42,7 +42,8 @@ export interface ReplyBoxProps {
   /** After a conflict: its line, Keep mine and Discard mine (the bin is Discard mine then too). */
   conflict: DraftConflict | null;
   takeBack: ComponentProps<typeof TakeBackNote>['state'];
-  staleQuestions: readonly InboxQuestion[];
+  /** Over the box: a replaced question's notice (the Inbox's ChangedNotice). Absent: none. */
+  changedNotice?: ReactNode;
   onJump: (target: JumpTarget) => void;
   /** "Draft  Saved 4:51 PM  Discard" (a phone, above the box) or "Not saved …" (a computer, over the row). */
   draftStamp: ReactNode;
@@ -63,15 +64,17 @@ export interface ReplyBoxProps {
   /** A Send carries the words now: the field shows none. */
   sendingWords: boolean;
   textRef: RefObject<HTMLTextAreaElement | null>;
-  /** The thread's voice; `others`: an Other answer's take on a question card, which Send waits for. */
-  voice: ComponentProps<typeof VoiceMicButton>['voice'] & { others: Pick<OtherFieldVoice, 'busy'> };
+  /** The reply's voice and what draws it (reply/replyVoice.ts). Absent: no microphone, no voice line, no voice code. */
+  voice?: ReplyBoxVoice;
   replyToNames: string;
+  /** The field's placeholder (the Inbox's "Write a reply. Type / for a skill"). */
+  placeholder: string;
   /** The asker note's id while it shows: the field is described by it. */
   askerNoteId: string | null;
-  /** Who gets the reply, when several agents could: a computer's chip leads the words, a phone's sits in the row. */
-  recipientPill: ReactNode;
-  skillFilter: FieldProps['skillFilter'];
-  commands: FieldProps['commands'];
+  /** Who gets the reply, when several agents could: a computer's chip leads the words, a phone's sits in the row. Absent: no control. */
+  recipients?: ReplyBoxRecipients;
+  /** The Skills button and the list a `/` opens. Absent: neither, and no skill list is read. */
+  skills?: ReplyBoxSkills;
   tags: FieldProps['tags'];
   onChange: (text: string) => void;
   onFieldKeyDown: NonNullable<FieldProps['onKeyDown']>;
@@ -79,7 +82,8 @@ export interface ReplyBoxProps {
   files: readonly ComposeFile[];
   onRemoveFile: (key: string) => void;
   onPutBackFile: (key: string, field: HTMLTextAreaElement | null) => void;
-  onAttachFiles: (list: FileList) => void;
+  /** The paperclip's files. Absent: no paperclip. */
+  onAttachFiles?: (list: FileList) => void;
   onShowFiles: () => void;
   // What goes with the reply.
   draftAnswers: readonly DraftAnswer[];
@@ -94,7 +98,6 @@ export interface ReplyBoxProps {
   fold: boolean;
   onFold: (fold: boolean) => void;
   fitKey: string;
-  noSkillsHint: boolean;
   // Send.
   /** The live-session choice stands in for Send and the bin, and shows under the box. */
   routeChoiceOpen: boolean;
@@ -102,20 +105,22 @@ export interface ReplyBoxProps {
   sending: boolean;
   sendRef: RefObject<HTMLButtonElement | null>;
   sendAria: string | undefined;
+  /** Send pressed with nothing still uploading. */
   onSend: () => void;
-  onOpenSkills: () => void;
+  /** Send pressed while a file still uploads: the box does not send (the host says why). */
+  onSendWhileUploading?: () => void;
   onDiscardDraft: () => void;
   errorLine: ReactNode;
 }
 
 export function ReplyBox({
   phone,
-  thread,
+  threadId,
   offerShown,
   onRestoreDraft,
   conflict,
   takeBack,
-  staleQuestions,
+  changedNotice,
   onJump,
   draftStamp,
   draftAboveRef,
@@ -133,10 +138,10 @@ export function ReplyBox({
   textRef,
   voice,
   replyToNames,
+  placeholder,
   askerNoteId,
-  recipientPill,
-  skillFilter,
-  commands,
+  recipients,
+  skills,
   tags,
   onChange,
   onFieldKeyDown,
@@ -155,17 +160,19 @@ export function ReplyBox({
   fold,
   onFold,
   fitKey,
-  noSkillsHint,
   routeChoiceOpen,
   routeChoice,
   sending,
   sendRef,
   sendAria,
   onSend,
-  onOpenSkills,
+  onSendWhileUploading,
   onDiscardDraft,
   errorLine,
 }: ReplyBoxProps) {
+  const recipientPill = recipients ? <ReplyBoxRecipientControl phone={phone} recipients={recipients} /> : null;
+  // A file still uploading holds the Send back, whatever the host's own Send does.
+  const pressSend = () => (files.some((file) => file.state === 'uploading') ? onSendWhileUploading?.() : onSend());
   return (
     <>
       {/* Above the box (approval "inbox-reply-recipient"): after a conflict its line and choice, and on a phone the
@@ -173,7 +180,7 @@ export function ReplyBox({
       {offerShown && <DraftOffer onRestore={onRestoreDraft} />}
       {conflict !== null && <DraftHead conflict={conflict} />}
       <TakeBackNote state={takeBack} />
-      {staleQuestions.length > 0 && <ChangedNotice questions={staleQuestions} thread={thread} onJump={onJump} />}
+      {changedNotice}
       {/* On a phone "Draft  Saved 4:51 PM  Discard" sits above the box, at the right, once something is saved.
           While the live-session choice stands in for the box's Send it goes, as a computer's bin does, so
           Discard cannot close the box under the choice. */}
@@ -207,18 +214,20 @@ export function ReplyBox({
         <div className="ib-rscroll" data-reply-scroll="" ref={scrollRef}>
           <ReplyTextField
             replyText={replyText}
-            mentionThread={thread.thread_id}
+            mentionThread={threadId}
             sendingWords={sendingWords}
             textareaRef={textRef}
-            voice={voice}
+            voice={voice?.handle}
+            voiceParts={voice?.parts}
             voiceNoteGlide
             ariaLabel={`Reply to ${replyToNames}`}
             ariaDescribedBy={[askerNoteId, conflict !== null ? conflict.id : null].filter(Boolean).join(' ') || undefined}
-            placeholder="Write a reply. Type / for a skill"
+            placeholder={placeholder}
             lead={phone ? undefined : recipientPill}
             destination="your reply"
-            skillFilter={skillFilter}
-            commands={commands}
+            skills={!!skills}
+            skillFilter={skills?.filter}
+            commands={skills?.commands}
             tags={tags}
             onChange={(text) => onChange(text)}
             onKeyDown={onFieldKeyDown}
@@ -262,7 +271,7 @@ export function ReplyBox({
             routeChoiceOpen ? null : (
               // No tooltip: a button that says Send needs none, and ⌘↵ is named only to assistive technology
               // (approval "inbox-send-no-shortcut-hint").
-              <button type="button" className="ib-btn ib-pri ib-rsend" ref={sendRef} data-reply-send="" onClick={() => onSend()} disabled={sending || voice.busy || voice.others.busy} aria-keyshortcuts={sendAria}>
+              <button type="button" className="ib-btn ib-pri ib-rsend" ref={sendRef} data-reply-send="" onClick={pressSend} disabled={sending || !!voice?.handle.busy || !!voice?.handle.others.busy} aria-keyshortcuts={sendAria}>
                 {/* While it sends the spinner takes the word's place and Send keeps its width, so nothing beside it moves. */}
                 {sending && <span className="ib-spin" aria-hidden="true" />}
                 {/* A phone: the round arrow; the word stays as the button's name. */}
@@ -271,16 +280,18 @@ export function ReplyBox({
               </button>
             )
           }
-          clip={<AttachFilesButton className="ib-rclip" iconSize={phone ? 20 : 16} phone={phone} inputData="data-reply-attach" onFiles={onAttachFiles} />}
+          clip={onAttachFiles ? <AttachFilesButton className="ib-rclip" iconSize={phone ? 20 : 16} phone={phone} inputData="data-reply-attach" onFiles={onAttachFiles} /> : null}
           skills={
-            <Tip content="Skills (or type / in the reply)">
-              <button type="button" className="ib-ricon" aria-label="Skills" data-reply-skills="" onClick={onOpenSkills}>
-                <Icon name="cube" size={phone ? 20 : 16} />
-              </button>
-            </Tip>
+            skills ? (
+              <Tip content="Skills (or type / in the reply)">
+                <button type="button" className="ib-ricon" aria-label="Skills" data-reply-skills="" onClick={skills.onOpen}>
+                  <Icon name="cube" size={phone ? 20 : 16} />
+                </button>
+              </Tip>
+            ) : null
           }
-          mic={<VoiceMicButton voice={voice} phone={phone} />}
-          status={<VoiceStatusLine voice={voice} phone={phone} />}
+          mic={voice ? <voice.parts.MicButton voice={voice.handle} phone={phone} /> : null}
+          status={voice ? <voice.parts.StatusLine voice={voice.handle} phone={phone} /> : null}
           files={
             files.length >= REPLY_FILES_SUMMARY_FROM ? (
               <button type="button" className="ib-rchip ib-rfilesn" data-reply-files-count="" aria-label={`${files.length} files attached. Show them`} onClick={onShowFiles}>
@@ -292,7 +303,7 @@ export function ReplyBox({
           chips={chips}
           summary={<ReplySummary skip={replySkip} dropped={dropped} comments={comments ? { props: comments.props, list: comments.list?.card ? null : comments.list, onList: comments.onList } : null} />}
           pill={phone ? recipientPill : null}
-          hint={noSkillsHint ? 'No skills are installed' : null}
+          hint={skills?.noneHint ? 'No skills are installed' : null}
           discard={
             // While the live-session choice is open it stands in for Send and the bin, as it did for Send's
             // row, so nothing can close the box under it. After a conflict the bin is "Discard mine": the

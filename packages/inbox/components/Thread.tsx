@@ -100,7 +100,7 @@ import { drawMessageHead } from '../parts/MessageHead';
 import { drawMessageBody } from '../parts/MessageBodyView';
 import type { MessageActs } from '../parts/messageActs';
 import { useSendReply } from '../data/actions/send';
-import { replyLanded, sendErrors, unconfirmed, UNCONFIRMED_MS, type UnconfirmedSend } from '../data/actions/sendLanded';
+import { gaveUp, replyLanded, sendErrors, unconfirmed, unconfirmedSend, UNCONFIRMED_MS, type UnconfirmedSend } from '../data/actions/sendLanded';
 import { useDrawSend, useSendsDrawn } from '../data/actions/sendDraw';
 import { SendingReply } from '../parts/SendingReply';
 import { pickComposerMode } from '../fullScreenComposer';
@@ -124,11 +124,12 @@ import {
 import { ReaskNote } from './ReaskNote';
 import { CombineLeftNote, ShipNote, TidyNote } from './Tidy';
 import { reaskedIn, reaskNoteAgent, reaskOffered, reaskTargets, reaskTooltip } from '../reask';
-import { StaleGuard, replacedBy, replacementOf, type JumpTarget } from './ReplacedQuestion';
+import { ChangedNotice, StaleGuard, replacedBy, replacementOf, type JumpTarget } from './ReplacedQuestion';
 import type { ComposerCommand } from './ComposerField';
 import { ReplyBox } from './reply/ReplyBox';
-import { sendFailure } from '../sendFailure';
-import { ReplyRecipientControl } from '../parts/ReplyRecipientControl';
+import { replyVoiceParts } from './reply/replyVoice';
+import { SEND_MAY_NOT_HAVE_GONE, sendFailure } from '../sendFailure';
+import type { ReplyBoxRecipients } from './reply/replyBoxSeams';
 import { aimable, headFolder, knownRecipients, latestBy, RECIPIENTS_MAX, sessionFolder, toggleRecipient, type RecipientRow } from '../replyRecipients';
 import { replyRecipientList } from '../thread/recipientList';
 import { removeAgentAction } from '../thread/removeAgent';
@@ -1549,8 +1550,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     setGuard(false);
     setRoute(CLOSED_ROUTE);
     setSkipArmed(null);
-    sendKeys.current = null;
-    sendContents.current = null;
+    // A Send given up with no answer may still land: its keys stay with its words (`late`), so Send again is that reply.
+    sendKeys.current = unconfirmed.get(thread.thread_id)?.late?.keys ?? null;
+    sendContents.current = unconfirmed.get(thread.thread_id)?.late?.contents ?? null;
     revisions.current.clear();
     savedQuestions.current.clear();
     lastAnswers.current.clear();
@@ -2846,9 +2848,12 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
    */
   const forgetUnconfirmed = (earlier: UnconfirmedSend, after: 'edited' | 'emptied' | 'closed') => {
     const id = threadRef.current.thread_id;
-    unconfirmed.delete(id);
     replyDraft.expectOwnClear(earlier.words);
     const edited = after === 'edited';
+    // One given up with no answer may land later: still watched (the thread read that shows it says it went), so only the line changes.
+    if (earlier.late && after !== 'closed') setError(edited ? 'Your earlier reply may have gone; Send sends your edited words as another reply.' : null);
+    if (earlier.late) return;
+    unconfirmed.delete(id);
     setError(edited ? 'Your earlier reply may have gone; Send sends your edited words as another reply.' : null);
     void replyLanded(id, earlier.key).then(async (landed) => {
       if (threadRef.current.thread_id !== id) return;
@@ -2885,11 +2890,12 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [thread]);
 
-  // Leaving the thread forgets it: a later Send is always an ordinary one.
+  // Leaving the thread forgets it: a later Send is always an ordinary one. Not one given up with no answer (`late`):
+  // it may still land, and a read of the thread when it is open again finishes it.
   useEffect(() => {
     const id = thread.thread_id;
     return () => {
-      unconfirmed.delete(id);
+      if (!unconfirmed.get(id)?.late) unconfirmed.delete(id);
     };
   }, [thread.thread_id]);
 
@@ -3057,6 +3063,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     let sendClears = false;
     const requests: { messageId: string; input: Parameters<typeof inboxApi.reply>[1] }[] = [];
     let sentUploads: string[] = [];
+    let sentKeys: NonNullable<UnconfirmedSend['late']> = { keys: null, contents: null }; // this Send's keys, kept if it may land late
     /** Opens the line of saves again once this Send's replies have left. */
     let releasePicks: (() => void) | null = null;
     const commentWrites = watchCommentWrites();
@@ -3225,6 +3232,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       );
       for (const id of replyKeysToRenew(sendContents.current, contents)) sendKeys.current.set(id, newUuid());
       sendContents.current = contents;
+      sentKeys = { keys: sendKeys.current, contents };
       // The words and the annotations ride the last reply, after its picks;
       // a comment on another session's message rides the reply to it. The
       // skills each reply's words and comments reference ride it too, as one
@@ -3386,20 +3394,13 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         } else if (wentAnyway === 'gone') {
           replyDraft.release(sendThread);
           fail(THREAD_GONE_TEXT);
-        } else if (wentAnyway === 'unknown') {
-          // Not known (the Inbox may be down): the draft stays as it is on the server, the box keeps the
+        } else if (wentAnyway === 'unknown' || (checks && gaveUp(failure))) {
+          // Not known (the Inbox may be down), or not there yet after a POST given up with no answer (it may still be
+          // on its way: `late`, watched for, its keys kept): the draft stays as it is on the server, the box keeps the
           // words, and the next Send of them first looks for this reply (unconfirmed).
           replyDraft.release(sendThread);
-          unconfirmed.set(sendThread, {
-            key: wordsKey!,
-            words: sendWords,
-            uploads: sentUploads,
-            comments: requests.flatMap((r) => r.input.annotation_ids ?? []),
-            // The picks a reply carries are the questions it names (their saved picks go with it).
-            picks: requests.flatMap((r) => (r.input.questions ?? []).map((q) => `${r.messageId}/${q.key}`)),
-            at: Date.now(),
-          });
-          fail('The reply may not have gone. Send again: it looks for this one first, so it is not sent twice.');
+          unconfirmed.set(sendThread, unconfirmedSend(wordsKey!, sendWords, sentUploads, requests, gaveUp(failure) ? sentKeys : undefined));
+          fail(SEND_MAY_NOT_HAVE_GONE);
         } else {
           replyDraft.release(sendThread);
           const text = textRef.current && here() ? replyText.get() : '';
@@ -4087,36 +4088,26 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     // A foot that does not scroll stays at 0 (the browser holds it there), and grows upward instead.
     if (foot && now !== was) foot.scrollTop += now - was;
   }, [draftAboveShows]);
-  const onlyRecipient = (row: RecipientRow) => {
-    aimReply([row.session]);
-    setRcptOpen(false);
-    announce(`This reply goes to ${row.label}.`);
-  };
-  const toggleReplyRecipient = (row: RecipientRow) => {
-    // The agents typed with `@` count toward the most one reply goes to.
-    const base = rcptPicked ?? rcptLead;
-    const next = toggleRecipient(base, row.session, RECIPIENTS_MAX - taggedIds.filter((id) => !base.includes(id)).length, rcptAlone);
-    aimReply(next);
-    announce(`This reply goes to ${namesList(next.map((id) => rcptAgents.find((r) => r.session === id)?.label ?? id))}.`);
-  };
-  // The reply's recipient control: a phone's in the box's row, a computer's the field's lead (parts/ReplyRecipientControl).
+  // The reply's recipients, as the box's control takes them (reply/ReplyBoxRecipients.tsx): a phone's in the box's
+  // row, a computer's the field's lead. A row picked alone, or ticked in or out, aims the reply and says to whom.
   const rcptFolderOf = (session: string) => sessionFolder(session, thread, taggable) ?? thread.project.name;
-  const rcptPill = !pillActive ? null : (
-    <ReplyRecipientControl
-      phone={phone}
-      rows={rcptAgents}
-      chosen={rcptChosen}
-      open={rcptOpen}
-      onOpen={setRcptOpen}
-      onOnly={onlyRecipient}
-      onToggle={toggleReplyRecipient}
-      onTagAnother={tagAnother}
-      onRemove={removeAgentAction({ threadId: thread.thread_id, onToast, changed: onChanged, labels: sessionLabels, folderOf: rcptFolderOf, rows: rcptAgents, picked: rcptPicked, aim: aimReply, field: () => textRef.current })}
-      section={sectionRef.current}
-      labels={sessionLabels}
-      folderOf={rcptFolderOf}
-    />
-  );
+  const rcptBox: ReplyBoxRecipients | undefined = !pillActive ? undefined : {
+    rows: rcptAgents,
+    chosen: rcptChosen,
+    open: rcptOpen,
+    onOpen: setRcptOpen,
+    onChange: (to) => {
+      aimReply(to);
+      announce(`This reply goes to ${namesList(to.map((id) => rcptAgents.find((r) => r.session === id)?.label ?? id))}.`);
+    },
+    // The agents typed with `@` count toward the most one reply goes to.
+    toggle: (row) => toggleRecipient(rcptPicked ?? rcptLead, row.session, RECIPIENTS_MAX - taggedIds.filter((id) => !(rcptPicked ?? rcptLead).includes(id)).length, rcptAlone),
+    onTagAnother: tagAnother,
+    onRemove: removeAgentAction({ threadId: thread.thread_id, onToast, changed: onChanged, labels: sessionLabels, folderOf: rcptFolderOf, rows: rcptAgents, picked: rcptPicked, aim: aimReply, field: () => textRef.current }),
+    section: sectionRef.current,
+    labels: sessionLabels,
+    folderOf: rcptFolderOf,
+  };
   const routeChoice = asking ? (
     <RouteChoice
       kind={routeFor}
@@ -5349,7 +5340,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           // The open box (components/reply/ReplyBox.tsx): drawn from what the thread holds; what it does comes back here.
           <ReplyBox
             phone={phone}
-            thread={thread}
+            threadId={thread.thread_id}
             offerShown={offerShown}
             onRestoreDraft={restoreDraft}
             conflict={
@@ -5368,7 +5359,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   }
             }
             takeBack={takeBack.state}
-            staleQuestions={staleQuestions}
+            changedNotice={staleQuestions.length > 0 && <ChangedNotice questions={staleQuestions} thread={thread} onJump={jumpTo} />}
             onJump={jumpTo}
             draftStamp={draftStamp}
             draftAboveRef={draftAboveRef}
@@ -5386,12 +5377,12 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             replyText={replyText}
             sendingWords={wordsAway === thread.thread_id}
             textRef={textRef}
-            voice={voice}
+            voice={{ handle: voice, parts: replyVoiceParts }}
             replyToNames={replyToNames}
+            placeholder="Write a reply. Type / for a skill"
             askerNoteId={showAskerNote ? noteId : null}
-            recipientPill={rcptPill}
-            skillFilter={skillFilter}
-            commands={replyCommands}
+            recipients={rcptBox}
+            skills={{ onOpen: openSkillsFromBox, noneHint: noSkillsHint, filter: skillFilter, commands: replyCommands }}
             tags={composerTags}
             onChange={changeReply}
             onFieldKeyDown={(event) => {
@@ -5432,14 +5423,13 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             fold={replyFold}
             onFold={setReplyFold}
             fitKey={replyFitKey}
-            noSkillsHint={noSkillsHint}
             routeChoiceOpen={!!routeChoiceOpen}
             routeChoice={routeChoice}
             sending={sending}
             sendRef={sendRef}
             sendAria={sendAria}
             onSend={() => void send()}
-            onOpenSkills={openSkillsFromBox}
+            onSendWhileUploading={() => void send()} // which says why itself ("Wait for the files to finish uploading.")
             onDiscardDraft={discardReply}
             errorLine={lineError && errorLine}
           />
