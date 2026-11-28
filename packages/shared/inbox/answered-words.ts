@@ -78,4 +78,4 @@ export function composeInboxNotMarkedBody(skipped: readonly { reason: string }[]
 }
 
 export const INBOX_ANSWERED_IN_REPLY_DESCRIPTION =
-  'Your own open questions in this thread (read_thread state open or picked) that the person answered in their reply\'s words instead of on the card: [{"question": "<message id>/<key>", "quote": "<the exact part of their reply that answers it>"}]; give "quote" or "reply" (its message id) when more than one of their replies reached you since you asked. The card shows their words as the answer, and they can reopen it. Send with reply_to into the thread.';
+  'Your own open questions in this thread that the person answered in their reply\'s words instead of on the card: [{"question": "<message id>/<key>", "quote": "<the exact part of their reply that answers it>"}]; give "quote" or "reply" (its message id) when more than one of their replies reached you since you asked. The card shows their words as the answer, and they can reopen it.';

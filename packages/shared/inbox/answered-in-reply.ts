@@ -9,7 +9,9 @@ export interface InboxAnsweredView {
   questionRecords: (messageId: string) => readonly InboxQuestionRecord[];
   closedByArchive: (message: InboxMessage) => boolean;
   openQuestionsOf: (threadId: string | null) => { id: string; prompt: string }[];
-  /** The reply went to `session` (addressed to it, not only to another agent) and that session got it or read it. */
+  /** The reply went to `session` (addressed to it, not only to another agent). */
+  sentTo: (message: InboxMessage, session: string) => boolean;
+  /** The reply went to `session` and that session got it or read it. */
   reachedSession: (message: InboxMessage, session: string) => boolean;
 }
 
@@ -32,10 +34,19 @@ function replyFor(view: InboxAnsweredView, members: readonly InboxMessage[], ask
   const named = request.reply ?? undefined;
   const after = members.slice(members.findIndex((m) => m.id === asked.id) + 1);
   const reopenedAt = after.reduce((last, m, i) => (m.reopened?.includes(record.id) ? i : last), -1);
-  const usable = after.slice(reopenedAt + 1).filter((m) => isPersonWords(m) && hasInboxReplyOwnWords(m.body) && view.reachedSession(m, session));
+  const since = after.slice(reopenedAt + 1).filter((m) => isPersonWords(m) && hasInboxReplyOwnWords(m.body));
+  const usable = since.filter((m) => view.reachedSession(m, session));
+  const notReached = (reply: InboxMessage) =>
+    view.sentTo(reply, session) ? `reply ${reply.id} has not reached you yet: read the thread (read_thread with your agent_session) and send again` : `reply ${reply.id} was sent to another agent, not to you`;
+  const holding = request.quote === undefined ? undefined : since.find((m) => !usable.includes(m) && typeof quoteFrom(m, request.quote) !== "string");
   let pick: ReplyPick;
   if (named === undefined) {
-    if (usable.length === 0) return reopenedAt >= 0 ? "the person reopened it and no reply of theirs to you has reached you since; name the reply with \"reply\"" : "no reply of the person's to you has reached you after it; name the reply with \"reply\"";
+    if (usable.length === 0) {
+      if (holding) return notReached(holding);
+      return reopenedAt >= 0
+        ? "the person reopened it and no reply of theirs to you has reached you since: read the thread (read_thread with your agent_session) and send again"
+        : "no reply of the person's to you has reached you after it: read the thread (read_thread with your agent_session) and send again";
+    }
     if (usable.length === 1) pick = quoteFrom(usable[0]!, request.quote);
     else if (request.quote === undefined) return `${usable.length} replies of the person's reached you after it (${usable.map((m) => m.id).join(", ")}); give "quote" with their exact words, or name the reply with "reply"`;
     else {
@@ -43,6 +54,7 @@ function replyFor(view: InboxAnsweredView, members: readonly InboxMessage[], ask
       const order = [first, ...usable.filter((m) => m !== first).reverse()];
       pick = order.map((m) => quoteFrom(m, request.quote)).find((p) => typeof p !== "string") ?? quoteFrom(first, request.quote);
     }
+    if (typeof pick === "string" && holding) return notReached(holding);
   } else {
     const reply = view.message(named);
     if (!reply || reply.thread_id !== asked.thread_id) return `reply ${named} is not a message of this thread`;
@@ -50,7 +62,7 @@ function replyFor(view: InboxAnsweredView, members: readonly InboxMessage[], ask
     if (!hasInboxReplyOwnWords(reply.body)) return `reply ${named} has no words the person wrote`;
     if (!after.some((m) => m.id === reply.id)) return `reply ${named} came before the question`;
     if (after.findIndex((m) => m.id === reply.id) < reopenedAt) return `the person reopened it after reply ${named}`;
-    if (!view.reachedSession(reply, session)) return `reply ${named} was not sent to you, or has not reached you yet`;
+    if (!view.reachedSession(reply, session)) return notReached(reply);
     pick = quoteFrom(reply, request.quote);
   }
   if (typeof pick !== "string" && record.picked_at && record.picked_at > pick.reply.created_at) return `the person picked on the card after reply ${pick.reply.id}`;
@@ -95,7 +107,11 @@ export function planInboxAnsweredInReply(
       refuse(`${ref}: no agent message ${target.message_id}.`);
       continue;
     }
-    if (threadId === null || asked.thread_id !== threadId) {
+    if (threadId === null) {
+      refuse(`${ref}: send with reply_to ${target.message_id}, into the question's thread.`);
+      continue;
+    }
+    if (asked.thread_id !== threadId) {
       refuse(`${ref} is in another thread (${asked.thread_id}): send with reply_to ${target.message_id}.`);
       continue;
     }

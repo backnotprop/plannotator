@@ -74,6 +74,51 @@ describe("answered_in_reply", () => {
     expect(state(jenkins.key).state).toBe("answered_in_reply");
   });
 
+  /** What read_thread does for a reader (null: a read with no session, from a shell). */
+  const readAs = (store: InboxStore, threadId: string, reader: string | null) => {
+    store.markAgentChecked(threadId, undefined, undefined, reader);
+    store.settleReadPast(threadId, reader);
+    if (reader) store.recordOwnRead(threadId, reader);
+    store.recordAgentRead(store.thread(threadId)!.messages.map((m) => m.id), reader);
+  };
+
+  test("a read with no session first, then the asking agent reads the thread and marks", () => {
+    const { ref, jenkins, state, store, asked, mark } = setup();
+    const sent = store.sendReply(asked.id, { idempotency_key: "r1", words, questions: [] }).reply;
+    readAs(store, asked.thread_id, null);
+    expect(refused(() => store.takeBack(sent.id)).code).toBe("agent_has_it");
+    expect(refused(() => mark([{ question: ref }], AGENT, sent.id)).message).toContain("read the thread (read_thread with your agent_session) and send again");
+    readAs(store, asked.thread_id, "ses_a");
+    mark([{ question: ref }], AGENT, sent.id);
+    expect(state(jenkins.key).state).toBe("answered_in_reply");
+  });
+
+  test("a woken agent, busy, reads the thread itself before its wake goes, then marks the reply it names", () => {
+    const { ref, jenkins, state, store, asked, mark } = setup();
+    const sent = store.sendReply(asked.id, { idempotency_key: "r1", words, questions: [] }).reply;
+    expect(store.pendingReplies("ses_a").map((m) => m.id)).toContain(sent.id);
+    readAs(store, asked.thread_id, "ses_a");
+    mark([{ question: ref, reply: sent.id }], AGENT, sent.id);
+    expect(state(jenkins.key).state).toBe("answered_in_reply");
+  });
+
+  test("another agent that wrote in the thread reads first; the asking agent's read still counts", () => {
+    const { ref, jenkins, state, store, asked, project, mark } = setup();
+    store.sendMessage({ project_id: project.id, author: OTHER, reply_to: asked.id, body: "Codex here." });
+    const sent = store.sendReply(asked.id, { idempotency_key: "r1", words, questions: [] }).reply;
+    readAs(store, asked.thread_id, "ses_b");
+    readAs(store, asked.thread_id, "ses_a");
+    mark([{ question: ref }], AGENT, sent.id);
+    expect(state(jenkins.key).state).toBe("answered_in_reply");
+  });
+
+  test("words found only in a reply that has not reached the agent: it is told to read the thread", () => {
+    const s = setup();
+    s.reply("Use Postgres.", "r1");
+    const late = s.reply("Keep Jenkins for a week.", "r2", false);
+    expect(refused(() => s.mark([{ question: s.ref, quote: "Keep Jenkins" }])).message).toContain(`reply ${late.id} has not reached you yet: read the thread`);
+  });
+
   test("a read by no session (a peek) reaches nobody", () => {
     const { ref, store, asked, mark } = setup();
     const sent = store.sendReply(asked.id, { idempotency_key: "r1", words, questions: [] }).reply;
@@ -160,8 +205,8 @@ describe("answered_in_reply", () => {
     expect(other.state(other.jenkins.key).answered_in_reply!.quote).toBe("Use Postgres, and keep Jenkins.");
     const named = setup();
     const late = named.reply("Also rename the repo to foo.", "r2", false);
-    expect(refused(() => named.mark([{ question: named.ref, reply: late.id }])).message).toContain(`reply ${late.id} was not sent to you, or has not reached you yet`);
-    expect(refused(() => named.mark([{ question: named.ref }])).message).toContain('no reply of the person\'s to you has reached you after it; name the reply with "reply"');
+    expect(refused(() => named.mark([{ question: named.ref, reply: late.id }])).message).toContain(`reply ${late.id} has not reached you yet: read the thread (read_thread with your agent_session) and send again`);
+    expect(refused(() => named.mark([{ question: named.ref }])).message).toContain("no reply of the person's to you has reached you after it: read the thread (read_thread with your agent_session) and send again");
     expect(queued.id).not.toBe(first.id);
   });
 
@@ -170,7 +215,7 @@ describe("answered_in_reply", () => {
     const theirs = store.sendMessage({ project_id: project.id, author: OTHER, reply_to: asked.id, body: "Codex here." }).message;
     const toOther = store.sendReply(theirs.id, { idempotency_key: "r1", words: "Keep Jenkins for a week.", questions: [] }).reply;
     store.recordDelivery(toOther.id, { host: "codex", session: "ses_b" });
-    expect(refused(() => mark([{ question: ref, reply: toOther.id }])).message).toContain("was not sent to you");
+    expect(refused(() => mark([{ question: ref, reply: toOther.id }])).message).toContain(`reply ${toOther.id} was sent to another agent, not to you`);
   });
 
   test("only the person's own words: text a Send appends (feedback quoting a file) is never quoted", () => {
@@ -287,13 +332,16 @@ describe("answered_in_reply", () => {
     const sent = s.reply(words, "r1");
     s.store.savePicks(s.asked.id, [{ key: s.region.key, revision: 0, answer: { v: 1, key: s.region.key, kind: "single", prompt: s.region.prompt, selected: ["us-east-1"] } }]);
     s.store.sendReply(s.asked.id, { idempotency_key: "r2", questions: [{ key: s.region.key, revision: 1 }] });
-    const result = s.mark([{ question: s.regionRef }, { question: s.ref }], FAR, sent.id);
+    const result = s.mark([{ question: s.regionRef }, { question: s.ref }], FAR, sent.id, { idempotency_key: "kf" });
     expect(result.answered_in_reply).toEqual([s.ref]);
     expect(result.answered_in_reply_skipped).toEqual([{ question: s.regionRef, reason: `${s.regionRef} is not open (it is sent).` }]);
-    const note = s.store.thread(s.asked.thread_id)!.messages.at(-1)!;
+    const note = s.store.pendingReplies("ses_a").find((m) => m.not_marked)!;
     expect([note.author.kind, note.reply_to, note.not_marked]).toEqual(["person", result.message.id, [s.regionRef]]);
     expect(note.body).toContain(`- ${s.regionRef} is not open (it is sent).`);
-    expect(s.store.pendingReplies("ses_a").map((m) => m.id)).toContain(note.id);
+    const listed = s.store.thread(s.asked.thread_id)!;
+    expect(listed.messages.map((m) => m.id)).not.toContain(note.id);
+    expect(JSON.stringify(listed)).not.toContain("Not marked answered");
+    expect(s.mark([{ question: s.regionRef }, { question: s.ref }], FAR, sent.id, { idempotency_key: "kf" }).answered_in_reply_skipped).toEqual([{ question: s.regionRef, reason: `${s.regionRef} is not open (it is sent).` }]);
     const elsewhere = s.mark([{ question: s.ref }], { ...FAR, machine: "ibx_01JZ00000000000000000000B1" }, sent.id);
     expect(elsewhere.answered_in_reply_skipped?.[0]?.reason).toContain("only the agent that asked");
   });

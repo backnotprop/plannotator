@@ -637,9 +637,14 @@ function isMovedNote(message: InboxMessage): boolean {
  */
 const INBOX_MOVED_WITHDRAWN_HOST = "plannotator-inbox";
 
-/** A note a thread never lists: the 👍's note and the moved-questions note. */
+/** The Inbox's note to an agent that a held send's marks of answered questions were skipped (`not_marked`): agent only, as a moved note. */
+function isNotMarkedNote(message: InboxMessage): boolean {
+  return message.author.kind === "person" && (message.not_marked?.length ?? 0) > 0;
+}
+
+/** A note a thread never lists: the 👍's note, the moved-questions note and the not-marked note. */
 function isUnlistedNote(message: InboxMessage): boolean {
-  return isAckNote(message) || isMovedNote(message);
+  return isAckNote(message) || isMovedNote(message) || isNotMarkedNote(message);
 }
 
 /** Two tray reactions are the same emoji with the same name (null is 👍 Looks good). */
@@ -5055,6 +5060,7 @@ export class InboxStore {
       questionRecords: (messageId) => this.questionRecords(messageId),
       closedByArchive: (message) => this.closedByArchive(message),
       openQuestionsOf: (threadId) => this.openQuestionsOf(threadId),
+      sentTo: (message, session) => this.isFor(message, session),
       reachedSession: (message, session) => {
         if (!this.isFor(message, session)) return false;
         if (this.isOwner(message, session)) {
@@ -5073,8 +5079,15 @@ export class InboxStore {
     const members = this.threadMessages(message.thread_id);
     const at = members.findIndex((m) => m.id === message.id);
     const reopened = (q: string) => members.slice(at + 1).some((m) => m.reopened?.includes(q));
+    const told = (q: string) =>
+      members
+        .slice(at + 1)
+        .find((m) => m.reply_to === message.id && m.not_marked?.includes(q))
+        ?.body.split("\n")
+        .find((line) => line.startsWith(`- ${q}`))
+        ?.slice(2);
     const reason = (q: string) =>
-      reopened(q) ? `${q}: the person reopened it after this message marked it answered.` : `${q}: it was not marked answered when this message arrived; the note after it says why.`;
+      reopened(q) ? `${q}: the person reopened it after this message marked it answered.` : (told(q) ?? `${q}: it was no longer open to mark when this message arrived.`);
     return { answered_in_reply_skipped: left.map((r) => ({ question: r.question, reason: reason(r.question) })) };
   }
 
@@ -7457,7 +7470,7 @@ export class InboxStore {
     // agent's read; so is a reply that tags agents. One sent again (`sendAgain`) waits whatever was read.
     // So is the note telling a session its questions moved: no read shows it (it is never listed), so only its wake
     // to that session settles it.
-    if (!message.to && !hasTags(message) && !isMovedNote(message) && message.sent_again_to !== session && (this.messages.get(message.thread_id)?.agent_checked_seq ?? 0) >= seq) return false;
+    if (!message.to && !hasTags(message) && !isMovedNote(message) && !isNotMarkedNote(message) && message.sent_again_to !== session && (this.messages.get(message.thread_id)?.agent_checked_seq ?? 0) >= seq) return false;
     return true;
   }
 
@@ -7577,7 +7590,7 @@ export class InboxStore {
   recordOwnRead(threadId: string, session: string, shown?: ReadonlySet<string>, markThrough?: number): void {
     for (const message of this.threadMessages(threadId)) {
       // A moved note is never shown by a read (it is not listed), so a read never settles it: its wake does.
-      if (message.author.kind !== "person" || message.tidy || isMovedNote(message) || (shown && !shown.has(message.id))) continue;
+      if (message.author.kind !== "person" || message.tidy || isMovedNote(message) || isNotMarkedNote(message) || (shown && !shown.has(message.id))) continue;
       const owner = this.isOwner(message, session);
       const tag = owner ? null : tagOf(message, session);
       if (!owner && !tag) continue;
@@ -7861,9 +7874,9 @@ export class InboxStore {
   recordAgentRead(ids: Iterable<string>, reader: string | null): void {
     for (const id of ids) {
       const message = this.messages.get(id);
-      if (message?.author.kind !== "person" || isInboxNote(message) || message.taken_back_at || message.read_by_agent) continue;
-      const holder = this.heldBy(message);
-      if (holder && !(reader && holder.by === "read" && holder.session === null && this.isOwner(message, reader))) continue;
+      if (message?.author.kind !== "person" || isInboxNote(message) || message.taken_back_at) continue;
+      const owner = reader !== null && this.isOwner(message, reader);
+      if (owner ? !!message.delivery || message.read_by_agent?.session === reader : !!message.read_by_agent || !!this.heldBy(message)) continue;
       const at = this.stamp();
       this.appendMessage({ ...message, read_by_agent: { session: reader, at } }, at);
     }
