@@ -209,6 +209,7 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
           onAgentFilter={(agentId) => leave({ page: 'inbox', project: null, machine: null, agent: agentId, thread: route.page === 'inbox' ? route.thread : null })}
           onMachineUpdate={pageOffersUpdates(settings) ? (id) => host.setMachineUpdateOpen({ id, snooze: false }) : undefined}
           outbox={threadOutbox(host.outbox, thread)}
+          outboxAll={host.outbox}
           onDismissOutbox={host.dismissOutbox}
           replyRequest={host.replyFor}
           draftSignal={host.draftSignals.of(thread.thread_id)}

@@ -28,6 +28,8 @@ export interface ThreadPaneProps {
   onMachineUpdate?: (machineId: string) => void;
   onNewMessageWith?: (source: ReuseSource) => void;
   outbox?: readonly OutboxView[];
+  /** The window's whole outbox, by key: the foot's line follows a write it held for this thread's machine until that settles. */
+  outboxAll?: ReadonlyMap<string, OutboxView>;
   onDismissOutbox?: (key: string) => void;
   sent: { at: string; checked_at: string | null; read_by?: string; recipients?: InboxSentRecipient[] } | null;
   onQuestions: (messageId: string, questions: InboxQuestion[], stateKept?: boolean) => void;
