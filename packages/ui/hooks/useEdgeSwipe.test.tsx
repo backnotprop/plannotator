@@ -158,6 +158,13 @@ describe.skipIf(!hasDom)('compact panel edge swipes', () => {
         });
         expect(closed.length).toBe(release === 60 ? 1 : 0);
       }
+      await act(async () => {
+        touch(panel, 'touchstart', 200, 100, 1, 0);
+        touch(panel, 'touchmove', 60, 100, 1, 20);
+        touch(panel, 'touchmove', 155, 100, 1, 40);
+        touch(panel, 'touchend', 155, 100, 1, 50);
+      });
+      expect(closed.length).toBe(1);
     });
   }
 

@@ -27,11 +27,11 @@ function expandedFolders(model: TreeModel): string[] {
 const scrollerOf = (model: TreeModel) =>
   model.getFileTreeContainer()?.shadowRoot?.querySelector<HTMLElement>('[data-file-tree-virtualized-scroll]') ?? null;
 
-export function useTreeMemory(model: TreeModel, memory: TreeMemory | undefined, rememberFolders = false): void {
+export function useTreeMemory(model: TreeModel, memory: TreeMemory | undefined, rememberFolders = false, restoreScroll = true): void {
   useEffect(() => {
     if (!memory) return;
     const target = memory.scrollTop;
-    let pending = target > 0;
+    let pending = restoreScroll && target > 0;
     let scroller: HTMLElement | null = null;
     let frame = 0;
     const save = () => {

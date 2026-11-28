@@ -163,7 +163,8 @@ export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
   useEffect(() => {
     for (const dir of initialExpanded) ensureLoaded(dir);
   }, [initialExpanded, ensureLoaded]);
-  useTreeMemory(model, props.memory, true);
+  const [resumes] = useState(() => !!props.memory?.expanded && props.memory.activePath === activePath);
+  useTreeMemory(model, props.memory, true, resumes);
 
   const known = useRef(new Set(paths));
   useEffect(() => {
@@ -217,7 +218,7 @@ export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
   }, [activePath]);
 
   const revealed = useRef<string | null>(null);
-  const restored = useRef(!!props.memory?.expanded && props.memory.activePath === activePath);
+  const restored = useRef(resumes);
   useEffect(() => {
     if (props.memory) props.memory.activePath = activePath;
   }, [activePath, props.memory]);

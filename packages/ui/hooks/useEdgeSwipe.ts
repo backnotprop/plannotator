@@ -94,7 +94,9 @@ export function useEdgeSwipe(options: EdgeSwipeOptions): void {
       const dx = (touch.clientX - current.x) * current.direction;
       const sample = current.samples.find(s => s.time >= event.timeStamp - 100);
       const elapsed = sample ? event.timeStamp - sample.time : 0;
-      const velocity = sample && elapsed > 0 ? (touch.clientX - sample.x) * current.direction / elapsed : 0;
+      const [before, last] = current.samples.slice(-2);
+      const returning = !!before && !!last && (last.x - before.x) * current.direction < 0;
+      const velocity = sample && elapsed > 0 && !returning ? (touch.clientX - sample.x) * current.direction / elapsed : 0;
       if (dx <= Math.abs(touch.clientY - current.y) * 1.5) {
         current.drag?.onEnd(null);
         return;
