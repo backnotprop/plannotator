@@ -299,7 +299,7 @@ describe("Settings → Prompts", () => {
     }
   });
 
-  test("over /mcp: Codex, whose note holds the rules, gets instructions without them; a client the Inbox cannot tie to a note gets them", async () => {
+  test("over /mcp: Codex gets the rules in the instructions even while its note holds them (the Inbox cannot tell which file it reads)", async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-prompts-mcp-")));
     roots.push(root);
     const home = join(root, "home");
@@ -326,14 +326,14 @@ describe("Settings → Prompts", () => {
       return (JSON.parse(body) as { result: { instructions: string } }).result.instructions;
     };
     expect(readFileSync(note, "utf8")).toContain("Ask me before you delete any file.");
-    expect(await instructions("codex-mcp-client")).not.toContain("Ask me before you delete any file.");
+    expect(await instructions("codex-mcp-client")).toContain("Ask me before you delete any file.");
+    expect(await instructions("gemini-cli-mcp-client")).toContain("Ask me before you delete any file.");
     expect(await instructions("some-mcp-client")).toContain("Ask me before you delete any file.");
-    // New rules: the save rewrites the note, and the next Codex connection still gets them there only.
+    // New rules: the save rewrites the note, and the next Codex connection gets the new ones in the instructions too.
     expect((await post(server, { serverSession: server.serverSession, prompts: { inbox: { rules: "Keep messages short." } } })).status).toBe(200);
     expect(readFileSync(note, "utf8")).toContain("Keep messages short.");
-    expect(await instructions("codex-mcp-client")).not.toContain("Keep messages short.");
-    // The note gone from the file: the next Codex connection gets them in the instructions.
-    writeFileSync(note, "Mine.\n");
-    expect(await instructions("codex-mcp-client")).toContain("Keep messages short.");
+    const next = await instructions("codex-mcp-client");
+    expect(next).toContain("Keep messages short.");
+    expect(next).not.toContain("Ask me before you delete any file.");
   });
 });

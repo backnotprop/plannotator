@@ -59,10 +59,10 @@ import {
   type InboxNoteAutoAdd,
 } from "@plannotator/core/inbox-types";
 import { loadConfig, loadConfigOrNull, saveConfig } from "@plannotator/shared/config";
-import { inboxNoteHoldsRules, inboxNoteRulesSection, inboxReminderRulesText } from "@plannotator/shared/inbox/connection";
+import { INBOX_REMINDER_MAX_CHARS, inboxNoteHoldsRules, inboxNoteRulesSection, inboxReminderRulesText } from "@plannotator/shared/inbox/connection";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
 import { isInboxTurnedOn } from "@plannotator/shared/inbox/turned-on";
-import { type AgentFileRead, describeFsError, readAgentFile, stripJsonComments, withBom, writeAgentFileAtomic } from "./agent-files";
+import { AGENT_FILE_MAX_BYTES, type AgentFileRead, describeFsError, readAgentFile, stripJsonComments, withBom, writeAgentFileAtomic } from "./agent-files";
 import {
   agentHomeAllowed,
   agentSpec,
@@ -264,11 +264,16 @@ export const INBOX_NOTE_BLOCK = `${INBOX_NOTE_START}\n${INBOX_NOTE_BODY}\n${INBO
  * rules: the shared ones (config.json `prompts.inbox.rules`), and for Claude
  * Code, Pi and OpenCode their own (`prompts.inbox.runtimes.<host>.rules`),
  * which win, as for the reminder (inboxReminderRulesText). Codex, Gemini CLI,
- * Qwen Code and Cursor get the shared ones. No cap beyond what Settings saves:
- * a file has no ceiling like a hook's. Rules with a line a marker or a Gemini
- * or Qwen memory tool would read as theirs are left out of the note (the
- * block would read as damaged, or a memory would land inside it); the
- * reminder still carries them where there is one.
+ * Qwen Code and Cursor get the shared ones. Left out of the note (noteSafe),
+ * so the note is today's block and holds no rules: rules longer than
+ * INBOX_REMINDER_MAX_CHARS (more than Settings ever saves: only a hand-edited
+ * config.json has them, and the note would put text of any size into the
+ * person's own file), and rules with a line a marker or a Gemini or Qwen
+ * memory tool would read as theirs (the block would read as damaged, or a
+ * memory would land inside it). The holds check (inboxNoteHoldsRules) then
+ * finds no rules in the note, so the reminder and the MCP instructions never
+ * leave them out because of it. A note is also never written with the rules
+ * where they would take the file past AGENT_FILE_MAX_BYTES (fitsAgentFile).
  */
 export function inboxNoteRules(agent: InboxNoteAgentId, config: unknown): string | null {
   const host = (INBOX_PROMPT_HOSTS as readonly string[]).includes(agent) ? agent : null;
@@ -291,11 +296,22 @@ export function sharedNoteRules(config: unknown): string | null {
 
 function noteSafe(rules: string | null): string | null {
   if (rules === null) return null;
+  // Past what Settings saves (a hand-edited config.json): never into the person's file.
+  if (rules.length > INBOX_REMINDER_MAX_CHARS) return null;
   // Anywhere, not per line: the marker finders' `^` also starts a line after a CR, U+2028 or U+2029,
   // and the memory tools find their header as plain text (indexOf).
   if (rules.includes(NOTE_MARKER_PREFIX)) return null;
   if (MEMORY_SECTION_HEADERS.some((header) => rules.includes(header))) return null;
   return rules.replace(/\r\n?/g, "\n");
+}
+
+/**
+ * Whether a note's file, written with this text, stays within what readAgentFile reads
+ * (AGENT_FILE_MAX_BYTES): past it the file is refused from then on, so switching the note off,
+ * a refresh and `plannotator uninstall` could never take the note out again.
+ */
+function fitsAgentFile(text: string, bom: boolean): boolean {
+  return Buffer.byteLength(withBom(text, bom), "utf8") <= AGENT_FILE_MAX_BYTES;
 }
 
 /** What every marker of the note starts with. */
@@ -774,35 +790,38 @@ export function addInboxNote(agent: InboxNoteAgentId, dataDir: string, e: AgentE
   const config = options.config === undefined ? loadConfigOrNull() : options.config;
   // config.json there but unreadable: its rules are unknown, and `{}` would write a note without them.
   if (config === null) return { ok: false, agent, reason: "config.json can't be read, so the note's rules are unknown; fix it and try again", path: shown };
-  const block = blockFor([agent, ...sharersOf(agent, real, notes)], noteRulesConfig(dataDir, config));
-  let next: string;
-  let action: "added" | "created" | "updated" | "unchanged" | "shared";
-  /** The block's hash before this add (null: there was none), for the other records naming the same file. */
-  let before: string | null = null;
-  if (found.kind === "one") {
-    const hash = sha256(found.block);
-    before = hash;
-    // A note Plannotator wrote after a Gemini or Qwen memory section moves above it (the memory tool would write into it).
-    const moves = afterMemorySection(original, found.start);
-    if (hash === sha256(block)) {
-      next = moves ? moveAboveMemory(original, found.start, found.end, found.block, nl) : original;
-      action = moves ? "updated" : notes[agent] || !owner ? "unchanged" : "shared";
-    } else if (owner ? ownedBy(owner, hash) : isPlannotatorBlock(hash)) {
-      // An older note Plannotator wrote, or one with other rules (its record, or with the record lost, a
-      // block exactly as an earlier version, or this one with no rules, wrote it).
-      next = moves ? moveAboveMemory(original, found.start, found.end, blockIn(block, nl), nl) : original.slice(0, found.start) + blockIn(block, nl) + original.slice(found.end);
-      action = "updated";
-    } else {
+  type Placed = { block: string; next: string; action: "added" | "created" | "updated" | "unchanged" | "shared"; before: string | null };
+  /** The file's text with `block` in it, or the answer when it is not written (`before`: the block's hash before this add, null: there was none, for the other records naming the same file). */
+  const place = (block: string): Placed | NoteChange => {
+    if (found.kind === "one") {
+      const hash = sha256(found.block);
+      // A note Plannotator wrote after a Gemini or Qwen memory section moves above it (the memory tool would write into it).
+      const moves = afterMemorySection(original, found.start);
+      if (hash === sha256(block)) {
+        return { block, next: moves ? moveAboveMemory(original, found.start, found.end, found.block, nl) : original, action: moves ? "updated" : notes[agent] || !owner ? "unchanged" : "shared", before: hash };
+      }
+      if (owner ? ownedBy(owner, hash) : isPlannotatorBlock(hash)) {
+        // An older note Plannotator wrote, or one with other rules (its record, or with the record lost, a
+        // block exactly as an earlier version, or this one with no rules, wrote it).
+        const next = moves ? moveAboveMemory(original, found.start, found.end, blockIn(block, nl), nl) : original.slice(0, found.start) + blockIn(block, nl) + original.slice(found.end);
+        return { block, next, action: "updated", before: hash };
+      }
       // The person's edit: theirs to keep.
       return { ok: true, agent, action: "kept-edited", path: shown! };
     }
-  } else {
     if (options.auto && UNMARKED_NOTE.test(original)) {
       return { ok: false, agent, reason: `${shown} already has the note, pasted without markers`, path: shown, skipped: true };
     }
-    next = insertBlock(original, block, nl);
-    action = read.kind === "missing" ? "created" : "added";
-  }
+    return { block, next: insertBlock(original, block, nl), action: read.kind === "missing" ? "created" : "added", before: null };
+  };
+  const bom = read.kind === "file" && read.bom;
+  // With the rules, else without them where they would take the file past what Plannotator reads (fitsAgentFile).
+  const withRules = blockFor([agent, ...sharersOf(agent, real, notes)], noteRulesConfig(dataDir, config));
+  let placed = place(withRules);
+  if (!("ok" in placed) && !fitsAgentFile(placed.next, bom) && withRules !== INBOX_NOTE_BLOCK) placed = place(INBOX_NOTE_BLOCK);
+  if ("ok" in placed) return placed;
+  if (!fitsAgentFile(placed.next, bom)) return { ok: false, agent, reason: `${shown} can't be edited: it is larger than ${Math.round(AGENT_FILE_MAX_BYTES / (1024 * 1024))} MiB`, path: shown };
+  const { block, next, action, before } = placed;
   if (read.kind !== "file" || next !== original) {
     if (options.auto && read.kind === "file") {
       if ((read.mode & 0o200) === 0) return { ok: false, agent, reason: `${shown} is read-only`, path: shown, skipped: true };
@@ -816,7 +835,7 @@ export function addInboxNote(agent: InboxNoteAgentId, dataDir: string, e: AgentE
     options.beforeWrite?.(read.target);
     if (!unchangedSince(read)) return { ok: false, agent, reason: `${shown} changed while the note was being added; try again`, path: shown };
     try {
-      writeAgentFileAtomic(read.target, withBom(next, read.kind === "file" && read.bom), read.kind === "file" ? read.mode : 0o644);
+      writeAgentFileAtomic(read.target, withBom(next, bom), read.kind === "file" ? read.mode : 0o644);
     } catch (error) {
       return { ok: false, agent, reason: `${shown} can't be written (${describeFsError(error)})`, path: shown };
     }
@@ -946,9 +965,9 @@ export function refreshInboxNotes(dataDir: string, e: AgentEnvironment, options:
     const current = sha256(block);
     // Right before the file's write: the records first (throws, writing nothing, when they cannot be
     // written), with a way back if the file's write then fails.
-    const commitRecords = (): (() => void) => {
+    const commitRecords = (written: string): (() => void) => {
       const saved = { ...file.notes };
-      if (!follow(agents, current)) return () => {};
+      if (!follow(agents, written)) return () => {};
       try {
         writeInboxAgentNotes(dataDir, file);
       } catch (error) {
@@ -965,13 +984,16 @@ export function refreshInboxNotes(dataDir: string, e: AgentEnvironment, options:
       };
     };
     let result: NoteRefresh["result"];
+    let held = current;
     try {
-      result = refreshNoteFile(path, recorded, block, options, commitRecords);
+      const done = refreshNoteFile(path, recorded, block, options, commitRecords);
+      result = done.result;
+      held = sha256(done.block);
     } catch {
       result = "refused";
     }
     // Already this version (written by an add whose record write failed, or another agent's link): the record follows.
-    if (result === "current" && follow(agents, current)) staleRecords = true;
+    if (result === "current" && follow(agents, held)) staleRecords = true;
     agents.forEach((agent, index) => results.push({ agent, path, result: result === "refreshed" && index > 0 ? "shared" : result }));
   }
   if (staleRecords) {
@@ -988,14 +1010,32 @@ export function refreshInboxNotes(dataDir: string, e: AgentEnvironment, options:
 const RETIRED_REPLY_PHRASE = "otherwise call `wait_for_reply`";
 const CURRENT_REPLY_PHRASE = "otherwise read the thread later with `read_thread`";
 
-/** One file of refreshInboxNotes: its outcome, the file written for `refreshed`, and for `edited` only when the retired reply sentence was swapped. */
+/**
+ * One file of refreshInboxNotes, and the block it holds now: with the rules, else without them where
+ * they would take the file past what Plannotator reads (fitsAgentFile); `refused` when even that does not fit.
+ */
 function refreshNoteFile(
   path: string,
   recorded: readonly InboxAgentNoteRecord[],
   block: string,
   options: RefreshInboxNotesOptions,
-  commitRecords: () => () => void,
-): NoteRefresh["result"] {
+  commitRecords: (written: string) => () => void,
+): { result: NoteRefresh["result"]; block: string } {
+  const result = refreshNoteFileWith(path, recorded, block, options, commitRecords);
+  if (result !== "too-big") return { result, block };
+  if (block === INBOX_NOTE_BLOCK) return { result: "refused", block };
+  const plain = refreshNoteFileWith(path, recorded, INBOX_NOTE_BLOCK, options, commitRecords);
+  return { result: plain === "too-big" ? "refused" : plain, block: INBOX_NOTE_BLOCK };
+}
+
+/** One file with one block: its outcome, the file written for `refreshed`, and for `edited` only when the retired reply sentence was swapped; `too-big`: nothing written, the block would take the file past AGENT_FILE_MAX_BYTES. */
+function refreshNoteFileWith(
+  path: string,
+  recorded: readonly InboxAgentNoteRecord[],
+  block: string,
+  options: RefreshInboxNotesOptions,
+  commitRecords: (written: string) => () => void,
+): NoteRefresh["result"] | "too-big" {
   const read = readAgentFile(path);
   if (read.kind === "missing") return "missing";
   if (read.kind === "refused") return "refused";
@@ -1024,6 +1064,8 @@ function refreshNoteFile(
     : moves
       ? moveAboveMemory(read.text, found.start, found.end, blockIn(block, nl), nl)
       : read.text.slice(0, found.start) + blockIn(block, nl) + read.text.slice(found.end);
+  // Never past what Plannotator reads: the swapped sentence is left as it was; a new block is tried without the rules.
+  if (!fitsAgentFile(next, read.bom)) return patching ? "edited" : "too-big";
   options.beforeWrite?.(read.target);
   // Compare and write: the bytes on disk must still be the ones this read (and the mode the same).
   const before = Buffer.from(withBom(read.text, read.bom), "utf8");
@@ -1046,7 +1088,7 @@ function refreshNoteFile(
   }
   let rollback: () => void;
   try {
-    rollback = commitRecords();
+    rollback = commitRecords(sha256(block));
   } catch {
     return "refused";
   }
@@ -1325,9 +1367,11 @@ function skippedOnPurpose(agent: InboxNoteAgentId, e: AgentEnvironment): "read-o
 /**
  * Whether the file `agent` reads its note from holds the note with exactly
  * its rules (inboxNoteHoldsRules: what the hosts' reminders check too). False
- * with no rules, for Cursor, and with no file. The Inbox's MCP instructions
- * leave the rules out for a client whose agent has them here
- * (inbox-mcp-note-rules.ts).
+ * with no rules, for Cursor, and with no file. Not used for the Inbox's MCP
+ * instructions, which always carry the rules: the Inbox cannot tell which
+ * file a connecting agent reads (Codex starts its MCP server with a cleared
+ * environment, so its CODEX_HOME never reaches the shim), and twice is better
+ * than never.
  */
 export function inboxNoteHoldsAgentRules(agent: InboxNoteAgentId, e: AgentEnvironment, config: unknown): boolean {
   const rules = agentRulesText(agent, config);

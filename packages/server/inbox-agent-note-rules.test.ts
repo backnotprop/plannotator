@@ -9,11 +9,12 @@
  * a scratch home (tests/helpers/fake-agents.ts); no Inbox is started.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, linkSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, linkSync, mkdirSync, readFileSync, realpathSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { INBOX_NOTE_AGENT_IDS, type InboxNoteAgentId } from "@plannotator/core/inbox-types";
 import { inboxNoteFileOf, inboxReminderRulesFor, resolveInboxReminderText } from "@plannotator/shared/config";
-import { INBOX_RULES_LEAD, inboxNoteHoldsRules, inboxReminderText } from "@plannotator/shared/inbox/connection";
+import { INBOX_REMINDER_MAX_CHARS, INBOX_RULES_LEAD, inboxNoteHoldsRules, inboxReminderText } from "@plannotator/shared/inbox/connection";
+import { AGENT_FILE_MAX_BYTES, readAgentFile } from "./agent-files";
 import { inboxReminderRulesAfterNote } from "../../apps/hook/hooks/mod/enabled";
 import { createFakeAgents, type FakeAgents } from "../../tests/helpers/fake-agents";
 import {
@@ -25,6 +26,7 @@ import {
   inboxNoteBlockFor,
   inboxNoteBlockWith,
   inboxNoteBodyWith,
+  inboxNoteHoldsAgentRules,
   inboxNoteRules,
   noteRulesStates,
   noteStatus,
@@ -38,8 +40,7 @@ import {
 import { noteWithoutMarkers } from "../inbox/agents";
 import { createAgentEnvironmentFor, type AgentEnvironment } from "./inbox-agents";
 import { inboxRulesModel } from "./inbox-rules";
-import { INBOX_MCP_INSTRUCTIONS, INBOX_MCP_RULES_ROOMS, inboxMcpInstructions, inboxMcpTierOf, type InboxMcpClient } from "./inbox-mcp-instructions";
-import { inboxMcpReminderFor, type InboxMcpHere } from "./inbox-mcp-note-rules";
+import { INBOX_MCP_RULES_ROOMS, inboxMcpInstructions, inboxMcpTierOf, resolveInboxMcpReminder, type InboxMcpClient } from "./inbox-mcp-instructions";
 
 let fake: FakeAgents;
 let dataDir: string;
@@ -159,6 +160,77 @@ describe("the block", () => {
     const plan = planInboxNoteRemoval(dataDir, e, Object.fromEntries(INBOX_NOTE_AGENT_IDS.map((id) => [id, id])) as Record<InboxNoteAgentId, string>, withClaude);
     expect(plan.items.map((item) => item.describe)).toEqual([expect.not.stringContaining("you edited it")]);
     expect(plan.items[0]!.apply()).toMatchObject({ ok: true, action: "deleted" });
+  });
+});
+
+describe("rules a note does not take: past what Settings saves, or past the file's size", () => {
+  const LONG = "Ask me first.".padEnd(INBOX_REMINDER_MAX_CHARS + 1, " and again");
+  const noteHolds = (agent: InboxNoteAgentId, config: object) => inboxNoteHoldsAgentRules(agent, e, config);
+
+  test("rules longer than Settings saves (a hand-edited config.json): today's block, and nothing drops them because of the note", () => {
+    expect(LONG.length).toBe(INBOX_REMINDER_MAX_CHARS + 1);
+    mkdirSync(file(".codex"), { recursive: true });
+    for (const agent of ["codex", "claude-code"] as const) {
+      expect(addInboxNote(agent, dataDir, e, undefined, { config: shared(LONG) })).toMatchObject({ ok: true });
+      expect(read(noteTarget(agent, e).path!)).toBe(`${INBOX_NOTE_BLOCK}\n`);
+      expect(noteHolds(agent, shared(LONG))).toBe(false);
+    }
+    // The reminders' own check finds no rules in the note, and the MCP instructions get them as before.
+    expect(inboxReminderRulesAfterNote(LONG, read(CLAUDE_FILE()))).toBe(LONG);
+    expect(inboxReminderRulesFor(shared(LONG), "claude-code", place())).toBe(LONG);
+    expect(resolveInboxMcpReminder(shared(LONG))).toEqual({ custom: null, rules: LONG });
+    // A refresh to such rules puts today's block back; at the limit itself the note takes them.
+    expect(addInboxNote("codex", dataDir, e, undefined, { config: shared() })).toMatchObject({ ok: true, action: "updated" });
+    expect(refreshInboxNotes(dataDir, e, { config: shared(LONG) }).find((r) => r.agent === "codex")?.result).toBe("refreshed");
+    expect(read(CODEX_FILE())).toBe(`${INBOX_NOTE_BLOCK}\n`);
+    const atLimit = LONG.slice(0, INBOX_REMINDER_MAX_CHARS);
+    expect(addInboxNote("codex", dataDir, e, undefined, { config: shared(atLimit) })).toMatchObject({ ok: true, action: "updated" });
+    expect(noteHolds("codex", shared(atLimit))).toBe(true);
+  });
+
+  /** The person's own Codex file, this many bytes short of the most Plannotator reads once today's block is added to it. */
+  const nearlyFull = (spare: number) => {
+    const text = `${"x".repeat(AGENT_FILE_MAX_BYTES - Buffer.byteLength(INBOX_NOTE_BLOCK) - 3 - spare)}\n`;
+    write(CODEX_FILE(), text);
+    return text;
+  };
+
+  test("a file near 1 MiB: the note goes in without the rules, stays readable and comes out byte for byte", () => {
+    const before = nearlyFull(100);
+    expect(addInboxNote("codex", dataDir, e, undefined, { config: shared() })).toMatchObject({ ok: true, action: "added" });
+    expect(read(CODEX_FILE())).toBe(`${before}\n${INBOX_NOTE_BLOCK}\n`);
+    expect(statSync(CODEX_FILE()).size).toBeLessThanOrEqual(AGENT_FILE_MAX_BYTES);
+    expect(readAgentFile(CODEX_FILE()).kind).toBe("file");
+    expect(noteHolds("codex", shared())).toBe(false);
+    // A refresh with the rules changes nothing: they still do not fit.
+    expect(refreshInboxNotes(dataDir, e, { config: shared() }).map((r) => r.result)).toEqual(["current"]);
+    expect(read(CODEX_FILE())).toBe(`${before}\n${INBOX_NOTE_BLOCK}\n`);
+    expect(removeInboxNote("codex", dataDir, e)).toMatchObject({ ok: true, action: "removed" });
+    expect(read(CODEX_FILE())).toBe(before);
+  });
+
+  test("a note with rules in a file that has grown: the refresh writes it without them, never past 1 MiB", () => {
+    write(CODEX_FILE(), "Mine.\n");
+    expect(addInboxNote("codex", dataDir, e, undefined, { config: shared() })).toMatchObject({ ok: true, action: "added" });
+    // The person's text above the note grows (the note with these rules still fits), then longer rules come.
+    const grown = nearlyFull(300);
+    write(CODEX_FILE(), `${grown}\n${inboxNoteBlockWith(RULES)}\n`);
+    expect(readAgentFile(CODEX_FILE()).kind).toBe("file");
+    const rules = "Only message me when you are blocked or done.\n".repeat(20).trim();
+    expect(refreshInboxNotes(dataDir, e, { config: shared(rules) }).map((r) => r.result)).toEqual(["refreshed"]);
+    expect(read(CODEX_FILE())).toBe(`${grown}\n${INBOX_NOTE_BLOCK}\n`);
+    expect(readAgentFile(CODEX_FILE()).kind).toBe("file");
+    // The record follows the block written, so the note is still Plannotator's own.
+    expect(readInboxAgentNotes(dataDir).notes.codex?.block_sha256).toBe(sha(INBOX_NOTE_BLOCK));
+    expect(noteStatus("codex", dataDir, e, shared(rules)).state).not.toBe("edited");
+    expect(refreshInboxNotes(dataDir, e, { config: shared(rules) }).map((r) => r.result)).toEqual(["current"]);
+  });
+
+  test("a file even today's block would take past 1 MiB: nothing written", () => {
+    const before = nearlyFull(-10);
+    expect(addInboxNote("codex", dataDir, e, undefined, { config: shared() })).toMatchObject({ ok: false });
+    expect(read(CODEX_FILE())).toBe(before);
+    expect(readInboxAgentNotes(dataDir).notes.codex).toBeUndefined();
   });
 });
 
@@ -386,37 +458,56 @@ describe("each agent gets its rules exactly once", () => {
     }
   });
 
-  // Codex and Gemini CLI connected through MCP: their note, then the instructions one `initialize` on this computer's
-  // `/mcp` gets (inbox.ts mcpForInitialize: inboxMcpReminderFor with `here`; inbox-mcp.ts builds them with the tier).
+  // Codex and Gemini CLI connected through MCP: the file the agent reads, found with ITS environment, then the
+  // instructions one `initialize` on `/mcp` gets (inbox.ts: `inboxReminder` is resolveInboxMcpReminder(config.json),
+  // and inbox-mcp.ts builds them for the client's tier). The Inbox cannot tell which file a connecting agent reads
+  // (Codex starts its MCP server with a cleared environment, so no CODEX_HOME reaches the shim), so the instructions
+  // always carry the rules: twice where the note holds them too, never none.
   const MCP_CLIENTS = { codex: { name: "codex-mcp-client", version: "0.165.0" }, gemini: { name: "gemini-cli-mcp-client", version: "0.0.1" } } as const;
-  const mcpSession = (agent: keyof typeof MCP_CLIENTS, config: object, client: InboxMcpClient = MCP_CLIENTS[agent], here: InboxMcpHere | null = { dataDir, environment: () => e }) => {
+  const mcpSession = (agent: keyof typeof MCP_CLIENTS, config: object, client: InboxMcpClient = MCP_CLIENTS[agent], agentEnvironment: AgentEnvironment = e) => {
     let fileText = "";
     try {
-      fileText = read(noteTarget(agent, e).path!);
+      fileText = read(noteTarget(agent, agentEnvironment).path!);
     } catch {
       // No file.
     }
-    return { fileText, instructions: inboxMcpInstructions(inboxMcpReminderFor(config, client, here ?? undefined), inboxMcpTierOf(client)) };
+    return { fileText, instructions: inboxMcpInstructions(resolveInboxMcpReminder(config), inboxMcpTierOf(client)) };
   };
   const mcpNoteFor = (agent: keyof typeof MCP_CLIENTS, config: object) => {
     mkdirSync(file(agent === "codex" ? ".codex" : ".gemini"), { recursive: true });
     expect(addInboxNote(agent, dataDir, e, undefined, { config }).ok).toBe(true);
   };
+  /** The agent run with its own folder, not the one the Inbox wrote the note in. */
+  const elsewhere = (agent: keyof typeof MCP_CLIENTS) => {
+    const env = agent === "codex" ? { ...fake.env, CODEX_HOME: file("codex-elsewhere") } : { ...fake.env, GEMINI_CLI_HOME: file("gemini-elsewhere") };
+    const other = createAgentEnvironmentFor({ platform: "linux", homeDir: fake.home, env });
+    mkdirSync(join(noteTarget(agent, other).path!, ".."), { recursive: true });
+    write(noteTarget(agent, other).path!, "Mine.\n");
+    return other;
+  };
 
   for (const agent of ["codex", "gemini"] as const) {
-    test(`${agent} through MCP: note with the rules → the instructions leave them out, byte for byte the built-in ones`, () => {
+    test(`${agent} through MCP: note with the rules → the instructions carry them too (twice, never none), the person's reminder as well`, () => {
       mcpNoteFor(agent, shared());
       const { fileText, instructions } = mcpSession(agent, shared());
       expect(count(fileText, RULES)).toBe(1);
-      expect(count(fileText + instructions, INBOX_RULES_LEAD)).toBe(1);
-      expect(count(fileText + instructions, RULES)).toBe(1);
-      expect(instructions).toBe(INBOX_MCP_INSTRUCTIONS);
-      // The person's reminder is not in the note: it stays in the instructions, the rules alone go.
+      expect(count(instructions, `${INBOX_RULES_LEAD}\n${RULES}`)).toBe(1);
       const withReminder = { prompts: { inbox: { rules: RULES, reminder: "Write to me in French." } } };
       mcpNoteFor(agent, withReminder);
       const both = mcpSession(agent, withReminder);
-      expect(count(both.fileText + both.instructions, RULES)).toBe(1);
+      expect(count(both.fileText + both.instructions, RULES)).toBe(2);
       expect(count(both.instructions, "Write to me in French.")).toBe(1);
+    });
+
+    test(`${agent} through MCP, run with ${agent === "codex" ? "another CODEX_HOME" : "another GEMINI_CLI_HOME"} than the Inbox's → it reads a file without them, and the instructions carry them`, () => {
+      mcpNoteFor(agent, shared());
+      expect(count(read(noteTarget(agent, e).path!), RULES)).toBe(1);
+      const other = elsewhere(agent);
+      expect(noteTarget(agent, other).path).not.toBe(noteTarget(agent, e).path);
+      const { fileText, instructions } = mcpSession(agent, shared(), MCP_CLIENTS[agent], other);
+      expect(fileText).toBe("Mine.\n");
+      expect(count(fileText + instructions, RULES)).toBe(1);
+      expect(instructions).toContain(`${INBOX_RULES_LEAD}\n${RULES}`);
     });
 
     test(`${agent} through MCP: no note (never added, or turned off) → the instructions carry them`, () => {
@@ -443,14 +534,9 @@ describe("each agent gets its rules exactly once", () => {
       expect(count(fileText + instructions, RULES)).toBe(1);
     });
 
-    test(`${agent} through MCP: a connection that is not this computer's own /mcp (a cloud agent's door, a linked computer) → the instructions carry them`, () => {
-      mcpNoteFor(agent, shared());
-      // The note here says nothing about what an agent elsewhere read.
-      expect(count(mcpSession(agent, shared(), MCP_CLIENTS[agent], null).instructions, RULES)).toBe(1);
-    });
   }
 
-  test("through MCP: a client the Inbox cannot tie to a note gets the rules, whatever the notes hold", () => {
+  test("through MCP: every client gets the rules, whatever the notes hold", () => {
     mcpNoteFor("codex", shared());
     mcpNoteFor("gemini", shared());
     for (const client of [
@@ -612,22 +698,6 @@ describe("the Inbox's gate: no rules through a note until the person turned the 
       expect(refreshInboxNotes(dataDir, e, { config: shared() }).map((r) => r.result)).toEqual(["refreshed"]);
       expect(count(read(CODEX_FILE()), RULES)).toBe(1);
       expect(count(read(CODEX_FILE()), INBOX_RULES_LEAD)).toBe(1);
-    });
-  });
-
-  test("while it is off, the MCP instructions are today's: they carry the rules even beside a note that holds them", () => {
-    mkdirSync(file(".codex"), { recursive: true });
-    // A note written while the Inbox was on, then the mark says off.
-    expect(addInboxNote("codex", dataDir, e, undefined, { config: shared() }).ok).toBe(true);
-    expect(count(read(CODEX_FILE()), RULES)).toBe(1);
-    const client = { name: "codex-mcp-client", version: "0.165.0" };
-    const here = { dataDir, environment: () => e };
-    off(() => {
-      mkdirSync(join(dataDir, "inbox"), { recursive: true });
-      writeFileSync(join(dataDir, "inbox", "turned-on"), `${JSON.stringify({ on: false, by: "command" })}\n`);
-      expect(inboxMcpReminderFor(shared(), client, here)).toEqual({ custom: null, rules: RULES });
-      turnOn();
-      expect(inboxMcpReminderFor(shared(), client, here)).toBeNull();
     });
   });
 });

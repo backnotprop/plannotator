@@ -117,7 +117,7 @@ import {
   HOST_PLAN_CARD_ENV,
   HOST_PLAN_CARD_MARKER,
 } from './enabled'
-import { claudeNoteFile, currentRules, reminderRulesWithNote } from './inbox-note-rules'
+import { claudeSessionNoteFile, currentRules, reminderRulesWithNote } from './inbox-note-rules'
 import { submitOrThrow, type Host, type LoadedPluginInfo } from './host'
 import {
   claudeTranscriptPaths,
@@ -371,6 +371,8 @@ interface Allowed {
   /** The T3 Code thread this session is (`t3ThreadOf`), or null. */
   t3Thread: string | null
   kind: SessionKind
+  /** `CLAUDE_CODE_ENTRYPOINT`, read for a panel session only (null otherwise): which panel host, for the note check (claudeSessionNoteFile). */
+  entrypoint: unknown
   /** The non-blocking reviews: the slash commands, the `plannotator` tool, the Bash take-over (`SESSION_KIND_FEATURES`). */
   reviews: boolean
   /** The Inbox reply wake: the link polls and delivers replies as turns. */
@@ -816,11 +818,12 @@ async function startSelfHeal($: Engine): Promise<void> {
 /**
  * The person's rules for this session's reminder (every place it goes: the first prompt, a launched
  * session's first wake, the compact hook), unless Claude Code's own rules file already holds them in the
- * Inbox's note: the file is read only when there are rules.
+ * Inbox's note and this session is one proven to load that file (claudeSessionNoteFile: not a T3 Code
+ * thread): the file is read only when there are rules.
  */
-async function reminderRulesOf($: Engine, rules: string | null): Promise<string | null> {
+async function reminderRulesOf($: Engine, session: { kind: SessionKind; entrypoint: unknown }, rules: string | null): Promise<string | null> {
   if (rules === null) return null
-  return reminderRulesWithNote(rules, claudeNoteFile(await $.env.get('CLAUDE_CONFIG_DIR'), await homeOf($)), (path) => $.fs.read(path))
+  return reminderRulesWithNote(rules, claudeSessionNoteFile(session, await $.env.get('CLAUDE_CONFIG_DIR'), await homeOf($)), (path) => $.fs.read(path))
 }
 
 /**
@@ -830,7 +833,7 @@ async function reminderRulesOf($: Engine, rules: string | null): Promise<string 
  */
 async function freshReminderRules($: Engine, settings: Allowed): Promise<string | null> {
   settings.inboxRulesSet = await currentRules(settings.inboxRulesSet, `${settings.dataDir}/config.json`, (path) => $.fs.read(path), (path) => $.fs.exists(path))
-  settings.inboxReminderRules = await reminderRulesOf($, settings.inboxRulesSet).catch(() => settings.inboxReminderRules)
+  settings.inboxReminderRules = await reminderRulesOf($, settings, settings.inboxRulesSet).catch(() => settings.inboxReminderRules)
   return settings.inboxReminderRules
 }
 
@@ -978,6 +981,7 @@ async function resolveAllowed($: Engine, e: { isInteractive?: unknown }): Promis
   const isInteractive = e.isInteractive === true
   const host = isInteractive ? { panel: false, hostPlanMode: false, desktop: false, t3Thread: null } : await sdkHostOf($)
   const kind = sessionKindOf({ isInteractive, ...host })
+  const entrypoint = kind === 'panel' ? await $.env.get('CLAUDE_CODE_ENTRYPOINT') : null
   const features = SESSION_KIND_FEATURES[kind]
   const dataDir = await resolveDataDir(
     {
@@ -1027,12 +1031,13 @@ async function resolveAllowed($: Engine, e: { isInteractive?: unknown }): Promis
     inboxReminder: features.reminder && inboxOn && resolveInboxReminderEnabled(await $.env.get('PLANNOTATOR_INBOX_TOOL'), configText),
     inboxReminderCustom: resolveInboxReminderCustom(configText),
     inboxRulesSet: resolveInboxReminderRules(configText),
-    inboxReminderRules: await reminderRulesOf($, resolveInboxReminderRules(configText)),
+    inboxReminderRules: await reminderRulesOf($, { kind, entrypoint }, resolveInboxReminderRules(configText)),
     panel: host.panel,
     hostPlanMode: host.hostPlanMode,
     planSwitch,
     t3Thread: host.t3Thread,
     kind,
+    entrypoint,
     reviews: features.reviews,
     wake: features.wake,
   }

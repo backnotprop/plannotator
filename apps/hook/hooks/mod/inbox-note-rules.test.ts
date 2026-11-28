@@ -6,7 +6,8 @@
 import { describe, expect, test } from 'bun:test'
 import { inboxReminderEnvValue } from './inbox'
 import { INBOX_RULES_LEAD, inboxReminderText } from './inbox-contract'
-import { claudeNoteFile, currentRules, reminderRulesWithNote } from './inbox-note-rules'
+import type { SessionKind } from './enabled'
+import { claudeNoteFile, claudeSessionNoteFile, currentRules, reminderRulesWithNote } from './inbox-note-rules'
 
 const TOOL = 'mcp__plugin_plannotator_tools__plannotator_inbox'
 const RULES = 'Ask me before you delete any file.'
@@ -54,6 +55,19 @@ describe('the rules the reminder carries', () => {
       expect(rules).toBe(RULES)
       expect(inboxReminderEnvValue(true, TOOL, null, rules)).toBe(`${inboxReminderText(TOOL)}\n\n${INBOX_RULES_LEAD}\n${RULES}`)
     }
+  })
+
+  test('a T3 Code thread (or any host not proven to load the file) keeps them even while the note holds them; Claude Code itself does not', async () => {
+    const reminderOf = async (kind: SessionKind, entrypoint: unknown) =>
+      inboxReminderEnvValue(true, TOOL, null, await reminderRulesWithNote(RULES, claudeSessionNoteFile({ kind, entrypoint }, undefined, '/home/ann'), () => NOTE))
+    const withRules = `${inboxReminderText(TOOL)}\n\n${INBOX_RULES_LEAD}\n${RULES}`
+    // T3 runs Claude through the Agent SDK: twice there (the note, if it loads it, and the reminder), never none.
+    expect(await reminderOf('t3', 't3-code')).toBe(withRules)
+    expect(await reminderOf('panel', 'orca')).toBe(withRules)
+    expect(await reminderOf('headless', 'sdk-ts')).toBe(withRules)
+    // Claude Code's own prompt and its own VS Code panel load the file: once, as before.
+    expect(await reminderOf('terminal', 'cli')).toBe(inboxReminderText(TOOL))
+    expect(await reminderOf('panel', 'claude-vscode')).toBe(inboxReminderText(TOOL))
   })
 
   test('no rules, or no folder: nothing is read', async () => {

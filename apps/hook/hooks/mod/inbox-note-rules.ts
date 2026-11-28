@@ -10,13 +10,25 @@
  * the Inbox rewrites the note when the person saves new rules, so an answer
  * made with the rules of the session's start would carry the old ones again.
  */
-import { inboxReminderRulesAfterNote, resolveInboxReminderRules } from './enabled'
+import { inboxReminderRulesAfterNote, resolveInboxReminderRules, type SessionKind } from './enabled'
 import { isAbsolutePath } from './paths'
 
 /** Claude Code's rules file the Inbox writes its note into, or null without an absolute config folder. */
 export function claudeNoteFile(configDirEnv: unknown, home: string | undefined): string | null {
   const dir = typeof configDirEnv === 'string' && configDirEnv ? configDirEnv : home ? `${home}/.claude` : null
   return dir !== null && isAbsolutePath(dir) ? `${dir}/rules/plannotator-inbox.md` : null
+}
+
+/**
+ * The rules file to check for this session (claudeNoteFile), or null where the session is not proven to
+ * load it, so the reminder keeps the rules even when the note holds them: twice there, never none. Proven:
+ * Claude Code's own prompt (`terminal`) and its own VS Code extension's panel (`claude-vscode`). Not: a T3
+ * Code thread (T3 runs Claude through the Agent SDK, not proven to load the person's rules folder; the
+ * Inbox's MCP instructions do not count on it either), Orca's panel, and any other host.
+ */
+export function claudeSessionNoteFile(session: { kind: SessionKind; entrypoint: unknown }, configDirEnv: unknown, home: string | undefined): string | null {
+  const loads = session.kind === 'terminal' || (session.kind === 'panel' && session.entrypoint === 'claude-vscode')
+  return loads ? claudeNoteFile(configDirEnv, home) : null
 }
 
 /**

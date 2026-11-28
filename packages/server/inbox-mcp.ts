@@ -393,9 +393,7 @@ export interface InboxMcpContext extends InboxSnoozeMcpContext, InboxScheduledMc
    * `prompts.inbox.rules` / `prompts.inbox.reminder`, read on every
    * connection, so a change applies at the next session). Null when neither
    * is configured: the built-in instructions stand unchanged. Absent: the
-   * built-in instructions, as before. An initialize on the Inbox's own `/mcp`
-   * gets the rules left out where the client's agent has them in its note
-   * (inbox-mcp-note-rules.ts).
+   * built-in instructions, as before.
    */
   inboxReminder?: () => InboxMcpReminder | null;
   /**

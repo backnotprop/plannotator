@@ -219,7 +219,6 @@ import { isAddressInUseError } from "./remote";
 import { createRequestHostGuard } from "./request-host-guard";
 import { markPlannotatorResponse, withPlannotatorServerHeader } from "./plannotator-server-marker";
 import { createInboxMcpServer, INBOX_BOARD_OFF_TEXT, INBOX_STEPS_OFF_TEXT, inboxMcpInitializeClient, resolveInboxMcpReminder, type InboxMcpClient, type InboxMcpContext } from "./inbox-mcp";
-import { inboxMcpReminderFor } from "./inbox-mcp-note-rules";
 import { guideReviewOf, guidePullKey, inboxGuideFileContents, inboxGuideRoute } from "./inbox-guides";
 import { guideReviewImage, pullReviewImage, reviewImageHttp } from "./inbox-review-image";
 import { guideReviewMarkdownImage, pullReviewMarkdownImage } from "./inbox-review-markdown-image";
@@ -2003,13 +2002,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     },
   };
   const mcp = createMcpHandler(() => createInboxMcpServer(mcpContext), { legacy: "stateless", maxRequestBodySize: INBOX_MAX_REQUEST_BYTES });
-  // An initialize request gets a server built for its client: the person's rules are sized to what that client keeps,
-  // and left out for an agent whose note on this computer holds them (inbox-mcp-note-rules.ts). Only this route says "here".
+  // An initialize request gets a server built for its client: the person's rules are sized to what that client keeps.
   const mcpForInitialize = (client: InboxMcpClient) =>
-    createMcpHandler(
-      () => createInboxMcpServer({ ...mcpContext, mcpClient: client, inboxReminder: () => inboxMcpReminderFor(loadConfig(), client, { dataDir, environment: () => agentEnvironment }) }),
-      { legacy: "stateless", maxRequestBodySize: INBOX_MAX_REQUEST_BYTES },
-    );
+    createMcpHandler(() => createInboxMcpServer({ ...mcpContext, mcpClient: client }), { legacy: "stateless", maxRequestBodySize: INBOX_MAX_REQUEST_BYTES });
 
   const health = (): InboxHealth => ({
     ok: true,
