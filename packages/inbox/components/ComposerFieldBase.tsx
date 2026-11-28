@@ -48,6 +48,7 @@ import { textareaField } from '../voiceField';
 import { isPhone, isTouchScreen } from '../phone';
 import { inboxSkillFilter } from '../skills';
 import { builtinSkillIcon } from './BuiltinSkillIcon';
+import { holdsImeEscape, isImeCompositionKey } from '@plannotator/ui/utils/commentSubmitKey';
 import { hashtagMenuLeft, useHashtagPicker, useInitiativeTags } from '../hashtags';
 import { useReplyMentions } from '../replyMentions';
 import { FieldLead } from './FieldLead';
@@ -359,7 +360,8 @@ export function ComposerFieldBase({
           hash.onSelect();
         }}
         onKeyDown={(event) => {
-          if (tagMenu && tagShown && (event.key === 'Enter' || event.key === 'Tab') && !event.metaKey && !event.ctrlKey && !event.altKey && tagMenu.activeIndex !== null) {
+          if (holdsImeEscape(event)) return;
+          if (tagMenu && tagShown && (event.key === 'Enter' || event.key === 'Tab') && !isImeCompositionKey(event) && !event.metaKey && !event.ctrlKey && !event.altKey && tagMenu.activeIndex !== null) {
             event.preventDefault();
             select(tagMenu.activeIndex);
             return;

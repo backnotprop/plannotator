@@ -25,7 +25,7 @@ import type { DiffFile } from '../types';
 import type { AIProviderOption } from '@plannotator/ui/utils/aiProvider';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { useConfigValue } from '@plannotator/ui/config';
-import { isCommentSubmitKey } from '@plannotator/ui/utils/commentSubmitKey';
+import { holdsImeEscape, isCommentSubmitKey } from '@plannotator/ui/utils/commentSubmitKey';
 import { artifactAnchorLabel, artifactAnnotationQuote } from '../utils/artifactAnnotations';
 import { isAgentGeneratedFinding } from '../utils/explainFinding';
 
@@ -510,6 +510,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
               value={editingOutdated.draft}
               onChange={(e) => setEditingOutdated({ id: annotation.id, draft: e.target.value })}
               onKeyDown={(e) => {
+                if (holdsImeEscape(e)) return;
                 if (e.key === 'Escape') { e.preventDefault(); setEditingOutdated(null); }
                 else if (isCommentSubmitKey(e, enterSavesComment)) { e.preventDefault(); saveOutdatedEdit(); }
               }}

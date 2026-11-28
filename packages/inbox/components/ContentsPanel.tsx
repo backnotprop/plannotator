@@ -5,6 +5,7 @@ import { DocumentContents } from '@plannotator/ui/components/DocumentContents';
 import { Icon } from '../icons';
 import { peekSheetHost } from './AttachmentStepper';
 import { Tip } from './Tip';
+import { isImeCompositionKey } from '@plannotator/ui/utils/commentSubmitKey';
 
 /**
  * The Contents button over an open document, when ui's contents rail is not on screen (contents.ts):
@@ -89,7 +90,7 @@ function ContentsSheet(props: Props) {
     // The window's capture phase runs before the pane's ladder and the shortcut scopes (AnnotationsChip's way).
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        if (event.defaultPrevented) return;
+        if (event.defaultPrevented || isImeCompositionKey(event)) return;
         event.preventDefault();
         event.stopPropagation();
         setOpen(false);

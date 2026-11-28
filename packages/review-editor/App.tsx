@@ -287,6 +287,7 @@ import {
   type ReviewSubmissionRecovery,
   type ReviewRecoveryStorage,
 } from './utils/reviewSubmissionRecovery';
+import { isImeCompositionKey } from '@plannotator/ui/utils/commentSubmitKey';
 
 declare const __APP_VERSION__: string;
 
@@ -2760,6 +2761,7 @@ const ReviewApp: React.FC = () => {
   // Global keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (isImeCompositionKey(e)) return;
       // Cmd/Ctrl+F to focus file search when diff files are available.
       // Bail while the guide takeover is open (file tree isn't rendered) and
       // don't intercept in the Commits view (its rail has no search input) —

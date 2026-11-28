@@ -2068,7 +2068,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     const section = sectionRef.current;
     if (!section) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.isComposing || event.defaultPrevented) return;
+      if (event.key !== 'Escape' || isComposingKey(event) || event.defaultPrevented) return;
       const area = event.composedPath()[0];
       if (!(area instanceof HTMLTextAreaElement) || area.value.trim() === '') return;
       const owner = area.closest('[data-annotation-id], [data-code-annotation-id]');

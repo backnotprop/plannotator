@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react';
+import { isImeCompositionKey } from '@plannotator/ui/utils/commentSubmitKey';
 
 const SEARCH_INPUT = '[data-file-tree-search-input]';
 
@@ -25,7 +26,7 @@ export function useTreeSearchKeys(model: SearchableTree, openPath: () => string 
       if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
         steering.current = true;
         queueMicrotask(() => { steering.current = false; });
-      } else if (event.key === 'Escape' && !model.isSearchOpen()) {
+      } else if (event.key === 'Escape' && !model.isSearchOpen() && !isImeCompositionKey(event)) {
         event.preventDefault();
         event.stopPropagation();
         const at = open.current();
