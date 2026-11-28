@@ -1,5 +1,5 @@
 /**
- * The Pele runtime slot (https://pele.run, MIT, pinned 1.3.0): a second
+ * The Pele runtime slot (https://pele.run, MIT, pinned 1.13.0): a second
  * engine for Mermaid-syntax fences. `diagram-engine.ts` decides which engine
  * draws a fence (shipped: Pele where it can, Mermaid the rest).
  *

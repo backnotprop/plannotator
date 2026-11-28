@@ -2489,7 +2489,8 @@ export async function startReviewServer(
           }
 
           if (savedGuideDeleteMatch && req.method === "PATCH") {
-            const savedId = decodeURIComponent(savedGuideDeleteMatch[1]);
+            const savedId = decodePathSegment(savedGuideDeleteMatch[1]);
+            if (savedId === null) return Response.json({ error: MALFORMED_PATH_ERROR }, { status: 400 });
             let body: { title?: unknown };
             try {
               body = (await req.json()) as { title?: unknown };

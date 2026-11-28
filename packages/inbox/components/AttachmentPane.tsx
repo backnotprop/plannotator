@@ -28,7 +28,7 @@ import { annotationOwnsHighlight } from '@plannotator/ui/utils/annotationOwnsHig
 import { groupAnnotationsByDocument, type AnnotationScope } from '@plannotator/ui/utils/annotationScope';
 import { InboxApiError, type AttachmentView } from '../api';
 import { attachmentDrawReady } from '../threadDrawReady';
-import { selectionOnPhrase, useInboxFileSource } from '../fileSource';
+import { pageFrameTooLarge, selectionOnPhrase, useInboxFileSource } from '../fileSource';
 import { folderOf, resolveInboxHtmlLink } from '../htmlLinks';
 import { htmlAssetRouteFromDocument } from '@plannotator/ui/utils/htmlLinkNavigation';
 import { ImageLightbox } from '@plannotator/ui/components/ImageLightbox';
@@ -89,8 +89,7 @@ import { ImageSwipePeek, isImageStep } from './ImageSwipePeek';
 import { OptionCaption } from './OptionCaption';
 import { FIRST_OPTION_NOTE, LAST_OPTION_NOTE, optionAnnouncement, type OptionSet } from '../optionSets';
 import { createPortal } from 'react-dom';
-import type { Notice } from './Markup';
-import { fileCardBody } from './Markup';
+import { fileCardBody, type Notice } from './Markup';
 import { isWordlessMarkup, MARKUP_ONLY_TEXT, markupOf } from '../markup';
 import { useShortcutScope } from '../panes/scope';
 import { inboxFileViewerShortcuts } from '../shortcuts/fileViewer.shortcuts';
@@ -108,6 +107,7 @@ import { whenStill } from '../whenStill';
 import { unsavedComposer, unsavedComposers } from './unsavedComposers';
 import { linkedValue, pageStartAt, splitLinked, usePageClear, usePageStart, type LinkedPage, type PageStart } from './htmlPageFrame';
 import { versionLineWords } from './versionLineWords';
+import { useUnanchoredSet } from '../unanchoredSet';
 export { unsavedComposer, unsavedComposers };
 
 /**
@@ -371,7 +371,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   // The text grew past what the window reads whole (413): the Download card instead.
   const [tooLarge, setTooLarge] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(props.focusId);
-  const [unanchored, setUnanchored] = useState<ReadonlySet<string>>(new Set());
+  const [unanchored, setUnanchored, reportUnanchored] = useUnanchoredSet();
   const [inputMethod, setInputMethod] = useState<InputMethod>('drag');
   const [mode, setMode] = useState<EditorMode>('selection');
   // The pen. It starts off (a click does what the page says) unless the person turned it on in this thread.
@@ -2514,7 +2514,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               {error}
             </div>
           )}
-          {view && isHtml && view.html !== null && (
+          {view && isHtml && view.html !== null && !tooLarge && (
             // Kept mounted under a linked page (inert, hidden), so Back finds it as it was left.
             <div
               ref={setFitBox}
@@ -2537,7 +2537,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               onPageTap={phoneHtml ? onPageTap : undefined}
               rawHtml={view.html}
               // Its own document, served under its own policy: web pictures load in the page, never in the window.
-              frameUrl={source.pageFrameUrl}
+              frameUrl={pageFrameTooLarge(source.pageFrameUrl, () => setTooLarge(true))}
               title={attachment.name}
               annotations={annotations}
               onAddAnnotation={(annotation) => void save(annotation)}
@@ -2831,7 +2831,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                 sideButton={sideButton}
                 refRepo={refRepo}
                 readOnly={props.readOnly}
-                onRestoreReport={(report) => setUnanchored(new Set(report.unanchored))}
+                onRestoreReport={reportUnanchored}
                 suggestComment={suggestion?.phrase ? (selected) => suggestionFor(view.text, suggestion, selected) : undefined}
               />
               </ImageResolverContext.Provider>

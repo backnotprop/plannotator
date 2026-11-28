@@ -4,7 +4,8 @@
  */
 import { expect, test } from 'bun:test';
 import { InboxApiError } from './api';
-import { SEND_NOT_SENT, sendFailure } from './sendFailure';
+import { InboxWriteTimeout } from './apiWrite';
+import { SEND_MAY_NOT_HAVE_GONE, SEND_NOT_SENT, sendFailure } from './sendFailure';
 
 const PATH_ERROR = "EACCES: permission denied, open '/Users/me/.plannotator/inbox/projects/ledger/threads/msg_01.jsonl'";
 const FULL_ERROR = "ENOSPC: no space left on device, write '/Users/me/.plannotator/inbox/projects/ledger/threads/msg_01.jsonl'";
@@ -57,4 +58,8 @@ test('a reply the Inbox could not write for a full disk (ENOSPC in a 500) says t
 test('no answer at all (the Inbox down, the network gone): send again; the browser\'s words behind Details', () => {
   expect(sendFailure(new TypeError('Failed to fetch'))).toEqual({ line: SEND_NOT_SENT, details: 'Failed to fetch' });
   expect(sendFailure('lost')).toEqual({ line: SEND_NOT_SENT, details: null });
+});
+
+test('a write given up with nothing arriving may still land: it never says "was not sent", but that it may not have gone', () => {
+  expect(sendFailure(new InboxWriteTimeout(20_000))).toEqual({ line: SEND_MAY_NOT_HAVE_GONE, details: 'no answer in 20 s' });
 });

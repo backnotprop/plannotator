@@ -26,6 +26,7 @@ import { readInboxQuestionKind } from '@plannotator/core/inbox-types';
 import { whenTime } from '@plannotator/core/inbox-format';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
 import { InboxApiError, inboxApi } from '../api';
+import { sendReadMs } from '../apiWrite';
 import { replyKeysToRenew, type SendTarget, type SentContents } from '../sendTargets';
 import { agentName, formatCount } from '../format';
 import { HostMark, Icon } from '../icons';
@@ -83,6 +84,9 @@ export interface DecisionModeProps {
   open: boolean;
   /** The latest projection (`GET /api/inbox/decisions`), null until read. */
   decisions: readonly InboxDecision[] | null;
+  /** The projection could not be read (every try failed, `decisions` still null): said as a card's failed read is, with Try again. */
+  readFailed?: boolean;
+  onReadAgain?: () => void;
   /** The thread the sitting is scoped to, by its subject: drawn in the head; null or absent: nothing drawn. */
   scope?: string | null;
   /** The list rows, by thread id: where a sent reply is (Delivered, Replied). */
@@ -460,7 +464,7 @@ export function DecisionMode(props: DecisionModeProps) {
       let draft: { draft: unknown };
       let model: Awaited<ReturnType<typeof inboxApi.thread>>;
       try {
-        [draft, model] = await Promise.all([inboxApi.replyDraft(first.thread.id), inboxApi.thread(first.thread.id)]);
+        [draft, model] = await Promise.all([inboxApi.replyDraft(first.thread.id), inboxApi.thread(first.thread.id, sendReadMs())]);
       } catch {
         setSend(key, { kind: 'failed', error: "Couldn't check the thread for a draft reply, so nothing was sent." });
         return 'failed';
@@ -915,6 +919,13 @@ export function DecisionMode(props: DecisionModeProps) {
                 setProto({ messageId: current.message.id, key });
               }}
             />)}
+          </div>
+        ) : props.readFailed ? (
+          <div className="ib-dm-loading" role="alert" data-decision-read-failed="">
+            Couldn&apos;t read the question.{' '}
+            <button type="button" className="ib-dm-lnk" onClick={props.onReadAgain}>
+              Try again
+            </button>
           </div>
         ) : (
           <div className="ib-dm-loading">Reading what waits on you…</div>

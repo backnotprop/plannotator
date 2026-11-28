@@ -670,9 +670,13 @@ export function PullsCard({
  * opens the card after the hover card's delay; on a touch screen a tap opens the sheet instead of the thread.
  */
 export function RowPullsMark({ threadId, summary }: { threadId: string; summary: InboxThreadPullsSummary | undefined }) {
+  // Most rows have no PR: they set up no card (its hooks were eleven per row, on all ~2,200 rows a large Inbox mounts).
+  return summary ? <RowPullsMarkShown threadId={threadId} summary={summary} /> : null;
+}
+
+function RowPullsMarkShown({ threadId, summary }: { threadId: string; summary: InboxThreadPullsSummary }) {
   const { open, setOpen, hover, cardHover, close } = usePopover();
   const { answer, failed, retrying, setAnswer, retry } = useThreadPulls(threadId, !!open);
-  if (!summary) return null;
   // Once read, the card's answer is the newest (the row's summary follows on the next list read).
   const shown = (answer && pullsSummaryOf(answer)) ?? summary;
   const words = pullsMarkWords(shown, labelOfKey(shown.headline.key));

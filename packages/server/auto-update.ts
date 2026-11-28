@@ -1034,6 +1034,19 @@ export function installerPathWith(base: string | undefined, extra: readonly stri
   return folders.join(":");
 }
 
+/**
+ * The environment the installer inherits. Windows drops PSModulePath: a
+ * Plannotator started under PowerShell 7 carries that shell's module folders,
+ * and Windows PowerShell then loads PowerShell 7's manifest of
+ * Microsoft.PowerShell.Utility, which leaves it without Get-FileHash, so
+ * install.ps1 fails at the checksum. Without the variable powershell.exe
+ * builds its own module path.
+ */
+export function installerBaseEnv(env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform): NodeJS.ProcessEnv {
+  if (platform !== "win32") return env;
+  return Object.fromEntries(Object.entries(env).filter(([key]) => key.toLowerCase() !== "psmodulepath"));
+}
+
 function installerEnv(launch: InstallerLaunch): { file: string; args: string[]; env: NodeJS.ProcessEnv } {
   const { file, args, env: commandEnv } = installerCommand(launch.platform, launch.flags);
   const prepare = launch.prepare ?? updatePrepareInvocation();
@@ -1042,7 +1055,7 @@ function installerEnv(launch: InstallerLaunch): { file: string; args: string[]; 
     file,
     args,
     env: {
-      ...process.env,
+      ...installerBaseEnv(process.env, launch.platform),
       // Set only when it adds folders: Windows keeps its own PATH key untouched.
       ...(path !== process.env.PATH && { PATH: path }),
       PLANNOTATOR_UPDATE_VERSION: launch.version,

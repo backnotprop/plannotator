@@ -98,6 +98,11 @@ function subscribe(listener: () => void): () => void {
 
 const snapshot = () => current;
 
+/** How many draws watch the rows' sessions (a list watches once, not once per row: RowSlot.tsx). */
+export function rowSessionsWatchersForTests(): number {
+  return listeners.size;
+}
+
 /** Plain state, not `useSyncExternalStore`: agents are set mid list read, and a store hook would draw before the read's own changes. */
 export function useRowSessions(): RowSessions {
   // In a picture (pictureWorld.ts): its own agents, nothing held, the person's never read.

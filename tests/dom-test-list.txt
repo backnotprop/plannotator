@@ -19,6 +19,7 @@ packages/ui/components/html-viewer/HtmlViewer.bridgeAsset.test.tsx
 packages/ui/components/html-viewer/HtmlViewer.sandbox.test.tsx
 packages/ui/components/html-viewer/HtmlViewer.frameScale.test.tsx
 packages/ui/components/html-viewer/bridgeTouchSelection.test.tsx
+packages/ui/components/html-viewer/bridgeCollapsedRange.test.ts
 packages/ui/components/html-embed/HtmlEmbedBlock.test.tsx
 packages/ui/components/LazyBlockBoundary.test.tsx
 packages/ui/components/RegionBoundary.test.tsx
@@ -66,11 +67,15 @@ packages/ui/components/MermaidBlock.theme.test.tsx
 packages/ui/components/DiagramBlock.anchor.test.tsx
 packages/ui/components/DiagramBlock.askAI.test.tsx
 packages/ui/components/DiagramBlock.engine.test.tsx
+packages/ui/components/DiagramBlock.restoreReportLoop.test.tsx
+packages/ui/components/DiagramBlock.restoreReportFresh.test.tsx
 packages/ui/utils/pele-labels.test.ts
 packages/ui/utils/pele-render.test.ts
 packages/ui/utils/pele-hostile.test.ts
+packages/ui/utils/hostDiagramSafety.test.ts
 packages/ui/utils/diagramAnchorPele.test.ts
 packages/ui/utils/peleRowSpaces.test.ts
+packages/ui/utils/peleSankeyHeader.test.ts
 packages/ui/components/DiagramBlock.copySource.test.tsx
 packages/ui/components/Viewer.askAISelectionLine.test.tsx
 packages/ui/components/Viewer.codeDocumentRepeatedLine.test.tsx
@@ -93,11 +98,13 @@ packages/inbox/contentsDots.test.tsx
 packages/inbox/links.test.tsx
 packages/inbox/replyFileLinks.test.tsx
 packages/inbox/replyFeedback.test.tsx
+packages/inbox/replySameAnswers.test.tsx
 packages/inbox/replyFocusOnOpen.test.tsx
 packages/inbox/permissionFocus.test.tsx
 packages/inbox/replyBoxTyping.test.tsx
 packages/inbox/paneFailureKeepsReply.test.tsx
 packages/inbox/replyFootPhone.test.tsx
+packages/inbox/sendAlwaysEnds.test.tsx
 packages/inbox/replyDraftNeverLost.test.tsx
 packages/inbox/farReplyDrafts.test.tsx
 packages/inbox/composeAutosave.test.tsx
@@ -118,6 +125,7 @@ packages/inbox/panePollsPause.test.tsx
 packages/inbox/decisionMode.test.tsx
 packages/inbox/decisionCardContract.test.tsx
 packages/inbox/decisionModeSettings.test.tsx
+packages/inbox/decisionSittingWait.test.tsx
 packages/inbox/threadFolding.test.tsx
 packages/inbox/threadNameMeta.test.tsx
 packages/inbox/components/stalePageNotice.test.tsx
@@ -254,6 +262,8 @@ packages/inbox/keyboardKeys.test.tsx
 packages/inbox/keyGuardsPageQueries.test.tsx
 packages/ui/shortcuts/runtime.guardCalls.test.tsx
 packages/inbox/rowSlotRenders.test.tsx
+packages/inbox/rowSlotWatchers.test.tsx
+packages/inbox/rowWatchers.test.tsx
 packages/inbox/actionDraftSend.test.tsx
 packages/inbox/actionNoteRefusal.test.tsx
 packages/inbox/actionSkip.test.tsx
@@ -349,6 +359,8 @@ packages/inbox/settingsSections.test.tsx
 packages/inbox/searchPalette.test.tsx
 packages/inbox/searchPaletteMachines.test.tsx
 packages/inbox/searchShortcut.test.tsx
+packages/inbox/searchTip.test.tsx
+packages/inbox/searchTipApp.test.tsx
 packages/inbox/openIn.test.tsx
 packages/inbox/openInCheck.test.tsx
 packages/inbox/openInFile.test.tsx
@@ -816,6 +828,7 @@ packages/inbox/contextNotes/contextNotes.test.tsx
 packages/inbox/composeLaunchTip.test.tsx
 packages/inbox/sidebarTip.test.tsx
 packages/inbox/attachmentDownload.test.tsx
+packages/inbox/attachmentPageTooLarge.test.tsx
 packages/inbox/listFilterButton.test.tsx
 packages/inbox/listFilterSearchMenu.test.tsx
 packages/inbox/prototypeWindow.test.tsx
@@ -844,6 +857,7 @@ packages/inbox/agents/setAgentIcons.test.tsx
 packages/inbox/agents/animateAnyIcon.test.tsx
 packages/inbox/agents/agentRename.test.tsx
 packages/inbox/agents/agentMenuLaunch.test.tsx
+packages/inbox/agents/agentMenuNewMessage.test.tsx
 packages/inbox/agents/agentRexPlace.test.tsx
 packages/inbox/agents/rexMark.test.tsx
 packages/inbox/agents/agentStatusMark.test.tsx
@@ -973,3 +987,5 @@ packages/inbox/guide/usePowerUp.test.tsx
 packages/inbox/guide/useViewedTicks.test.tsx
 packages/inbox/components/reply/replyBoxParity.test.tsx
 packages/inbox/guide/diffFontLoad.test.tsx
+packages/ui/components/diagram/DiagramCanvas.controlsReserve.test.tsx
+packages/ui/components/diagram/diagramSourceAccept.test.tsx

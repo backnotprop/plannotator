@@ -72,10 +72,11 @@ export function launchOff(dataDir: string): void {
  * first use would otherwise show it on the first hover of a band, or after the list holds still on a phone, and claim
  * it. Code review's one-time offer too (packages/inbox/components/CodeReviewOffer.tsx): on a release build it is first
  * in the line while Code review was never decided and opens at once, over whatever a spec is doing; its stamp settles
- * it and leaves the switch as the world set it. Every world's `inboxReveals` starts with both (`E2E_LAUNCH_OFF`,
+ * it and leaves the switch as the world set it. The Search tip too (packages/inbox/search/searchTip.ts): it would
+ * open beside the palette at a spec's first search. Every world's `inboxReveals` starts with all three (`E2E_LAUNCH_OFF`,
  * `launchOff`); a spec that writes `inboxReveals` whole spreads it in. The offer's own spec takes `code_review` out.
  */
-export const E2E_GROUP_TIP_SEEN = { band_tip: { shownAt: '2026-10-01T10:00:00.000Z' }, code_review: { shownAt: '2026-10-01T10:00:00.000Z' } } as const;
+export const E2E_GROUP_TIP_SEEN = { band_tip: { shownAt: '2026-10-01T10:00:00.000Z' }, code_review: { shownAt: '2026-10-01T10:00:00.000Z' }, search_tip: { shownAt: '2026-10-01T10:00:00.000Z' } } as const;
 
 /**
  * The config.json keys every e2e world starts with (`launchOff`): spread it into a config a spec writes whole. Besides

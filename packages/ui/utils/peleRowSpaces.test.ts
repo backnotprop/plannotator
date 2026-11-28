@@ -53,6 +53,17 @@ describe.if(hasDom)('a label Pele wraps over rows', () => {
     expect(PELE_FINDER.targetFromElement(result.svgNode, result.svgNode.querySelector('g.pele-node[data-id="A"]')!, 'rows')?.label).toBe(words);
   });
 
+  test('a Chinese or Japanese label Pele wraps between characters reads run together, as its source has it', async () => {
+    const words = '这是一个非常长的中文标签，用来测试换行是否正确，不应该把整个图拉得很宽很宽很宽';
+    const result = await renderDiagram('mermaid', 'cjk', `flowchart TD\n  A["${words}"] --> B[Done]`, { colorTheme: 'github', mode: 'light' });
+    if (result.ok === false) throw new Error(result.message);
+    const node = result.svgNode.querySelector('g.pele-node[data-id="A"] text')!;
+    expect(Array.from(node.children).filter((row) => (row.textContent ?? '').trim() !== '').length).toBeGreaterThan(1);
+    expect(node.textContent).toBe(words);
+    // A comment's label is the label as written, which is what Mermaid's finder reads for the same fence.
+    expect(PELE_FINDER.targetFromElement(result.svgNode, result.svgNode.querySelector('g.pele-node[data-id="A"]')!, 'cjk')?.label).toBe(words);
+  });
+
   test('a one-row label, a row that already ends in a space, and rows placed by a list are left as they are', () => {
     const svg = parseInertSvg(
       '<svg xmlns="http://www.w3.org/2000/svg"><text id="one"><tspan x="0" y="0">Alone</tspan></text>' +

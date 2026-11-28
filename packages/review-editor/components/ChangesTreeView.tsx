@@ -310,7 +310,10 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
     const entry = focused ? l.entries.get(focused) : undefined;
     if (entry?.kind === 'file' && entry.file.path !== p.activePath && entry.file.path !== justPicked.current) p.onSelectFile(entry.index, { via: 'focus' });
   }, [model]);
-  const searchKeys = useTreeSearchKeys(model);
+  const searchKeys = useTreeSearchKeys(model, () => {
+    const { props: p, layout: l } = live.current;
+    return p.activePath ? l.treePathOf.get(p.activePath) ?? null : null;
+  });
 
   const focusing = useRef(false);
   useEffect(() => {

@@ -2478,7 +2478,11 @@ export async function startReviewServer(options: {
 		}
 
 		if (savedGuideDeleteMatch && req.method === "PATCH") {
-			const savedId = decodeURIComponent(savedGuideDeleteMatch[1]);
+			const savedId = decodePathSegment(savedGuideDeleteMatch[1]);
+			if (savedId === null) {
+				json(res, { error: MALFORMED_PATH_ERROR }, 400);
+				return;
+			}
 			let body: { title?: unknown };
 			try {
 				body = (await parseBody(req)) as { title?: unknown };

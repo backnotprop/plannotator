@@ -73,7 +73,8 @@ import { newRecordBatch, noteOwnRecord, noteRecord } from './openThreadReads';
 import { archivedRowPatch, patchShownRow, readRowPatch, shownRowOf } from './rowActions';
 import { createOwnSaves } from './ownSaves';
 import { createKeyedSignal } from './signal';
-import { keepSame } from './listSame';
+import { newDecisionWatch } from './decisions/model';
+import { readKeptDecisions } from './decisions/keptRead';
 import { draftsReadOwed, replyDraftsDiffer, unsentThreads } from './draftsReads';
 import { machinesModel, rowSnoozes, snoozeBlockedBy, threadAwayLine } from './machines';
 import { ASK_AGENT_TO_UPDATE, ASK_AGENT_TO_UPDATE_THREAD, MachineUpdateDialog } from './components/MachineUpdate';
@@ -143,7 +144,7 @@ import { systemShown } from './system/gate';
 import { useSystemProjects } from './system/projects';
 import { systemDropped, systemEscapeTo, systemKept } from './system/route';
 import { feedbackCopiedToast, feedbackPrompt } from './feedbackPrompt';
-import { connectLineNews, noteQuestionRows } from './agents';
+import { agentsRead, connectLineNews, noteQuestionRows } from './agents';
 import { ScheduledRoute, useScheduledOn } from './scheduled/ScheduledPage';
 import { PlansRoute, usePlansOn } from './plans/PlansPage';
 import { GridRoute, useGridOn } from './grid/GridPage';
@@ -363,11 +364,9 @@ function Inbox() {
     void inboxApi.dismissOutbox(key).catch(() => {});
   }, []);
   /**
-   * Decision mode (experimental, approval "inbox-decision-mode"): the
-   * projection while the feature is on, and the sitting (open, or tucked
-   * into its pill behind a thread). Off, nothing of it renders. Thread only
-   * (owner, 2026-10-27): a sitting is one thread's decisions (`thread`), opened
-   * from that thread's open-questions list; there is no global way in.
+   * Decision mode (approval "inbox-decision-mode"): the watched threads' decisions while it is on, and the sitting
+   * (open, or tucked into its pill behind a thread). Off, nothing of it renders. Thread only (owner, 2026-10-27): a
+   * sitting is one thread's decisions (`thread`), opened from its open-questions list; there is no global way in.
    */
   const [decisions, setDecisions] = useState<InboxDecision[] | null>(null);
   // `startNonce`: a new start while the sitting is open moves it to that card.
@@ -375,7 +374,7 @@ function Inbox() {
   /** What opened decision mode: focus goes back there when the sitting ends. */
   const decideOpener = useRef<HTMLElement | null>(null);
   const [decideLeft, setDecideLeft] = useState(0);
-  const decisionModeOnRef = useRef(false);
+  const decisionWatch = useRef(newDecisionWatch());
   const questionListeners = useRef(new Set<(question: InboxQuestion) => void>());
   /**
    * Thread steps' changes (approval "inbox-thread-steps"): a `steps` record names its thread; presence moving
@@ -406,16 +405,8 @@ function Inbox() {
     questionListeners.current.add(listener);
     return () => void questionListeners.current.delete(listener);
   }, []);
-  const refreshDecisions = useCallback(async () => {
-    if (!decisionModeOnRef.current) return;
-    try {
-      const next = await inboxApi.decisions();
-      // A read that brought nothing new keeps the decisions drawn (listSame.ts `keepSame`): nothing is drawn again.
-      if (decisionModeOnRef.current) setDecisions((current) => keepSame(current, next.decisions));
-    } catch {
-      // Off on the server (another window turned it off): the next settings read says so.
-    }
-  }, []);
+  // Only the watched threads' decisions are held (the read lists the whole store's): decisions/keptRead.ts.
+  const refreshDecisions = useCallback(() => readKeptDecisions(inboxApi.decisions, decisionWatch.current, setDecisions), []);
   /** The latest list read's sections, for the event stream's `deliveries` (which reads again only while a delivery can move). */
   const latestSectionsRef = useRef<ListModel['sections'] | null>(null);
   latestSectionsRef.current = latest?.sections ?? null;
@@ -1363,7 +1354,7 @@ function Inbox() {
   const refreshAgents = useCallback(async () => {
     try {
       const mine = ++agentsSeq.current;
-      const next = await inboxApi.agents();
+      const next = agentsRead(await inboxApi.agents());
       if (mine === agentsSeq.current) setAgentsState(next);
       return next;
     } catch {
@@ -3669,7 +3660,7 @@ function Inbox() {
       },
     },
   });
-  const { decisionModeOn, decideInThread, sittingDecisions, closeDecide, decisionsTouched } = useDecideSitting({ settings, decisions, setDecisions, decide, setDecide, decideOpener, decisionModeOnRef, refreshDecisions, refreshList, route });
+  const { decisionModeOn, decideInThread, sittingDecisions, sittingRead, closeDecide, decisionsTouched } = useDecideSitting({ settings, decisions, setDecisions, decide, setDecide, decideOpener, decisionWatch, refreshDecisions, refreshList, route });
   const snoozeBack = useSnoozeBack({ thread, route, listedOpenRow, looking, openThreadCovered, lookRef: paneReads.activeLook, trackLook, refreshList, snoozed: latest?.snoozed, refreshSnoozes, seen: inboxApi.seen });
   // The list's Archived group (approval "inbox-archived-group") and Settings → Archived's Unarchive.
   const archivedFilter = useCallback((rows: readonly InboxListRow[]) => filterShown([{ id: 'archived', label: 'Archived', threads: [...rows] }])[0]?.threads ?? rows, [filterShown]);
@@ -4576,7 +4567,7 @@ function Inbox() {
     const news = connectLineNews(agents);
     if (!news) return;
     setConnectLine(news);
-    void inboxApi.agentsSeen(news.report?.at ?? null, news.notes).then(setAgents, () => {});
+    void inboxApi.agentsSeen(news.report?.at ?? null, news.notes).then(agentsRead).then(setAgents, () => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agents, agentsSettled, settings?.via, connectLine]);
   const connectLineEl =
@@ -5665,9 +5656,8 @@ function Inbox() {
                 ? void refreshInbox(null, route.thread !== null)
                 : leave({ page: 'inbox', project: null, machine: machineId, thread: null })
             }
-            // The Agents section (approval "inbox-agents-section"): an agent filters the list to its threads, as a
-            // machine does (a second click shows everything again); Add agent is New message with a new session chosen
-            // (plain New message where nothing can be started from here), and Add machine is Settings → Machines.
+            // The Agents section (approval "inbox-agents-section"): an agent filters the list to its threads, as a machine does (a second click shows
+            // everything again); Add agent is New message with a new session chosen (plain New message where nothing can start here); Add machine, Settings → Machines.
             agentRows={windowRows}
             // Picked: its list, as a machine's (no thread open). Cleared: everything, the thread on screen kept.
             onAgentFilter={(agentId) =>
@@ -5676,6 +5666,7 @@ function Inbox() {
                 : leave({ page: 'inbox', project: null, machine: null, agent: null, thread: route.page === 'inbox' ? route.thread : null })
             }
             onMessageAgent={(session, opener) => openCompose({ session }, opener)}
+            agentNewMessage={{ linked: plusOn }}
             onAddAgent={(opener) => openCompose(plusOn ? { launch: { agent: composeLastAgent } } : {}, opener)}
             onAddMachine={machines.self ? () => leave({ page: 'settings', project: null, thread: null, section: 'machines' }) : undefined}
             projectNames={projectNames}
@@ -6145,9 +6136,9 @@ function Inbox() {
       {ask.layer}
       {toast && !toast.hidden && soundDialog !== 'open' && !agentNoteOpen && <InboxToast toast={toast} phone={phone} onDismiss={dismissToast} onHold={holdToast} />}
       <SearchHost
-        mounted={searchMounted}
-        open={searchOpen}
-        phone={phone}
+        mounted={searchMounted} open={searchOpen}
+        phone={phone} onSettingsStale={refreshSettings}
+        searchTip={settings?.reveal?.search_tip === true && !tourOn && !firstRun && !revealBlocked && !lineBusy}
         tintOf={listColours?.tintOfThread}
         currentProject={route.page === 'inbox' ? route.project : null}
         projects={projects} projectLabels={anyMachineLinked ? projectNames : undefined} linkedMachines={machines.linked}
@@ -6217,6 +6208,8 @@ function Inbox() {
         <DecisionMode
           open={!decide.tucked}
           decisions={sittingDecisions}
+          readFailed={sittingRead.failed}
+          onReadAgain={sittingRead.retry}
           scope={decide.title}
           rows={latestRows}
           start={decide.start}

@@ -166,6 +166,7 @@ export const TOOL_GUIDE: Record<InboxMcpToolName, InboxToolGuide> = {
     args: ["query", "all_projects", "limit"],
     lines: [
       `Find messages by words, read-only: your messages, other agents' and the person's, in this project unless \`all_projects\`. It is the search the person runs in the window (⌘K): every word must match (the last may be the start of a word), and a question's prompt, choices and answer count as its message's text. Up to \`limit\` results (default ${INBOX_AGENT_SEARCH_LIMIT}, at most 50), best first, each one line: \`thread_id\`, \`message_id\`, \`author\` (\"person\" or the agent's name), \`at\`, the thread's \`subject\`, a \`snippet\` around the match, and \`question\` (its key) when the match is in a question. The result says how many matched in all. Searching writes nothing and marks nothing read: a folder the Inbox has never seen gets no results (with a note), never a new project. Then read_thread with that \`thread_id\` and \`message_id\` shows the message in full. ${INBOX_SEARCH_FIRST_RULE}`,
+      '- Words in double quotes are an exact phrase: `"file viewer"` finds those words side by side, in that order; a quoted word matches only that whole word.',
     ],
   },
   resolve_message: {
