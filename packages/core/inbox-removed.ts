@@ -42,6 +42,7 @@ export interface RemovalMessage {
   set_aside?: readonly string[] | null;
   moved_note?: { thread_id: string } | null;
   reopened?: readonly string[] | null;
+  not_marked?: readonly string[] | null;
   ack_of?: string | null;
   tidy?: unknown;
   scheduled_run?: { run?: number } | null;
@@ -57,6 +58,7 @@ function isNote(message: RemovalMessage): boolean {
     !!message.moved_note ||
     (!!message.scheduled_run && message.scheduled_run.run === undefined) ||
     (message.reopened?.length ?? 0) > 0 ||
+    (message.not_marked?.length ?? 0) > 0 ||
     (typeof message.ack_of === "string" && message.ack_of !== "") ||
     (typeof message.tidy === "object" && message.tidy !== null)
   );

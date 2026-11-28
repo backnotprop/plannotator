@@ -83,20 +83,29 @@ afterEach(() => {
   refuse = null;
 });
 
-async function render(onChanged: () => Promise<void> = async () => {}) {
-  const data = thread();
+const pane = (data: InboxThread, onChanged: () => Promise<void>) => (
+  <div className="pn-inbox">
+    <ThreadPane thread={data} sent={null} onQuestions={() => {}} onChanged={onChanged} onClose={() => {}} file={null} onOpenFile={() => {}} onOpenGuide={() => {}} />
+  </div>
+);
+
+async function render(onChanged: () => Promise<void> = async () => {}, data: InboxThread = thread()) {
   host = document.createElement('div');
   document.body.appendChild(host);
   act(() => {
     root = createRoot(host!);
-    root.render(
-      <div className="pn-inbox">
-        <ThreadPane thread={data} sent={null} onQuestions={() => {}} onChanged={onChanged} onClose={() => {}} file={null} onOpenFile={() => {}} onOpenGuide={() => {}} />
-      </div>,
-    );
+    root.render(pane(data, onChanged));
   });
   await settle();
   return data;
+}
+
+function stillOpen(): InboxThread {
+  const data = thread();
+  const [asked, ...rest] = data.messages;
+  const [region, jenkins] = asked!.questions!;
+  const { answered_in_reply: _taken, ...open } = jenkins!;
+  return { ...data, messages: [{ ...asked!, questions: [region!, { ...open, state: 'open' }] }, ...rest.slice(0, 1)] };
 }
 
 const settle = () =>
@@ -119,11 +128,16 @@ test.skipIf(!hasDom)('a Reopen that fails says so on the card and can be pressed
 });
 
 test.skipIf(!hasDom)('a Send refused because a question was taken from the reply reads the thread again and says so plainly', async () => {
-  refuse = (path) => (path.endsWith('/reply') ? Response.json({ code: 'question_answered_in_reply', error: 'Question q-1 was answered in the person\'s reply; Reopen it to answer it here.' }, { status: 409 }) : null);
+  refuse = (path) => (path.endsWith('/reply') ? Response.json({ code: 'question_answered_in_reply', error: 'This question was marked answered from the reply. Reopen it on its card to answer it there.' }, { status: 409 }) : null);
   let reads = 0;
-  await render(async () => {
+  const reread = async () => {
     reads += 1;
-  });
+    act(() => root!.render(pane(thread(), reread)));
+  };
+  const before = await render(reread, stillOpen());
+  const key = before.messages[0]!.questions![1]!.key;
+  const card = () => host!.querySelector(`[data-question-key="${key}"]`) as HTMLElement;
+  expect(card().querySelector('[data-answered-quote]')).toBeNull();
   const replyButton = [...host!.querySelectorAll('button')].find((b) => b.textContent?.replace(/\s+/g, ' ').trim() === 'Reply')!;
   await act(async () => {
     replyButton.click();
@@ -141,9 +155,12 @@ test.skipIf(!hasDom)('a Send refused because a question was taken from the reply
     await new Promise((resolve) => setTimeout(resolve, 50));
   });
   await settle();
+  await settle();
   expect(host!.textContent).toContain(ANSWERED_IN_REPLY_LINE);
-  expect(host!.textContent).not.toContain('q-1');
+  expect(host!.textContent).not.toContain(key);
   expect(reads).toBeGreaterThan(0);
+  expect(card().querySelector('[data-answered-quote]')?.textContent).toContain(QUOTE);
+  expect((host!.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement).value).toBe('Use us-east-1.');
 });
 
 test.skipIf(!hasDom)('a question answered in the reply: the person\'s words as its answer, not counted open, and one Reopen', async () => {

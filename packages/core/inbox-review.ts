@@ -148,6 +148,10 @@ export const INBOX_MESSAGE_FEEDBACK_TITLE = 'Feedback on your messages';
 export const INBOX_OWN_MESSAGE_FEEDBACK_TITLE = 'Feedback on my messages';
 /** The heading the window's Send opens the feedback on attached files with (`# …`). */
 export const INBOX_ATTACHMENT_FEEDBACK_TITLE = 'Feedback on the attached files';
+/** The heading the window's Send opens the comments on a question's running prototypes with (`# …`). */
+export const INBOX_LIVE_SITE_FEEDBACK_TITLE = 'Feedback on your running app';
+/** The heading a pull request review's Send opens its diff comments with (`# Feedback on pull request #12`; packages/inbox pulls/model.ts). */
+export const INBOX_PULL_FEEDBACK_TITLE_LINE = /^# Feedback on (?:pull|merge) request \S+$/;
 
 /** The parts of a thread's message `inboxThreadHadReview` reads. */
 export interface InboxReviewThreadMessage {

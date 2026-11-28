@@ -342,6 +342,7 @@ export function isInboxNote(message: {
   set_aside?: readonly string[] | null;
   moved_note?: { thread_id: string } | null;
   reopened?: readonly string[] | null;
+  not_marked?: readonly string[] | null;
   ack_of?: string | null;
   tidy?: InboxTidyMark | null;
   scheduled_run?: { run?: number } | null;
@@ -354,6 +355,7 @@ export function isInboxNote(message: {
       !!message.moved_note ||
       (!!message.scheduled_run && message.scheduled_run.run === undefined) ||
       (message.reopened?.length ?? 0) > 0 ||
+      (message.not_marked?.length ?? 0) > 0 ||
       (typeof message.ack_of === "string" && message.ack_of !== "") ||
       (typeof message.tidy === "object" && message.tidy !== null))
   );
@@ -373,6 +375,7 @@ export function inboxPersonAnsweredSince(
     ack?: { at: string } | null;
     set_aside?: readonly string[] | null;
     reopened?: readonly string[] | null;
+    not_marked?: readonly string[] | null;
     ack_of?: string | null;
     tidy?: InboxTidyMark | null;
   }[],
@@ -683,6 +686,11 @@ export interface InboxMessage {
    * again after a set-aside note had named them. Absent on every other message.
    */
   reopened?: string[];
+  /**
+   * On a person's note: the questions a linked computer's held message asked to mark answered in the
+   * person's reply that could no longer be marked when it arrived. Absent on every other message.
+   */
+  not_marked?: string[];
   /**
    * On the note that carries a 👍 Looks good to the agent (amended
    * 2026-10-16): the agent message the person marked. Written once the

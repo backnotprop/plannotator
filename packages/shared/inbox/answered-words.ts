@@ -9,8 +9,13 @@ export const INBOX_ANSWERED_QUOTE_MAX = 500;
 export const INBOX_ANSWERED_REQUESTS_MAX = 100;
 
 export function inboxReplyOwnWords(body: string): string {
-  return withoutInboxSkillsBlock(personWords(withoutInboxReplyQuoteLead(body)));
+  return withoutInboxSkillsBlock(personWords(withoutInboxReplyQuoteLead(body)))
+    .split("\n")
+    .filter((line) => !/^ {0,3}>/.test(line))
+    .join("\n");
 }
+
+export const hasInboxReplyOwnWords = (body: string): boolean => /[\p{L}\p{N}]/u.test(inboxReplyOwnWords(body));
 
 const flat = (text: string): string => text.replace(/\s+/g, " ").trim();
 
@@ -68,5 +73,9 @@ export function composeInboxAnsweredReopenedBody(question: Pick<InboxQuestionRec
   return [INBOX_REOPENED_HEADING, "", `- ${question.id}: ${flat(question.prompt)}`, "", "You marked it answered in their reply; they say it is not. It is open again: don't use those words as the answer, and wait for theirs."].join("\n");
 }
 
+export function composeInboxNotMarkedBody(skipped: readonly { reason: string }[]): string {
+  return ["Not marked answered:", "", ...skipped.map((s) => `- ${s.reason}`), "", "Your message went into the thread, but these were not marked answered when it reached the computer that holds it: they stay open on their cards."].join("\n");
+}
+
 export const INBOX_ANSWERED_IN_REPLY_DESCRIPTION =
-  'Your own open questions in this thread (read_thread state open or picked) that the person answered in their reply\'s words instead of on the card: [{"question": "<message id>/<key>", "quote": "<the exact part of their reply that answers it>"}]; add "reply": its message id when it is not their newest reply. The card shows their words as the answer, and they can reopen it. Send with reply_to into the thread.';
+  'Your own open questions in this thread (read_thread state open or picked) that the person answered in their reply\'s words instead of on the card: [{"question": "<message id>/<key>", "quote": "<the exact part of their reply that answers it>"}]; give "quote" or "reply" (its message id) when more than one of their replies reached you since you asked. The card shows their words as the answer, and they can reopen it. Send with reply_to into the thread.';

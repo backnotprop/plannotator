@@ -4566,6 +4566,12 @@
             "type": "string"
           }
         },
+        "not_marked": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "ack_of": {
           "type": "string"
         },

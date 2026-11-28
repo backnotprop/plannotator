@@ -42,7 +42,7 @@ import {
 import type { InboxPictureItPage } from "@plannotator/core/picture-it-page";
 import { inboxStoredSkips, inboxSupersedeSkipState, type InboxStoredMessage, type InboxSupersedeSkip } from "./supersede-skips";
 import { planInboxAnsweredInReply, type InboxAnsweredView } from "./answered-in-reply";
-import { composeInboxAnsweredReopenedBody, normalizeInboxAnsweredRequests } from "./answered-words";
+import { composeInboxAnsweredReopenedBody, composeInboxNotMarkedBody, normalizeInboxAnsweredRequests } from "./answered-words";
 import { inboxFileQuestionTwin } from "@plannotator/core/inbox-file-question-twin";
 import { inboxTwinChoicesRefusal } from "@plannotator/core/inbox-choice-twins";
 import type { InboxReviewAnchor, InboxReviewBatch, InboxReviewLive } from "@plannotator/core/review-threads";
@@ -356,6 +356,8 @@ export interface InboxSendResult {
   /** The action items this send marked done (`done`), `<message id>/<key>`. Absent when none. */
   done?: string[];
   answered_in_reply?: string[];
+  /** Each question marked answered, with the reply and the words it used. */
+  answered_in_reply_marks?: { question: string; reply: string; quote: string }[];
   answered_in_reply_skipped?: { question: string; reason: string }[];
   skipped?: InboxSupersedeSkip[];
 }
@@ -4618,7 +4620,7 @@ export class InboxStore {
           replayed: true,
           ...(message.thread_naming ? { naming: message.thread_naming } : {}),
           ...(markedDone.length > 0 ? { done: markedDone } : {}),
-          ...(markedAnswered.length > 0 ? { answered_in_reply: markedAnswered } : {}),
+          ...(markedAnswered.length > 0 ? { answered_in_reply: markedAnswered, answered_in_reply_marks: this.answeredMarksBy(message.id) } : {}),
           ...this.answeredSkippedOnReplay(message, markedAnswered),
           ...(keptSkips ? { skipped: keptSkips } : {}),
         };
@@ -4794,6 +4796,25 @@ export class InboxStore {
       this.appendQuestion({ ...record, superseded_by: by }, at);
     }
     for (const [questionId, answer] of answering.marks) this.appendQuestion({ ...this.questions.get(questionId)!, answered_in_reply: answer }, at);
+    if (answering.skipped.length > 0) {
+      const noteAt = this.stamp();
+      this.appendMessage(
+        {
+          id: inboxId("msg"),
+          project_id: message.project_id,
+          thread_id: message.thread_id,
+          reply_to: message.id,
+          author: { kind: "person" },
+          subject: null,
+          body: composeInboxNotMarkedBody(answering.skipped),
+          created_at: noteAt,
+          resolved_at: null,
+          idempotency_key: null,
+          not_marked: answering.skipped.map((s) => s.question),
+        },
+        noteAt,
+      );
+    }
     // The action items the agent saw done: closed, nothing sent. A Done or Can't do it the person
     // had waiting in their draft is kept under `person`: its note still goes with their Send (Q3). A skip
     // the person already sent is kept the same way (nothing of it is left to send).
@@ -4852,7 +4873,7 @@ export class InboxStore {
       replayed: false,
       ...(naming ? { naming } : {}),
       ...(doneIds.length > 0 ? { done: doneIds } : {}),
-      ...(answering.marks.size > 0 ? { answered_in_reply: [...answering.marks.keys()] } : {}),
+      ...(answering.marks.size > 0 ? { answered_in_reply: [...answering.marks.keys()], answered_in_reply_marks: [...answering.marks].map(([question, mark]) => ({ question, reply: mark.reply_id, quote: mark.quote })) } : {}),
       ...(answering.skipped.length > 0 ? { answered_in_reply_skipped: answering.skipped } : {}),
       ...(skipped.length > 0 ? { skipped } : {}),
     };
@@ -5038,7 +5059,7 @@ export class InboxStore {
         if (!this.isFor(message, session)) return false;
         if (this.isOwner(message, session)) {
           const holder = this.heldBy(message);
-          if (holder && (holder.session === session || holder.session === null)) return true;
+          if (holder?.session === session) return true;
         }
         const tag = tagOf(message, session);
         return tag !== null && (!!tag.delivery || !!tag.read_at);
@@ -5048,7 +5069,22 @@ export class InboxStore {
 
   private answeredSkippedOnReplay(message: InboxMessage, marked: readonly string[]): { answered_in_reply_skipped?: { question: string; reason: string }[] } {
     const left = (message.answered_in_reply ?? []).filter((r) => !marked.includes(r.question));
-    return left.length > 0 ? { answered_in_reply_skipped: left.map((r) => ({ question: r.question, reason: "it no longer held when this message arrived" })) } : {};
+    if (left.length === 0) return {};
+    const members = this.threadMessages(message.thread_id);
+    const at = members.findIndex((m) => m.id === message.id);
+    const reopened = (q: string) => members.slice(at + 1).some((m) => m.reopened?.includes(q));
+    const reason = (q: string) =>
+      reopened(q) ? `${q}: the person reopened it after this message marked it answered.` : `${q}: it was not marked answered when this message arrived; the note after it says why.`;
+    return { answered_in_reply_skipped: left.map((r) => ({ question: r.question, reason: reason(r.question) })) };
+  }
+
+  /** Each question a message marked answered, with the reply and the words it used. */
+  answeredMarksBy(messageId: string): { question: string; reply: string; quote: string }[] {
+    const message = this.messages.get(messageId);
+    if (!message) return [];
+    return this.threadMessages(message.thread_id).flatMap((member) =>
+      this.questionRecords(member.id).flatMap((r) => (r.answered_in_reply?.message_id === messageId ? [{ question: r.id, reply: r.answered_in_reply.reply_id, quote: r.answered_in_reply.quote }] : [])),
+    );
   }
 
   answeredInReplyBy(messageId: string): string[] {
@@ -5403,7 +5439,7 @@ export class InboxStore {
         throw refusalError({ code: "question_superseded", key: entry.key, superseded_by: by });
       }
       if (record.answered_in_reply) {
-        throw new InboxError("question_answered_in_reply", `Question ${entry.key} was answered in the person's reply; Reopen it to answer it here.`, { key: entry.key });
+        throw new InboxError("question_answered_in_reply", "This question was marked answered from the reply. Reopen it on its card to answer it there.", { key: entry.key });
       }
       // Mark read closed it: Move back reopens it, pick included.
       if (record.set_aside) {
@@ -7762,7 +7798,7 @@ export class InboxStore {
     const marked: InboxMessage[] = [];
     for (const item of this.pendingReplies(session, { tags: options.tags })) {
       // The Inbox's own notes wait for the turn to end, the moved-questions note too: never pushed into a busy turn.
-      if ((item.set_aside?.length ?? 0) > 0 || (item.reopened?.length ?? 0) > 0 || item.moved_note) continue;
+      if ((item.set_aside?.length ?? 0) > 0 || (item.reopened?.length ?? 0) > 0 || (item.not_marked?.length ?? 0) > 0 || item.moved_note) continue;
       if (!INBOX_AUTO_SEND_ACK_NOTES && item.ack_of) continue;
       // Tidy goes to a busy session when its turn ends, never into it.
       if (item.tidy) continue;
@@ -7825,7 +7861,9 @@ export class InboxStore {
   recordAgentRead(ids: Iterable<string>, reader: string | null): void {
     for (const id of ids) {
       const message = this.messages.get(id);
-      if (message?.author.kind !== "person" || isInboxNote(message) || message.taken_back_at || this.heldBy(message)) continue;
+      if (message?.author.kind !== "person" || isInboxNote(message) || message.taken_back_at || message.read_by_agent) continue;
+      const holder = this.heldBy(message);
+      if (holder && !(reader && holder.by === "read" && holder.session === null && this.isOwner(message, reader))) continue;
       const at = this.stamp();
       this.appendMessage({ ...message, read_by_agent: { session: reader, at } }, at);
     }

@@ -1,4 +1,4 @@
-import { inboxAnsweredQuote, inboxReplyOwnWords } from "./answered-words";
+import { hasInboxReplyOwnWords, inboxAnsweredQuote, inboxReplyOwnWords } from "./answered-words";
 import { inboxQuestionState, isInboxQuestionSupersedable, parseInboxSupersedeRef } from "@plannotator/core/inbox-questions";
 import { isInboxNote, type InboxAnsweredInReply, type InboxAnsweredInReplyRequest, type InboxAuthor, type InboxMessage, type InboxQuestionRecord } from "@plannotator/core/inbox-types";
 import { InboxError } from "./schema";
@@ -21,24 +21,40 @@ const isPersonWords = (message: InboxMessage): boolean =>
 const sameAgent = (a: AgentAuthor, b: AgentAuthor): boolean =>
   a.session !== null && a.session === b.session && (a.host ?? null) === (b.host ?? null) && (a.machine ?? null) === (b.machine ?? null);
 
-function replyFor(view: InboxAnsweredView, members: readonly InboxMessage[], asked: InboxMessage, record: InboxQuestionRecord, session: string, named: string | undefined, replyTo: string | null): InboxMessage | string {
+type ReplyPick = { reply: InboxMessage; quote: string } | string;
+
+function quoteFrom(reply: InboxMessage, excerpt: string | undefined): ReplyPick {
+  const quoted = inboxAnsweredQuote(inboxReplyOwnWords(reply.body), excerpt);
+  return quoted.ok ? { reply, quote: quoted.quote } : `${quoted.reason} (${reply.id})`;
+}
+
+function replyFor(view: InboxAnsweredView, members: readonly InboxMessage[], asked: InboxMessage, record: InboxQuestionRecord, session: string, request: InboxAnsweredInReplyRequest, replyTo: string | null): ReplyPick {
+  const named = request.reply ?? undefined;
   const after = members.slice(members.findIndex((m) => m.id === asked.id) + 1);
   const reopenedAt = after.reduce((last, m, i) => (m.reopened?.includes(record.id) ? i : last), -1);
-  const usable = after.slice(reopenedAt + 1).filter((m) => isPersonWords(m) && view.reachedSession(m, session));
-  let reply: InboxMessage | undefined;
+  const usable = after.slice(reopenedAt + 1).filter((m) => isPersonWords(m) && hasInboxReplyOwnWords(m.body) && view.reachedSession(m, session));
+  let pick: ReplyPick;
   if (named === undefined) {
-    reply = usable.find((m) => m.id === replyTo) ?? usable.at(-1);
-    if (!reply) return reopenedAt >= 0 ? "the person reopened it and no reply of theirs to you has reached you since; name the reply with \"reply\"" : "no reply of the person's to you has reached you after it; name the reply with \"reply\"";
+    if (usable.length === 0) return reopenedAt >= 0 ? "the person reopened it and no reply of theirs to you has reached you since; name the reply with \"reply\"" : "no reply of the person's to you has reached you after it; name the reply with \"reply\"";
+    if (usable.length === 1) pick = quoteFrom(usable[0]!, request.quote);
+    else if (request.quote === undefined) return `${usable.length} replies of the person's reached you after it (${usable.map((m) => m.id).join(", ")}); give "quote" with their exact words, or name the reply with "reply"`;
+    else {
+      const first = usable.find((m) => m.id === replyTo) ?? usable.at(-1)!;
+      const order = [first, ...usable.filter((m) => m !== first).reverse()];
+      pick = order.map((m) => quoteFrom(m, request.quote)).find((p) => typeof p !== "string") ?? quoteFrom(first, request.quote);
+    }
   } else {
-    reply = view.message(named);
+    const reply = view.message(named);
     if (!reply || reply.thread_id !== asked.thread_id) return `reply ${named} is not a message of this thread`;
     if (!isPersonWords(reply)) return `reply ${named} is not the person's own reply`;
-    if (!after.some((m) => m.id === reply!.id)) return `reply ${named} came before the question`;
-    if (after.findIndex((m) => m.id === reply!.id) < reopenedAt) return `the person reopened it after reply ${named}`;
+    if (!hasInboxReplyOwnWords(reply.body)) return `reply ${named} has no words the person wrote`;
+    if (!after.some((m) => m.id === reply.id)) return `reply ${named} came before the question`;
+    if (after.findIndex((m) => m.id === reply.id) < reopenedAt) return `the person reopened it after reply ${named}`;
     if (!view.reachedSession(reply, session)) return `reply ${named} was not sent to you, or has not reached you yet`;
+    pick = quoteFrom(reply, request.quote);
   }
-  if (record.picked_at && record.picked_at > reply.created_at) return `the person picked on the card after reply ${reply.id}`;
-  return reply;
+  if (typeof pick !== "string" && record.picked_at && record.picked_at > pick.reply.created_at) return `the person picked on the card after reply ${pick.reply.id}`;
+  return pick;
 }
 
 export interface InboxAnsweredPlan {
@@ -83,6 +99,14 @@ export function planInboxAnsweredInReply(
       refuse(`${ref} is in another thread (${asked.thread_id}): send with reply_to ${target.message_id}.`);
       continue;
     }
+    if (asked.author.session === null) {
+      refuse(`${ref} was asked without agent_session, so no agent can mark it answered; it stays open for the person.`);
+      continue;
+    }
+    if (author.session === null) {
+      refuse(`${ref}: send with agent_session (your session id); only the session that asked a question may mark it answered.`);
+      continue;
+    }
     if (!sameAgent(asked.author, author)) {
       refuse(`${ref}: another session asked it; only the agent that asked a question may mark it answered.`);
       continue;
@@ -101,17 +125,12 @@ export function planInboxAnsweredInReply(
       refuse(`${ref} is also in supersedes; name it in one of them.`);
       continue;
     }
-    const reply = replyFor(view, members, asked, record, author.session!, request.reply, replyTo);
-    if (typeof reply === "string") {
-      refuse(`${ref}: ${reply}.`);
+    const pick = replyFor(view, members, asked, record, author.session, request, replyTo);
+    if (typeof pick === "string") {
+      refuse(`${ref}: ${pick}.`);
       continue;
     }
-    const quoted = inboxAnsweredQuote(inboxReplyOwnWords(reply.body), request.quote);
-    if (!quoted.ok) {
-      refuse(`${ref}: ${quoted.reason} (${reply.id}).`);
-      continue;
-    }
-    plan.marks.set(record.id, { reply_id: reply.id, quote: quoted.quote, message_id: messageId, at });
+    plan.marks.set(record.id, { reply_id: pick.reply.id, quote: pick.quote, message_id: messageId, at });
   }
   if (problems.length === 0) return plan;
   if (author.machine) return { ...plan, skipped: problems };

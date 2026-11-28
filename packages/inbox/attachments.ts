@@ -4,7 +4,7 @@
  * and the feedback text a Send carries after the picks.
  */
 
-import { INBOX_ATTACHMENT_FEEDBACK_TITLE, INBOX_GUIDE_FEEDBACK_TITLE, INBOX_MESSAGE_FEEDBACK_TITLE, INBOX_OWN_MESSAGE_FEEDBACK_TITLE, inboxReviewTitleLine } from '@plannotator/core/inbox-review';
+import { INBOX_ATTACHMENT_FEEDBACK_TITLE, INBOX_GUIDE_FEEDBACK_TITLE, INBOX_LIVE_SITE_FEEDBACK_TITLE, INBOX_MESSAGE_FEEDBACK_TITLE, INBOX_OWN_MESSAGE_FEEDBACK_TITLE, inboxReviewTitleLine } from '@plannotator/core/inbox-review';
 import { indexQuestionBlocks, type IndexedQuestion } from '@plannotator/core/question-block';
 import { inboxUrl, machineOf } from './inboxUrl';
 import { shouldStripFrontmatter } from '@plannotator/core/annotatable';
@@ -623,7 +623,7 @@ export function isFileComment(record: InboxAnnotationRecord): boolean {
 
 /** The heading of comments on running apps (a question's prototypes), and what each section is ("this site"). */
 export const LIVE_SITE_FEEDBACK_HEADING = {
-  title: 'Feedback on your running app',
+  title: INBOX_LIVE_SITE_FEEDBACK_TITLE,
   intro:
     "The following feedback is on the running app your question's options named as prototypes, made on the live pages through Plannotator's local proxy, one section per prototype. Each comment names the page it was made on and the element it is on.",
   subject: 'site',

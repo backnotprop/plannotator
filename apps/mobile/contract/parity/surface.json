@@ -1344,6 +1344,7 @@
       "InboxMessageWire.moved_note",
       "InboxMessageWire.moved_to",
       "InboxMessageWire.named_by",
+      "InboxMessageWire.not_marked",
       "InboxMessageWire.person_read_at",
       "InboxMessageWire.person_read_seq",
       "InboxMessageWire.person_seen_before_read",
