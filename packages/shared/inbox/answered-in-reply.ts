@@ -9,91 +9,113 @@ export interface InboxAnsweredView {
   questionRecords: (messageId: string) => readonly InboxQuestionRecord[];
   closedByArchive: (message: InboxMessage) => boolean;
   openQuestionsOf: (threadId: string | null) => { id: string; prompt: string }[];
+  /** The reply went to `session` (addressed to it, not only to another agent) and that session got it or read it. */
+  reachedSession: (message: InboxMessage, session: string) => boolean;
 }
+
+type AgentAuthor = Extract<InboxAuthor, { kind: "agent" }>;
 
 const isPersonWords = (message: InboxMessage): boolean =>
   message.author.kind === "person" && !isInboxNote(message) && (message.reask?.length ?? 0) === 0 && !message.taken_back_at;
 
-function replyFor(view: InboxAnsweredView, members: readonly InboxMessage[], asked: InboxMessage, questionId: string, named: string | undefined, replyTo: string | null): InboxMessage | string {
+const sameAgent = (a: AgentAuthor, b: AgentAuthor): boolean =>
+  a.session !== null && a.session === b.session && (a.host ?? null) === (b.host ?? null) && (a.machine ?? null) === (b.machine ?? null);
+
+function replyFor(view: InboxAnsweredView, members: readonly InboxMessage[], asked: InboxMessage, record: InboxQuestionRecord, session: string, named: string | undefined, replyTo: string | null): InboxMessage | string {
   const after = members.slice(members.findIndex((m) => m.id === asked.id) + 1);
-  const reopenedAt = after.reduce((last, m, i) => (m.reopened?.includes(questionId) ? i : last), -1);
-  const since = after.slice(reopenedAt + 1).filter(isPersonWords);
+  const reopenedAt = after.reduce((last, m, i) => (m.reopened?.includes(record.id) ? i : last), -1);
+  const usable = after.slice(reopenedAt + 1).filter((m) => isPersonWords(m) && view.reachedSession(m, session));
+  let reply: InboxMessage | undefined;
   if (named === undefined) {
-    const answering = since.find((m) => m.id === replyTo) ?? since.at(-1);
-    return answering ?? (reopenedAt >= 0 ? "the person reopened it and has not replied since" : "the person has not replied after it");
+    reply = usable.find((m) => m.id === replyTo) ?? usable.at(-1);
+    if (!reply) return reopenedAt >= 0 ? "the person reopened it and no reply of theirs to you has reached you since; name the reply with \"reply\"" : "no reply of the person's to you has reached you after it; name the reply with \"reply\"";
+  } else {
+    reply = view.message(named);
+    if (!reply || reply.thread_id !== asked.thread_id) return `reply ${named} is not a message of this thread`;
+    if (!isPersonWords(reply)) return `reply ${named} is not the person's own reply`;
+    if (!after.some((m) => m.id === reply!.id)) return `reply ${named} came before the question`;
+    if (after.findIndex((m) => m.id === reply!.id) < reopenedAt) return `the person reopened it after reply ${named}`;
+    if (!view.reachedSession(reply, session)) return `reply ${named} was not sent to you, or has not reached you yet`;
   }
-  const reply = view.message(named);
-  if (!reply || reply.thread_id !== asked.thread_id) return `reply ${named} is not a message of this thread`;
-  if (!isPersonWords(reply)) return `reply ${named} is not the person's own reply`;
-  if (!after.some((m) => m.id === reply.id)) return `reply ${named} came before the question`;
-  if (!since.some((m) => m.id === reply.id)) return `the person reopened it after reply ${named}`;
+  if (record.picked_at && record.picked_at > reply.created_at) return `the person picked on the card after reply ${reply.id}`;
   return reply;
 }
 
+export interface InboxAnsweredPlan {
+  marks: Map<string, InboxAnsweredInReply>;
+  /** Left out of a send from another computer (checked only when it arrived), each with why. */
+  skipped: { question: string; reason: string }[];
+}
+
+/**
+ * The questions a send marks answered in the person's reply. A send from this computer is refused whole on any
+ * problem; one from a linked computer (`author.machine`, which may have waited in its outbox) skips the entries
+ * that no longer hold and is delivered, the skipped ones listed.
+ */
 export function planInboxAnsweredInReply(
   view: InboxAnsweredView,
   threadId: string | null,
   requests: readonly InboxAnsweredInReplyRequest[],
-  author: Extract<InboxAuthor, { kind: "agent" }>,
+  author: AgentAuthor,
   superseding: ReadonlySet<string>,
   messageId: string,
   at: string,
   replyTo: string | null,
-): Map<string, InboxAnsweredInReply> {
-  const plan = new Map<string, InboxAnsweredInReply>();
+): InboxAnsweredPlan {
+  const plan: InboxAnsweredPlan = { marks: new Map(), skipped: [] };
   if (requests.length === 0) return plan;
-  const problems: string[] = [];
+  const problems: { question: string; reason: string }[] = [];
   const members = threadId === null ? [] : view.threadMessages(threadId);
   for (const request of requests) {
     const ref = request.question;
+    const refuse = (reason: string) => problems.push({ question: ref, reason });
     const target = parseInboxSupersedeRef(ref);
     if (!target || target.key === null || !target.key.startsWith("q-")) {
-      problems.push(`"${ref}" is not a question's id: write <message id>/<key> (read_thread gives the key).`);
+      refuse(`"${ref}" is not a question's id: write <message id>/<key> (read_thread gives the key).`);
       continue;
     }
     const asked = view.message(target.message_id);
     if (!asked || asked.author.kind !== "agent") {
-      problems.push(`${ref}: no agent message ${target.message_id}.`);
+      refuse(`${ref}: no agent message ${target.message_id}.`);
       continue;
     }
     if (threadId === null || asked.thread_id !== threadId) {
-      problems.push(`${ref} is in another thread (${asked.thread_id}): send with reply_to ${target.message_id}.`);
+      refuse(`${ref} is in another thread (${asked.thread_id}): send with reply_to ${target.message_id}.`);
       continue;
     }
-    if ((asked.author.session ?? null) !== (author.session ?? null) || (asked.author.host ?? null) !== (author.host ?? null)) {
-      problems.push(`${ref}: another session asked it; only the agent that asked a question may mark it answered.`);
+    if (!sameAgent(asked.author, author)) {
+      refuse(`${ref}: another session asked it; only the agent that asked a question may mark it answered.`);
       continue;
     }
     const record = view.questionRecords(asked.id).find((r) => r.key === target.key && r.kind !== "action");
     if (!record) {
-      problems.push(`${ref}: message ${target.message_id} has no question ${target.key}.`);
+      refuse(`${ref}: message ${target.message_id} has no question ${target.key}.`);
       continue;
     }
     const state = inboxQuestionState(record, view.closedByArchive(asked));
     if (!isInboxQuestionSupersedable(state)) {
-      problems.push(`${ref} is not open (it is ${state}).`);
+      refuse(`${ref} is not open (it is ${state}).`);
       continue;
     }
     if (superseding.has(record.id)) {
-      problems.push(`${ref} is also in supersedes; name it in one of them.`);
+      refuse(`${ref} is also in supersedes; name it in one of them.`);
       continue;
     }
-    const reply = replyFor(view, members, asked, record.id, request.reply, replyTo);
+    const reply = replyFor(view, members, asked, record, author.session!, request.reply, replyTo);
     if (typeof reply === "string") {
-      problems.push(`${ref}: ${reply}.`);
+      refuse(`${ref}: ${reply}.`);
       continue;
     }
     const quoted = inboxAnsweredQuote(inboxReplyOwnWords(reply.body), request.quote);
     if (!quoted.ok) {
-      problems.push(`${ref}: ${quoted.reason} (${reply.id}).`);
+      refuse(`${ref}: ${quoted.reason} (${reply.id}).`);
       continue;
     }
-    plan.set(record.id, { reply_id: reply.id, quote: quoted.quote, message_id: messageId, at });
+    plan.marks.set(record.id, { reply_id: reply.id, quote: quoted.quote, message_id: messageId, at });
   }
-  if (problems.length > 0) {
-    const open = view.openQuestionsOf(threadId).filter((q) => /\/q-/.test(q.id));
-    const listing = open.length > 0 ? `Open questions in this thread: ${open.map((q) => `${q.id} (${q.prompt})`).join("; ")}.` : "This thread has no open questions.";
-    throw new InboxError("invalid_answered_in_reply", `answered_in_reply: ${problems.join(" ")} Nothing was sent. ${listing}`, { field: "answered_in_reply", open_questions: open });
-  }
-  return plan;
+  if (problems.length === 0) return plan;
+  if (author.machine) return { ...plan, skipped: problems };
+  const open = view.openQuestionsOf(threadId).filter((q) => /\/q-/.test(q.id));
+  const listing = open.length > 0 ? `Open questions in this thread: ${open.map((q) => `${q.id} (${q.prompt})`).join("; ")}.` : "This thread has no open questions.";
+  throw new InboxError("invalid_answered_in_reply", `answered_in_reply: ${problems.map((p) => p.reason).join(" ")} Nothing was sent. ${listing}`, { field: "answered_in_reply", open_questions: open });
 }

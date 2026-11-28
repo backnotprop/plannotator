@@ -127,6 +127,7 @@ describe("answered in the person's reply, on a linked computer's thread", () => 
       const repliedBody = (await replied.json()) as Json;
       expect(replied.status, JSON.stringify(repliedBody)).toBe(200);
       const replyId = repliedBody.reply.id as string;
+      laptop.store.recordDelivery(replyId, { host: "claude-code", session: "ses_studio" });
 
       const marked = await send({ reply_to: replyId, body: "Got it: Jenkins stays a week.", idempotency_key: "mark-1", answered_in_reply: [{ question: ref, quote: "keep Jenkins for a week" }] });
       expect(marked.structured.answered_in_reply).toEqual([ref]);

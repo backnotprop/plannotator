@@ -3373,7 +3373,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         void loadLive();
         return;
       }
-      const failed = sendFailure(cause);
+      const failed = sendFailure(cause, onChanged);
       fail(failed.line);
       if (here()) setErrorDetails(failed.details ? { for: failed.line, text: failed.details } : null);
     } finally {

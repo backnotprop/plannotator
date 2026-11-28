@@ -27,10 +27,15 @@ export function AnsweredInReplyCard({
 }) {
   const id = useId();
   const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
   const taken = question.answered_in_reply!;
   const reopen = () => {
     setBusy(true);
-    onReopen().catch(() => setBusy(false));
+    setFailed(false);
+    onReopen().catch(() => {
+      setBusy(false);
+      setFailed(true);
+    });
   };
   return (
     <fieldset
@@ -65,6 +70,11 @@ export function AnsweredInReplyCard({
         <span className="ib-qfoot-st" data-answered-by="">
           {by ? agentName(by) : 'The agent'} took this from your reply · {whenTime(taken.at)}
         </span>
+        {failed && (
+          <span className="ib-qfoot-st text-destructive" role="alert" data-answered-reopen-failed="">
+            Couldn't reopen it. Try again.
+          </span>
+        )}
         {!readOnly && (
           <button type="button" className={FOOT_BUTTON} disabled={busy} onClick={reopen} data-answered-reopen="">
             Reopen

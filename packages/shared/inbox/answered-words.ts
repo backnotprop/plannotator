@@ -1,6 +1,7 @@
-import { INBOX_REOPENED_HEADING, cutText, splitInboxReplyBody } from "@plannotator/core/inbox-questions";
+import { INBOX_REOPENED_HEADING, cutText } from "@plannotator/core/inbox-questions";
 import { withoutInboxReplyQuoteLead } from "@plannotator/core/inbox-reply-quote";
 import { withoutInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
+import { personWords } from "./person-words";
 import type { InboxAnsweredInReplyRequest, InboxQuestionRecord } from "@plannotator/core/inbox-types";
 
 export const INBOX_ANSWERED_QUOTE_MAX = 500;
@@ -8,10 +9,24 @@ export const INBOX_ANSWERED_QUOTE_MAX = 500;
 export const INBOX_ANSWERED_REQUESTS_MAX = 100;
 
 export function inboxReplyOwnWords(body: string): string {
-  return splitInboxReplyBody(withoutInboxReplyQuoteLead(withoutInboxSkillsBlock(body))).words;
+  return withoutInboxSkillsBlock(personWords(withoutInboxReplyQuoteLead(body)));
 }
 
 const flat = (text: string): string => text.replace(/\s+/g, " ").trim();
+
+const WORD = /[\p{L}\p{N}]/u;
+const UNSPACED = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}]/u;
+
+function wholeWordsIn(paragraph: string, part: string): boolean {
+  for (let at = paragraph.indexOf(part); at >= 0; at = paragraph.indexOf(part, at + 1)) {
+    const before = paragraph[at - 1] ?? "";
+    const after = paragraph[at + part.length] ?? "";
+    const opens = !WORD.test(before) || !WORD.test(part[0]!) || UNSPACED.test(before) || UNSPACED.test(part[0]!);
+    const closes = !WORD.test(after) || !WORD.test(part.at(-1)!) || UNSPACED.test(after) || UNSPACED.test(part.at(-1)!);
+    if (opens && closes) return true;
+  }
+  return false;
+}
 
 export type InboxAnsweredQuote = { ok: true; quote: string } | { ok: false; reason: string };
 
@@ -21,8 +36,10 @@ export function inboxAnsweredQuote(words: string, excerpt: string | undefined): 
   if (excerpt === undefined) return { ok: true, quote: cutText(said, INBOX_ANSWERED_QUOTE_MAX) };
   const part = flat(excerpt);
   if (part === "") return { ok: false, reason: "quote is empty; leave it out to quote the whole reply" };
-  if (!said.includes(part)) return { ok: false, reason: "quote must be an exact part of the person's reply" };
+  if ([...part].length < 2 || !WORD.test(part)) return { ok: false, reason: "quote is too short: give at least one whole word" };
   if (part.length > INBOX_ANSWERED_QUOTE_MAX) return { ok: false, reason: `quote is over ${INBOX_ANSWERED_QUOTE_MAX} characters` };
+  const paragraphs = words.split(/\n\s*\n/).map(flat);
+  if (!paragraphs.some((paragraph) => wholeWordsIn(paragraph, part))) return { ok: false, reason: "quote must be whole words copied exactly from one paragraph of the person's reply" };
   return { ok: true, quote: part };
 }
 

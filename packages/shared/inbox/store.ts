@@ -34,7 +34,6 @@ import {
   parseInboxQuestionBlocks,
   parseInboxBareKey,
   parseInboxSupersedeRef,
-  splitInboxReplyBody,
   summarizeInboxQuestions,
   toInboxQuestion,
   type InboxAnswerRefusal,
@@ -46,7 +45,6 @@ import { planInboxAnsweredInReply, type InboxAnsweredView } from "./answered-in-
 import { composeInboxAnsweredReopenedBody, normalizeInboxAnsweredRequests } from "./answered-words";
 import { inboxFileQuestionTwin } from "@plannotator/core/inbox-file-question-twin";
 import { inboxTwinChoicesRefusal } from "@plannotator/core/inbox-choice-twins";
-import { withoutInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
 import type { InboxReviewAnchor, InboxReviewBatch, InboxReviewLive } from "@plannotator/core/review-threads";
 import { inboxRowPreview, inboxRowPreviewWords } from "@plannotator/core/inbox-folding";
 import {
@@ -56,7 +54,6 @@ import {
   withInboxActionsSection,
   parseInboxActionBlocks,
   parseInboxDoneRef,
-  INBOX_ACTIONS_HEADING,
 } from "@plannotator/core/inbox-actions";
 import {
   inboxId,
@@ -253,8 +250,7 @@ import {
 } from "@plannotator/core/inbox-types";
 import type { InboxReviewVerdictRecord } from "@plannotator/core/inbox-review";
 import type { InboxScheduledChange, InboxScheduledRun, InboxScheduledThread } from "@plannotator/core/inbox-scheduled-types";
-import { INBOX_ATTACHMENT_FEEDBACK_TITLE, INBOX_GUIDE_FEEDBACK_TITLE, INBOX_MESSAGE_FEEDBACK_TITLE, INBOX_OWN_MESSAGE_FEEDBACK_TITLE } from "@plannotator/core/inbox-review";
-import { codeFenceCloseIndex } from "@plannotator/core/markdown-structure";
+import { personWords } from "./person-words";
 import { InboxError, inboxDir } from "./schema";
 import type { InboxLog, InboxLogFactory } from "./store-log/log";
 import { agentNamesHere, archiveSeqAfter, cardAfter, firstLineName, firstLineTagKeys, movesAddress, pullEventOf, threadNameIndexKey } from "./store-log/history";
@@ -360,6 +356,7 @@ export interface InboxSendResult {
   /** The action items this send marked done (`done`), `<message id>/<key>`. Absent when none. */
   done?: string[];
   answered_in_reply?: string[];
+  answered_in_reply_skipped?: { question: string; reason: string }[];
   skipped?: InboxSupersedeSkip[];
 }
 
@@ -862,35 +859,6 @@ function guideCommentFields(fields: Record<string, unknown>, scope: "line" | "ge
   const createdAt = fields.createdAt;
   kept.createdAt = typeof createdAt === "number" && Number.isFinite(createdAt) ? createdAt : Date.now();
   return kept;
-}
-
-/** The headings a Send appends after the person's words (the action items, the annotations' feedback). */
-const SEND_APPENDED_HEADINGS: ReadonlySet<string> = new Set([
-  `## ${INBOX_ACTIONS_HEADING}`,
-  `# ${INBOX_MESSAGE_FEEDBACK_TITLE}`,
-  `# ${INBOX_OWN_MESSAGE_FEEDBACK_TITLE}`,
-  `# ${INBOX_ATTACHMENT_FEEDBACK_TITLE}`,
-  `# ${INBOX_GUIDE_FEEDBACK_TITLE}`,
-]);
-
-/**
- * The person's own words in a reply as stored (approval "board-hashtags"), for a card made later for its
- * thread (`threadTaggedInitiative`): without the reply's first line, the still-open line and the answers
- * section (`splitInboxReplyBody`) and the skills block, cut where a Send appends its own sections (the
- * action items, the annotations' feedback, which quote plans and files): only at those headings, each after
- * a blank line, never inside a code fence. The person's own headings and fenced `# comments` stay words.
- * At send time the reply's words are read directly (`sendReply`), and a New message's body is its words.
- */
-function personWords(body: string): string {
-  const lines = splitInboxReplyBody(withoutInboxSkillsBlock(body)).words.split("\n");
-  for (let i = 0; i < lines.length; i++) {
-    if (/^\s*```/.test(lines[i]!)) {
-      i = codeFenceCloseIndex(lines, i);
-      continue;
-    }
-    if (SEND_APPENDED_HEADINGS.has(lines[i]!.trimEnd()) && (i === 0 || lines[i - 1]!.trim() === "")) return lines.slice(0, i).join("\n");
-  }
-  return lines.join("\n");
 }
 
 export class InboxStore {
@@ -4651,6 +4619,7 @@ export class InboxStore {
           ...(message.thread_naming ? { naming: message.thread_naming } : {}),
           ...(markedDone.length > 0 ? { done: markedDone } : {}),
           ...(markedAnswered.length > 0 ? { answered_in_reply: markedAnswered } : {}),
+          ...this.answeredSkippedOnReplay(message, markedAnswered),
           ...(keptSkips ? { skipped: keptSkips } : {}),
         };
       }
@@ -4824,7 +4793,7 @@ export class InboxStore {
       const record = this.questions.get(questionId)!;
       this.appendQuestion({ ...record, superseded_by: by }, at);
     }
-    for (const [questionId, answer] of answering) this.appendQuestion({ ...this.questions.get(questionId)!, answered_in_reply: answer }, at);
+    for (const [questionId, answer] of answering.marks) this.appendQuestion({ ...this.questions.get(questionId)!, answered_in_reply: answer }, at);
     // The action items the agent saw done: closed, nothing sent. A Done or Can't do it the person
     // had waiting in their draft is kept under `person`: its note still goes with their Send (Q3). A skip
     // the person already sent is kept the same way (nothing of it is left to send).
@@ -4883,7 +4852,8 @@ export class InboxStore {
       replayed: false,
       ...(naming ? { naming } : {}),
       ...(doneIds.length > 0 ? { done: doneIds } : {}),
-      ...(answering.size > 0 ? { answered_in_reply: [...answering.keys()] } : {}),
+      ...(answering.marks.size > 0 ? { answered_in_reply: [...answering.marks.keys()] } : {}),
+      ...(answering.skipped.length > 0 ? { answered_in_reply_skipped: answering.skipped } : {}),
       ...(skipped.length > 0 ? { skipped } : {}),
     };
   }
@@ -5064,7 +5034,18 @@ export class InboxStore {
       questionRecords: (messageId) => this.questionRecords(messageId),
       closedByArchive: (message) => this.closedByArchive(message),
       openQuestionsOf: (threadId) => this.openQuestionsOf(threadId),
+      reachedSession: (message, session) => {
+        if (!this.isFor(message, session)) return false;
+        if (this.isOwner(message, session) && (message.delivery?.session === session || message.read_by_agent?.session === session)) return true;
+        const tag = tagOf(message, session);
+        return tag !== null && (!!tag.delivery || !!tag.read_at);
+      },
     };
+  }
+
+  private answeredSkippedOnReplay(message: InboxMessage, marked: readonly string[]): { answered_in_reply_skipped?: { question: string; reason: string }[] } {
+    const left = (message.answered_in_reply ?? []).filter((r) => !marked.includes(r.question));
+    return left.length > 0 ? { answered_in_reply_skipped: left.map((r) => ({ question: r.question, reason: "it no longer held when this message arrived" })) } : {};
   }
 
   answeredInReplyBy(messageId: string): string[] {
@@ -7835,9 +7816,6 @@ export class InboxStore {
     const at = this.stamp();
     const taken: InboxMessage = { ...message, taken_back_at: at, deliver_now_at: null, ...(message.tags ? { tags: message.tags.map((t) => ({ ...t, deliver_now_at: null })) } : {}) };
     this.appendMessage(taken, at);
-    for (const member of this.threadMessages(message.thread_id)) {
-      for (const record of this.questionRecords(member.id)) if (record.answered_in_reply?.reply_id === message.id) this.appendQuestion({ ...record, answered_in_reply: null }, at);
-    }
     return taken;
   }
 

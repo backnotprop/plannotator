@@ -3,6 +3,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { parseInboxQuestionBlocks } from '@plannotator/core/inbox-questions';
 import type { InboxMessageWire, InboxProject, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
+import { ANSWERED_IN_REPLY_LINE } from './apiError';
 
 const hasDom = typeof document !== 'undefined';
 const { ThreadPane } = (hasDom ? await import('./components/Thread') : {}) as typeof import('./components/Thread');
@@ -54,6 +55,7 @@ let root: Root | null = null;
 let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
 let posted: { path: string; body: Record<string, unknown> }[] = [];
+let refuse: ((path: string) => Response | null) | null = null;
 
 beforeEach(() => {
   if (!hasDom) return;
@@ -63,7 +65,7 @@ beforeEach(() => {
     const path = String(input);
     if (init?.method === 'POST') {
       posted.push({ path, body: JSON.parse(String(init.body)) });
-      return Response.json({ questions: [] });
+      return refuse?.(path) ?? Response.json({ questions: [] });
     }
     if (path.includes('/attachments')) return Response.json({ serverSession: 's', attachments: [], annotations: [] });
     if (path.includes('/sessions')) return Response.json({ home: null, project: PROJECT, sessions: [] });
@@ -78,6 +80,70 @@ afterEach(() => {
   root = null;
   host = null;
   globalThis.fetch = savedFetch;
+  refuse = null;
+});
+
+async function render(onChanged: () => Promise<void> = async () => {}) {
+  const data = thread();
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  act(() => {
+    root = createRoot(host!);
+    root.render(
+      <div className="pn-inbox">
+        <ThreadPane thread={data} sent={null} onQuestions={() => {}} onChanged={onChanged} onClose={() => {}} file={null} onOpenFile={() => {}} onOpenGuide={() => {}} />
+      </div>,
+    );
+  });
+  await settle();
+  return data;
+}
+
+const settle = () =>
+  act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+
+test.skipIf(!hasDom)('a Reopen that fails says so on the card and can be pressed again', async () => {
+  refuse = (path) => (path.endsWith('/reopen') ? Response.json({ code: 'internal', error: 'Internal error.' }, { status: 500 }) : null);
+  const data = await render();
+  const card = host!.querySelector(`[data-question-key="${data.messages[0]!.questions![1]!.key}"]`) as HTMLElement;
+  const reopen = card.querySelector('[data-answered-reopen]') as HTMLButtonElement;
+  await act(async () => {
+    reopen.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  await settle();
+  expect(card.querySelector('[data-answered-reopen-failed]')?.textContent).toBe("Couldn't reopen it. Try again.");
+  expect(reopen.disabled).toBe(false);
+});
+
+test.skipIf(!hasDom)('a Send refused because a question was taken from the reply reads the thread again and says so plainly', async () => {
+  refuse = (path) => (path.endsWith('/reply') ? Response.json({ code: 'question_answered_in_reply', error: 'Question q-1 was answered in the person\'s reply; Reopen it to answer it here.' }, { status: 409 }) : null);
+  let reads = 0;
+  await render(async () => {
+    reads += 1;
+  });
+  const replyButton = [...host!.querySelectorAll('button')].find((b) => b.textContent?.replace(/\s+/g, ' ').trim() === 'Reply')!;
+  await act(async () => {
+    replyButton.click();
+  });
+  await settle();
+  const box = host!.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement;
+  await act(async () => {
+    const set = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+    set.call(box, 'Use us-east-1.');
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  const send = [...host!.querySelectorAll('button')].find((b) => b.textContent?.replace(/\s+/g, ' ').trim() === 'Send')!;
+  await act(async () => {
+    send.click();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+  await settle();
+  expect(host!.textContent).toContain(ANSWERED_IN_REPLY_LINE);
+  expect(host!.textContent).not.toContain('q-1');
+  expect(reads).toBeGreaterThan(0);
 });
 
 test.skipIf(!hasDom)('a question answered in the reply: the person\'s words as its answer, not counted open, and one Reopen', async () => {
@@ -108,5 +174,5 @@ test.skipIf(!hasDom)('a question answered in the reply: the person\'s words as i
     reopen.click();
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
-  expect(posted.map((p) => [p.path, p.body.key])).toEqual([[`/api/inbox/messages/${ASKED}/reopen`, jenkins.key]]);
+  expect(posted.filter((p) => p.path.endsWith('/reopen')).map((p) => [p.path, p.body.key])).toEqual([[`/api/inbox/messages/${ASKED}/reopen`, jenkins.key]]);
 });

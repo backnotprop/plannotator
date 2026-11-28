@@ -127,6 +127,9 @@ export const SEND_MESSAGE_DESCRIPTION = [
  * `supersedes`, as an agent reads it (a field description reaches the model
  * whole; send_message's own description is cut at 2,048 characters).
  */
+export const answeredSkippedText = (skipped: readonly { question: string; reason: string }[] | undefined): string =>
+  skipped?.length ? `\nNot marked answered (the message itself went): ${skipped.map((s) => s.reason).join(" ")}` : "";
+
 export const SUPERSEDES_DESCRIPTION =
   `Earlier questions in this thread that no longer apply, so the person cannot answer them any more. Withdraw your own questions that are still open (read_thread state open or picked; a sent, skipped or closed one is left as it is, and the result says so) this way as the thread moves on: when this message replaces them, makes them moot or follows up on them, so they stop keeping the thread at the top of the person's list. "<message id>/<key>" for one question (read_thread gives each question's key) or "<message id>" for every open question of that message, as a list of strings, e.g. ["msg_…/q-…"]. With exactly one question in this message, it replaces them; otherwise they read \"No longer applies\". To replace one with a particular new question, put \`Replaces: <message id>/<key>\` in that question's block instead. The person's pick on a superseded question is never sent. Every id must name a question of the thread this message lands in (use reply_to); otherwise nothing is sent and the refusal, invalid_supersedes, lists the thread's open questions. ${INBOX_MOVED_TO_RULE}`;
 
@@ -1092,6 +1095,7 @@ export async function sendAgentMessage(
       /** The action items this message marked done (`done`). */
       ...(markedDone.length > 0 ? { done: markedDone } : {}),
       ...(markedAnswered.length > 0 ? { answered_in_reply: markedAnswered } : {}),
+      ...(result.answered_in_reply_skipped?.length ? { answered_in_reply_skipped: result.answered_in_reply_skipped } : {}),
       ...(result.skipped ? { skipped: result.skipped } : {}),
       replayed: result.replayed,
       cursor: store.messageCursor(message.id) ?? store.cursor(),
@@ -1443,6 +1447,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           prototypesNotFramedText(sent.notFramed),
           questionOpenersWithTextText(sent.questionOpenersWithText),
           inboxSupersedeSkipsText(sent.structured.skipped as InboxSupersedeSkip[] | undefined),
+          answeredSkippedText(sent.structured.answered_in_reply_skipped as { question: string; reason: string }[] | undefined),
           removedFromThreadText(store, sent.structured, input.agent_session),
         ];
         if (stale) hints.push(`\n${staleThreadText(stale, shortTime)}`);

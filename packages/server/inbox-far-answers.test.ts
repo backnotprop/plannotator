@@ -94,7 +94,7 @@ describe("an agent's answer in another computer's thread", () => {
     expect(held!.structured).toMatchObject({ held: true });
   });
 
-  test("answered_in_reply goes only to a computer that lists its mark; an older one gets the message without it and the agent is told", async () => {
+  test("answered_in_reply goes only to a computer that lists its mark; an older one gets the message without it and the agent is told; a retry after it updated is the first send", async () => {
     const answered = [{ question: `${THREAD}/q-1`, quote: "Keep Jenkins for a week" }];
     const newer = laptop(writes, { answersInReply: () => true });
     const sentNew = await farAgentReply(newer.deps, { body: "Got it.", reply_to: THREAD, agent_session: "ses_one", idempotency_key: "a-1", answered_in_reply: answered }, next, undefined);
@@ -106,6 +106,7 @@ describe("an agent's answer in another computer's thread", () => {
     expect("answered_in_reply" in (older.sent[0]!.body.args as object)).toBe(false);
     expect(sentOld!.text).toBe(`${FAR_REPLY_WORDS.notMarked("Studio")}\nWrote: Got it.`);
     expect(sentOld!.structured).toMatchObject({ answered_in_reply_not_marked: true });
+    older.deps.answersInReply = () => true;
     const again = await farAgentReply(older.deps, { body: "Got it.", reply_to: THREAD, agent_session: "ses_one", idempotency_key: "a-1", answered_in_reply: answered }, next, undefined);
     expect(again!.text).toBe(sentOld!.text);
     expect(older.sent).toHaveLength(1);

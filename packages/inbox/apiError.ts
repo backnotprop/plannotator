@@ -1,3 +1,5 @@
+export const ANSWERED_IN_REPLY_LINE = 'This question was marked answered from your reply. Reopen it on the card to pick here.';
+
 export class InboxApiError extends Error {
   constructor(
     readonly status: number,
@@ -15,7 +17,7 @@ export class InboxApiError extends Error {
     /** The linked machine (`ibx_` id) that could not be asked, when a far read failed (Combine across computers). */
     readonly machineId: string | null = null,
   ) {
-    super(message);
+    super(code === 'question_answered_in_reply' ? ANSWERED_IN_REPLY_LINE : message);
     this.name = 'InboxApiError';
   }
 }

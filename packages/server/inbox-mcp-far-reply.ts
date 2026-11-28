@@ -148,11 +148,6 @@ export async function farAgentReply(
   const place = await deps.placeOf(replyTo);
   if (!place) return null;
   const name = deps.nameOf(place.machine) ?? "the other computer";
-  const unmarked = Array.isArray(input.answered_in_reply) && input.answered_in_reply.length > 0 && !deps.answersInReply?.(place.machine);
-  if (unmarked) {
-    const { answered_in_reply: _answered, ...without } = input;
-    input = without as typeof input;
-  }
   // An older Plannotator there takes no answer: refused as before, never held to be refused later.
   if (deps.takes(place.machine) === false) throw new InboxError("thread_on_other_machine", farReplyRefusal(replyTo, name));
   const here = workingFolder && isAbsolute(workingFolder) ? workingFolder : input.project_path && isAbsolute(input.project_path) ? input.project_path : undefined;
@@ -168,6 +163,12 @@ export async function farAgentReply(
   const heldKey = `far-reply:${scoped(session, place.thread_id, key)}`;
   const before = deps.heldWrite(heldKey);
   const was = before?.body.args && typeof before.body.args === "object" ? (before.body.args as Record<string, unknown>) : null;
+  const asks = Array.isArray(input.answered_in_reply) && input.answered_in_reply.length > 0;
+  const unmarked = asks && (was ? !Array.isArray(was.answered_in_reply) : !deps.answersInReply?.(place.machine));
+  if (unmarked) {
+    const { answered_in_reply: _answered, ...without } = input;
+    input = without as typeof input;
+  }
   if (before && !sameInboxSend(farCall(was ?? {}), farCall({ ...input, body: pictures.body, reply_to: replyTo }))) {
     throw new InboxError("idempotency_key_reused", "This idempotency_key was already used for a different message.");
   }
