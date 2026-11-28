@@ -63,6 +63,14 @@ describe("answered_in_reply", () => {
     expect(store.listRow(asked.thread_id)!.questions.open).toBe(1);
   });
 
+  test("an agent that reads the thread (read_thread, no wake) has the replies it read", () => {
+    const { ref, jenkins, state, store, asked, mark } = setup();
+    const sent = store.sendReply(asked.id, { idempotency_key: "r1", words, questions: [] }).reply;
+    store.markAgentChecked(asked.thread_id, undefined, undefined, "ses_a");
+    mark([{ question: ref }], AGENT, sent.id);
+    expect(state(jenkins.key).state).toBe("answered_in_reply");
+  });
+
   test("the default is the reply the agent answers, among replies that reached it; one still queued never counts", () => {
     const { ref, jenkins, state, reply, mark } = setup();
     const first = reply("Use Postgres, and keep Jenkins.", "r1");

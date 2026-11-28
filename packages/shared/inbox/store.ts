@@ -5036,7 +5036,10 @@ export class InboxStore {
       openQuestionsOf: (threadId) => this.openQuestionsOf(threadId),
       reachedSession: (message, session) => {
         if (!this.isFor(message, session)) return false;
-        if (this.isOwner(message, session) && (message.delivery?.session === session || message.read_by_agent?.session === session)) return true;
+        if (this.isOwner(message, session)) {
+          const holder = this.heldBy(message);
+          if (holder && (holder.session === session || holder.session === null)) return true;
+        }
         const tag = tagOf(message, session);
         return tag !== null && (!!tag.delivery || !!tag.read_at);
       },
