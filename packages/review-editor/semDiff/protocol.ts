@@ -20,6 +20,12 @@ export interface SemDiffPromote {
   promote: number;
 }
 
+export interface SemDiffForget {
+  forget: number[];
+}
+
+export const isSemDiffPool = (worker: unknown): boolean => (worker as { semDiffPool?: unknown } | null)?.semDiffPool === true;
+
 export interface SemDiffDownload {
   download: 'start' | 'done';
   language: string;

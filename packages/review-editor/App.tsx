@@ -839,7 +839,7 @@ const ReviewApp: React.FC = () => {
   const [semDiff, setSemDiff] = useState<SemDiffAdvert | null>(null);
   const semanticDiffEnabled = useConfigValue('semanticDiffEnabled');
   const semDiffClient = useMemo(
-    () => (semDiff && semanticDiffEnabled ? createSemDiffClient({ advert: semDiff, origin: window.location.origin, createWorker: loadSemDiffWorker, pooled: true }) : null),
+    () => (semDiff && semanticDiffEnabled ? createSemDiffClient({ advert: semDiff, origin: window.location.origin, createWorker: loadSemDiffWorker }) : null),
     [semDiff, semanticDiffEnabled],
   );
   useEffect(() => () => semDiffClient?.dispose(), [semDiffClient]);

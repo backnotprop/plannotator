@@ -3,7 +3,7 @@ import { languageForPath } from '@plannotator/sem-jiff/languages';
 import { reviewSummary, SKIM_KINDS, type ReviewSummary } from '@plannotator/sem-jiff/summary';
 import type { SemDiffAdvert } from '@plannotator/shared/sem-diff-assets';
 import { SEM_DIFF_GRAMMARS } from '@plannotator/sem-jiff/grammars';
-import type { SemDiffDownload, SemDiffReply, SemDiffRequest } from './protocol';
+import { isSemDiffPool, type SemDiffDownload, type SemDiffReply, type SemDiffRequest } from './protocol';
 
 export const SEM_DIFF_TIMEOUT_MS = 3_000;
 export const SEM_DIFF_OPINION_TIMEOUT_MS = 30_000;
@@ -49,7 +49,6 @@ export interface SemDiffClientOptions {
   timeoutMs?: number;
   coldTimeoutMs?: number;
   downloadTimeoutMs?: number;
-  pooled?: boolean;
   /** The timers every bound runs on. Tests pass their own so they can fire a bound and see exactly which timers this client left. */
   timers?: SemDiffTimers;
 }
@@ -71,7 +70,8 @@ export function hasSomethingToSay(operations: SemanticDiffOperation[]): boolean 
 }
 
 export function createSemDiffClient(options: SemDiffClientOptions): SemDiffClient {
-  const { advert, origin, createWorker, timeoutMs = SEM_DIFF_TIMEOUT_MS, coldTimeoutMs = SEM_DIFF_COLD_TIMEOUT_MS, downloadTimeoutMs = SEM_DIFF_DOWNLOAD_TIMEOUT_MS, timers = realTimers, pooled = false } = options;
+  const { advert, origin, createWorker, timeoutMs = SEM_DIFF_TIMEOUT_MS, coldTimeoutMs = SEM_DIFF_COLD_TIMEOUT_MS, downloadTimeoutMs = SEM_DIFF_DOWNLOAD_TIMEOUT_MS, timers = realTimers } = options;
+  let pooled = false;
   const warm = new Set<string>();
   const coldTimedOut = new Map<string, number>();
   const downloading = new Set<string>();
@@ -143,7 +143,9 @@ export function createSemDiffClient(options: SemDiffClientOptions): SemDiffClien
     downloading.delete(language);
     stalledDownloads.add(language);
     const head = pending.keys().next().value;
-    for (const [id, { request }] of [...pending]) if ((languageForPath(request.path) ?? '') === language) settle(id, null);
+    const dropped = [...pending].filter(([, { request }]) => (languageForPath(request.path) ?? '') === language).map(([id]) => id);
+    for (const id of dropped) settle(id, null);
+    if (pooled && dropped.length > 0) void worker?.then((w) => w.postMessage({ forget: dropped }), () => {});
     if (pending.keys().next().value !== head) watchHead();
   };
   const heard = ({ download, language }: SemDiffDownload) => {
@@ -165,6 +167,11 @@ export function createSemDiffClient(options: SemDiffClientOptions): SemDiffClien
     const ensureWorker = (): Promise<Worker> => {
     if (worker) return worker;
     const created = Promise.resolve().then(createWorker).then((w) => {
+      if (isSemDiffPool(w)) {
+        pooled = true;
+        if (watchdog) timers.clear(watchdog);
+        watchdog = null;
+      }
       w.onmessage = (event: MessageEvent<SemDiffReply | SemDiffDownload>) => {
         if ('download' in event.data) {
           if (worker === created) heard(event.data);
@@ -202,7 +209,7 @@ export function createSemDiffClient(options: SemDiffClientOptions): SemDiffClien
     const request: SemDiffRequest = { id, advert: advert!, origin, path, oldText, newText, ...(opinion ? { opinion: { rejected: [...opinion.rejected] } } : {}), ...(background ? { background: true as const } : {}) };
     return new Promise<SemDiffReply | null>((resolve) => {
       pending.set(id, { request, settle: resolve });
-      if (background && pooled) queuedBehind.set(key, id);
+      if (background) queuedBehind.set(key, id);
       post(id);
       if (pending.size === 1) watchHead();
     }).then((reply) => {
@@ -234,7 +241,7 @@ export function createSemDiffClient(options: SemDiffClientOptions): SemDiffClien
         if (!keep && results.get(key) === found) results.delete(key);
       });
       if (results.size > MAX_CACHED) results.delete(results.keys().next().value!);
-    } else if (!background && queuedBehind.has(key)) {
+    } else if (!background && pooled && queuedBehind.has(key)) {
       const promote = queuedBehind.get(key)!;
       queuedBehind.delete(key);
       void worker?.then((w) => w.postMessage({ promote }), () => {});

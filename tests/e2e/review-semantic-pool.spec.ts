@@ -72,20 +72,33 @@ async function review(root: string, cwd: string, name: string) {
   return { url, close };
 }
 
-async function semanticCount(browser: Browser, url: string, cores: number): Promise<{ count: number; workers: number }> {
+async function semanticCount(browser: Browser, url: string, cores: number): Promise<{ count: number; answering: number }> {
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, reducedMotion: 'reduce' });
   const seen = ['plannotator-plan-look-choice-resolved=true', 'plannotator-edit-mode-announcement-seen=3', 'plannotator-announce-tui-herdr-seen=1', 'plannotator-announce-inbox-seen=1', 'plannotator-announce-ask-session-seen=1', 'plannotator-announce-agent-tool-seen=1', 'plannotator-guide-intro-seen=2', 'plannotator-guide-hint-acked=true', 'plannotator-review-dest-spotlight-seen=1', 'plannotator-auto-viewed-notice-seen=1'];
   await context.addCookies(seen.map((pair) => ({ name: pair.split('=')[0]!, value: pair.split('=')[1]!, url })));
   await context.addInitScript((n) => Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => n }), cores);
+  await context.addInitScript(() => {
+    const Base = window.Worker;
+    const answers: number[] = [];
+    (window as unknown as { __semAnswers: number[] }).__semAnswers = answers;
+    window.Worker = class extends Base {
+      constructor(...args: ConstructorParameters<typeof Worker>) {
+        super(...args);
+        const at = answers.push(0) - 1;
+        this.addEventListener('message', (event: MessageEvent) => {
+          if (event.data && typeof event.data === 'object' && 'semanticOperations' in event.data) answers[at]!++;
+        });
+      }
+    };
+  });
   const page = await context.newPage();
-  let workers = 0;
-  page.on('worker', () => workers++);
   await page.goto(url);
   const row = page.locator('[data-semantic-diff-count]');
   await expect(row).toBeVisible({ timeout: 60_000 });
   const count = Number((await row.textContent())?.match(/\d+/)?.[0] ?? -1);
+  const answering = await page.evaluate(() => (window as unknown as { __semAnswers: number[] }).__semAnswers.filter((n) => n > 0).length);
   await context.close();
-  return { count, workers };
+  return { count, answering };
 }
 
 let browser: Browser;
@@ -101,7 +114,7 @@ test('three semantic workers find exactly what one finds, on a 24-file review', 
   const root = inboxScratch('review-semantic-pool');
   try {
     const cwd = makeRepo(root);
-    const runs: Record<number, { count: number; workers: number }> = {};
+    const runs: Record<number, { count: number; answering: number }> = {};
     for (const cores of [4, 8]) {
       const session = await review(root, cwd, `home-${cores}`);
       try {
@@ -112,7 +125,8 @@ test('three semantic workers find exactly what one finds, on a 24-file review', 
     }
     expect(runs[4]!.count).toBeGreaterThanOrEqual(FILES);
     expect(runs[8]!.count).toBe(runs[4]!.count);
-    expect(runs[8]!.workers - runs[4]!.workers).toBe(2);
+    expect(runs[4]!.answering).toBe(1);
+    expect(runs[8]!.answering).toBe(3);
   } finally {
     await removeInboxScratch(root);
   }

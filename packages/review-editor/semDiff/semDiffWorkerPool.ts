@@ -1,5 +1,5 @@
 import { languageForPath } from '@plannotator/sem-jiff/languages';
-import type { SemDiffDownload, SemDiffPromote, SemDiffReply, SemDiffRequest } from './protocol';
+import type { SemDiffDownload, SemDiffForget, SemDiffPromote, SemDiffReply, SemDiffRequest } from './protocol';
 import { SEM_DIFF_COLD_TIMEOUT_MS, SEM_DIFF_OPINION_TIMEOUT_MS, SEM_DIFF_TIMEOUT_MS, type SemDiffTimers } from './semDiffClient';
 
 export const SPAWN_BACKLOG = 3;
@@ -47,6 +47,7 @@ export function createSemDiffWorkerPool(options: SemDiffWorkerPoolOptions): Work
   let loadFailures = 0;
   let idleTimer: unknown = null;
   const pool = {
+    semDiffPool: true,
     onmessage: null as ((event: MessageEvent<Message>) => void) | null,
     onerror: null as (() => void) | null,
     postMessage,
@@ -69,11 +70,9 @@ export function createSemDiffWorkerPool(options: SemDiffWorkerPoolOptions): Work
   const watch = (slot: Slot) => {
     if (slot.timer != null) timers.clear(slot.timer);
     slot.timer = null;
-    const current = slot.jobs.values().next();
-    if (current.done) return;
-    const request = current.value;
+    const request = [...slot.jobs.values()].find((job) => !slot.downloads.has(languageOf(job)));
+    if (!request) return;
     const language = languageOf(request);
-    if (slot.downloads.has(language)) return;
     const limit = slot.warm.has(language) || (coldTimeouts.get(language) ?? 0) >= 2 ? timeoutMs : Math.max(timeoutMs, coldTimeoutMs);
     slot.timer = timers.set(() => timedOut(slot, request), limit);
   };
@@ -235,9 +234,21 @@ export function createSemDiffWorkerPool(options: SemDiffWorkerPoolOptions): Work
     waiting.unshift(foreground);
   }
 
-  function postMessage(message: SemDiffRequest | SemDiffPromote): void {
+  function forget(ids: number[]): void {
+    const gone = new Set(ids);
+    for (let at = waiting.length - 1; at >= 0; at--) if (gone.has(waiting[at]!.id)) waiting.splice(at, 1);
+    for (const slot of slots) {
+      let changed = false;
+      for (const id of ids) changed = slot.jobs.delete(id) || changed;
+      if (changed) watch(slot);
+    }
+    dispatch();
+  }
+
+  function postMessage(message: SemDiffRequest | SemDiffPromote | SemDiffForget): void {
     if (closed) return;
     if ('promote' in message) return promote(message.promote);
+    if ('forget' in message) return forget(message.forget);
     if (broken) return fail(message.id, 'worker did not start');
     if (message.opinion) {
       const slot = slots[0] ?? spawn();

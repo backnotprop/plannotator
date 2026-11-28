@@ -204,6 +204,74 @@ describe('semantic diff worker pool', () => {
     expect(failed()).toEqual([4]);
   });
 
+  test('a file running while the one before it waits for its grammar still has a deadline', async () => {
+    const { workers, create, answer, ids } = heldWorkers();
+    const { timers, advance } = clock();
+    const pool = createSemDiffWorkerPool({ createWorker: create, size: 1, timers, timeoutMs: 3_000, coldTimeoutMs: 30_000 });
+    const { failed } = listen(pool);
+    pool.postMessage(request(1));
+    await settled();
+    answer(workers[0]!, 1);
+    pool.postMessage(request(2, false, 'src/p.py'));
+    pool.postMessage(request(3, false, 'src/t.ts'));
+    await settled();
+    workers[0]!.onmessage?.({ data: { download: 'start', language: 'python' } } as MessageEvent);
+    expect(ids(workers[0]!)).toEqual([1, 2, 3]);
+    advance(3_000);
+    await settled();
+    expect(failed()).toEqual([3]);
+    expect(workers[0]!.terminated).toBe(true);
+    expect(ids(workers[1]!)).toEqual([2]);
+  });
+
+  test('a file the client gave up on frees its worker, so the idle stop still releases it', async () => {
+    const { workers, create, answer, ids } = heldWorkers();
+    const { timers, advance } = clock();
+    const pool = createSemDiffWorkerPool({ createWorker: create, size: 2, timers });
+    const { replies } = listen(pool);
+    for (const id of [1, 2, 3, 4, 5, 6]) pool.postMessage(request(id, true, id === 3 ? 'src/p.py' : `src/f${id}.ts`));
+    await settled();
+    answer(workers[0]!, 1);
+    await settled();
+    expect(ids(workers[1]!)[0]).toBe(3);
+    workers[1]!.onmessage?.({ data: { download: 'start', language: 'python' } } as MessageEvent);
+    for (let round = 0; round < 6; round++) {
+      for (const worker of workers) for (const id of ids(worker)) if (id !== 3 && !replies.some((r) => r.id === id)) answer(worker, id);
+      await settled();
+    }
+    advance(IDLE_RELEASE_MS);
+    await settled();
+    expect(workers[1]!.terminated).toBe(false);
+    pool.postMessage({ forget: [3] } as unknown as SemDiffRequest);
+    advance(IDLE_RELEASE_MS);
+    await settled();
+    expect(workers[1]!.terminated).toBe(true);
+  });
+
+  test('the client tells the pool which files it gave up on when a grammar never arrives', async () => {
+    const posted: unknown[] = [];
+    let send: ((event: MessageEvent) => void) | null = null;
+    const worker = {
+      set onmessage(fn: (event: MessageEvent) => void) {
+        send = fn;
+      },
+      set onerror(_fn: () => void) {},
+      postMessage: (message: unknown) => posted.push(message),
+      terminate() {},
+      semDiffPool: true,
+    } as unknown as Worker;
+    const { timers, advance } = clock();
+    const client = createSemDiffClient({ advert, origin: 'http://127.0.0.1:1', createWorker: () => worker, timers, downloadTimeoutMs: 90_000 });
+    const asked = client.attempt('src/p.py', 'a = 1\n', 'a = 2\n');
+    await settled();
+    send!({ data: { download: 'start', language: 'python' } } as MessageEvent);
+    advance(90_000);
+    expect(await asked).toEqual({ result: null, failed: true });
+    await settled();
+    expect(posted[1]).toEqual({ forget: [(posted[0] as SemDiffRequest).id] });
+    client.dispose();
+  });
+
   test('a worker that dies fails only the file it was on; the file waiting in it goes to another', async () => {
     const { workers, create, answer, ids } = heldWorkers();
     const pool = createSemDiffWorkerPool({ createWorker: create, size: 1, timers: clock().timers });
@@ -321,8 +389,9 @@ describe('semantic diff worker pool', () => {
       set onerror(_fn: () => void) {},
       postMessage: (message: unknown) => posted.push(message),
       terminate() {},
+      semDiffPool: true,
     } as unknown as Worker;
-    const client = createSemDiffClient({ advert, origin: 'http://127.0.0.1:1', createWorker: () => worker, pooled: true });
+    const client = createSemDiffClient({ advert, origin: 'http://127.0.0.1:1', createWorker: () => worker });
     const file = fixture(0);
     const listed = computeReviewSemanticDiff([file], client, async () => file, new AbortController().signal);
     await settled();
@@ -339,14 +408,14 @@ describe('semantic diff worker pool', () => {
   test('gives the same review-wide result as a single worker', async () => {
     const files = Array.from({ length: 12 }, (_, i) => fixture(i));
     const read = async (file: { path: string }) => files.find((f) => f.path === file.path)!;
-    const run = async (createWorker: () => Worker, pooled: boolean) => {
-      const client = createSemDiffClient({ advert, origin: 'http://127.0.0.1:1', createWorker, pooled });
+    const run = async (createWorker: () => Worker) => {
+      const client = createSemDiffClient({ advert, origin: 'http://127.0.0.1:1', createWorker });
       const result = await computeReviewSemanticDiff(files, client, read, new AbortController().signal);
       client.dispose();
       return result;
     };
-    const single = await run(engineWorker, false);
-    const pooled = await run(() => createSemDiffWorkerPool({ createWorker: engineWorker, size: 4 }), true);
+    const single = await run(engineWorker);
+    const pooled = await run(() => createSemDiffWorkerPool({ createWorker: engineWorker, size: 4 }));
     expect(single.summary.total).toBeGreaterThan(0);
     expect(pooled).toEqual(single);
   });
