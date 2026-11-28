@@ -8,7 +8,7 @@
 
 import { isInboxActionReport, isInboxNote, type InboxMessageWire, type InboxQuestion, type InboxThread } from './inbox-types';
 import { QUESTION_ANSWERS_HEADING, type QuestionAnswer } from './question-block';
-import { INBOX_STILL_OPEN_LINE, sliceText } from './inbox-questions';
+import { INBOX_STILL_OPEN_LINE, inboxQuestionWaitsForList, sliceText } from './inbox-questions';
 import { withoutInboxSkillsBlock } from './skill-reference-block';
 import { INLINE_DESTINATION, stripInlineMarkup } from './inline-markdown';
 import { withoutInboxReplyQuoteLead } from './inbox-reply-quote';
@@ -423,7 +423,7 @@ export function holdingsOf(message: InboxMessageWire, options: { delivered: bool
   const questions = (message.questions ?? []).filter(live);
   const isPicked = options.picked ?? ((q: InboxQuestion) => q.state === 'picked');
   const picks = questions.filter((q) => q.state !== 'sent' && isPicked(q)).length;
-  const open = questions.filter((q) => q.state !== 'sent' && !isPicked(q)).length;
+  const open = questions.filter((q) => inboxQuestionWaitsForList(q) && !isPicked(q)).length;
   const sent = questions.filter((q) => q.state === 'sent').length;
   if (picks > 0) out.push({ kind: 'picks', text: `${plural(picks, 'pick')} in your draft`, say: `${plural(picks, 'pick')} in your draft`, count: picks });
   if (open > 0) out.push({ kind: 'open', text: `${open} open ${open === 1 ? 'question' : 'questions'}`, say: `${open} open ${open === 1 ? 'question' : 'questions'}`, count: open });
