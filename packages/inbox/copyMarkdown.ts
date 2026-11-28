@@ -66,6 +66,7 @@ interface QuestionShape {
 /** An answer's words: the pick (Other and text too), then a note. */
 function answerLine(question: InboxQuestion): string | null {
   if (question.state === 'superseded') return 'Replaced by a later question.';
+  if (question.state === 'answered_in_reply' && question.answered_in_reply) return `Answer, from your reply: “${oneLine(question.answered_in_reply.quote)}”`;
   const answer = question.answer;
   if (!answer || (question.state !== 'sent' && question.state !== 'closed')) return null;
   if (question.state === 'closed' && answer.skipped) return 'Answer: Set aside';

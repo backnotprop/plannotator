@@ -278,7 +278,7 @@ test.skipIf(!hasDom)('words only: Keep open by default; the Send leaves the ques
   expect((await questionStates(ids.stopped)).map((q) => q.state)).toEqual(['open', 'open']);
   const mine = await personMessages(ids.stopped);
   expect(mine.map((m) => m.body)).toEqual([
-    "Thinking about it.\n\nNo questions answered yet; all 2 are still open. Don't re-ask them; the person will answer in the Inbox.",
+    "Thinking about it.\n\nNo questions answered yet; all 2 are still open. Don't re-ask them; the person will answer in the Inbox. If their words answer one, name it in answered_in_reply.",
   ]);
   // Nothing was answered: the thread still waits on the person.
   expect(await serverSection(ids.stopped)).toBe('stopped');
@@ -553,7 +553,7 @@ test.skipIf(!hasDom)('one session, words only (Keep open by default): the words 
   // The reply the session gets (on its update) still says its question is open.
   const mine = await personMessages(ids.same);
   expect(mine.map((m) => [m.reply_to, m.body])).toEqual([
-    [ids.sameUpdate, "Still deciding.\n\nNo question answered yet; it is still open. Don't re-ask it; the person will answer in the Inbox."],
+    [ids.sameUpdate, "Still deciding.\n\nNo question answered yet; it is still open. Don't re-ask it; the person will answer in the Inbox. If their words answer it, name it in answered_in_reply."],
   ]);
 });
 

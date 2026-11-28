@@ -115,6 +115,7 @@ packages/inbox/whatsNewHeader.test.tsx
 packages/inbox/whatsNewTailnet.test.tsx
 packages/inbox/whatsNewImages.test.tsx
 packages/inbox/replaced.test.tsx
+packages/inbox/answeredInReply.test.tsx
 packages/inbox/reask.test.tsx
 packages/inbox/openQuestions.test.tsx
 packages/inbox/threadPulls/ThreadPulls.test.tsx
