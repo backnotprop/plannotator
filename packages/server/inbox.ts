@@ -6193,6 +6193,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       });
     },
     combineLoading: () => !repoReadsBegun || repos.reading(),
+    titleOf: (session) => live.labelOf(session) ?? live.titles()[session] ?? null,
   });
 
   // Combine (packages/server/inbox-combine.ts): picked threads, one agent writes a new thread, then they are archived.

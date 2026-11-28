@@ -85,6 +85,22 @@ test.skipIf(!hasDom)('new work and the run show together: the menu offers "Tidy 
   expect(document.querySelectorAll('[data-tidy-run-agent]')).toHaveLength(3);
 });
 
+test.skipIf(!hasDom)('each agent row says which session it is, as Combine names it: its title, else its project', async () => {
+  const item = (thread_id: string, subject: string) => ({ thread_id, subject, project: { id: 'prj_x', name: 'herdr' }, reasons: ['you wrote last'] });
+  const p = {
+    ...plan(2),
+    agents: [
+      { session: 'ses-c', host: 'claude-code', name: 'Claude Code', title: 'Theme pass', thread: 'Theme pass', project: 'herdr', reach: 'wakes', items: [item('msg_x', 'Theme pass')] },
+      { session: 'ses-e', host: 'claude-code', name: 'Claude Code', thread: 'Docs', project: 'herdr', reach: 'wakes', items: [item('msg_y', 'Docs')] },
+    ],
+  } as InboxTidyPlan;
+  const menu = await openMenu(controller(p));
+  act(() => menu.click());
+  await settle();
+  expect(document.querySelector('[data-tidy-agent="ses-c"] .ib-tidy-nm')!.textContent).toBe('Claude Code · Theme pass');
+  expect(document.querySelector('[data-tidy-agent="ses-e"] .ib-tidy-nm')!.textContent).toBe('Claude Code · herdr');
+});
+
 test.skipIf(!hasDom)('a stale plan being read again (pending): the menu and the popover show Tidy as while first read, never the old plan or run', async () => {
   const stale = { ...controller(plan(1)), pending: true };
   const item = await openMenu(stale);

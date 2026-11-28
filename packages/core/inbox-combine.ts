@@ -60,12 +60,15 @@ export interface InboxCombineAgent {
   threads: number;
 }
 
+/** What `inboxCombineAgentLabel` reads: a Combine's agent, or a Tidy's. */
+export type InboxAgentLabelled = Pick<InboxCombineAgent, "session" | "name" | "title" | "thread" | "project">;
+
 /**
- * How the dialog and the toasts name an agent: its host, then its session's title or its project ("Claude Code ·
- * billing-svc"); the thread it wrote in last instead where two of the agents would read the same.
+ * How the dialog, the toasts and Tidy's picker name an agent: its host, then its session's title or its project
+ * ("Claude Code · billing-svc"); the thread it wrote in last instead where two of the agents would read the same.
  */
-export function inboxCombineAgentLabel(agent: InboxCombineAgent, all: readonly InboxCombineAgent[] = [agent]): string {
-  const of = (a: InboxCombineAgent) => a.title ?? a.project ?? a.thread;
+export function inboxCombineAgentLabel(agent: InboxAgentLabelled, all: readonly InboxAgentLabelled[] = [agent]): string {
+  const of = (a: InboxAgentLabelled) => a.title ?? a.project ?? a.thread;
   const part = of(agent);
   if (!part) return agent.name;
   const twin = all.some((a) => a.session !== agent.session && a.name === agent.name && of(a) === part);
