@@ -2,7 +2,7 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSP
 import { ProjectMark, showsProjects, useRowMarks } from '../letterMarks';
 import { knownProjectName, useKnownProjects } from '../projectPictures';
 import { INBOX_CARD_COLUMN_LABELS, INBOX_CARD_LIVE_COLUMNS, displayInboxSubject, inboxCardMarkRef, type InboxCardColumn, type InboxCardMark, type InboxCardWire, type InboxListRow, type InboxInitiative } from '@plannotator/core/inbox-types';
-import { InboxHeldError, inboxApi, type CardsModel, type ComposeSessionsModel, type ProjectFolder } from '../api';
+import { InboxApiError, InboxHeldError, inboxApi, type CardsModel, type ComposeSessionsModel, type ProjectFolder } from '../api';
 import { errorToast } from '../toastError';
 import type { MachinesModel } from '../machines';
 import { formatCount, fullTime, whenTime } from '../format';
@@ -378,6 +378,19 @@ export function BoardPage(props: BoardPageProps) {
     };
   };
 
+  /** A 4xx refusal (except timeout/rate-limit) means no card was made, so retries must send the updated dialog input rather than replaying it. */
+  const isCardTryRefused = (cause: unknown): boolean =>
+    cause instanceof InboxApiError && cause.status >= 400 && cause.status < 500 && cause.status !== 408 && cause.status !== 429;
+
+  const runMadeTry = async (run: () => Promise<InboxCardWire>): Promise<InboxCardWire> => {
+    try {
+      return await run();
+    } catch (cause) {
+      if (isCardTryRefused(cause)) madeTry.current = null;
+      throw cause;
+    }
+  };
+
   /** The dialog's card, made once and brought to what the dialog says now. */
   const dialogCardFor = async (input: NewCardInput): Promise<InboxCardWire> => {
     const target = targetOf(input);
@@ -392,7 +405,7 @@ export function BoardPage(props: BoardPageProps) {
         card = all.find((c) => c.idempotency_key === before.key) ?? null;
       } else {
         // The last try's answer was lost: replay it as it was.
-        card = await before.run();
+        card = await runMadeTry(before.run);
       }
       dialogCard.current = card;
       madeFrom.current = card ? { input: before.input, target: before.target } : null;
@@ -412,7 +425,7 @@ export function BoardPage(props: BoardPageProps) {
     if (!card) {
       const { key, run } = makeTry(input);
       madeTry.current = { input, target, key, run };
-      card = await run();
+      card = await runMadeTry(run);
       dialogCard.current = card;
       madeFrom.current = { input, target };
       madeTry.current = null;
