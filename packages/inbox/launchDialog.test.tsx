@@ -4,7 +4,9 @@
  * What regresses: the Inbox claiming while its settings say nothing is due, or never claiming again on a page left open
  * until launch day; the dialog on both plan review and the Inbox of one computer (one launch switch behind both
  * routes); a surface showing it again after it was answered; the Inbox's other reveals not holding back once it drew;
- * a phone or remote gate on the web Inbox (the owner left out only the native phone app: the phone-width page shows it).
+ * a phone or remote gate on the web Inbox (the owner left out only the native phone app: the phone-width page shows it);
+ * the launch claimed while the welcome to the code review Inbox is open, or never in a tab that showed the welcome (it
+ * waits for the line's gap after it, then shows); a claim answered after the page stopped being ready opening anyway.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
@@ -17,7 +19,9 @@ import { createLaunchSwitch, launchSwitchAction, LAUNCH_SWITCH_FILE, type Launch
 const hasDom = typeof document !== 'undefined';
 const { InboxLaunchDialog } = (hasDom ? await import('./launchDialog') : {}) as typeof import('./launchDialog');
 const { useLaunchAnnouncement } = (hasDom ? await import('@plannotator/ui/components/LaunchAnnouncement') : {}) as typeof import('@plannotator/ui/components/LaunchAnnouncement');
-const { oneTimeDialogShownThisLoad, resetOneTimeDialogShownForTests } = (hasDom ? await import('./reveal') : {}) as typeof import('./reveal');
+const { oneTimeDialogShownThisLoad, resetOneTimeDialogShownForTests, REVEAL_TIMES } = (hasDom ? await import('./reveal') : {}) as typeof import('./reveal');
+const { useLaunchAfterWelcome } = (hasDom ? await import('./reviewOnly') : {}) as typeof import('./reviewOnly');
+type RevealStage = import('./reveal').RevealStage;
 type LaunchClient = import('@plannotator/ui/components/LaunchAnnouncement').LaunchClient;
 
 const CAMPAIGN = 'product-hunt-2026';
@@ -127,6 +131,55 @@ describe.skipIf(!hasDom)('the launch dialog across surfaces', () => {
     await act(async () => document.querySelector<HTMLElement>('[data-launch-not-now]')!.click());
     await settle();
     expect(computer.records.get(CAMPAIGN)?.answer).toBe('dismissed');
+  });
+
+  /** App's gate for the launch beside the welcome (`reviewWelcome.launchMay`), the other gates open. */
+  function AfterWelcome({ stage, client }: { stage: RevealStage; client: LaunchClient }) {
+    return <InboxLaunchDialog due ready={useLaunchAfterWelcome(stage)} heldBack={() => false} client={client} loadArt={artIn} />;
+  }
+
+  test('beside the welcome to the code review Inbox: no claim while it is claimed or open; once closed, the same tab shows the launch after the gap', async () => {
+    const gap = REVEAL_TIMES.otherDialogMs;
+    REVEAL_TIMES.otherDialogMs = 150;
+    try {
+      const computer = oneComputer();
+      const client = computer.surface('inbox');
+      const rerender = await mount(<AfterWelcome stage="claimed" client={client} />);
+      await rerender(<AfterWelcome stage="open" client={client} />);
+      await settle(60);
+      expect(computer.claims).toEqual([]);
+      await rerender(<AfterWelcome stage="shown" client={client} />);
+      await settle(60);
+      expect([computer.claims.length, dialogs()]).toEqual([0, 0]);
+      await settle(200);
+      expect([computer.claims.length, dialogs()]).toEqual([1, 1]);
+    } finally {
+      REVEAL_TIMES.otherDialogMs = gap;
+    }
+  });
+
+  test('a load where the welcome never came claims at once', async () => {
+    const computer = oneComputer();
+    await mount(<AfterWelcome stage="none" client={computer.surface('inbox')} />);
+    await settle();
+    expect([computer.claims.length, dialogs()]).toEqual([1, 1]);
+  });
+
+  test('a claim answered yes while the page stopped being ready (another dialog drew meanwhile) does not open until it is ready again', async () => {
+    const computer = oneComputer();
+    const client = computer.surface('inbox');
+    let artLoaded = () => {};
+    const art = () => new Promise<boolean>((resolve) => (artLoaded = () => resolve(true)));
+    const rerender = await mount(<InboxLaunchDialog due ready heldBack={() => false} client={client} loadArt={art} />);
+    await settle();
+    expect(computer.claims.length).toBe(1);
+    await rerender(<InboxLaunchDialog due ready={false} heldBack={() => false} client={client} loadArt={art} />);
+    await act(async () => artLoaded());
+    await settle();
+    expect(dialogs()).toBe(0);
+    await rerender(<InboxLaunchDialog due ready heldBack={() => false} client={client} loadArt={art} />);
+    await settle();
+    expect(dialogs()).toBe(1);
   });
 
   test('the web Inbox at phone width shows it too (only the native phone app leaves it out)', async () => {

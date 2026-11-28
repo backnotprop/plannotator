@@ -52,7 +52,7 @@ import { executeSubmitPlan } from "./submit-plan-executor";
 import { getPlanningPrompt } from "./planning-prompt";
 import { announceSessionUrl } from "./session-url";
 import { addInboxReminderOpenCode1, findInboxConnection, inboxToolArgs, openCode1AgentHasInbox } from "./inbox";
-import { inboxAgentTool } from "@plannotator/shared/inbox/connection";
+import { inboxAgentTool, inboxAgentWords } from "@plannotator/shared/inbox/connection";
 import {
   appendCommandFeedback,
   CommandMessageAgents,
@@ -742,7 +742,7 @@ Do NOT proceed with implementation until your plan is approved.`;
   // says nothing about them arriving by themselves.
   try {
     const inbox = await findInboxConnection();
-    const spec = inbox ? inboxAgentTool(inbox.tools, { wakes: false }) : null;
+    const spec = inbox ? inboxAgentTool(inbox.tools, { wakes: false, words: inboxAgentWords(loadConfig()) }) : null;
     if (inbox && spec) {
       plugin.tool = {
         ...(plugin.tool ?? {}),

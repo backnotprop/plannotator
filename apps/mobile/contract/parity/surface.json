@@ -1821,6 +1821,7 @@
       "experimental",
       "favicon",
       "float_drafts",
+      "full_inbox",
       "inbox_tool",
       "mark_read_warning",
       "notifications",

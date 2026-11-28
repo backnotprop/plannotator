@@ -3,6 +3,7 @@ import { reloadSkillCatalog } from '@plannotator/ui/utils/skillCatalog';
 import { inboxApi, post, type AgentToolHost, type InboxStorageModel, type SettingsModel } from '../../api';
 import { inboxUrl } from '../../inboxUrl';
 import { scheduledApi } from '../../scheduled/client';
+import { saveFullInbox } from './fullInbox';
 import { onInboxReconnected } from '../../sessionAdopt';
 import { noteDeletedHere } from '../deletedHere';
 
@@ -66,6 +67,15 @@ export function useSettingsSaves(
   const toggleCodeReview = (next: boolean) =>
     saveSetting((s) => ({ ...s, code_review: { on: next } }), () => inboxApi.saveCodeReview(next), (s, saved) => ({ ...s, code_review: saved.code_review }), reloadSkillCatalog);
 
+  /** Full Inbox (reviewOnly.ts): off is the Inbox for code review only; the answer carries Code review, which stays on. */
+  const toggleFullInbox = (next: boolean) =>
+    saveSetting(
+      (s) => ({ ...s, full_inbox: { on: next } }),
+      () => saveFullInbox(next),
+      (s, saved) => ({ ...s, ...(saved.full_inbox ? { full_inbox: saved.full_inbox } : {}), ...(saved.code_review ? { code_review: saved.code_review } : {}) }),
+      reloadSkillCatalog,
+    );
+
   const toggleSystem = (next: boolean) => saveSetting((s) => ({ ...s, system: { on: next } }), () => inboxApi.saveSystem(next), (s, saved) => ({ ...s, system: saved.system ?? { on: next } }));
 
   const toggleChapterDiagrams = (next: boolean) =>
@@ -125,7 +135,7 @@ export function useSettingsSaves(
     }
     await refreshList(true);
   };
-  return { toggleTool, toggleCookieHost, toggleBoard, toggleBro, toggleFloatDrafts, toggleMarkReadWarning, toggleSteps, toggleCodeReview, toggleSystem, toggleChapterDiagrams, toggleScheduled, toggleDecisionMode, toggleExperimental, tailscaleBusy, toggleTailscale, deleteThread, deleteProject };
+  return { toggleTool, toggleCookieHost, toggleBoard, toggleBro, toggleFloatDrafts, toggleMarkReadWarning, toggleSteps, toggleCodeReview, toggleFullInbox, toggleSystem, toggleChapterDiagrams, toggleScheduled, toggleDecisionMode, toggleExperimental, tailscaleBusy, toggleTailscale, deleteThread, deleteProject };
 }
 
 /** App's settings take a saved thread panes switch through this (set where App runs `useSettingsSaves`). */

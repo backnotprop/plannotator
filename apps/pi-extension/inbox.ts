@@ -48,7 +48,7 @@ import {
 	inboxRegistryFileOf,
 	InboxWake,
 } from "./generated/inbox/agent-link.ts";
-import { inboxAgentTool, type InboxReplyCommand } from "./generated/inbox/connection.ts";
+import { inboxAgentTool, inboxAgentWords, type InboxAgentWords, type InboxReplyCommand } from "./generated/inbox/connection.ts";
 import { isInboxTurnedOn } from "./generated/inbox/turned-on.ts";
 import { releasePiSessionClaim, writePiSessionClaim } from "./generated/inbox/pi-session-claim.ts";
 import { isCtxAlive, resolveIdleDeliveryOptions } from "./current-pi-session.ts";
@@ -190,7 +190,7 @@ export function setupPiInbox(pi: InboxPi, options: PiInboxOptions): Promise<void
 		registerPiInbox(
 			pi,
 			new InboxAgentConnection({ dataDir, host: PI_INBOX_HOST, agentName: PI_INBOX_AGENT_NAME, tools }),
-			{ ...options, reminder },
+			{ ...options, reminder, words: inboxAgentWords(config) },
 		);
 	});
 }
@@ -370,8 +370,8 @@ function piHandoffLineOf(ctx: ExtensionContext, sessionId: string): string[] {
 }
 
 /** Exported for the tests. */
-export function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options: PiInboxOptions & { reminder: string | null }): void {
-	const spec = inboxAgentTool(connection.tools);
+export function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options: PiInboxOptions & { reminder: string | null; words?: InboxAgentWords }): void {
+	const spec = inboxAgentTool(connection.tools, { words: options.words ?? inboxAgentWords(null) });
 	const ohMyPi = detectPiHost(pi) === "oh-my-pi";
 	if (!spec) return;
 

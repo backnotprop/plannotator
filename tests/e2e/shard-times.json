@@ -211,6 +211,7 @@
   "inbox-review-jumps.spec.ts": 18,
   "inbox-review-keys.spec.ts": 30,
   "inbox-review-markdown.spec.ts": 35,
+  "inbox-review-only.spec.ts": 90,
   "inbox-review-plus-button-firefox.spec.ts": 60,
   "inbox-review-plus-button.spec.ts": 14,
   "inbox-review-risk-bars.spec.ts": 30,

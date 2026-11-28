@@ -51,7 +51,7 @@ import { loadConfig, resolveInboxTool } from "../../packages/shared/config";
 import { getPlannotatorDataDir } from "../../packages/shared/data-dir";
 import { discoverInboxTools, InboxAgentConnection, InboxDeliverLater, inboxRegistryFileOf, InboxWake, type InboxWakeTarget } from "../../packages/shared/inbox/agent-link";
 import { isInboxTurnedOn } from "../../packages/shared/inbox/turned-on";
-import { inboxAgentTool, type InboxReplyCommand, type InboxToolInfo } from "../../packages/shared/inbox/connection";
+import { inboxAgentTool, inboxAgentWords, type InboxReplyCommand, type InboxToolInfo } from "../../packages/shared/inbox/connection";
 
 export const CLINE_INBOX_HOST = "cline";
 export const CLINE_INBOX_AGENT_NAME = "Cline";
@@ -262,7 +262,7 @@ export async function setupClineInbox(api: ClinePluginApi, ctx: ClineSetupContex
   const connection = new InboxAgentConnection({ dataDir, host: CLINE_INBOX_HOST, agentName: CLINE_INBOX_AGENT_NAME, tools });
   const session = new ClineInboxSession(connection, sessionId, ctx, deps);
 
-  const spec = inboxAgentTool(connection.tools);
+  const spec = inboxAgentTool(connection.tools, { words: inboxAgentWords(loadConfig()) });
   if (spec && typeof api.registerTool === "function") {
     try {
       api.registerTool({

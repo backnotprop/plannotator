@@ -107,6 +107,8 @@ export interface SidebarProps {
   onAddMachine?: () => void;
   /** Rows waiting on the person, all projects. */
   inboxCount: number;
+  /** The Inbox for code review only (reviewOnly.ts): only what review needs is drawn; the Inbox row while `inboxCount` says something waits. */
+  reviewOnly?: boolean;
   projects: readonly ProjectFolder[];
   /**
    * The window's name for each project (`windowProjectNames`, App.tsx), shared with the rows so a project reads
@@ -439,6 +441,8 @@ export function Sidebar(props: SidebarProps) {
     agents: agentsDrawn,
     tags: props.tags?.shown === true,
     phone,
+    reviewOnly: props.reviewOnly === true,
+    inboxWaits: props.inboxCount > 0,
   });
   const shows = (item: InboxSidebarItem) => drawn.has(item) && inboxSidebarShown(layout, item);
   // Hidden in Customize sidebar (the owner, 2026-11-09): the whole section goes, heading and all. Agents keep running.

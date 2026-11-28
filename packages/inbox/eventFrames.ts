@@ -50,7 +50,7 @@ export interface InboxEventHandlers {
   /** A thread's steps changed, on this Inbox or a linked machine: only that thread's checklist reads them again. */
   onSteps?: (threadId: string) => void;
   /** Show a thread, or (`page`, with no thread) a capability's page: `plannotator plans` shows the Plans page. */
-  onShow?: (threadId: string, windowId: string, page?: 'plans') => void;
+  onShow?: (threadId: string, windowId: string, page?: 'plans' | 'reviews') => void;
   onSnoozes?: () => void;
   onThreadPulls?: (threadIds: string[]) => void;
   onRows?: (rows: unknown, rev: unknown, last: { prev: unknown; by: unknown }) => void;
@@ -61,7 +61,7 @@ export interface InboxEventHandlers {
   onShowArchived?: (value: unknown) => void;
   onAgentFaces?: (data: unknown) => void;
   onReactions?: (reactions: unknown, rev: unknown) => void;
-  onCapabilities?: (capabilities: { board?: { on: boolean }; decision_mode?: { on: boolean }; steps?: { on: boolean }; bro?: { on: boolean }; float_drafts?: { on: boolean }; mark_read_warning?: { on: boolean }; split_view?: { on: boolean }; code_review?: { on: boolean }; system?: { on: boolean }; chapter_diagrams?: { on: boolean }; scheduled_threads?: { on: boolean }; plans?: { on: boolean }; experimental?: InboxExperimentalSettings }) => void;
+  onCapabilities?: (capabilities: { board?: { on: boolean }; decision_mode?: { on: boolean }; steps?: { on: boolean }; bro?: { on: boolean }; float_drafts?: { on: boolean }; mark_read_warning?: { on: boolean }; split_view?: { on: boolean }; code_review?: { on: boolean }; full_inbox?: { on: boolean; chosen?: true }; system?: { on: boolean }; chapter_diagrams?: { on: boolean }; scheduled_threads?: { on: boolean }; plans?: { on: boolean }; experimental?: InboxExperimentalSettings }) => void;
   onTailscale?: (tailscale: TailscaleSettings) => void;
   onMachine?: (frame: MachineRecordFrame) => void;
   onMachines?: (machines: MachineView[]) => void;
@@ -139,7 +139,7 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
     case 'show':
       try {
         const data = JSON.parse(frame.data) as { thread_id?: unknown; window?: unknown; page?: unknown };
-        if (data.page === 'plans' && typeof data.window === 'string') handlers.onShow?.('', data.window, 'plans');
+        if ((data.page === 'plans' || data.page === 'reviews') && typeof data.window === 'string') handlers.onShow?.('', data.window, data.page);
         else if (typeof data.thread_id === 'string' && typeof data.window === 'string') handlers.onShow?.(data.thread_id, data.window);
       } catch {
       }
@@ -209,7 +209,7 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       return;
     case 'capabilities':
       try {
-        const data = JSON.parse(frame.data) as { board?: { on?: unknown }; decision_mode?: { on?: unknown }; steps?: { on?: unknown }; bro?: { on?: unknown }; float_drafts?: { on?: unknown }; mark_read_warning?: { on?: unknown }; split_view?: { on?: unknown }; code_review?: { on?: unknown }; system?: { on?: unknown }; chapter_diagrams?: { on?: unknown }; scheduled_threads?: { on?: unknown }; plans?: { on?: unknown }; experimental?: unknown };
+        const data = JSON.parse(frame.data) as { board?: { on?: unknown }; decision_mode?: { on?: unknown }; steps?: { on?: unknown }; bro?: { on?: unknown }; float_drafts?: { on?: unknown }; mark_read_warning?: { on?: unknown }; split_view?: { on?: unknown }; code_review?: { on?: unknown }; full_inbox?: { on?: unknown; chosen?: unknown }; system?: { on?: unknown }; chapter_diagrams?: { on?: unknown }; scheduled_threads?: { on?: unknown }; plans?: { on?: unknown }; experimental?: unknown };
         const experimental = experimentalOfFrame(data.experimental);
         handlers.onCapabilities?.({
           ...(typeof data.board?.on === 'boolean' ? { board: { on: data.board.on } } : {}),
@@ -220,6 +220,8 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
           ...(typeof data.mark_read_warning?.on === 'boolean' ? { mark_read_warning: { on: data.mark_read_warning.on } } : {}),
           ...(typeof data.split_view?.on === 'boolean' ? { split_view: { on: data.split_view.on } } : {}),
           ...(typeof data.code_review?.on === 'boolean' ? { code_review: { on: data.code_review.on } } : {}),
+          // Code review only (reviewOnly.ts): off while the person uses the Inbox for code review only.
+          ...(typeof data.full_inbox?.on === 'boolean' ? { full_inbox: { on: data.full_inbox.on, ...(data.full_inbox.chosen === true ? { chosen: true as const } : {}) } } : {}),
           ...(typeof data.system?.on === 'boolean' ? { system: { on: data.system.on } } : {}),
           ...(typeof data.chapter_diagrams?.on === 'boolean' ? { chapter_diagrams: { on: data.chapter_diagrams.on } } : {}),
           ...(typeof data.scheduled_threads?.on === 'boolean' ? { scheduled_threads: { on: data.scheduled_threads.on } } : {}),
