@@ -639,7 +639,7 @@ export function useHtmlAnnotation({
   anchorSize = false,
 }: UseHtmlAnnotationOptions): Omit<
   UseAnnotationHighlighterReturn,
-  "highlighterRef" | "highlightRange" | "highlightMathElement" | "commentDrafts" | "reopenCommentDraft" | "reopenComment"
+  "highlighterRef" | "highlightRange" | "highlightMathElement" | "commentDrafts" | "reopenCommentDraft" | "reopenComment" | "touchSelectionOffer"
 > & {
   /** Whether any pinned draft target is still displayed by the page. Always
    *  true while no composer is open. */

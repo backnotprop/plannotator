@@ -9,6 +9,13 @@ interface FloatingQuickLabelPickerProps {
   cursorHint?: { x: number; y: number };
   onSelect: (label: QuickLabel) => void;
   onDismiss: () => void;
+  /**
+   * The toolbar that opened it is for an unpainted selection (a touch
+   * screen's, still the system's): the picker counts as part of it, so a
+   * press on a label is not a change of the selection, and the press leaves
+   * the page's selection alone. Absent: as before.
+   */
+  unpainted?: boolean;
 }
 
 const PICKER_WIDTH = 192;
@@ -53,6 +60,7 @@ export const FloatingQuickLabelPicker: React.FC<FloatingQuickLabelPickerProps> =
   cursorHint,
   onSelect,
   onDismiss,
+  unpainted = false,
 }) => {
   const [position, setPosition] = useState<{ top: number; left: number; flipAbove: boolean; maxHeight: number } | null>(null);
   const ref = useRef<HTMLDivElement>(null);
@@ -122,6 +130,7 @@ export const FloatingQuickLabelPicker: React.FC<FloatingQuickLabelPickerProps> =
       ref={ref}
       data-quick-label-picker
       data-floating-picker="true"
+      data-pn-touch-selection-offer={unpainted ? '' : undefined}
       className="fixed z-[100]"
       style={{
         top: position.top,
@@ -130,6 +139,8 @@ export const FloatingQuickLabelPicker: React.FC<FloatingQuickLabelPickerProps> =
         ...(position.flipAbove ? { transform: 'translateY(-100%)' } : {}),
         animation: `${animName} 0.12s ease-out`,
       }}
+      // Captured: the rows stop the press themselves.
+      onMouseDownCapture={(e) => { if (unpainted) e.preventDefault(); }}
       onMouseDown={(e) => e.stopPropagation()}
     >
       <style>{`

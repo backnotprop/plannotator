@@ -16,6 +16,8 @@
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
+// No React here, so it may load before the DevTools hook below.
+import { TOUCH_SELECTION_SETTLE_MS } from '../utils/touchSelection';
 
 // React's DevTools hook, read by react-dom when it loads: it must be in place before the first import of react-dom.
 interface Committed { inDocument: number; inCard: number }
@@ -247,7 +249,10 @@ describe.if(hasDom)('the card in the window', () => {
     range.setEnd(node!, node!.textContent!.indexOf(phrase) + phrase.length);
     window.getSelection()!.removeAllRanges();
     window.getSelection()!.addRange(range);
-    await act(async () => { node!.parentElement!.closest('article')!.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true })); });
+    // A finger's selection rests unpainted under the selection toolbar; its Comment opens the card.
+    await act(async () => { document.dispatchEvent(new Event('selectionchange')); });
+    await act(async () => { await new Promise((r) => setTimeout(r, TOUCH_SELECTION_SETTLE_MS + 80)); });
+    await act(async () => { document.querySelector<HTMLButtonElement>('[data-pn-touch-selection-offer] button[title="Comment"]')!.click(); });
     await settle();
     const field = box()?.querySelector<HTMLTextAreaElement>('textarea');
     expect(field).toBeTruthy();
