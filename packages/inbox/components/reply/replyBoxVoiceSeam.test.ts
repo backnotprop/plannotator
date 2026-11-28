@@ -83,3 +83,12 @@ test('the voice entry is where the recorder comes from', () => {
   expect(entry.has(join(INBOX, 'voiceRecorder.ts'))).toBe(true);
   expect(entry.has(join(INBOX, 'components/VoiceMic.tsx'))).toBe(true);
 });
+
+test('the controller loads no voice code, and never the Inbox\'s own Send (its late record is kept in the browser)', () => {
+  const composer = graph(join(INBOX, 'components/reply/useReplyComposer.tsx'));
+  const banned = [...VOICE, 'packages/inbox/data/actions/sendLanded.ts', 'packages/inbox/data/actions/send.ts'];
+  const reached = banned.filter((file) => composer.has(join(ROOT, file))).map((file) => composer.get(join(ROOT, file))!.map(rel).join(' -> '));
+  expect(reached).toEqual([]);
+  expect(composer.has(join(INBOX, 'components/reply/ReplyBox.tsx'))).toBe(false);
+  expect(composer.has(join(INBOX, 'replyDraft.ts'))).toBe(true);
+});

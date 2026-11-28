@@ -44,6 +44,7 @@ import { caretAnchor, caretLineRect, fieldAnchor, fieldInSight, phoneSkillListHe
 import { TagNotes, TagPicker } from './TagPicker';
 import type { VoiceNote, voiceHidesCaret, voicePaint } from './VoiceMic';
 import type { VoiceHandle } from '../voice';
+import type { ThreadMentions } from '../threadMentions';
 import { textareaField } from '../voiceField';
 import { isPhone, isTouchScreen } from '../phone';
 import { inboxSkillFilter } from '../skills';
@@ -126,6 +127,8 @@ export interface InboxComposerFieldProps {
    * approval "inbox-drag-threads"): a dragged row, the row menu's Mention in reply, a pasted thread link. Absent: none.
    */
   mentionThread?: string;
+  /** Where those mentions are kept (threadMentions.ts `createThreadMentions`). Absent: the Inbox's own. Keep its identity stable. */
+  mentionScope?: ThreadMentions;
   /**
    * Drawn at the start of the field's first line, the words flowing after it (`FieldLead`): the reply box's recipient
    * chip in a thread with several agents. Absent: the field as ever.
@@ -173,6 +176,7 @@ export function ComposerFieldBase({
   skillFilter: ownSkillFilter,
   commands,
   mentionThread,
+  mentionScope,
   lead,
   onFocus,
   rows = 2,
@@ -199,7 +203,7 @@ export function ComposerFieldBase({
   const voiceLive = voice && voiceParts ? voiceParts.hidesCaret(voice.view) : false;
   const wrapRef = useRef<HTMLDivElement | null>(null);
   // Thread mentions (a reply's field only): every change of the words goes through `setText`, so the mentions move with them.
-  const threadMentions = useReplyMentions({ threadId: mentionThread ?? '', text: value, fieldRef: innerRef, wrapRef, voiceLive, off: mentionThread === undefined });
+  const threadMentions = useReplyMentions({ threadId: mentionThread ?? '', text: value, fieldRef: innerRef, wrapRef, voiceLive, off: mentionThread === undefined, scope: mentionScope });
   const commitMentions = threadMentions.commit;
   const setText = useCallback(
     (next: string, caret?: number | null, undo = false) => {
