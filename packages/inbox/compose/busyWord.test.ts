@@ -12,6 +12,10 @@ test('working while busy, idle when its host said it is not, nothing when its ho
   expect([busyWord({ busy: true }), busyWord({ busy: false }), busyWord({ busy: null })]).toEqual(['Working', 'Idle', null]);
 });
 
+test('a session with its Inbox turned off says so in the To picker whatever its turn', () => {
+  expect([busyWord({ busy: true, inbox_off: true }), busyWord({ busy: false, inbox_off: true })]).toEqual(['Inbox off', 'Inbox off']);
+});
+
 test("the Board's card: working, idle, ended (not live), and nothing for a live host that reports no turns", () => {
   const live = [
     { session: 'cc', busy: true },

@@ -5265,7 +5265,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   </p>
                 )}
                 {/* A plain reply saved for a session that ended, or that its session took and will never deliver, moves the same way (the server checks). */}
-                {message === last && (delivered?.ended || delivered?.stuck) && !lastTo && askedSession && !isDelivered(last, thread.messages[0]!) && (
+                {message === last && (delivered?.ended || delivered?.stuck || delivered?.inboxOff) && !lastTo && askedSession && !isDelivered(last, thread.messages[0]!) && (
                   <SendToAnotherSession
                     messageId={last.id}
                     stuck={delivered.stuck === true}
@@ -5278,7 +5278,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   />
                 )}
                 {/* A launched agent that is gone: the reply waiting on it can move, addressed to it or answering it. */}
-                {message === last && (shownRun ? shownRun.state === 'missing' && waitingCanMove : delivered?.state === 'undelivered') && lastTo && (
+                {message === last && (shownRun ? shownRun.state === 'missing' && waitingCanMove : delivered?.state === 'undelivered' || !!delivered?.inboxOff) && lastTo && (
                   <SendToAnotherSession
                     messageId={last.id}
                     stuck={delivered?.stuck === true}

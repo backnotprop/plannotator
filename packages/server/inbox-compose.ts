@@ -163,6 +163,7 @@ export function createInboxCompose(options: {
         ...(root !== group.project.root ? { root } : {}),
         ...(entry.label ? { label: entry.label } : {}),
         ...(entry.runtime ? { runtime: entry.runtime } : {}),
+        ...(entry.inboxOff ? { inbox_off: true as const } : {}),
         activity: Math.max(entry.startedAt, last ? Date.parse(last.at) : 0),
       });
     }
@@ -299,7 +300,7 @@ export function createInboxCompose(options: {
     const there = thereInThread(live, options.launch, message.thread_id);
     // Its session's connection claimed it and will never deliver it (its wake was killed mid-delivery): that session
     // does not get it, running or not, so it moves as off an ended one. Nothing delivers it again by itself.
-    const stuck = !!waitsOn && live.stuck(waitsOn, messageId);
+    const stuck = !!waitsOn && (live.stuck(waitsOn, messageId) || live.inboxOff(waitsOn));
     const next = store.readdressMessage(messageId, target, {
       targetLive: !!waitsOn && !stuck && there.askerLive(waitsOn),
       askerEnded: stuck || replacesEndedAsker(asked, there),

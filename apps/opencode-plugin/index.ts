@@ -52,7 +52,8 @@ import { executeSubmitPlan } from "./submit-plan-executor";
 import { getPlanningPrompt } from "./planning-prompt";
 import { announceSessionUrl } from "./session-url";
 import { addInboxReminderOpenCode1, findInboxConnection, inboxToolArgs, openCode1AgentHasInbox } from "./inbox";
-import { inboxAgentTool } from "@plannotator/shared/inbox/connection";
+import { inboxAgentTool, INBOX_OFF_AGENT_TEXT } from "@plannotator/shared/inbox/connection";
+import { openCodeInboxOff } from "./inbox-off";
 import {
   appendCommandFeedback,
   CommandMessageAgents,
@@ -607,7 +608,7 @@ Do NOT proceed with implementation until your plan is approved.`;
   ): Promise<void> {
     // The Inbox is the CLI's own server: the embedded runtime cannot host it.
     if (cmd === "plannotator-inbox") {
-      await handleCliCommand({ command: cmd, client, sessionId: input.sessionID, rawArgs: "", commandTurn: true });
+      await handleCliCommand({ command: cmd, client, sessionId: input.sessionID, rawArgs: input.arguments ?? "", commandTurn: true });
       return;
     }
     // input.arguments is the raw tail string from OpenCode's command dispatcher —
@@ -789,7 +790,7 @@ Do NOT proceed with implementation until your plan is approved.`;
           }
           if (lastAnswer.size > 500 && !lastAnswer.has(input.sessionID)) lastAnswer.clear();
           lastAnswer.set(input.sessionID, hasInbox);
-          if (hasInbox) addInboxReminderOpenCode1(output.system, reminderText);
+          if (hasInbox) addInboxReminderOpenCode1(output.system, openCodeInboxOff(input.sessionID) ? INBOX_OFF_AGENT_TEXT : reminderText);
         };
       }
     }

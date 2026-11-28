@@ -17,6 +17,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { parseInboxQuestionBlocks } from '@plannotator/core/inbox-questions';
 import type { InboxAnnotationRecord, InboxMessageWire, InboxProject, InboxQuestion, InboxRun, InboxThread } from '@plannotator/core/inbox-types';
 import { whenTime } from './format';
+import { INBOX_OFF_REPLY_TEXT } from '@plannotator/core/inbox-delivery-line';
 
 const hasDom = typeof document !== 'undefined';
 // Viewer pulls in web-highlighter, which reads `window` at module-eval time.
@@ -108,7 +109,7 @@ let root: Root | null = null;
 let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
 let posted: { path: string; body: Record<string, unknown> }[] = [];
-let sessions: { sessions: ReturnType<typeof live>[]; asker?: { session: string; live: boolean; stuck?: string[] } } = { sessions: [] };
+let sessions: { sessions: ReturnType<typeof live>[]; asker?: { session: string; live: boolean; stuck?: string[]; connection?: Record<string, unknown> } } = { sessions: [] };
 let replyAnswer: () => Response = () => new Response('{}');
 let annotations: InboxAnnotationRecord[] = [];
 /** Which sessions are still there, by id (answers `?asker=` for any session); null: `sessions.asker` as set. */
@@ -857,6 +858,19 @@ test.skipIf(!hasDom)('a reply its live session took and will never deliver (`ask
   expect(line?.getAttribute('data-delivery')).toBe('undelivered');
   expect(line?.textContent).not.toContain('gets this');
   expect(line?.textContent).not.toContain('still gets it');
+  act(() => (el.querySelector('[data-readdress-open]') as HTMLButtonElement).click());
+  await settle();
+  expect([...el.querySelectorAll('[data-readdress-session]')].map((row) => row.getAttribute('data-readdress-session'))).toEqual(['ses_other']);
+  act(() => (el.querySelector('[data-readdress-send]') as HTMLButtonElement).click());
+  await settle();
+  expect(posted.find((p) => p.path.endsWith(`/messages/${R1}/to`))?.body.to).toEqual({ host: 'pi', session: 'ses_other' });
+});
+
+test.skipIf(!hasDom)('a reply to a session with its Inbox turned off: the line says it goes in when turned back on, and it can move', async () => {
+  const connection = { busy: false, idle_since: '2026-10-11T10:48:00.000Z', send_now: false, inbox_off: true };
+  sessions = { sessions: [live('ses_asker', 'claude-code', { inbox_off: true }), live('ses_other', 'pi')], asker: { session: 'ses_asker', live: true, connection } };
+  const el = await render(threadOf(asking(), personReply()), { at: '2026-10-11T10:52:00.000Z', checked_at: null });
+  expect(el.querySelector('[data-delivery]')?.textContent).toContain(INBOX_OFF_REPLY_TEXT);
   act(() => (el.querySelector('[data-readdress-open]') as HTMLButtonElement).click());
   await settle();
   expect([...el.querySelectorAll('[data-readdress-session]')].map((row) => row.getAttribute('data-readdress-session'))).toEqual(['ses_other']);

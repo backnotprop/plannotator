@@ -6,7 +6,7 @@
  * accessible name carries the state in words. Pure, for the tests.
  */
 import { inboxAgentName, inboxT3WaitLine, type InboxListRow, type InboxListSection, type InboxRowDelivery } from '@plannotator/core/inbox-types';
-import { deliveryText, INBOX_STOPPED_REPLY_TEXT, type DeliveryLine } from './deliveryLine';
+import { deliveryText, INBOX_OFF_REPLY_TEXT, INBOX_STOPPED_REPLY_TEXT, type DeliveryLine } from './deliveryLine';
 import { whenTime } from './format';
 import { deliveryAgentName } from './scriptAuthor';
 
@@ -51,7 +51,8 @@ export function rowWait(d: InboxRowDelivery | null | undefined): NonNullable<Del
 export function rowDeliverySpoken(d: InboxRowDelivery): string {
   const name = rowDeliveryName(d);
   // Held by a stopped Claude Code session (approval "inbox-stopped-reply"): the thread's words, not "queued".
-  const stopped = d.reason === 'stopped' ? INBOX_STOPPED_REPLY_TEXT.charAt(0).toLowerCase() + INBOX_STOPPED_REPLY_TEXT.slice(1) : null;
+  const held = d.reason === 'stopped' ? INBOX_STOPPED_REPLY_TEXT : d.reason === 'inbox_off' ? INBOX_OFF_REPLY_TEXT : null;
+  const stopped = held ? held.charAt(0).toLowerCase() + held.slice(1) : null;
   // It waits on T3: the first words of the thread's line (approval "inbox-t3-reply-waiting-line"), not "queued".
   const t3 = d.t3_wait ? inboxT3WaitLine(d.t3_wait).text.split('.', 1)[0]! : null;
   const words =

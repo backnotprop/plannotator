@@ -153,6 +153,8 @@ import {
   withSessionTitles,
 } from './inbox'
 import { inboxAgentTool, inboxPlaceFromEnv, inboxReminderFor, type InboxPlace, type InboxToolInfo } from './inbox-contract'
+import { INBOX_OFF_AGENT_TEXT, INBOX_OFF_NOTICE, INBOX_ON_AGENT_TEXT, INBOX_ON_NOTICE, inboxOffArgument, inboxOffCarriesAcrossClear } from './inbox-contract'
+import { readOffSessions, STORE_INBOX_OFF_SESSIONS, withOffSession } from './inbox-off'
 import { inboxTurnedOnHere } from './inbox-turned-on'
 import { INBOX_DEFAULT_TOOLS } from './inbox-default-tools'
 import { COMMANDS, debugAppendArgv, INBOX_COMMAND, isModCommand, privateDirArgv, resolveDataDir, waitArgv } from './launch'
@@ -478,7 +480,33 @@ async function plainReminderAgain($: Engine): Promise<void> {
   if (!reminderWithThreadsSet) return
   reminderWithThreadsSet = false
   if (!allowed) return
-  await Promise.resolve($.env.set('PLANNOTATOR_INBOX_REMINDER', inboxReminderEnvValue(reminderOn(), inboxToolName, allowed.inboxReminderCustom, allowed.inboxReminderRules))).catch(() => undefined)
+  await Promise.resolve($.env.set('PLANNOTATOR_INBOX_REMINDER', reminderEnvNow())).catch(() => undefined)
+}
+
+let offSession: string | null = null
+
+function offFor(sessionId: string): boolean {
+  return offSession === sessionId || (offSession !== null && inboxOffCarriesAcrossClear(true))
+}
+
+function reminderEnvNow(): string | undefined {
+  if (offSession !== null) return INBOX_OFF_AGENT_TEXT
+  return allowed ? inboxReminderEnvValue(reminderOn(), inboxToolName, allowed.inboxReminderCustom, allowed.inboxReminderRules) : undefined
+}
+
+async function storedOff($: Engine, sessionId: string): Promise<boolean> {
+  const stored = await Promise.resolve($.store.get(STORE_INBOX_OFF_SESSIONS)).catch(() => undefined)
+  return Object.hasOwn(readOffSessions(stored), sessionId)
+}
+
+async function noteSessionOff($: Engine, instance: PlannotatorMod, off: boolean): Promise<void> {
+  const sessionId = String(instance.session.sessionId)
+  offSession = off ? sessionId : null
+  instance.inbox?.setInboxOff(off)
+  const stored = await Promise.resolve($.store.get(STORE_INBOX_OFF_SESSIONS)).catch(() => undefined)
+  const now = Number(await Promise.resolve($.clock.now()).catch(() => Date.now()))
+  await Promise.resolve($.store.set(STORE_INBOX_OFF_SESSIONS, withOffSession(readOffSessions(stored), sessionId, off, now))).catch(() => undefined)
+  await Promise.resolve($.env.set('PLANNOTATOR_INBOX_REMINDER', reminderEnvNow())).catch(() => undefined)
 }
 
 /**
@@ -693,6 +721,7 @@ async function currentMod($: Engine, options: { healed?: boolean } = {}): Promis
     const forkedFrom = new TranscriptForkedFrom(host, String(sessionId), transcriptCandidatesOf($, String(sessionId)))
     // So does a conversation handed over to this session: the old transcript ends with a record that names it.
     const continuedIn = new TranscriptContinuedIn(host, String(sessionId), transcriptCandidatesOf($, String(sessionId)))
+    const off = offFor(String(sessionId)) || (await storedOff($, String(sessionId)))
     const instance = new PlannotatorMod(host, {
       sessionId,
       dataDir: settings.dataDir,
@@ -719,7 +748,9 @@ async function currentMod($: Engine, options: { healed?: boolean } = {}): Promis
     })
     // A question queued behind the old session's turn still enters as a turn of the new one: the new instance drops it.
     instance.carryQueued(previous)
+    instance.inbox?.setInboxOff(off)
     mod = instance
+    if (off || offSession !== null) await noteSessionOff($, instance, off)
     // Beside the tag, for the same session: the project its shell's `plannotator inbox call` / `card` file under.
     // Not awaited: every hook (ExitPlanMode included) waits on this switch, and the turn start and each Bash call export again.
     void instance.exportSessionProject()
@@ -1199,7 +1230,9 @@ export function register(on: On) {
   // not alongside it: whether the command hook runs inside next(e) is the
   // engine's, and a reused precomputed summary installs at once.
   on('session.compact', async ($: Engine, e: any, next: Next) => {
-    if (e?.trigger !== 'precompute' && !e?.agentId && reminderOn() && allowed && inboxToolName) {
+    if (e?.trigger !== 'precompute' && !e?.agentId && allowed && offSession !== null) {
+      await Promise.resolve($.env.set('PLANNOTATOR_INBOX_REMINDER', INBOX_OFF_AGENT_TEXT)).catch(() => undefined)
+    } else if (e?.trigger !== 'precompute' && !e?.agentId && reminderOn() && allowed && inboxToolName) {
       try {
         const reminder = inboxReminderEnvValue(true, inboxToolName, allowed.inboxReminderCustom, allowed.inboxReminderRules)
         if (reminder) {
@@ -1236,7 +1269,12 @@ export function register(on: On) {
     // which shows the text and drops `context` (2.1.287 through 2.1.312): the
     // person gets the address, the model no briefing. The installer's skill
     // holds the name, so a queued command takes the normal path.
-    if (!isModCommand(name)) return await instance.openInbox(inboxToolName)
+    if (!isModCommand(name)) {
+      const word = inboxOffArgument(e.args)
+      if (!word) return await instance.openInbox(inboxToolName)
+      await noteSessionOff($, instance, word === 'off')
+      return word === 'off' ? { text: INBOX_OFF_NOTICE, context: [INBOX_OFF_AGENT_TEXT] } : { text: INBOX_ON_NOTICE, context: [INBOX_ON_AGENT_TEXT] }
+    }
     const spec = COMMANDS[name]
     const text = await instance.runCommand(spec.kind, typeof e.args === 'string' ? e.args : '')
     return { text }
@@ -1488,16 +1526,18 @@ export function register(on: On) {
         // The store is read only for a resumed conversation's first prompt here.
         const recorded = resumed && !state.delivered && !isMeta && !command ? await reminderRecorded($, sessionId) : false
         const carries = inboxFirstPromptContext({ delivered: state.delivered, resumed, recorded, isMeta, command })
+        const off = offFor(sessionId)
         const texts: string[] = []
-        if (carries?.reminder) texts.push(inboxReminderFor(settings.inboxReminderCustom, toolName, { rules: settings.inboxReminderRules }))
-        if (carries?.threads) {
+        if (carries && off) texts.push(INBOX_OFF_AGENT_TEXT)
+        if (carries?.reminder && !off) texts.push(inboxReminderFor(settings.inboxReminderCustom, toolName, { rules: settings.inboxReminderRules }))
+        if (carries?.threads && !off) {
           const threads = await withinMs($, SESSION_THREADS_RESUME_MS, async () =>
             readSessionThreads(hostOf($, settings.debugPath), settings.dataDir, inboxSessionOf(settings, sessionId), await inboxProjectFolderOf($), toolName),
           )
           if (threads) texts.push(threads)
         }
         if (carries) reminderFor = state
-        if (carries?.reminder) recordFor = sessionId
+        if (carries?.reminder && !off) recordFor = sessionId
         if (texts.length > 0) entering = { ...e, context: [...(Array.isArray(e.context) ? e.context : []), ...texts] }
       } catch {
         entering = e

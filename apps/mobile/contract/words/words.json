@@ -146,6 +146,16 @@
       "parts": [],
       "source": "packages/core/inbox-delivery-line.ts INBOX_STOPPED_REPLY_TEXT"
     },
+    "delivery.inbox_off_reply": {
+      "text": "Inbox off in that session: goes in when it's turned back on",
+      "parts": [],
+      "source": "packages/core/inbox-delivery-line.ts INBOX_OFF_REPLY_TEXT"
+    },
+    "label.inbox_off": {
+      "text": "Inbox off",
+      "parts": [],
+      "source": "packages/core/inbox-delivery-line.ts INBOX_OFF_LABEL"
+    },
     "delivery.turn_ended": {
       "text": "went in when its turn ended",
       "parts": [],

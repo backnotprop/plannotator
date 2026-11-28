@@ -23855,6 +23855,62 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-enum-inboxdeliveryreason-inbox-off",
+      "title": "enum:InboxDeliveryReason.inbox_off",
+      "surface": [
+        "enum:InboxDeliveryReason.inbox_off"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-28",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxagent-inbox-off",
+      "title": "field:InboxAgent.inbox_off",
+      "surface": [
+        "field:InboxAgent.inbox_off"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-28",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxagent-inbox-off-unknown",
+      "title": "field:InboxAgent.inbox_off_unknown",
+      "surface": [
+        "field:InboxAgent.inbox_off_unknown"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-28",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxcomposesession-inbox-off",
+      "title": "field:InboxComposeSession.inbox_off",
+      "surface": [
+        "field:InboxComposeSession.inbox_off"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-28",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }

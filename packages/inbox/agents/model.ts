@@ -5,6 +5,7 @@
  */
 import { inboxHostName, type InboxAgent, type InboxAgentsGroup, type InboxListRow, type InboxListSection, type InboxParticipant } from '@plannotator/core/inbox-types';
 import { whenTime } from '../format';
+import { INBOX_OFF_LABEL } from '@plannotator/core/inbox-delivery-line';
 import type { MachineView } from '../api';
 import { awayLine, isAway, type MachinesModel } from '../machines';
 
@@ -242,6 +243,8 @@ export function modelName(id: string): string {
   return `${family} ${parts[2]}${parts[3] ? `.${parts[3]}` : ''}`;
 }
 
+export const INBOX_OFF_TOO_OLD = 'needs a newer Plannotator in that session';
+
 export function agentFacts(entry: AgentEntry, machine: MachineView | null, now: Date = new Date()): AgentFacts {
   const { agent } = entry;
   const sub = [agentHostName(agent.host, agent.runtime), agent.project?.name, machine?.name].filter(Boolean).join(' · ');
@@ -269,7 +272,8 @@ export function agentFacts(entry: AgentEntry, machine: MachineView | null, now: 
   // Where it lives (a Rex pane, as Rex named it at the last read): a row of its own.
   if (agent.place?.line) rows.push(['Where', agent.place.line]);
   if (entry.thread?.subject && entry.thread.subject !== entry.name) rows.push(['Thread', entry.thread.subject]);
-  return { title: entry.name, sub, state, rows };
+  if (agent.live && !agent.inbox_off && agent.inbox_off_unknown) rows.push(['/plannotator-inbox off', INBOX_OFF_TOO_OLD]);
+  return { title: entry.name, sub, state: agent.live && agent.inbox_off ? `${state} · ${INBOX_OFF_LABEL}` : state, rows };
 }
 
 /** What a session's line says it is doing: nothing for a live agent whose host reports no turns (never "idle"). */

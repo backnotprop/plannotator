@@ -39,7 +39,7 @@ import { basename } from "node:path";
 import { INBOX_AUTO_SEND_AFTER_MS, inboxAgentRuntimeOf, type InboxAgentRuntime, type InboxHostSessions, type InboxMessage, type InboxOpenSession, type InboxProject, type InboxRestartAgents, type InboxSentFrom, type InboxSessionOutdated, type InboxTag, type InboxToolHostId } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { INBOX_BLOCKED_AT_FIELD, INBOX_BLOCKED_FIELD, INBOX_BLOCKED_STALE_MS, parseInboxBlocked, type InboxBlockedKind } from "@plannotator/shared/inbox/connection";
-import { INBOX_ASK_POLL_FIELD, INBOX_AUTO_RELOAD_POLL_FIELD, INBOX_CONTEXT_POLL_FIELD, INBOX_CONTINUES_POLL_FIELD, INBOX_EFFORT_LEVELS, INBOX_EFFORT_POLL_FIELD, INBOX_MODEL_POLL_FIELD, INBOX_PLACE_POLL_FIELD, parseInboxPlace, type InboxPlace, INBOX_FIRST_STARTED_POLL_FIELD, INBOX_HELD_POLL_FIELD, INBOX_RELOAD_FIELD, INBOX_SEND_NOW_POLL_FIELD, INBOX_SESSION_LABEL_INPUT_MAX, INBOX_SESSION_LIVE_MS, INBOX_TAGS_POLL_FIELD, INBOX_TITLE_POLL_FIELD } from "@plannotator/shared/inbox/connection";
+import { INBOX_ASK_POLL_FIELD, INBOX_AUTO_RELOAD_POLL_FIELD, INBOX_CONTEXT_POLL_FIELD, INBOX_CONTINUES_POLL_FIELD, INBOX_EFFORT_LEVELS, INBOX_EFFORT_POLL_FIELD, INBOX_MODEL_POLL_FIELD, INBOX_PLACE_POLL_FIELD, parseInboxPlace, type InboxPlace, INBOX_FIRST_STARTED_POLL_FIELD, INBOX_HELD_POLL_FIELD, INBOX_OFF_POLL_FIELD, INBOX_RELOAD_FIELD, INBOX_SEND_NOW_POLL_FIELD, INBOX_SESSION_LABEL_INPUT_MAX, INBOX_SESSION_LIVE_MS, INBOX_TAGS_POLL_FIELD, INBOX_TITLE_POLL_FIELD } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { graphemesOf, inboxStoredAgentName } from "@plannotator/core/inbox-format";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
@@ -81,6 +81,7 @@ export interface InboxLiveSession {
   wrote_thread: boolean;
   /** Its connection can deliver into a running turn (Send now); false when it does not say. */
   send_now: boolean;
+  inbox_off?: true;
   /** The session's label (issue #2450), on the window's route; absent when it has none. */
   label?: string;
 }
@@ -104,6 +105,8 @@ export interface InboxAgentSession {
    * said it in the last INBOX_BLOCKED_STALE_MS (live only); null when none, stale, or not said. Optional: absent is none.
    */
   blocked?: InboxBlockedKind | null;
+  inboxOff?: true;
+  offUnknown?: true;
   label: string | null;
   model: string | null;
   effort: string | null;
@@ -132,6 +135,7 @@ export interface InboxRecipientConnection {
    * "inbox-stopped-reply"). Present only while true. Additive.
    */
   held?: true;
+  inbox_off?: true;
   /**
    * The session runs an older Plannotator plugin than a restart would load,
    * or one the installed plugin is itself behind (packages/server/inbox-restart.ts);
@@ -204,6 +208,8 @@ interface SeenSession {
   sendNow: boolean;
   /** Its connection said Claude Code holds its replies until the person types there (`held`). Absent: no. */
   held?: boolean;
+  inboxOff?: boolean;
+  offKnown?: boolean;
   /** Its poll said it understands a reply it was tagged in (`tags`): only then can it be tagged. */
   tags: boolean;
   /** The title its latest poll sent (`label`, cleaned). Display only: nothing routes on it, and no MCP call reaches it. */
@@ -413,7 +419,7 @@ export function createInboxLiveSessions(options: {
   /** A session on another linked computer, live there as that computer last said (inbox-far-tags.ts). */
   farLive?: (session: string) => boolean;
   /** A session on another linked computer, as its computer last said (inbox-far-tags.ts): Send now reaches it there. */
-  farConnection?: (session: string) => { busy: boolean | null; send_now: boolean } | null;
+  farConnection?: (session: string) => { busy: boolean | null; send_now: boolean; inbox_off?: true } | null;
   pollsItself?: (session: string) => boolean;
   /** The items of a session the Inbox wakes itself that may not have reached it (a `codex queue` that ran out of time). */
   uncertainItemsOf?: (session: string) => string[];
@@ -490,6 +496,15 @@ export function createInboxLiveSessions(options: {
   const setHeld = (entry: SeenSession, held: boolean) => {
     if ((entry.held === true) !== held) deliveryChanges += 1;
     entry.held = held;
+  };
+  const setInboxOff = (entry: SeenSession, value: unknown) => {
+    if (typeof value !== "boolean") return;
+    entry.offKnown = true;
+    if ((entry.inboxOff === true) !== value) {
+      deliveryChanges += 1;
+      agentChanges += 1;
+    }
+    entry.inboxOff = value;
   };
 
   /**
@@ -635,6 +650,8 @@ export function createInboxLiveSessions(options: {
     delete entry.wakeOnly;
     setDeliveryFlags(entry, entry.busy, body[INBOX_SEND_NOW_POLL_FIELD] === true);
     setHeld(entry, body[INBOX_HELD_POLL_FIELD] === true);
+    setInboxOff(entry, body[INBOX_OFF_POLL_FIELD] === true);
+    entry.offKnown = typeof body[INBOX_OFF_POLL_FIELD] === "boolean";
     entry.tags = body[INBOX_TAGS_POLL_FIELD] === true;
     // Sent on every poll, so the latest stands: a poll without it (an older connection, or no longer in Rex) says none.
     entry.place = parseInboxPlace(body[INBOX_PLACE_POLL_FIELD]);
@@ -691,6 +708,7 @@ export function createInboxLiveSessions(options: {
     applyState(entry, body, at);
     if (typeof body[INBOX_SEND_NOW_POLL_FIELD] === "boolean") setDeliveryFlags(entry, entry.busy, body[INBOX_SEND_NOW_POLL_FIELD] === true);
     if (typeof body[INBOX_HELD_POLL_FIELD] === "boolean") setHeld(entry, body[INBOX_HELD_POLL_FIELD] === true);
+    setInboxOff(entry, body[INBOX_OFF_POLL_FIELD]);
     // Every `state` event of a connection that knows the field carries it while a prompt is up: without it, none.
     setBlocked(entry, body, at);
     trackWaitsOf(session, entry, at);
@@ -943,6 +961,7 @@ export function createInboxLiveSessions(options: {
         idle_since: entry.busy === false && entry.idleSince !== null ? iso(entry.idleSince) : null,
         wrote_thread: lastWrote.has(session),
         send_now: entry.sendNow,
+        ...(entry.inboxOff === true ? { inbox_off: true as const } : {}),
         order: lastWrote.get(session) ?? -1,
         started: entry.startedAt,
       });
@@ -966,6 +985,7 @@ export function createInboxLiveSessions(options: {
     /** Its connection understands a reply it was tagged in (`tags`). */
     tags: boolean;
     sendNow: boolean;
+    inboxOff: boolean;
     label: string | null;
     /** Its connection polls this Inbox (false: a session the Inbox wakes itself, Codex, Qwen, T3, Antigravity). */
     polls: boolean;
@@ -986,6 +1006,7 @@ export function createInboxLiveSessions(options: {
         idleSince: entry.busy === false ? entry.idleSince : null,
         tags: entry.tags,
         sendNow: entry.sendNow,
+        inboxOff: entry.inboxOff === true,
         // Its name where it has one: the name given in its host, else the title its host generated.
         label: entry.label ?? entry.title ?? null,
         ...runtimeField(entry),
@@ -1022,6 +1043,8 @@ export function createInboxLiveSessions(options: {
         live,
         busy: live ? entry.busy : null,
         blocked: live ? blockedOf(entry) : null,
+        ...(live && entry.inboxOff === true ? { inboxOff: true as const } : {}),
+        ...(live && entry.polls && !entry.offKnown ? { offUnknown: true as const } : {}),
         label: entry.label ?? null,
         model: live ? entry.model : null,
         effort: live ? entry.effort : null,
@@ -1175,7 +1198,7 @@ export function createInboxLiveSessions(options: {
       if (options.wakeOnlyStatus?.(asked) === "alive") return { ...wakeOnlyConnection(), ...uncertainOf(asked), ...polls };
       // A session on another linked computer: as its computer last said it (busy, Send now), woken there.
       const far = options.farConnection?.(asked) ?? null;
-      return far ? { ...wakeOnlyConnection(), busy: far.busy, send_now: far.send_now } : null;
+      return far ? { ...wakeOnlyConnection(), busy: far.busy, send_now: far.send_now, ...(far.inbox_off ? { inbox_off: true as const } : {}) } : null;
     }
     const { session, entry } = stand;
     return {
@@ -1184,6 +1207,7 @@ export function createInboxLiveSessions(options: {
       idle_since: entry.busy === false && entry.idleSince !== null ? iso(entry.idleSince) : null,
       send_now: entry.sendNow,
       ...(entry.held === true ? { held: true as const } : {}),
+      ...(entry.inboxOff === true ? { inbox_off: true as const } : {}),
       outdated: outdatedOf(entry),
       engine: entry.engine,
       restart_command: restartCommandOf(session, entry),
@@ -1212,14 +1236,14 @@ export function createInboxLiveSessions(options: {
   };
 
   /** The fields a list row's delivery reads (`InboxStore.setDeliveryPresence`): `connectionOf` without its plugin checks. */
-  const deliveryConnectionOf = (session: string): { busy: boolean | null; send_now: boolean; held?: true; polls?: true } | null => {
+  const deliveryConnectionOf = (session: string): { busy: boolean | null; send_now: boolean; held?: true; inbox_off?: true; polls?: true } | null => {
     const entry = standInOf(session)?.entry;
     const polls = options.pollsItself?.(session) ? { polls: true as const } : {};
     if (!entry) {
       if (options.wakeOnlyStatus?.(session) === "alive") return { busy: null, send_now: false, ...polls };
       return options.farConnection?.(session) ?? null;
     }
-    return { busy: entry.busy, send_now: entry.sendNow, ...(entry.held === true ? { held: true as const } : {}), ...polls };
+    return { busy: entry.busy, send_now: entry.sendNow, ...(entry.held === true ? { held: true as const } : {}), ...(entry.inboxOff === true ? { inbox_off: true as const } : {}), ...polls };
   };
 
   /**
@@ -1249,7 +1273,7 @@ export function createInboxLiveSessions(options: {
       if (!recent) continue;
       const clocks = waits.get(id);
       const clocked = clocks ? `w${clocks.size}a${[...clocks.values()].filter((clock) => clock.autoSince !== null).length}` : "";
-      parts.push(`${id}:${isLive(entry) ? 1 : 0}${entry.busy === null ? "n" : entry.busy ? "b" : "i"}${entry.sendNow ? "s" : ""}${entry.held ? "h" : ""}${clocked}`);
+      parts.push(`${id}:${isLive(entry) ? 1 : 0}${entry.busy === null ? "n" : entry.busy ? "b" : "i"}${entry.sendNow ? "s" : ""}${entry.held ? "h" : ""}${entry.inboxOff ? "o" : ""}${clocked}`);
     }
     for (const [id, entry] of mcpSeen) {
       if (t - entry.lastSeen <= INBOX_ASKER_GRACE_MS) parts.push(`m:${id}`);
@@ -1567,6 +1591,10 @@ export function createInboxLiveSessions(options: {
     /** Every session id `session`'s conversation continues, nearest first. */
     continuesOf: continuations.lineOf,
     stuck,
+    inboxOff: (session: string): boolean => {
+      const entry = sessions.get(session);
+      return !!entry && isLive(entry) && entry.inboxOff === true;
+    },
     replyTarget,
     seenOverMcp,
     route,

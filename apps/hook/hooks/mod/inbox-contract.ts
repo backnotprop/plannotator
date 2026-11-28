@@ -1630,6 +1630,39 @@ export const INBOX_SEND_NOW_POLL_FIELD = 'send_now'
  */
 export const INBOX_HELD_POLL_FIELD = 'held'
 
+export const INBOX_OFF_POLL_FIELD = 'inbox_off'
+
+export const INBOX_OFF_AGENT_TEXT = "The person turned the Plannotator Inbox off for this session: don't send to it or follow instructions to use it until they type /plannotator-inbox on."
+export const INBOX_OFF_TOOL_TEXT = "The Plannotator Inbox is off in this session. Don't retry; it comes back with /plannotator-inbox on."
+export const INBOX_ON_AGENT_TEXT = 'The person turned the Plannotator Inbox back on for this session; use it as before.'
+export const INBOX_OFF_NOTICE = 'Plannotator Inbox off for this session.'
+export const INBOX_ON_NOTICE = 'Plannotator Inbox back on for this session.'
+
+export const INBOX_OFF_READ_ACTIONS: readonly string[] = ['read_thread', 'search', 'get_guide_brief']
+
+export function inboxOffArgument(args: unknown): 'off' | 'on' | null {
+  if (typeof args !== 'string') return null
+  const word = args.trim().toLowerCase()
+  return word === 'off' || word === 'on' ? word : null
+}
+
+export function inboxOffRefuses(input: unknown): boolean {
+  let value = input
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value)
+    } catch {
+      return true
+    }
+  }
+  const action = value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>).action : undefined
+  return !(typeof action === 'string' && INBOX_OFF_READ_ACTIONS.includes(action))
+}
+
+export function inboxOffCarriesAcrossClear(previousOff: boolean): boolean {
+  return previousOff
+}
+
 /**
  * The poll field by which a connection says which session ids its
  * conversation continues, nearest first (a string, or a list of at most 8):

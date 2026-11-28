@@ -64,6 +64,7 @@ export type InboxDeliveryReason =
   | "next_turn"
   | "ack_pending"
   | "stopped"
+  | "inbox_off"
   | "handed";
 
 /** How the session the item goes to is connected now: the fields the rule reads. */
@@ -74,6 +75,7 @@ export interface InboxDeliveryConnection {
   send_now: boolean;
   /** Claude Code refused a reply and holds the session's replies until the person types there (`held`). Absent: no. */
   held?: boolean;
+  inbox_off?: boolean;
   polls?: boolean;
 }
 
@@ -162,6 +164,7 @@ export function inboxDeliveryState(input: InboxDeliveryInput): InboxDeliveryDeci
   // Claude Code holds this session's replies until the person types there (they stopped it): nothing goes in
   // before that, Send now included, so the line says so instead of Queued or Sending.
   if (connection?.held === true) return { state: "queued", reason: "stopped", ...no };
+  if (connection?.inbox_off === true) return { state: "queued", reason: "inbox_off", ...no };
   // Pressed, and the session can take it now. While it cannot (its own Ask this session question holds
   // it), the item waits for the turn to end: it reads as queued.
   if (input.sendingNow && !(connection?.busy === true && !connection.send_now)) return { state: "sending", reason: "sending_now", ...no, ...auto };

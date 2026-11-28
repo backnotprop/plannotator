@@ -38,6 +38,9 @@ import {
   scriptOnlyAnnotateFlagText,
   type PlannotatorToolInput,
 } from "../../packages/shared/plannotator-tool";
+import { inboxOpenedText, openInboxInBrowser } from "../../packages/shared/inbox/agent-link";
+import { INBOX_OFF_NOTICE, INBOX_ON_NOTICE, inboxOffArgument } from "../../packages/shared/inbox/connection";
+import { setInboxSessionOff } from "../../packages/shared/inbox/session-off";
 import { agentsServiceOf, DSH_NO_WAKE_PROFILES, rootAgentOf, type DshAgentsService, type DshInboxAgent, type DshInboxContext, type DshToolsService } from "./inbox";
 import { createUserMessage, sessionCwd, type DshContext } from "./plan-review";
 import { DSH_LAST_SUBJECT, DSH_LOCAL_CHANGES_SUBJECT, DshReviews, dshStartFailureText, type DshReviewKind, type DshReviewRequest } from "./reviews";
@@ -50,6 +53,8 @@ export const DSH_COMMANDS = {
   annotate: "plannotator-annotate",
   last: "plannotator-last",
 } as const;
+
+export const DSH_INBOX_COMMAND = "plannotator-inbox";
 
 /** `last` from a subagent: it reads the main session's messages, which the subagent did not write. */
 export const DSH_SUBAGENT_LAST_TEXT =
@@ -334,6 +339,25 @@ export function createDshNative(
       define(DSH_COMMANDS.review, "Review code changes or a pull request in Plannotator", "[directory | PR URL] [--base <ref>]");
       define(DSH_COMMANDS.annotate, "Annotate a file, folder or URL in Plannotator", "<file | folder | URL> [--gate] [--markdown]");
       define(DSH_COMMANDS.last, "Annotate the agent's last message in Plannotator");
+      try {
+        commands.register({
+          name: DSH_INBOX_COMMAND,
+          description: "Open your Plannotator Inbox and show its address; off or on turns it off or on for this session",
+          input: { hint: "[off | on]" },
+          async handler({ agent, rawInput }) {
+            if (!agent || typeof agent.id !== "string") return { kind: "error", text: "No DSH session received this command." };
+            const word = inboxOffArgument(rawInput ?? "");
+            if (word) {
+              setInboxSessionOff(options.dataDir, rootAgentOf(agents, agent).id, word === "off");
+              return { kind: "success", text: word === "off" ? INBOX_OFF_NOTICE : INBOX_ON_NOTICE };
+            }
+            const opened = await openInboxInBrowser({ dataDir: options.dataDir, ...(options.resolveBinary() ? { command: options.resolveBinary() } : {}) });
+            return "url" in opened ? { kind: "success", text: inboxOpenedText(opened.url, opened.note) } : { kind: "error", text: opened.error };
+          },
+        });
+      } catch (error) {
+        warn("plannotator: could not register /%s (%s)", DSH_INBOX_COMMAND, error instanceof Error ? error.message : String(error));
+      }
     },
     dispose() {
       reviews.dispose();

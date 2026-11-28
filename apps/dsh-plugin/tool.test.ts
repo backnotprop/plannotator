@@ -17,7 +17,9 @@ import type { DshInboxAgent, DshToolDefinition } from "./inbox";
 import type { DshUserMessage } from "./plan-review";
 import { applyPlannotator } from "./plugin";
 import { dshDecision } from "./reviews";
-import { commandRequest, DSH_COMMANDS, type DshCommandDefinition } from "./tool";
+import { commandRequest, DSH_COMMANDS, DSH_INBOX_COMMAND, type DshCommandDefinition } from "./tool";
+import { INBOX_OFF_NOTICE } from "../../packages/shared/inbox/connection";
+import { isInboxSessionOff } from "../../packages/shared/inbox/session-off";
 
 const FAKE_CLI = join(import.meta.dir, "fixtures", "fake-cli.ts");
 const roots: string[] = [];
@@ -173,7 +175,7 @@ describe("the plannotator tool switch", () => {
   test("off by default: the plannotator tool is not registered; the commands are", () => {
     const dsh = loadPlugin();
     expect(dsh.tools.map((tool) => tool.name)).toEqual([]);
-    expect(dsh.commands.map((command) => command.name).sort()).toEqual([DSH_COMMANDS.annotate, DSH_COMMANDS.last, DSH_COMMANDS.review]);
+    expect(dsh.commands.map((command) => command.name).sort()).toEqual([DSH_COMMANDS.annotate, DSH_INBOX_COMMAND, DSH_COMMANDS.last, DSH_COMMANDS.review]);
   });
 
   test("on with config agentTool or PLANNOTATOR_AGENT_TOOL=1; PLANNOTATOR_AGENT_TOOL=0 wins over the config", () => {
@@ -231,6 +233,18 @@ describe("non-blocking reviews", () => {
     expect(call!.env.DSH_HOME).toEndWith("dsh-home");
     expect(main.followups).toEqual([]);
   }, 15_000);
+
+  test("/plannotator-inbox off and on flip the receiving session alone and run no CLI", async () => {
+    const dsh = loadPlugin();
+    const main = dsh.add(new FakeAgent("session-main", dsh.project));
+    const off = await dsh.command(DSH_INBOX_COMMAND)!.handler({ agent: main, rawInput: "off" });
+    expect(off).toEqual({ kind: "success", text: INBOX_OFF_NOTICE });
+    expect(isInboxSessionOff(dsh.dataDir, "session-main")).toBe(true);
+    expect(isInboxSessionOff(dsh.dataDir, "session-other")).toBe(false);
+    await dsh.command(DSH_INBOX_COMMAND)!.handler({ agent: main, rawInput: "on" });
+    expect(isInboxSessionOff(dsh.dataDir, "session-main")).toBe(false);
+    expect(dsh.calls()).toEqual([]);
+  });
 
   test("close stops the review and nothing is sent to the session afterwards", async () => {
     const dsh = loadPlugin({ config: { agentTool: true } });

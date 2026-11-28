@@ -2483,6 +2483,8 @@ public struct InboxAgent: Codable, Hashable, Sendable {
   public var firstThread: InboxAgentFirstThread?
   public var project: InboxAgentProject?
   public var state: InboxAgentState
+  public var inboxOff: Bool?
+  public var inboxOffUnknown: Bool?
   public var waiting: Double
   public var live: Bool
   public var startedAt: String?
@@ -2498,9 +2500,9 @@ public struct InboxAgent: Codable, Hashable, Sendable {
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
-  static let knownKeys: Set<String> = ["id", "session", "continues", "launch", "host", "runtime", "label", "title", "first_thread", "project", "state", "waiting", "live", "started_at", "last_seen_at", "model", "effort", "context", "place", "rex_status", "rex_mark", "status_mark", "turns_unknown"]
+  static let knownKeys: Set<String> = ["id", "session", "continues", "launch", "host", "runtime", "label", "title", "first_thread", "project", "state", "inbox_off", "inbox_off_unknown", "waiting", "live", "started_at", "last_seen_at", "model", "effort", "context", "place", "rex_status", "rex_mark", "status_mark", "turns_unknown"]
 
-  public init(id: String, session: String, continues: [String]? = nil, launch: InboxAgentLaunch? = nil, host: String? = nil, runtime: InboxAgentRuntime? = nil, label: String? = nil, title: String? = nil, firstThread: InboxAgentFirstThread? = nil, project: InboxAgentProject? = nil, state: InboxAgentState, waiting: Double, live: Bool, startedAt: String? = nil, lastSeenAt: String? = nil, model: String? = nil, effort: String? = nil, context: Double? = nil, place: InboxAgentPlace? = nil, rexStatus: InboxAgentRexStatus? = nil, rexMark: InboxRexMark? = nil, statusMark: InboxAgentMark? = nil, turnsUnknown: Bool? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(id: String, session: String, continues: [String]? = nil, launch: InboxAgentLaunch? = nil, host: String? = nil, runtime: InboxAgentRuntime? = nil, label: String? = nil, title: String? = nil, firstThread: InboxAgentFirstThread? = nil, project: InboxAgentProject? = nil, state: InboxAgentState, inboxOff: Bool? = nil, inboxOffUnknown: Bool? = nil, waiting: Double, live: Bool, startedAt: String? = nil, lastSeenAt: String? = nil, model: String? = nil, effort: String? = nil, context: Double? = nil, place: InboxAgentPlace? = nil, rexStatus: InboxAgentRexStatus? = nil, rexMark: InboxRexMark? = nil, statusMark: InboxAgentMark? = nil, turnsUnknown: Bool? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.id = id
     self.session = session
     self.continues = continues
@@ -2512,6 +2514,8 @@ public struct InboxAgent: Codable, Hashable, Sendable {
     self.firstThread = firstThread
     self.project = project
     self.state = state
+    self.inboxOff = inboxOff
+    self.inboxOffUnknown = inboxOffUnknown
     self.waiting = waiting
     self.live = live
     self.startedAt = startedAt
@@ -2540,6 +2544,8 @@ public struct InboxAgent: Codable, Hashable, Sendable {
     self.firstThread = try c.decodeIfPresent(InboxAgentFirstThread.self, forKey: WireKey("first_thread"))
     self.project = try c.decodeIfPresent(InboxAgentProject.self, forKey: WireKey("project"))
     self.state = try c.decode(InboxAgentState.self, forKey: WireKey("state"))
+    self.inboxOff = try c.decodeIfPresent(Bool.self, forKey: WireKey("inbox_off"))
+    self.inboxOffUnknown = try c.decodeIfPresent(Bool.self, forKey: WireKey("inbox_off_unknown"))
     self.waiting = try c.decode(Double.self, forKey: WireKey("waiting"))
     self.live = try c.decode(Bool.self, forKey: WireKey("live"))
     self.startedAt = try c.decodeIfPresent(String.self, forKey: WireKey("started_at"))
@@ -2568,6 +2574,8 @@ public struct InboxAgent: Codable, Hashable, Sendable {
     try c.encodeIfPresent(self.firstThread, forKey: WireKey("first_thread"))
     try c.encode(self.project, forKey: WireKey("project"))
     try c.encode(self.state, forKey: WireKey("state"))
+    try c.encodeIfPresent(self.inboxOff, forKey: WireKey("inbox_off"))
+    try c.encodeIfPresent(self.inboxOffUnknown, forKey: WireKey("inbox_off_unknown"))
     try c.encode(self.waiting, forKey: WireKey("waiting"))
     try c.encode(self.live, forKey: WireKey("live"))
     try c.encode(self.startedAt, forKey: WireKey("started_at"))
@@ -3940,12 +3948,13 @@ public struct InboxComposeSession: Codable, Hashable, Sendable {
   public var label: String?
   public var runtime: InboxComposeSessionRuntime?
   public var place: InboxAgentPlace?
+  public var inboxOff: Bool?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
-  static let knownKeys: Set<String> = ["session", "host", "started_at", "last_seen_at", "busy", "idle_since", "last_thread", "root", "label", "runtime", "place"]
+  static let knownKeys: Set<String> = ["session", "host", "started_at", "last_seen_at", "busy", "idle_since", "last_thread", "root", "label", "runtime", "place", "inbox_off"]
 
-  public init(session: String, host: String, startedAt: String, lastSeenAt: String, busy: Bool? = nil, idleSince: String? = nil, lastThread: InboxComposeSessionLastThread? = nil, root: String? = nil, label: String? = nil, runtime: InboxComposeSessionRuntime? = nil, place: InboxAgentPlace? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(session: String, host: String, startedAt: String, lastSeenAt: String, busy: Bool? = nil, idleSince: String? = nil, lastThread: InboxComposeSessionLastThread? = nil, root: String? = nil, label: String? = nil, runtime: InboxComposeSessionRuntime? = nil, place: InboxAgentPlace? = nil, inboxOff: Bool? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.session = session
     self.host = host
     self.startedAt = startedAt
@@ -3957,6 +3966,7 @@ public struct InboxComposeSession: Codable, Hashable, Sendable {
     self.label = label
     self.runtime = runtime
     self.place = place
+    self.inboxOff = inboxOff
     self.unknownFields = unknownFields
   }
 
@@ -3973,6 +3983,7 @@ public struct InboxComposeSession: Codable, Hashable, Sendable {
     self.label = try c.decodeIfPresent(String.self, forKey: WireKey("label"))
     self.runtime = try c.decodeIfPresent(InboxComposeSessionRuntime.self, forKey: WireKey("runtime"))
     self.place = try c.decodeIfPresent(InboxAgentPlace.self, forKey: WireKey("place"))
+    self.inboxOff = try c.decodeIfPresent(Bool.self, forKey: WireKey("inbox_off"))
     self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
   }
 
@@ -3989,6 +4000,7 @@ public struct InboxComposeSession: Codable, Hashable, Sendable {
     try c.encodeIfPresent(self.label, forKey: WireKey("label"))
     try c.encodeIfPresent(self.runtime, forKey: WireKey("runtime"))
     try c.encodeIfPresent(self.place, forKey: WireKey("place"))
+    try c.encodeIfPresent(self.inboxOff, forKey: WireKey("inbox_off"))
     try WireKey.write(unknownFields, to: &c)
   }
 }
@@ -4105,6 +4117,7 @@ public enum InboxDeliveryReason: Codable, Hashable, Sendable, RawRepresentable {
   case ended
   case handed
   case idle
+  case inboxOff
   case nextTurn
   case reads
   case sendingNow
@@ -4115,7 +4128,7 @@ public enum InboxDeliveryReason: Codable, Hashable, Sendable, RawRepresentable {
   /// A value this app does not know (a newer Inbox).
   case unknown(String)
 
-  public static let known: [InboxDeliveryReason] = [.ackPending, .away, .delivered, .ended, .handed, .idle, .nextTurn, .reads, .sendingNow, .stopped, .stuck, .undelivered, .working]
+  public static let known: [InboxDeliveryReason] = [.ackPending, .away, .delivered, .ended, .handed, .idle, .inboxOff, .nextTurn, .reads, .sendingNow, .stopped, .stuck, .undelivered, .working]
 
   public init(rawValue: String) {
     switch rawValue {
@@ -4125,6 +4138,7 @@ public enum InboxDeliveryReason: Codable, Hashable, Sendable, RawRepresentable {
     case "ended": self = .ended
     case "handed": self = .handed
     case "idle": self = .idle
+    case "inbox_off": self = .inboxOff
     case "next_turn": self = .nextTurn
     case "reads": self = .reads
     case "sending_now": self = .sendingNow
@@ -4144,6 +4158,7 @@ public enum InboxDeliveryReason: Codable, Hashable, Sendable, RawRepresentable {
     case .ended: return "ended"
     case .handed: return "handed"
     case .idle: return "idle"
+    case .inboxOff: return "inbox_off"
     case .nextTurn: return "next_turn"
     case .reads: return "reads"
     case .sendingNow: return "sending_now"

@@ -59,7 +59,7 @@ sed -i.bak -e "s|from ['\"]@plannotator/sem-jiff/grammars['\"]|from './sem-diff-
 # pi-session-claim (which process runs a Pi session) imports node: only.
 # turned-on (whether the person turned the Inbox on here) imports ./connection and node:.
 mkdir -p generated/inbox
-for f in connection agent-link tailnet pi-session-claim turned-on; do
+for f in connection agent-link tailnet pi-session-claim turned-on session-off; do
   src="../../packages/shared/inbox/$f.ts"
   printf '// @generated — DO NOT EDIT. Source: packages/shared/inbox/%s.ts\n' "$f" | cat - "$src" > "generated/inbox/$f.ts"
 done
