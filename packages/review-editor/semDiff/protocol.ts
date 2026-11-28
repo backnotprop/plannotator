@@ -9,11 +9,22 @@ export interface SemDiffRequest {
   oldText: string;
   newText: string;
   opinion?: { rejected: string[] };
+  background?: true;
 }
 
 export type SemDiffReply =
   | { id: number; ok: true; semanticOperations: SemanticDiffOperation[]; semanticFolds: SemanticDiffFold[]; patch: string; secondOpinion?: SecondOpinionReport }
   | { id: number; ok: false; error: string };
+
+export interface SemDiffPromote {
+  promote: number;
+}
+
+export interface SemDiffForget {
+  forget: number[];
+}
+
+export const isSemDiffPool = (worker: unknown): boolean => (worker as { semDiffPool?: unknown } | null)?.semDiffPool === true;
 
 export interface SemDiffDownload {
   download: 'start' | 'done';

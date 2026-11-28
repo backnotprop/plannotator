@@ -339,5 +339,6 @@
   "toolstrip-rtl.spec.ts": 9,
   "toolstrip-stacking.spec.ts": 31,
   "vscode-guides-answer.spec.ts": 3,
-  "vscode-guides-sanitize.spec.ts": 9
+  "vscode-guides-sanitize.spec.ts": 9,
+  "review-semantic-pool.spec.ts": 8
 }
