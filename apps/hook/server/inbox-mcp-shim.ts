@@ -357,8 +357,11 @@ export function processStartedAtMs(pid: number, platform: NodeJS.Platform = proc
       if (!Number.isFinite(ticks) || !boot) return null;
       return Number(boot[1]) * 1000 + Math.floor((ticks / 100) * 1000);
     }
-    const ran = spawnSync("ps", ["-o", "lstart=", "-p", String(pid)], { encoding: "utf8", timeout: 2000, windowsHide: true, env: { ...process.env, LC_ALL: "C", LANG: "C" } });
-    const at = Date.parse((ran.stdout ?? "").trim());
+    // In UTC, read as UTC: never the two sides' own time zones, which differ when TZ changed in this process
+    // (Bun keeps a TZ set at run time out of the environment a child gets, but parses dates in it).
+    const ran = spawnSync("ps", ["-o", "lstart=", "-p", String(pid)], { encoding: "utf8", timeout: 2000, windowsHide: true, env: { ...process.env, LC_ALL: "C", LANG: "C", TZ: "UTC" } });
+    const text = (ran.stdout ?? "").trim();
+    const at = text ? Date.parse(`${text} GMT`) : NaN;
     return ran.status === 0 && Number.isFinite(at) ? at : null;
   } catch {
     return null;
