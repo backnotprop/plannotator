@@ -10,7 +10,7 @@
  * The whole window (InboxApp) over a stubbed fetch and EventSource; no Inbox. DOM-gated: runs under DOM_TESTS=1
  * (happy-dom), from tests/dom-test-list.txt.
  */
-import { afterAll, afterEach, beforeAll, expect, test } from 'bun:test';
+import { afterAll, afterEach, beforeAll, test } from 'bun:test';
 import type { SettingsModel } from './api';
 
 const hasDom = typeof document !== 'undefined';
